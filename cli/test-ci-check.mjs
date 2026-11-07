@@ -909,3 +909,53 @@ test('#426 step: one file from a base with no checks/ is "1 file"', () => {
     assert.match(r.stdout, /run: 1 file \(#426\)$/m);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #428: a newer push to a PR cancels a gate file's older run — every gate re-reads the whole PR range, and a
+// merge waits only on the newest run. A file that checks only its own push's commits, or writes to the repo,
+// never cancels: the update guard checks `before..HEAD` of one push, so a cancelled run leaves those commits
+// unchecked; gate-sync pushes the ledger.
+test('#428: the PR gate files cancel their older run; the update guard, gate-sync and a push to main never do', () => {
+  // The PR-text files start on an edit too; their group also names the commit, so an older commit's late edit
+  // run cannot cancel a newer push's run.
+  const group = (name) => `\nconcurrency:\n  group: \${{ github.workflow }}-\${{ github.event.pull_request.number }}${/pr-text/.test(name) ? '-${{ github.event.pull_request.head.sha }}' : ''}\n  cancel-in-progress: true\n`;
+  let gh = 0, gl = 0;
+  for (const { name, text, gitlab } of GATE_TEMPLATES) {
+    if (!gitlab) {
+      gh++;
+      assert.ok(text.includes(group(name)), `${name}: no per-PR concurrency group that cancels`);
+      // The group is keyed on the PR number, so the file must start on pull_request only (no empty number).
+      const on = text.slice(text.search(/^on:$/m), text.search(/^concurrency:$/m));
+      assert.deepEqual(on.match(/^ {2}[a-z_]+:/gm), ['  pull_request:'], `${name}: starts on more than pull_request`);
+      continue;
+    }
+    // GitLab: every job is interruptible, in its own block or in the template it extends.
+    const blocks = new Map();
+    for (const b of noComments(text).split(/^(?=['"]?[^\s#'"-][^:]*['"]?:)/m)) {
+      const m = b.match(/^['"]?([^\s#'"-][^:'"]*)['"]?:/);
+      if (m) blocks.set(m[1], b);
+    }
+    for (const key of blocks.keys()) {
+      if (key.startsWith('.') || ['variables', 'include', 'stages', 'default', 'workflow'].includes(key)) continue;
+      gl++;
+      const interruptible = (k, depth = 0) => {
+        const blk = blocks.get(k);
+        if (!blk || depth > 5 || /^ {2}interruptible: false$/m.test(blk)) return false; // the nearest explicit setting wins
+        if (/^ {2}interruptible: true$/m.test(blk)) return true;
+        const ext = blk.match(/^ {2}extends: (\S+)$/m);
+        return Boolean(ext && interruptible(ext[1], depth + 1));
+      };
+      assert.ok(interruptible(key), `${name}: job ${key} is not interruptible`);
+    }
+  }
+  assert.equal(gh, 6, 'GitHub gate files read');
+  assert.equal(gl, 21, 'GitLab gate jobs read');
+  for (const f of ['skills/yad-checks/templates/github/yad-update-guard.yml', 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml',
+    'skills/yad-product-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
+    const text = noComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    assert.doesNotMatch(text, /cancel-in-progress: true|interruptible: true/, `${f} must never cancel a run`);
+  }
+  // This repo's CI: a PR's older run is cancelled; a push to main has a group of its own (its commit), so it is
+  // neither cancelled nor left waiting — a shared group cancels a waiting run even without cancel-in-progress.
+  const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  assert.ok(ci.includes("\nconcurrency:\n  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"), 'ci.yml concurrency');
+});

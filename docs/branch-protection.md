@@ -81,6 +81,14 @@ counts a skipped job as passed, so an edit could turn a failed gate green. A gat
 hand is kept by `yad update` and may still start on an edit: `yad doctor` warns about it
 (`checks:edit-run`).
 
+**Older runs are cancelled (#428).** Each gate file cancels its own older run on the same pull request when
+a newer one starts. For the PR-text files, that is an edit or a reopen on the same commit; for the other gate
+files, it is any newer push. The cancelled run belongs to an older commit or to older PR text, and a merge
+waits only on the newest run's checks. In the rare case where GitHub delivers two pushes out of order, the
+other gate files' older-commit run can cancel the newer one; the cancelled check then blocks the merge (it
+never passes it) until you re-run it from the Checks tab or push again. `yad-update-guard` never cancels a
+run: each run checks only the commits of its own push, so a cancelled run would leave them unchecked.
+
 Before 4.0 the Product's workflow file was `.github/workflows/yad-hub-checks.yml`, with `name:
 yad-hub-checks`; `yad update` renames it `yad-product-checks`. The job names above did not change, so
 the required checks stay as they are. A workflow of your own that starts on `workflow_run:` of
@@ -127,11 +135,36 @@ retries every 15 minutes and fails the same way until the token is there.
 | Allowed to force push | off | |
 | Pipelines must succeed (Settings → Merge requests) | on | Makes yad's checks block a merge — only the jobs the root `.gitlab-ci.yml` includes run |
 | Skipped pipelines are considered successful (Settings → Merge requests) | off | When on, a skipped pipeline lets a merge through without yad's checks |
+| Auto-cancel redundant pipelines (Settings → CI/CD → General pipelines) | your choice — on saves runner time | When on, a newer push to a merge request cancels the older pipeline's yad jobs, which are marked `interruptible` (#428). GitLab cancels a pipeline only while none of its jobs that are not interruptible has started, so a job of your own can keep the older pipeline running. It also applies to the default branch: see the note below the table |
 | All threads must be resolved (Settings → Merge requests) | your choice | Suggested: a reviewer's open question is not merged past |
 | Reject unsigned commits (Settings → Repository → Push rules) | **off** on the Product; your choice on a code repo | As on GitHub (#432). Push rules are GitLab Premium |
 | Merge request approval rules (Settings → Merge requests) | 1 or more approvals for a team, 0 in solo mode | **Premium and Ultimate only.** On GitLab Free an approval never blocks a merge |
 | Remove all approvals when commits are added to the source branch | on | Safe with yad, for the same reason as on GitHub |
 | Code owner approval (Settings → Repository → Protected branches) | **on**, with the gate-file lines in [Who may change the gates](#who-may-change-the-gates-426) | As on GitHub. **Premium and Ultimate only** |
+
+**The update guard and auto-cancel (#428).** `yad-update-guard` checks only the commits of its own push to
+the default branch. Its jobs are not interruptible, so once one has started, GitLab never cancels its
+pipeline. But a pipeline whose jobs are all still waiting for a runner can be cancelled by a newer push, and
+then that push's commits are never checked. To keep every run on the default branch, add this to your own
+root `.gitlab-ci.yml` (yad does not put a `workflow:` block in its fragments, because it would merge into
+your pipeline's own settings):
+
+```yaml
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      auto_cancel:
+        on_new_commit: none
+    - when: always
+```
+
+If your root file already has a `workflow:rules` list, do not add a second one. GitLab uses the first rule
+that matches, so add the `auto_cancel` lines to the rule that matches default-branch pipelines today. If no
+rule matches them yet, put the snippet's first rule at the top of your list (this also starts the
+default-branch pipelines your list stopped until now, your own jobs included). These keys are recent, and an
+older self-managed GitLab treats an unknown key as an error that stops every pipeline: check the file in
+the pipeline editor before you commit it (Build → Pipeline editor, or CI/CD → Editor on older versions; it
+validates the file).
 
 The checks run as jobs in the merge request pipeline: on the Product `yad-product-commit-message`,
 `yad-product-pr-title`, `yad-product-pr-template`, `yad-product-ledger-guard`, `yad-product-member-check` and, when that file is there,

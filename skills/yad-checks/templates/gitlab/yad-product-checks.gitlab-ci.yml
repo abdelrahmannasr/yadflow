@@ -59,6 +59,10 @@
       )
 
 .yad_product_mr_only:
+  # A newer push to the same merge request may cancel this job's older run (#428). GitLab does it only when
+  # the project's "Auto-cancel redundant pipelines" setting is on and no job in the older
+  # pipeline that is not interruptible has started; the gates re-read the whole MR range, so nothing is missed.
+  interruptible: true
   image: node:${YAD_NODE_VERSION}
   variables:
     # A project/group CI/CD variable overrides this YAML value, so the Node line can be changed in project

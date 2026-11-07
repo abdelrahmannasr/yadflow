@@ -19,6 +19,12 @@ on:
     types: [opened, synchronize, reopened]
     branches: ["**"]
 
+# A newer push to the same pull request cancels this workflow's older run (#428): only the newest commit
+# can be merged, and every gate here re-reads the whole PR range, so the older run checks nothing it misses.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 # Read-only by default: no gate here writes to the repo. A job that needs more asks for it itself.
 permissions:
   contents: read
