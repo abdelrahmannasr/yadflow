@@ -5,15 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Nightly, and by hand: the macOS legs run on these and on pushes to main, not on pull requests (#434).
+  # Nightly, and by hand (#434): the macOS legs run on these and on pushes to main, not on pull requests. The
+  # nightly run repeats every job, so `npm audit` also catches an advisory published since the last merge.
   schedule:
     - cron: '23 3 * * *'
   workflow_dispatch:
 
 # A newer push to the same pull request cancels its older run (#428). A push to main never cancels or waits:
-# each merge's run is the record that main was green at that commit, so its group is the commit itself (a
-# shared group would still cancel a run left waiting in it, even without cancel-in-progress). The event name
-# is in it too, so a nightly or by-hand run of the same commit never waits behind its push run (#434).
+# each merge's run is the record that main was green at that commit, so its group is its event and commit (a
+# shared group would still cancel a run left waiting in it, even without cancel-in-progress); with the event in
+# it, a nightly or by-hand run of the same commit never waits behind its push run (#434).
 concurrency:
   group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -127,7 +128,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: npm # #434: reuse the npm download cache, keyed on package-lock.json
+          # No `cache: npm` here: this job never runs npm ci, so it would save a near-empty cache under the
+          # key the test and audit jobs share — and, finishing first, block their full one (#434).
 
       # Packs the real tarball, installs it into a throwaway prefix, and drives the installed
       # binary through setup -> check -> gate open/sync -> commit -> check gates (pass + fail).

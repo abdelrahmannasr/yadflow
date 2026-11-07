@@ -976,7 +976,12 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
   // e2e (ubuntu-latest) leg runs on every event.
   assert.ok(ci.includes(`include: \${{ fromJSON(github.event_name == 'pull_request' && '[]' || '[{"os":"macos-latest","node-version":24}]') }}\n`), 'ci.yml test: macOS off PRs');
   assert.ok(ci.includes(`os: \${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}\n`), 'ci.yml e2e: macOS off PRs');
-  assert.match(ci, /\n  schedule:\n    - cron: '[^']+'\n  workflow_dispatch:\n/, 'ci.yml nightly + by hand');
+  assert.match(ci, /\n {2}schedule:\n {4}- cron: '[^']+'\n {2}workflow_dispatch:\n/, 'ci.yml nightly + by hand');
+  // The e2e job installs no dependencies: a `cache: npm` there would save a near-empty cache under the key the
+  // test and audit jobs share (#434).
+  const e2e = ci.slice(ci.indexOf('\n  e2e:\n'), ci.indexOf('\n  docs-sites:\n'));
+  assert.ok(e2e.length > 0 && e2e.includes('npm run test:e2e'), 'ci.yml e2e job found');
+  assert.doesNotMatch(e2e, /^\s+cache:/m, 'ci.yml e2e: no npm cache');
 });
 
 // #433: the merge modes yad's checks do not support yet (E166) are gaps; the settings that make the checks

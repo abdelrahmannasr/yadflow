@@ -92,13 +92,15 @@ Auth is the `id-token: write` permission in the workflow plus the npm trusted-pu
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs on every pull request into `main`,
 every push to `main`, nightly, and by hand:
 
-- the test matrix — Linux on Node 18, 20, 22 and 24, and macOS on Node 24 (18 and 20 are end of life: test-only legs, so yadflow 4 keeps proving it still runs there; yadflow 5 drops them);
-- the end-to-end harness against the packed tarball, on Linux and macOS, and the agent acceptance run's checks with scripted agents (the real run is opt-in);
-- the macOS legs are the slowest, so they run only on a push to `main`, nightly and by hand — not on a pull
-  request. Check the `main` run after each merge: a macOS-only bug shows up there first;
+- the test matrix — Linux on Node 18, 20, 22 and 24, and macOS on Node 24 after a merge, nightly and by hand (18 and 20 are end of life: test-only legs, so yadflow 4 keeps proving it still runs there; yadflow 5 drops them);
+- the end-to-end harness against the packed tarball, on Linux (and on macOS after a merge, nightly and by hand), and the agent acceptance run's checks with scripted agents (the real run is opt-in);
 - lint, the 70% coverage gate, and the tarball-leak smoke (Linux, Node 24);
 - `npm audit` of production dependencies (failing on high severity), and a check of the registry
   signatures.
+
+The macOS legs are the slowest (about 11 minutes), so a pull request does not run them. Check the `main` run
+after each merge: a macOS-only bug shows up there first. To run them on a branch before merging a risky
+change: `gh workflow run ci.yml --ref <branch>`.
 
 OpenSSF Scorecard runs as its own workflow (`.github/workflows/scorecard.yml`), weekly and on every push
 to `main`.
