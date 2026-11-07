@@ -82,7 +82,7 @@ function fakePlatform({ installed = true, authed = true, calls = [] } = {}) {
 
 // GitHub, for one repo: the repo, its branch, the rules on the branch, and classic protection.
 const PR_RULE = (n = 1, extra = {}) => ({ type: 'pull_request', parameters: { required_approving_review_count: n, dismiss_stale_reviews_on_push: true, ...extra } });
-const CHECKS_RULE = (contexts) => ({ type: 'required_status_checks', parameters: { required_status_checks: contexts.map((context) => ({ context })) } });
+const CHECKS_RULE = (contexts, strict = true) => ({ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: strict, required_status_checks: contexts.map((context) => ({ context })) } });
 const ALL_RULES = (jobs) => [PR_RULE(), CHECKS_RULE(jobs), { type: 'non_fast_forward' }, { type: 'deletion' }];
 const NOT_PROTECTED = [404, { message: 'Branch not protected' }];
 // `rules` is the list of rules; `rulesFail` a refused answer instead, as [status, body].
@@ -110,7 +110,7 @@ test('E160b case 1: everything set on GitHub — every row ok, complete, no gap'
     for (const repo of r.repos) for (const f of repo.findings) assert.equal(f.status, 'ok', `${repo.name} ${f.id}: ${f.message}`);
     assert.deepEqual(r.repos.map((x) => x.name), ['Product', 'app']);
     assert.deepEqual(r.summary, { gaps: 0, suggestions: 0, unknown: 0, complete: true });
-    assert.deepEqual(Object.keys(byId(r, 'app')).sort(), ['deletion', 'files', 'force-push', 'protected', 'required-checks', 'signed-commits', 'stale-approvals']);
+    assert.deepEqual(Object.keys(byId(r, 'app')).sort(), ['deletion', 'files', 'force-push', 'merge-queue', 'protected', 'required-checks', 'signed-commits', 'stale-approvals', 'up-to-date']);
   } finally { done(w); }
 });
 
@@ -174,7 +174,7 @@ test('E160b case 4: force push or deletion allowed is a gap; a full page of rule
 // GitLab, for one project: the project and its settings, the branch, protected branches, approvals, push rule.
 // The project is in a person's own namespace unless `project.namespace` says a group's.
 const NO_ONE = { name: 'main', allow_force_push: false, push_access_levels: [{ access_level: 0 }] };
-function gl(repo, { project = {}, prot = true, protectedBranches = [NO_ONE], branchesFail = null, approvals = [200, { reset_approvals_on_push: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
+function gl(repo, { project = {}, prot = true, protectedBranches = [NO_ONE], branchesFail = null, approvals = [200, { reset_approvals_on_push: true, merge_requests_author_approval: false, merge_requests_disable_committers_approval: true }], pushRule = [404, { message: '404 Not found' }] } = {}) {
   const at = `projects/acme%2F${repo}`;
   return [
     [new RegExp(`^${at}$`), 200, { default_branch: 'main', namespace: { kind: 'user' }, ci_config_path: '', only_allow_merge_if_pipeline_succeeds: true, allow_merge_on_skipped_pipeline: false, only_allow_merge_if_all_discussions_are_resolved: true, ...project }],
@@ -958,4 +958,75 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
   // neither cancelled nor left waiting — a shared group cancels a waiting run even without cancel-in-progress.
   const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
   assert.ok(ci.includes("\nconcurrency:\n  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"), 'ci.yml concurrency');
+});
+
+// #433: the merge modes yad's checks do not support yet (E166) are gaps; the settings that make the checks
+// judge the right base, or the right approvers, are suggestions. Nothing new is fetched: the same reads.
+test('#433 GitHub: a merge queue is a gap; "up to date" off is a suggestion; a rule unread is unknown', () => {
+  const w = workspace();
+  try {
+    const rules = (extra = [], strict = true) => [PR_RULE(), CHECKS_RULE(REQUIRED_CHECKS.github.code, strict), { type: 'non_fast_forward' }, { type: 'deletion' }, ...extra];
+    const run = (appRules, more = {}) => check(w, [...gh('p', { rules: ALL_RULES(productJobs) }), ...gh('app', { rules: appRules, ...more })]).r;
+    const queued = run(rules([{ type: 'merge_queue', parameters: {} }]));
+    const q = byId(queued, 'app')['merge-queue'];
+    assert.equal(q.status, 'gap');
+    assert.match(q.message, /waits forever/);
+    assert.match(q.fix.steps.join(' '), /turn off "Require merge queue"/);
+    assert.equal(q.fix.url, 'https://github.com/acme/app/settings/rules');
+    assert.ok(queued.summary.gaps >= 1, 'a gap fails the run');
+    const loose = byId(run(rules([], false)), 'app');
+    assert.equal(loose['merge-queue'].status, 'ok');
+    assert.match(loose['merge-queue'].message, /classic branch protection is not read/);
+    assert.equal(loose['up-to-date'].status, 'suggest');
+    assert.match(loose['up-to-date'].message, /older base/);
+    assert.match(loose['up-to-date'].fix.steps.join(' '), /Require branches to be up to date/);
+    // Classic protection alone can turn "up to date" on.
+    const classic = [200, { required_status_checks: { strict: true, contexts: [] } }];
+    assert.equal(byId(run(rules([], false), { classic }), 'app')['up-to-date'].status, 'ok');
+    // The rules not read: the queue is unknown, never ok; "up to date" stays a suggestion that says why.
+    const unread = byId(run(null, { rulesFail: [500, { message: 'boom' }] }), 'app');
+    assert.equal(unread['merge-queue'].status, 'unknown');
+    assert.equal(unread['up-to-date'].status, 'suggest');
+    assert.match(unread['up-to-date'].message, /^not known/);
+  } finally { done(w); }
+});
+
+test('#433 GitLab: merge trains are a gap, merged-results pipelines are supported, and self-approval is a suggestion in team mode', () => {
+  const w = workspace({ platform: 'gitlab' });
+  try {
+    const app = (opts) => byId(check(w, [...gl('p'), ...gl('app', opts)]).r, 'app');
+    const trains = app({ project: { merge_trains_enabled: true, merge_pipelines_enabled: true } });
+    assert.equal(trains['merge-trains'].status, 'gap');
+    assert.match(trains['merge-trains'].message, /ahead in the train/);
+    assert.match(trains['merge-trains'].fix.steps.join(' '), /turn off "Enable merge trains"/);
+    assert.equal(trains['merged-results'].status, 'ok');
+    assert.match(trains['merged-results'].message, /are on/);
+    const off = app({ project: { merge_trains_enabled: false, merge_pipelines_enabled: false } });
+    assert.equal(off['merge-trains'].status, 'ok');
+    assert.match(off['merged-results'].message, /are off/);
+    // GitLab Free does not report the setting, and cannot run trains; merged-results gets no row then.
+    const free = app({});
+    assert.equal(free['merge-trains'].status, 'ok');
+    assert.equal(free['merged-results'], undefined);
+    // Who may approve: the author, or someone who added commits, is a suggestion; unread says Premium.
+    const self = app({ approvals: [200, { reset_approvals_on_push: true, merge_requests_author_approval: true, merge_requests_disable_committers_approval: false }] });
+    assert.equal(self['author-approval'].status, 'suggest');
+    assert.match(self['author-approval'].fix.steps.join(' '), /Prevent approval by author/);
+    assert.equal(self['committer-approval'].status, 'suggest');
+    assert.match(self['committer-approval'].fix.steps.join(' '), /Prevent approvals by users who add commits/);
+    const noPremium = app({ approvals: [403, { message: '403 Forbidden' }] });
+    assert.equal(noPremium['author-approval'].status, 'suggest');
+    assert.match(noPremium['author-approval'].message, /Premium/);
+    const good = app({});
+    assert.equal(good['author-approval'].status, 'ok');
+    assert.equal(good['committer-approval'].status, 'ok');
+  } finally { done(w); }
+  // Solo mode: one person writes and approves, so neither approval row is asked.
+  const solo = workspace({ platform: 'gitlab', product: { solo: true } });
+  try {
+    const app = byId(check(solo, [...gl('p'), ...gl('app', { approvals: [200, { merge_requests_author_approval: true, merge_requests_disable_committers_approval: false }] })]).r, 'app');
+    assert.equal(app['author-approval'], undefined);
+    assert.equal(app['committer-approval'], undefined);
+    assert.equal(app['merge-trains'].status, 'ok', 'trains are asked in solo mode too');
+  } finally { done(solo); }
 });
