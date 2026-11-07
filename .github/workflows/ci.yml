@@ -5,12 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly, and by hand: the macOS legs run on these and on pushes to main, not on pull requests (#434).
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
 
 # A newer push to the same pull request cancels its older run (#428). A push to main never cancels or waits:
 # each merge's run is the record that main was green at that commit, so its group is the commit itself (a
-# shared group would still cancel a run left waiting in it, even without cancel-in-progress).
+# shared group would still cancel a run left waiting in it, even without cancel-in-progress). The event name
+# is in it too, so a nightly or by-hand run of the same commit never waits behind its push run (#434).
 concurrency:
-  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -29,10 +34,11 @@ jobs:
         # leave in yadflow 5, which needs Node 22 (E161).
         node-version: [18, 20, 22, 24]
         # One macOS leg (Node 24) confirms the bash gates + git plumbing behave on the
-        # other POSIX target without paying for a full os×node cross-product.
-        include:
-          - os: macos-latest
-            node-version: 24
+        # other POSIX target without paying for a full os×node cross-product. It is the slowest leg
+        # (about 11 minutes), so it runs after a merge to main, nightly and by hand, not on a pull request
+        # (#434). The cost: a macOS-only bug (like #462) is found right after the merge, not before it.
+        # It is not a required check, so its name may change freely.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[]' || '[{"os":"macos-latest","node-version":24}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config
@@ -110,7 +116,9 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS: after a merge, nightly and by hand only, as in the test job (#434). `e2e (ubuntu-latest)`
+        # is a required check: keep that name.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false } # #426: no job here pushes; the tests must not find a token in .git/config

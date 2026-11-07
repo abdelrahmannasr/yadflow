@@ -967,10 +967,16 @@ test('#428: the PR gate files cancel their older run; the update guard, gate-syn
     const text = noComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
     assert.doesNotMatch(text, /cancel-in-progress: true|interruptible: true/, `${f} must never cancel a run`);
   }
-  // This repo's CI: a PR's older run is cancelled; a push to main has a group of its own (its commit), so it is
-  // neither cancelled nor left waiting — a shared group cancels a waiting run even without cancel-in-progress.
+  // This repo's CI: a PR's older run is cancelled; a push to main has a group of its own (its event + commit), so
+  // it is neither cancelled nor left waiting — a shared group cancels a waiting run even without
+  // cancel-in-progress — and a nightly or by-hand run of the same commit never waits behind it (#434).
   const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
-  assert.ok(ci.includes("\nconcurrency:\n  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"), 'ci.yml concurrency');
+  assert.ok(ci.includes("\nconcurrency:\n  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"), 'ci.yml concurrency');
+  // #434: the macOS legs run on a push to main, nightly and by hand, never on a pull request; the required
+  // e2e (ubuntu-latest) leg runs on every event.
+  assert.ok(ci.includes(`include: \${{ fromJSON(github.event_name == 'pull_request' && '[]' || '[{"os":"macos-latest","node-version":24}]') }}\n`), 'ci.yml test: macOS off PRs');
+  assert.ok(ci.includes(`os: \${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}\n`), 'ci.yml e2e: macOS off PRs');
+  assert.match(ci, /\n  schedule:\n    - cron: '[^']+'\n  workflow_dispatch:\n/, 'ci.yml nightly + by hand');
 });
 
 // #433: the merge modes yad's checks do not support yet (E166) are gaps; the settings that make the checks
