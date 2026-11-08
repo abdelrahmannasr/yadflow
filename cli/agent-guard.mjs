@@ -16,7 +16,10 @@
 // ledger guard). The rules in AGENTS.md are what the agent follows; this catches the plain mistake.
 //
 // FAIL-OPEN, like the ledger guard: a payload it cannot read, or no command in it, is allowed.
-import { classify } from './agent-rules.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { classify, readAllowList } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 
 // A heredoc's `<<` and its end word: bare (`EOF`), quoted (`'EOF'`, `"EOF"`, `E"OF"`) or escaped (`\EOF`). Any
@@ -83,7 +86,8 @@ export function shellParts(line) {
     }
     if (ch === '\'' || ch === '"') { quote = ch; inWord = true; continue; }
     if (ch === '\\' && line[i + 1] === '\n') { i++; continue; }
-    if (ch === '\\' && line[i + 1] === '\r' && line[i + 2] === '\n') { i += 2; continue; }
+    // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
+    // command. So it falls through to the escape below (the CR is a character of the word), and the LF ends the part.
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
     if (ch === '#' && !inWord) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
@@ -461,7 +465,17 @@ function platformApproval(words) {
 }
 
 // The verdict for one shell command line: `{allow: true}` or `{allow: false, message}`.
+// A `\` + CR + LF is a part break to bash and zsh with their default options, but a line join to a shell that
+// drops CRs (Git Bash with `igncr`). Refuse under either reading: judge the joined line too, at every depth, since
+// a `bash -c` string built from quoted pieces holds one only once its quotes are gone.
 export function agentGuardDecision(line, depth = 0) {
+  if (typeof line === 'string' && line.includes('\\\r\n')) {
+    const joined = judgeLine(line.replace(/\\\r\n/g, ''), depth);
+    if (!joined.allow) return joined;
+  }
+  return judgeLine(line, depth);
+}
+function judgeLine(line, depth) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
   const parts = shellParts(line);
   // The commands a `$(…)` or backticks run are judged too (a few levels deep at most).
@@ -509,3 +523,311 @@ export function payloadCommand(payload) {
 
 // Cursor's payload names its event; Claude Code's says `PreToolUse`.
 export const isCursorPayload = (payload) => payload?.hook_event_name === 'beforeShellExecution' || typeof payload?.cursor_version === 'string';
+
+// ---------------------------------------------------------------------------------------------------------------
+// PRE-APPROVAL (E167, issue #353). The other half of the guard: a command line it can SEE only reads runs with no
+// permission prompt. Claude Code's allow rules match the start of a command, so `Bash(gh api:*)` would also pass
+// `gh api -X DELETE …`; this reads each word instead. It answers "allow" only when EVERY part of the line is one of
+// the reads below, written in a form it knows; anything else gets no answer, which is the prompt the person had
+// before. So a mistake here, or a hook that fails, costs a prompt, never a write. A team's own `deny` and `ask`
+// rules still win over a hook's "allow" (Claude Code's rule), and `YAD_NO_PREAPPROVE=1` turns this half off.
+//
+// Never pre-approved, whatever the form: a secret, token, variable, key or webhook (the person's, HUMAN_ONLY_ACTS
+// in cli/agent-rules.mjs), GraphQL (a mutation rides the same call as a query), any API call that is not a GET, a
+// file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
+// named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
+export const PREAPPROVED = Object.freeze({
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, secure files, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials, Terraform state, schedules, CI logs, traces or artifacts, admin settings (application) or user in the path, with or without a .json-style suffix',
+  git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one, no %G in a format, git diff paths inside the project; git still runs what its own config names, such as an external diff or fsmonitor)',
+  jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
+  filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
+  yad: 'the read-only yad commands of the settings allow list',
+  gates: 'the read-only gates in checks/ (spec-link, contract-check, commit-message, lineage-check, epic-open, reconcile-debt-check, risk-map-check, verified-commits, ledger-guard, member-check), only while the file is the copy this yadflow ships',
+  never: 'secrets, tokens, variables, keys, webhooks, GraphQL, API writes, file writes, $ (variables) outside single quotes, brace lists, globs, ( ), a word starting with ~ or =, $(…), bash -c, env prefixes',
+});
+export const PREAPPROVED_GATES = Object.freeze(['spec-link.sh', 'contract-check.sh', 'commit-message.sh', 'lineage-check.sh', 'epic-open.sh',
+  'reconcile-debt-check.sh', 'risk-map-check.sh', 'verified-commits.sh', 'ledger-guard.sh', 'member-check.mjs']);
+const SHIPPED_CHECKS = fileURLToPath(new URL('../skills/yad-checks/templates/checks/', import.meta.url));
+
+// The line with its harmless redirects blanked out (`2>/dev/null`, `>/dev/null`, `&>/dev/null`, `2>&1`, `>&2`),
+// or null when it has any other: a `>` to a file writes it, a `<` (a file, a heredoc, a here-string) or a
+// process substitution feeds text from somewhere this does not judge. Quotes are respected, so the `>` in
+// `jq '.a > 1'` is text. Null too for anything the shell EXPANDS before the program sees it, because the words
+// judged here would not be the words run: a `$` outside single quotes (`"$GH_TOKEN"`, `${HOME}`, `$((…))`).
+// Unquoted text is held to an ALLOW list of characters — letters, digits, `_ . / : @ % + , ^ ~ = -`, spaces and
+// the separators — because bash and zsh each expand more than any list of bad ones names: a brace list
+// (`{~/.ssh/id_rsa,x}`), a glob (`*`, `?`, `[`, which can reach a link out of the project), zsh's glob
+// qualifiers (`file(e:cmd:)` runs cmd) and `=(cmd)` / `=ls`. So also: no `=` or `~` starting a word. One form is
+// let through because neither shell expands it: a brace around one plain word (`{owner}` in a gh path, `@{u}`).
+// Only a space, a tab and a newline break words: `\r`, `\v`, a no-break space are word characters to the shell,
+// and a guard that read them as breaks would judge different words than the shell runs. No `#` either: where a
+// comment starts depends on that same reading (a `\`-newline joins words), so a `#` gets the prompt.
+// Not `^`: zsh's `extendedglob` (on in setups such as Prezto) makes it a glob.
+const UNQUOTED_SAFE = /[A-Za-z0-9_./:@%+,~=-]/;
+function blankHarmlessRedirects(line) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (quote === '"' && (ch === '$' || ch === '`')) return null;
+      else if (ch === '\\' && quote === '"') { out += ch + (line[i + 1] ?? ''); i++; continue; }
+      out += ch;
+      continue;
+    }
+    // An escaped character is literal, except a CR, which the guard's reader and the shell do not split alike.
+    if (ch === '\\') { if (line[i + 1] === '\r') return null; out += ch + (line[i + 1] ?? ''); i++; continue; }
+    if (ch === '\'' || ch === '"') { quote = ch; out += ch; continue; }
+    const wordStart = i === 0 || /[ \t\n;|&]/.test(line[i - 1]);
+    if ((ch === '~' || ch === '=') && (wordStart || /[=:]/.test(line[i - 1]))) return null;
+    if (ch === '{') {
+      const m = /^\{[A-Za-z0-9_]*\}/.exec(line.slice(i));
+      if (!m) return null;
+      out += m[0]; i += m[0].length - 1; continue;
+    }
+    if (ch === '<') return null;
+    if (ch !== '>' && !UNQUOTED_SAFE.test(ch) && !/[ \t\n;|&]/.test(ch)) return null;
+    if (ch !== '>') { out += ch; continue; }
+    // The fd before it (`2>`) or `&>`: blanked with it.
+    let start = out.length;
+    while (start > 0 && /[0-9&]/.test(out[start - 1])) start--;
+    if (start > 0 && !/[\s;|&]/.test(out[start - 1])) return null;
+    let j = i + 1;
+    if (line[j] === '(') return null;
+    let dup = false;
+    if (line[j] === '>') j++;
+    else if (line[j] === '&') { dup = true; j++; } else if (line[j] === '|') return null;
+    while (line[j] === ' ' || line[j] === '\t') j++;
+    let k = j;
+    while (k < line.length && !/[\s;|&<>()'"`$\\]/.test(line[k])) k++;
+    const target = line.slice(j, k);
+    if (!(dup ? /^[0-9]+$/.test(target) : target === '/dev/null')) return null;
+    // The target ends the word: `2>/dev/null"x"` writes to `/dev/nullx`.
+    if (k < line.length && !/[\s;|&)]/.test(line[k])) return null;
+    out = `${out.slice(0, start)}${' '.repeat(i - start)}${' '.repeat(k - i)}`;
+    i = k - 1;
+  }
+  return quote ? null : out;
+}
+
+// A file named on a command line, read inside the project only: no `~`, no `$`, nothing that resolves (through a
+// link too) outside the project. `at` is `{ cwd, root }`: the word resolves from `cwd` and must land in `root`.
+// `-` is standard input.
+function insideProject(word, at) {
+  if (word === '-') return true;
+  if (!word || /^~|\$/.test(word)) return false;
+  let root, cwd;
+  // Both through realpath, so a link in either (macOS's /var is /private/var) does not make a file look outside.
+  try { root = fs.realpathSync(at.root); cwd = fs.realpathSync(at.cwd); } catch { return false; }
+  let full = path.resolve(cwd, word);
+  try { full = fs.realpathSync(full); } catch { /* not there yet (or a glob): judged by its spelling */ }
+  const rel = path.relative(root, full);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// Read a program's arguments against its options: `bool` takes no value, `value` takes one (`-n 5`, `-n5`,
+// `--lines=5`, `--lines 5`), `pairs` takes two (`--arg name value`). Short options may be clustered (`-in`) while
+// they take no value. `numeric` allows `-5` (head, tail). Returns the plain operands, or null for an option it
+// does not know: an unknown option is never guessed at.
+function operandsOf(args, { bool = [], value = [], pairs = [], numeric = false } = {}) {
+  const B = new Set(bool), V = new Set(value), P = new Set(pairs);
+  const ops = [];
+  const values = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { ops.push(...args.slice(i + 1)); break; }
+    if (a === '-' || !a.startsWith('-')) { ops.push(a); continue; }
+    if (a.startsWith('--')) {
+      const [name, eq] = [a.split('=')[0], a.includes('=')];
+      if (B.has(name) && !eq) continue;
+      if (V.has(name)) { (values[name] ??= []).push(eq ? a.slice(a.indexOf('=') + 1) : args[++i]); if (!eq && i >= args.length) return null; continue; }
+      if (P.has(name) && !eq) { (values[name] ??= []).push([args[i + 1], args[i + 2]]); i += 2; if (i >= args.length) return null; continue; }
+      return null;
+    }
+    if (numeric && /^-[0-9]+$/.test(a)) continue;
+    // A short option or a cluster of them.
+    for (let c = 1; c < a.length; c++) {
+      const o = `-${a[c]}`;
+      if (B.has(o)) continue;
+      if (V.has(o)) {
+        const rest = a.slice(c + 1);
+        (values[o] ??= []).push(rest || args[++i]);
+        if (!rest && i >= args.length) return null;
+        break;
+      }
+      return null;
+    }
+  }
+  return { ops, values };
+}
+
+// The tools a part may run, each judged on its own words (the program name first, bare: `./gh` is a script).
+const FILTERS = {
+  head: { bool: ['-q', '-v', '--quiet', '--silent', '--verbose'], value: ['-n', '-c', '--lines', '--bytes'], numeric: true },
+  tail: { bool: ['-q', '-v', '-r', '--quiet', '--silent', '--verbose'], value: ['-n', '-c', '--lines', '--bytes'], numeric: true },
+  wc: { bool: ['-l', '-w', '-c', '-m', '-L', '--lines', '--words', '--bytes', '--chars', '--max-line-length'] },
+  cut: { bool: ['-s', '-n', '--only-delimited', '--complement'], value: ['-d', '-f', '-c', '-b', '--delimiter', '--fields', '--characters', '--bytes', '--output-delimiter'] },
+  cat: { bool: ['-n', '-b', '-s', '-v', '-e', '-t', '-A', '-E', '-T', '-u', '--number', '--number-nonblank', '--squeeze-blank', '--show-all'] },
+  grep: { bool: ['-i', '-v', '-c', '-n', '-E', '-F', '-G', '-o', '-q', '-w', '-x', '-l', '-L', '-h', '-H', '-s', '-r', '-z', '-a', '-I',
+    '--ignore-case', '--invert-match', '--count', '--line-number', '--extended-regexp', '--fixed-strings', '--only-matching', '--quiet', '--silent',
+    '--word-regexp', '--line-regexp', '--files-with-matches', '--files-without-match', '--no-filename', '--with-filename', '--recursive', '--color', '--no-messages'],
+  // Not -R / --dereference-recursive: it follows every link under the folder, out of the project too.
+  value: ['-e', '-m', '-A', '-B', '-C', '--regexp', '--max-count', '--after-context', '--before-context', '--context', '--include', '--exclude', '--exclude-dir'] },
+};
+function filterPart(prog, args, at) {
+  if (prog === 'uniq') {
+    const r = operandsOf(args, { bool: ['-c', '-d', '-u', '-i', '--count', '--repeated', '--unique', '--ignore-case'] });
+    // A second operand is the file uniq WRITES.
+    return Boolean(r && r.ops.length <= 1 && r.ops.every((f) => insideProject(f, at)));
+  }
+  if (prog === 'tr') {
+    const r = operandsOf(args, { bool: ['-d', '-s', '-c', '-C', '--delete', '--squeeze-repeats', '--complement'] });
+    return Boolean(r && r.ops.length >= 1 && r.ops.length <= 2);
+  }
+  const spec = FILTERS[prog];
+  if (!spec) return false;
+  const r = operandsOf(args, spec);
+  if (!r) return false;
+  // grep's first operand is its pattern, unless one came with -e.
+  const files = prog === 'grep' && !r.values['-e'] && !r.values['--regexp'] ? r.ops.slice(1) : r.ops;
+  if (prog === 'grep' && !r.values['-e'] && !r.values['--regexp'] && !r.ops.length) return false;
+  return files.every((f) => insideProject(f, at));
+}
+
+const JQ_SPEC = { bool: ['-r', '-j', '-c', '-n', '-s', '-e', '-a', '-S', '-C', '-M', '--raw-output', '--join-output', '--compact-output', '--null-input',
+  '--slurp', '--exit-status', '--ascii-output', '--sort-keys', '--color-output', '--monochrome-output', '--tab', '--seq', '--stream', '--raw-output0', '--raw-input', '-R'],
+// Not -f / --from-file: the filter would come from a file this does not read (it could hold `env`); not -L.
+value: ['--indent'], pairs: ['--arg', '--argjson', '--slurpfile', '--rawfile'] };
+// `env` and `$ENV` print the environment, where the platform tokens live; `import` and `include` read a file
+// from any path. A filter that only names a field `.env` is caught too: it gets the prompt, which is safe.
+const READS_ENV = /\benv\b|\bENV\b|\$__prog_args\b|\bimport\b|\binclude\b/;
+function jqPart(args, at) {
+  const r = operandsOf(args, JQ_SPEC);
+  if (!r) return false;
+  const filter = r.ops[0];
+  if (filter === undefined || READS_ENV.test(filter)) return false;
+  for (const [, f] of [...(r.values['--slurpfile'] ?? []), ...(r.values['--rawfile'] ?? [])]) if (!insideProject(f, at)) return false;
+  return r.ops.slice(1).every((f) => insideProject(f, at));
+}
+
+// `gh api` / `glab api`: a GET of a REST path, with only the options that keep it one.
+const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent', '--verbose'], value: ['-X', '--method', '-H', '--header', '-q', '--jq', '-t', '--template', '-p', '--preview'] };
+// (Not --cache: it writes gh's cache files, outside the project.)
+// Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`),
+// a person's e-mail addresses, a pipeline trigger (its token), an integration or service (a webhook URL), a
+// credential, CI logs, traces and artifacts (masking there is best effort, or none), GitLab's secure files,
+// Terraform state, pipeline schedules (one lists its variables with their values) and admin settings, and
+// GitLab's `user` (the caller's private e-mail).
+const NEVER_PATH = /secret|secure|token|variable|key|hook|email|trigger|integration|service|credential|terraform|schedule|artifact|^logs$|^trace$|^application$|^user$/i;
+function apiPart(prog, args) {
+  const r = operandsOf(args, API_SPEC);
+  if (!r || r.ops.length !== 1) return false;
+  const methods = [...(r.values['-X'] ?? []), ...(r.values['--method'] ?? [])];
+  if (methods.some((m) => String(m).toUpperCase() !== 'GET')) return false;
+  if ([...(r.values['-H'] ?? []), ...(r.values['--header'] ?? [])].some((h) => !/^accept\s*:/i.test(String(h)))) return false;
+  if ([...(r.values['-q'] ?? []), ...(r.values['--jq'] ?? [])].some((q) => READS_ENV.test(String(q)))) return false;
+  const endpoint = r.ops[0];
+  if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(endpoint) || /\$/.test(endpoint)) return false;
+  // Decoded first, then split, so `user%2F` is two parts; each part is tested as written and without a format
+  // suffix (`user.json`).
+  const bare = decodeURIComponent(endpoint.split(/[?#]/)[0]);
+  if (bare.replace(/^\/+/, '') === 'graphql') return false;
+  if (bare.split('/').some((seg) => NEVER_PATH.test(seg) || NEVER_PATH.test(seg.replace(/\.[A-Za-z0-9]*$/, '')))) return false;
+  return apiMethod([prog, 'api', ...args]) === 'GET';
+}
+
+const GIT_READS = new Set(['log', 'status', 'diff', 'show', 'rev-parse', 'ls-files', 'blame']);
+// The options that write a file, read one from anywhere, or run a program. git accepts any unique shortening of a
+// long option in some commands (`git blame --conten=/etc/hosts` is `--contents`), so a long option is refused
+// when it is a prefix of one of these, not only when it equals one. The short ones: blame's `-S <file>`,
+// ls-files' `-X <file>`, diff's `-O<file>`, in any cluster.
+const GIT_RISKY = ['--output', '--output-directory', '--ext-diff', '--textconv', '--no-index', '--contents', '--open-files-in-pager', '--ignore-revs-file',
+  '--exclude-from', '--exclude-per-directory', '--pathspec-from-file', '--orderfile', '--show-signature', '--rotate-to', '--skip-to'];
+// Real options that happen to begin a risky one: allowed as written.
+const GIT_EXACT_SAFE = new Set(['--text', '--ignore-rev', '--output-indicator-new', '--output-indicator-old', '--output-indicator-context']);
+// The short options that read a file, by command: blame's `-S <file>`, ls-files' `-X <file>`, `-O<file>` (diff's
+// order file). `git log -S <text>` is a search, not a file, so it stays.
+const GIT_RISKY_SHORT = { blame: 'S', 'ls-files': 'X', diff: 'O', log: 'O', show: 'O' };
+function gitPart(args, at) {
+  if (!GIT_READS.has(args[0])) return false;
+  const shortRisk = GIT_RISKY_SHORT[args[0]] ?? '';
+  let afterDashes = false;
+  for (const a of args.slice(1)) {
+    if (a === '--') { afterDashes = true; continue; }
+    // `%G…` in a format makes git check signatures, which runs gpg.
+    if (/%G/.test(a)) return false;
+    if (!afterDashes && a.startsWith('--')) {
+      const name = a.split('=')[0];
+      if (!GIT_EXACT_SAFE.has(name) && name.length > 2 && GIT_RISKY.some((r) => r.startsWith(name))) return false;
+    } else if (!afterDashes && a.startsWith('-') && shortRisk && new RegExp(`^-[A-Za-z]*[${shortRisk}]`).test(a)) return false;
+    // `git diff` turns to --no-index by itself when a path is outside the repo, and prints both files: every path
+    // it is given must be inside the project. A ref (`main`, `origin/main`, `HEAD~1`) reads as one inside.
+    else if (args[0] === 'diff' && (afterDashes || !a.startsWith('-')) && !insideProject(a, at)) return false;
+  }
+  return true;
+}
+
+// A read gate run from checks/, unchanged from the copy this yadflow ships.
+function gatePart(prog, args, at) {
+  const file = args[0] ?? '';
+  const name = file.replace(/^\.\//, '');
+  const m = /^checks\/([A-Za-z0-9._-]+)$/.exec(name);
+  if (!m || !PREAPPROVED_GATES.includes(m[1])) return false;
+  if (m[1].endsWith('.mjs') ? prog !== 'node' : !(prog === 'bash' || prog === 'sh')) return false;
+  if (!insideProject(name, at)) return false;
+  try {
+    return fs.readFileSync(path.resolve(at.cwd, name)).equals(fs.readFileSync(path.join(SHIPPED_CHECKS, m[1])));
+  } catch { return false; }
+}
+
+function yadPart(args) {
+  const { words, flags } = yadWords(args);
+  // yad's own reading of the words and flags must be a read too (`check --fix` is not, whatever the prefix).
+  if (classify(words, flags) !== 'read') return false;
+  const key = words.join(' ');
+  return readAllowList().some((rule) => {
+    const k = rule.slice('Bash(yad '.length, -':*)'.length);
+    return key === k || key.startsWith(`${k} `);
+  });
+}
+
+// What one part of the line is, when it is a read this pre-approves; else null.
+function readKind(words, at) {
+  if (!words.length) return null;
+  const [prog, ...args] = words;
+  // A bare program name: no path (a script that shares a name), no `VAR=value`, no prefix (`env`, `sudo`, …).
+  if (!/^[a-z][a-z0-9_-]*$/.test(prog) || PREFIXES.has(prog)) return null;
+  if ((prog === 'gh' || prog === 'glab') && args[0] === 'api') return apiPart(prog, args.slice(1)) ? `${prog} api GET` : null;
+  if (prog === 'git') return gitPart(args, at) ? `git ${args[0]}` : null;
+  if (prog === 'jq') return jqPart(args, at) ? 'jq' : null;
+  if (prog === 'yad') return yadPart(args) ? 'a read-only yad command' : null;
+  if (prog === 'bash' || prog === 'sh' || prog === 'node') return gatePart(prog, args, at) ? `the ${args[0].replace(/^\.\/|^checks\//g, '')} gate` : null;
+  return filterPart(prog, args, at) ? prog : null;
+}
+
+// `{ preapproved: true, reason }` when every part of the line is a read named above, else `{ preapproved: false }`.
+// It never judges a refusal: the caller asks `agentGuardDecision` first, and a refused line is never pre-approved.
+// `cwd` is where the line runs (files resolve from it); `root` is the project, and `cwd` must be inside it — an
+// agent that changed to `/` would otherwise make every file "inside".
+export function agentGuardPreapproval(line, { cwd = process.cwd(), root = cwd } = {}) {
+  const no = { preapproved: false };
+  try {
+    if (typeof line !== 'string' || !line.trim() || !agentGuardDecision(line).allow) return no;
+    const at = { cwd: path.resolve(root, cwd), root };
+    if (!insideProject('.', at)) return no;
+    const clean = blankHarmlessRedirects(line);
+    if (clean === null) return no;
+    const parts = shellParts(clean);
+    if (!parts.length || parts.subs.length || clean.includes('`') || /\$\(/.test(clean)) return no;
+    const kinds = [];
+    for (const words of parts) {
+      const kind = readKind(words, at);
+      if (!kind) return no;
+      if (!kinds.includes(kind)) kinds.push(kind);
+    }
+    return { preapproved: true, reason: kinds.join(', ') };
+  } catch {
+    return no;
+  }
+}

@@ -350,3 +350,17 @@ test('E159 case 13 (join): join --json never starts a login; its member step is 
     assert.deepEqual(r.json.member.person.commands, ['gh auth login --hostname github.com --scopes user:email']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E167 (#353): setup shows what the agent guard pre-approves, and what it never does, beside the allow list', async () => {
+  const { PREAPPROVED } = await import('./agent-guard.mjs');
+  const T = tmp();
+  try {
+    const P = path.join(T, 'p');
+    fs.mkdirSync(P);
+    const r = yad(T, P, ['setup', '--solo', '--greenfield', '--monorepo', '--no-tools', '--git-init', '--ide-targets', '.claude', '--platform', 'none', '--connect', 'none'], { SDLC_NONINTERACTIVE: '1' });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /Bash\(yad guide:\*\)/, 'the allow list first');
+    assert.match(r.out, /judged by the agent guard each time \(YAD_NO_PREAPPROVE=1 turns this off\)/);
+    for (const [k, text] of Object.entries(PREAPPROVED)) assert.ok(r.out.includes(k === 'never' ? `never: ${text}` : `- ${text}`), `${k}: ${r.out}`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

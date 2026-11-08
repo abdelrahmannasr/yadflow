@@ -19,6 +19,7 @@ import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
 import { readAllowList } from './agent-rules.mjs';
+import { PREAPPROVED } from './agent-guard.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -806,6 +807,10 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold(who)} ${c.dim('(read-only yad commands Claude Code runs without asking, in .claude/settings.json)')}`);
     if (allowListShown) { log(`    ${c.dim('the same list as above')}`); return; }
     for (const e of readAllowList()) log(`    ${c.dim(e)}`);
+    // E167 (#353): what the agent guard also lets run without asking, read word by word (cli/agent-guard.mjs).
+    log(`    ${c.dim('and, judged by the agent guard each time (YAD_NO_PREAPPROVE=1 turns this off):')}`);
+    for (const [k, text] of Object.entries(PREAPPROVED)) if (k !== 'never') log(`    ${c.dim(`- ${text}`)}`);
+    log(`    ${c.dim(`never: ${PREAPPROVED.never}`)}`);
     allowListShown = true;
   };
   for (const repo of registry.repos) {
