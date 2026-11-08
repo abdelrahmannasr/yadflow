@@ -1303,6 +1303,16 @@ test('#321 Unity MCP: a recommended tool used by yad-implement, found by its Uni
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#321: yad-implement says when a repo is a Unity repo, how it reaches Unity MCP, and quotes its fallback word for word', () => {
+  const t = TOOLBOX.find((x) => x.id === 'unity-mcp');
+  const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8');
+  assert.ok(skill.includes(`\`${t.fallback}\``), 'the fallback, quoted exactly: change one, change both');
+  for (const words of ['`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder', 'yad toolbox list --json --dir', '`unity-mcp`',
+    'yad toolbox connect unity-mcp --json', 'the ≤3-file rule still holds', '`Unity not reachable: console checked by <person>`']) {
+    assert.ok(skill.replace(/\s+/g, ' ').includes(words), words);
+  }
+});
+
 test('E86: `yad toolbox add / remove` write only the difference from the default, and install nothing', () => {
   const { T, p, home } = product({ '.sdlc/design.json': '{"tool":"figma"}' });
   const file = path.join(p, '.sdlc/toolbox.json');

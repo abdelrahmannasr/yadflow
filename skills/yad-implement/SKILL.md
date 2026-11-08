@@ -128,6 +128,21 @@ the frame links only, only when the person says so, and record that in the commi
 paragraph (Step 6) as `design tool not reachable: continued from the frame links, on <person>'s word`.
 `not-checkable` means there is nothing to probe: go on from the links. `preflight: null` means no frames.
 
+**In a Unity repo, check the build through Unity MCP (#321).** A Unity repo is one with
+`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root. Run `yad toolbox list --json --dir
+<repo>` and find `unity-mcp`: use it when its `status.state` is `installed` or `available`. If it is not
+found, offer `yad toolbox connect unity-mcp --json` once, under the connect-tool rule, and hand the person
+its steps (they are done in the Unity Editor). A new MCP server is loaded when the agent starts: if your
+session does not see it yet (in Claude Code, `/mcp`), tell the person to restart the agent and run this step
+again. **With it:** after each edit, have Unity refresh and compile, read its console, and fix every error
+your change caused before you commit; when the task declares tests, run them (EditMode or PlayMode) through
+the server. The server never widens the task: no file, scene, prefab or asset outside the task's declared
+files is created, moved or saved, and the ≤3-file rule still holds. **Without it**, or on a no, the
+toolbox's fallback holds:
+`files only: yad-implement edits the C# and asks the person to open Unity and report its console errors`.
+Ask before the commit, fix what they paste, and record `Unity not reachable: console checked by <person>` in
+the commit's `Decisions:` paragraph (Step 6).
+
 **Then ask the batch (#357)** that **Ask the human-only questions first** above describes, before
 writing any code. Read `spec.md`'s `## Clarifications` first: `yad-spec` recorded its answers there.
 Ask only what is still open for THIS task, from its block in `tasks.md`, `plan.md` and the contract
