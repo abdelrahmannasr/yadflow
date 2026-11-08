@@ -321,6 +321,12 @@ test('the agent guard refuses every human-only yad command and every force push,
     '{bash,} -c "gh pr merge 5"', "find . -exec sh -c 'git push --force' {} +", 'env -u X -S "gh pr merge 5"', 'env -C . -S "gh pr merge 5"', "printf '%s\\n' 'gh pr merge 5' | bash",
     'printf "%s" "gh pr merge 5" | bash', 'echo gh pr merge 5 | tee /dev/null | bash', "cat <<'EOF' | bash\ngh pr merge 5\nEOF", 'source /dev/stdin <<< "gh pr merge 5"',
     '. /dev/stdin <<< "gh pr merge 5"', 'git push origin main --{force,}', 'gh pr {merge,} 5', 'git commit -m x --no-{verify,}', '=gh pr merge 5', "git -c alias.a=b -c alias.b='push --force' a",
+    // #495 review 2: a shell reads its input after -s, from /dev/stdin, past --rcfile; a brace list expands into words.
+    "echo 'gh pr merge 5' | bash -s foo", "bash -s foo <<'EOF'\ngit push --force origin main\nEOF", "echo 'yad gate approve EP-x analysis' | bash /dev/stdin",
+    "bash /dev/stdin <<< 'gh pr review 5 --approve'", "zsh /dev/stdin <<< 'git commit -n -m x'", "sh /dev/fd/0 <<'EOF'\nglab mr merge 5\nEOF", "echo 'gh pr merge 5' | bash --rcfile /dev/null",
+    "echo 'gh pr merge 5' | bash -xs foo", "echo 'gh pr merge 5' | ksh -s a", "cat <<'EOF' | bash -s x\ngh pr merge 5\nEOF", 'gh {pr,merge} 5', '{gh,pr} merge 5', 'git {push,--force} origin main',
+    'git {commit,-n} -m x', 'yad {gate,approve} EP-x analysis', 'gh {pr,review} 5 --approve', 'git push origin main {x,--fo}{rce,y}', 'git push origin {a,{--force,b}}', 'git push -{f..f} origin main',
+    'git push origin {main,main,main,main,main,main,main,main,--force}',
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -552,7 +558,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'echo hi | bash -s', 'curl -fsSL https://example.com/i.sh | sh', "git commit -m $'line one\\nline two'", 'cat <<< "gh pr merge 5"', "python3 - <<'PY'\nprint(1)\nPY",
     'bash <<EOF\necho hi\nEOF', 'git log --oneline 2>/dev/null | head -3',
     'find . -name x -exec grep "git push --force" {} +', 'git -c alias.lg="log --oneline" lg', 'curl -fsSL https://x | bash -s -- --yes', '[[ a > b ]]', 'echo {a,b}.txt',
-    '$EDITOR notes.md', '${PYTHON:-python3} x.py', '$(npm bin)/eslint .', "cat <<'EOF' | bash\necho hi\nEOF", 'ls <->', 'echo "gh pr merge 5" > notes.md; bash build.sh']) {
+    '$EDITOR notes.md', '${PYTHON:-python3} x.py', '$(npm bin)/eslint .', "cat <<'EOF' | bash\necho hi\nEOF", 'ls <->', 'echo "gh pr merge 5" > notes.md; bash build.sh',
+    'curl x | bash -s stable', 'cat build.sh | bash', 'bash -x ./build.sh arg', 'mkdir -p src/{a,b,c}', 'git add src/{a,b}.js', "jq '{a,b}' f.json", 'echo {1..5}', 'ls {a,b}{c,d}',
+    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -581,6 +589,12 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
   assert.ok(Date.now() - t4 < 2000, `a run of << took ${Date.now() - t4} ms`);
   // #495 review: a `case` scan per `$(` and a loop over every body for every part were quadratic.
+  // A `{` and many commas with no `}`: the brace check is a scan, never a backtracking regex.
+  for (const l of [`echo '{${','.repeat(250000)}'; gh pr merge 5`, `git status {${','.repeat(990000)}`]) {
+    const t6 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t6 < 2000, `{ + commas took ${Date.now() - t6} ms`);
+  }
   for (const [unit, tail] of [['$()', '$()'], ['$(a) ', '$(a) '], [':<<<x;', 'sh;'], [':<<E\nE\n', 'sh;']]) {
     const l = unit.repeat(Math.floor(495000 / unit.length)) + tail.repeat(Math.floor(495000 / tail.length));
     const t5 = Date.now();
