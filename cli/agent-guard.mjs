@@ -70,7 +70,10 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // (`$(…)` or backticks, outside single quotes) stays inside its word, and its text is also kept in
 // `parts.subs`, so the caller judges the command it runs: `r=$(yad gate approve …)` runs an approval. Quotes
 // inside it are its own (`"$(cat <<'EOF' … EOF)"` holds any `"` in the heredoc's text).
-export function shellParts(line) {
+// `mode` picks the reading where bash and zsh decide by context the reader does not track (#492): `literalExpanding`
+// reads an end word holding `$` or a backtick as a heredoc ending at that literal word (else: no heredoc), and
+// `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
+export function shellParts(line, mode = {}) {
   const parts = [];
   // Not enumerable: `parts` reads as the plain list of parts it always was.
   Object.defineProperty(parts, 'subs', { value: [] });
@@ -99,13 +102,14 @@ export function shellParts(line) {
       const next = index.endAfter(h.word, h.tabs, at);
       if (next < 0) {
         // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
-        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; parts.subs.push(...substitutionsIn(line.slice(from))); }
+        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; for (const x of substitutionsIn(line.slice(from))) parts.subs.push(x); }
         return -1;
       }
       if (!h.quoted) bodies.push(line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start));
       at = next;
     }
-    for (const body of bodies) parts.subs.push(...substitutionsIn(body));
+    // A loop, not a spread: a body of 124,000 `$(` overflowed the stack with `push(...)` (#492 review).
+    for (const body of bodies) for (const x of substitutionsIn(body)) parts.subs.push(x);
     return at;
   };
   for (let i = 0; i < line.length; i++) {
@@ -132,12 +136,12 @@ export function shellParts(line) {
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
     // A `#` starts a comment only where a word starts after a space, a tab, a newline, `;`, `&` or `|` (or at the
     // start): right after `(` or `)` it is text to zsh's globs and to bash's `[[ =~ ]]` (#492 review).
-    if (ch === '#' && !inWord && (i === 0 || /[ \t\n;&|]/.test(line[i - 1]))) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
+    if (ch === '#' && !inWord && (i === 0 || (mode.hashAfterParen ? /[ \t\n;&|()]/ : /[ \t\n;&|]/).test(line[i - 1]))) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
       const m = heredocAt(line, i);
-      if (m) { if (!m.expands) heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
+      if (m) { if (!m.expands || mode.literalExpanding) heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -516,27 +520,62 @@ function platformApproval(words) {
 // again with every CR removed, at every depth, since a `bash -c` string built from quoted pieces holds one only
 // once its quotes are gone. A line too long to judge in a hook's time is refused, never let through.
 export const MAX_JUDGED = 1_000_000;
+// Every reading costs time, so the whole judgement has a budget: past it the line is refused, as a line too long
+// is — a hook that runs out its harness's time lets the command through (#492).
+export const JUDGE_BUDGET_MS = 5000;
+let deadline = Infinity;
+const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
 export function agentGuardDecision(line, depth = 0) {
   if (typeof line === 'string' && line.length > MAX_JUDGED) {
     return { allow: false, message: `yad agent guard: this command is too long to judge (${line.length} characters, more than ${MAX_JUDGED}). Write what it carries to a file with your editor, or run it as separate commands.` };
   }
-  if (typeof line === 'string' && line.includes('\r')) {
-    const dropped = judgeLine(line.replace(/\r/g, ''), depth);
-    if (!dropped.allow) return dropped;
+  if (depth > 0) return judgeReadings(line, depth);
+  deadline = Date.now() + JUDGE_BUDGET_MS;
+  try {
+    return judgeReadings(line, depth);
+  } catch (e) {
+    // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
+    return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
+  } finally {
+    deadline = Infinity;
   }
-  // And with every `\` + newline join already made (CRs dropped first), so a `$\<LF>(` or an end word split by a
-  // join (`EO\<LF>F`) reads as the shell joins it (#492 review). Inside single quotes a join is literal text:
-  // judging it joined only refuses more.
-  if (typeof line === 'string' && /\\\r?\n/.test(line)) {
-    const joined = judgeLine(line.replace(/\r/g, '').replace(/\\\n/g, ''), depth);
-    if (!joined.allow) return joined;
+}
+// Every reading the shells may make of the line: as written; with CRs dropped (a CR-dropping shell); with every
+// `\` + newline join made, CRs dropped first (a `$\<LF>(`, an end word split by a join: `EO\<LF>F`); and, where
+// the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
+function judgeReadings(line, depth) {
+  if (typeof line !== 'string') return { allow: true };
+  const texts = [line];
+  if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
+  if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
+  const modes = [{}];
+  if (/<<[^\n]*[$`]/.test(line)) modes.push({ literalExpanding: true });
+  if (/[()]#/.test(line)) modes.push({ hashAfterParen: true });
+  if (modes.length === 3) modes.push({ literalExpanding: true, hashAfterParen: true });
+  for (const mode of modes) {
+    for (const text of texts) {
+      const v = judgeLine(text, depth, mode);
+      if (!v.allow) return v;
+    }
   }
-  return judgeLine(line, depth);
+  // An end word that expands can end the heredoc on any line, whatever the variable holds (`bash -c "cat <<E$x …"`
+  // with an empty $x ends at `E`): each line is judged on its own too, so the command after it is seen wherever
+  // the heredoc ends. Only refuses more.
+  if (modes.some((m) => m.literalExpanding)) {
+    for (const text of texts) {
+      for (const one of text.split('\n')) {
+        const v = judgeLine(one, depth, {});
+        if (!v.allow) return v;
+      }
+    }
+  }
+  return { allow: true };
 }
 const TOO_DEEP = { allow: false, message: 'yad agent guard: this command nests `$(…)`, backticks or `bash -c` too deep to judge. Run it as separate commands.' };
-function judgeLine(line, depth) {
+function judgeLine(line, depth, mode = {}) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
-  const parts = shellParts(line);
+  if (Date.now() > deadline) return OUT_OF_TIME;
+  const parts = shellParts(line, mode);
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
   for (const sub of parts.subs) {

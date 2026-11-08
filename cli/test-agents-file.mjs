@@ -297,6 +297,14 @@ test('the agent guard refuses every human-only yad command and every force push,
     '<<"E$x" gh pr merge 1', 'echo hi; <<"E$x" gh pr merge 1', "<<'E`x`' yad gate approve EP-a", '<<E$x gh pr merge 1', 'x=1 <<E$x gh pr merge 1',
     '[[ a =~ (#|$(gh pr merge 1)) ]]', '[[ a =~ (#|`gh pr merge 1`) ]]', '[[ a =~ (x)#$(gh pr merge 1) ]]', 'shopt -s extglob\necho @(#$(gh pr merge 1))',
     'echo foo(#$(gh pr merge 1))', 'ls foo(#q$(gh pr merge 1))', 'A((#$(gh pr merge 1)', '<<<((###;gh pr merge 1',
+    // #492 review 3: every reading the shells may make — an expanding end word as a heredoc, as none, and line by
+    // line (its value is unknown); a `#` after a parenthesis as a comment (command position) and as text.
+    'cat <<"E$x"\n\'\nE$x\ngh pr merge 1', "cat <<'E$x'\n'\nE$x\ngh pr merge 1", 'cat <<"E$x"\n"\nE$x\ngh pr merge 1', 'bash -c "cat <<E$x\n\'\nE\ngh pr merge 1"',
+    'x=F; bash -c "cat <<E$x\n\'\nEF\ngh pr merge 1"', "cat <<E$x\nit's a note\nE$x\ngh pr merge 1",
+    "(cd web && npm ci)# don't skip\ngh pr merge 1", "(true)# x '\ngh pr merge 1", "(# '\ngh pr merge 1\n)", "if (true)# '\nthen gh pr merge 1; fi",
+    "x=(# '\n$(gh pr merge 1)\n)", "f()# '\n{ gh pr merge 1; }; f", "()# x '\ngh pr merge 1", "x=(a b)# don't\ngh pr merge 1",
+    // A body of many `$(` overflowed the stack (the hook then exited 1, which lets the command run).
+    `cat <<E >/dev/null\n${'$((1))\n'.repeat(130000)}$(gh pr merge 1)\n`, `cat <<E >/dev/null\n${'$((1))'.repeat(130000)}\nE\ngh pr merge 1\n`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -512,7 +520,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   assert.deepEqual(shellParts('cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\r\n'), [['cat'], ['gh', 'pr', 'merge', '5\r']]);
   assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
   // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
-  for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n']) {
+  for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n',
+    '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
