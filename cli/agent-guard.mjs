@@ -23,8 +23,42 @@ import { classify, readAllowList } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 
 // A heredoc's `<<` and its end word: bare (`EOF`), quoted (`'EOF'`, `"EOF"`, `E"OF"`) or escaped (`\EOF`). Any
-// quote or `\` in the word makes the text plain text, as bash reads it: nothing in it runs.
-const HEREDOC = /^<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[A-Za-z0-9_.-])+)/;
+// quote or `\` in the word makes the text plain text, as bash reads it: nothing in it runs. The word is every
+// character the shell reads as one word (#492): anything but a space, a tab, a newline or `; & | ( ) < >` — so
+// `EOF#`, `EOF+` and a CR (`EOF\r`, from a line written with CRLF) are part of it. Sticky, matched in place
+// (`heredocAt`): slicing the rest of the line for each `<<` made a long line take quadratic time.
+const HEREDOC = /<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[^ \t\n;&|()<>'"\\])+)/y;
+// An end word holding `$` or a backtick is read as no heredoc (#492 review): inside `bash -c "…"` the outer shell
+// expands it first (`EOF$x` becomes `EOF`), so where it ends cannot be known here, and the lines after it are
+// judged as commands instead.
+// It is still a redirect (`<<"E$x" gh pr merge 1` runs gh), so the `<<word` is read past either way: only no
+// heredoc is recorded for it (`expands`).
+const heredocAt = (line, i) => { HEREDOC.lastIndex = i; const m = HEREDOC.exec(line); if (m) m.expands = /[$`]/.test(m[2]); return m; };
+
+// Where each line of `text` starts, by its exact text and by its text with leading tabs removed (`<<-`), so a
+// heredoc's end line is found by a binary search, not by scanning on: a line of many heredocs with different
+// end words is read in near-linear time (#492). `endAfter` gives the index just past the first line at or
+// after `at` that reads `word`, or -1.
+function lineIndex(text) {
+  const exact = new Map(), stripped = new Map();
+  for (let at = 0; at <= text.length;) {
+    const eol = text.indexOf('\n', at);
+    const t = text.slice(at, eol < 0 ? text.length : eol);
+    for (const [map, k] of [[exact, t], [stripped, t.replace(/^\t+/, '')]]) { const list = map.get(k); if (list) list.push(at); else map.set(k, [at]); }
+    at = eol < 0 ? text.length + 1 : eol + 1;
+  }
+  return {
+    endAfter(word, tabs, at) {
+      const list = (tabs ? stripped : exact).get(word);
+      if (!list) return -1;
+      let lo = 0, hi = list.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] < at) lo = mid + 1; else hi = mid; }
+      if (lo === list.length) return -1;
+      const eol = text.indexOf('\n', list[lo]);
+      return eol < 0 ? text.length + 1 : eol + 1;
+    },
+  };
+}
 const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] === '-', quoted: /['"\\]/.test(m[2]) });
 
 // One command line split into its simple commands: on `;`, `&`, `&&`, `||`, `|` and newlines, outside
@@ -36,7 +70,10 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // (`$(…)` or backticks, outside single quotes) stays inside its word, and its text is also kept in
 // `parts.subs`, so the caller judges the command it runs: `r=$(yad gate approve …)` runs an approval. Quotes
 // inside it are its own (`"$(cat <<'EOF' … EOF)"` holds any `"` in the heredoc's text).
-export function shellParts(line) {
+// `mode` picks the reading where bash and zsh decide by context the reader does not track (#492): `literalExpanding`
+// reads an end word holding `$` or a backtick as a heredoc ending at that literal word (else: no heredoc), and
+// `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
+export function shellParts(line, mode = {}) {
   const parts = [];
   // Not enumerable: `parts` reads as the plain list of parts it always was.
   Object.defineProperty(parts, 'subs', { value: [] });
@@ -50,28 +87,36 @@ export function shellParts(line) {
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
   // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
   // `$(…)` and backticks, so those go to `parts.subs`.
+  // The end line must match exactly: `EOF\r` ends only a heredoc whose word is `EOF\r`, as in bash and zsh (a
+  // shell that drops CRs is the other reading, judged by agentGuardDecision). A heredoc whose end line never
+  // comes is ended by the shell at the end of the input, and an unquoted one still runs its `$(…)` there: those
+  // are judged too, as the rest of the line is also read as commands.
+  let index = null;
+  let restFrom = -1;
   const heredocsEnd = (from) => {
+    index ??= lineIndex(line);
     let at = from;
     const bodies = [];
     for (const h of heredocs) {
       const start = at;
-      for (;;) {
-        if (at > line.length) return -1;
-        const eol = line.indexOf('\n', at);
-        const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
-        const lineStart = at;
-        at = eol < 0 ? line.length + 1 : eol + 1;
-        if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) { if (!h.quoted) bodies.push(line.slice(start, lineStart)); break; }
+      const next = index.endAfter(h.word, h.tabs, at);
+      if (next < 0) {
+        // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
+        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; for (const x of substitutionsIn(line.slice(from))) parts.subs.push(x); }
+        return -1;
       }
+      if (!h.quoted) bodies.push(line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start));
+      at = next;
     }
-    for (const body of bodies) parts.subs.push(...substitutionsIn(body));
+    // A loop, not a spread: a body of 124,000 `$(` overflowed the stack with `push(...)` (#492 review).
+    for (const body of bodies) for (const x of substitutionsIn(body)) parts.subs.push(x);
     return at;
   };
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     // A command substitution, unquoted or in double quotes (single quotes keep it as text).
     if (quote !== '\'' && ((ch === '$' && line[i + 1] === '(') || ch === '`')) {
-      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2);
+      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)));
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
       word += line.slice(i, end + 1); inWord = true;
       i = end;
@@ -89,12 +134,14 @@ export function shellParts(line) {
     // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
     // command. So it falls through to the escape below (the CR is a character of the word), and the LF ends the part.
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
-    if (ch === '#' && !inWord) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
+    // A `#` starts a comment only where a word starts after a space, a tab, a newline, `;`, `&` or `|` (or at the
+    // start): right after `(` or `)` it is text to zsh's globs and to bash's `[[ =~ ]]` (#492 review).
+    if (ch === '#' && !inWord && (i === 0 || (mode.hashAfterParen ? /[ \t\n;&|()]/ : /[ \t\n;&|]/).test(line[i - 1]))) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
-      const m = HEREDOC.exec(line.slice(i));
-      if (m) { heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
+      const m = heredocAt(line, i);
+      if (m) { if (!m.expands || mode.literalExpanding) heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -104,8 +151,11 @@ export function shellParts(line) {
       if (at >= 0) i = at - 1 - 1;
       continue;
     }
-    if (ch === '\n' || ch === ';' || ch === '&' || ch === '|') { endPart(); continue; }
-    if (ch === ' ' || ch === '\t' || ch === '\r') { endWord(); continue; }
+    // `(` and `)` end a part too (#492): `<(cmd)`, `>(cmd)`, `f(){ cmd; }` and `case x in x) cmd;;` run `cmd`.
+    if (ch === '\n' || ch === ';' || ch === '&' || ch === '|' || ch === '(' || ch === ')') { endPart(); continue; }
+    // A CR is a character of the word, as bash and zsh read it (#492): `x\r#` is one word, so its `#` starts no
+    // comment. A shell that drops CRs is the other reading, judged by agentGuardDecision.
+    if (ch === ' ' || ch === '\t') { endWord(); continue; }
     word += ch; inWord = true;
   }
   endPart();
@@ -114,7 +164,9 @@ export function shellParts(line) {
 
 // Where the `$(` whose text starts at `from` closes: the index of its `)`, or the end of the line when it never
 // closes. Quotes, nested `(…)` and a heredoc's text inside it are its own, so a `)` in them does not close it.
-function substitutionEnd(line, from) {
+// `getIndex` gives the line index of `line`, built once per text and shared by every `$(` in it (#492 review: one
+// per call made many `$(…)` holding heredocs take quadratic time).
+function substitutionEnd(line, from, getIndex) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
@@ -128,22 +180,18 @@ function substitutionEnd(line, from) {
     if (ch === '\\') { i++; continue; }
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
-      const m = HEREDOC.exec(line.slice(i));
-      if (m) { heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
+      const m = heredocAt(line, i);
+      if (m) { if (!m.expands) heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
+      const index = getIndex();
       let at = i + 1;
       let found = true;
       for (const h of heredocs) {
-        for (;;) {
-          if (at > line.length) { found = false; break; }
-          const eol = line.indexOf('\n', at);
-          const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
-          at = eol < 0 ? line.length + 1 : eol + 1;
-          if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
-        }
-        if (!found) break;
+        const next = index.endAfter(h.word, h.tabs, at);
+        if (next < 0) { found = false; break; }
+        at = next;
       }
       heredocs.length = 0;
       if (found) i = at - 2;
@@ -159,11 +207,13 @@ function substitutionEnd(line, from) {
 // keeps the next one as text.
 function substitutionsIn(text) {
   const out = [];
+  let index = null;
+  const getIndex = () => (index ??= lineIndex(text));
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === '\\') { i++; continue; }
     if ((ch === '$' && text[i + 1] === '(') || ch === '`') {
-      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2);
+      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2, getIndex);
       out.push(ch === '`' ? text.slice(i + 1, end).replace(/\\`/g, '`') : text.slice(i + 2, end));
       i = end;
     }
@@ -465,30 +515,91 @@ function platformApproval(words) {
 }
 
 // The verdict for one shell command line: `{allow: true}` or `{allow: false, message}`.
-// A `\` + CR + LF is a part break to bash and zsh with their default options, but a line join to a shell that
-// drops CRs (Git Bash with `igncr`). Refuse under either reading: judge the joined line too, at every depth, since
-// a `bash -c` string built from quoted pieces holds one only once its quotes are gone.
+// Bash and zsh read a CR as a character of a word; a shell that drops CRs (Git Bash with `igncr`) does not, and
+// reads `\` + CR + LF as a line join. Refuse under either reading (#353, #492): a line holding a CR is judged
+// again with every CR removed, at every depth, since a `bash -c` string built from quoted pieces holds one only
+// once its quotes are gone. A line too long to judge in a hook's time is refused, never let through.
+export const MAX_JUDGED = 1_000_000;
+// Every reading costs time, so the whole judgement has a budget: past it the line is refused, as a line too long
+// is — a hook that runs out its harness's time lets the command through (#492).
+// (agentGuardPreapproval asks again for an allowed line, so a hook can spend it twice: about 10 s at worst, well
+// under a harness's hook timeout.)
+export const JUDGE_BUDGET_MS = 5000;
+let deadline = Infinity;
+const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
 export function agentGuardDecision(line, depth = 0) {
-  if (typeof line === 'string' && line.includes('\\\r\n')) {
-    const joined = judgeLine(line.replace(/\\\r\n/g, ''), depth);
-    if (!joined.allow) return joined;
+  if (typeof line === 'string' && line.length > MAX_JUDGED) {
+    return { allow: false, message: `yad agent guard: this command is too long to judge (${line.length} characters, more than ${MAX_JUDGED}). Write what it carries to a file with your editor, or run it as separate commands.` };
   }
-  return judgeLine(line, depth);
+  if (depth > 0) return judgeReadings(line, depth);
+  deadline = Date.now() + JUDGE_BUDGET_MS;
+  try {
+    return judgeReadings(line, depth);
+  } catch (e) {
+    // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
+    return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
+  } finally {
+    deadline = Infinity;
+  }
 }
-function judgeLine(line, depth) {
-  if (typeof line !== 'string' || !line.trim()) return { allow: true };
-  const parts = shellParts(line);
-  // The commands a `$(…)` or backticks run are judged too (a few levels deep at most).
-  if (depth < 3) {
-    for (const sub of parts.subs) {
-      const v = agentGuardDecision(sub, depth + 1);
+// Where the first heredoc whose end word expands (`<<E$x`, `<<"E\`x\`"`) opens, or -1: read from the actual matches,
+// one `<<` at a time, so it is linear (a regex over the line backtracked: quadratic on a run of `<<`).
+function firstExpandingHeredoc(text) {
+  for (let i = text.indexOf('<<'); i >= 0; i = text.indexOf('<<', i + 2)) {
+    const m = heredocAt(text, i);
+    if (m?.expands) return i;
+  }
+  return -1;
+}
+// Every reading the shells may make of the line: as written; with CRs dropped (a CR-dropping shell); with every
+// `\` + newline join made, CRs dropped first (a `$\<LF>(`, an end word split by a join: `EO\<LF>F`); and, where
+// the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
+function judgeReadings(line, depth) {
+  if (typeof line !== 'string') return { allow: true };
+  const texts = [line];
+  if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
+  if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
+  const modes = [{}];
+  const expandsAt = firstExpandingHeredoc(line);
+  if (expandsAt >= 0) modes.push({ literalExpanding: true });
+  if (/[()]#/.test(line)) modes.push({ hashAfterParen: true });
+  if (modes.length === 3) modes.push({ literalExpanding: true, hashAfterParen: true });
+  for (const mode of modes) {
+    for (const text of texts) {
+      const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
     }
   }
+  // An end word that expands can end the heredoc on any line, whatever the variable holds (`bash -c "cat <<E$x …"`
+  // with an empty $x ends at `E`): each line is judged on its own too, so the command after it is seen wherever
+  // the heredoc ends. Only refuses more.
+  if (expandsAt >= 0) {
+    for (const text of texts) {
+      const from = firstExpandingHeredoc(text);
+      for (const one of text.slice(from < 0 ? 0 : from).split('\n')) {
+        const v = judgeLine(one, depth, {});
+        if (!v.allow) return v;
+      }
+    }
+  }
+  return { allow: true };
+}
+const TOO_DEEP = { allow: false, message: 'yad agent guard: this command nests `$(…)`, backticks or `bash -c` too deep to judge. Run it as separate commands.' };
+function judgeLine(line, depth, mode = {}) {
+  if (typeof line !== 'string' || !line.trim()) return { allow: true };
+  if (Date.now() > deadline) return OUT_OF_TIME;
+  const parts = shellParts(line, mode);
+  // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
+  if (parts.subs.length && depth >= 3) return TOO_DEEP;
+  for (const sub of parts.subs) {
+    const v = agentGuardDecision(sub, depth + 1);
+    if (!v.allow) return v;
+  }
   for (const part of parts) {
-    // `bash -c "<line>"`: the line it runs is judged too (a few levels deep at most).
+    // `bash -c "<line>"`: the line it runs is judged too, as deep; one deeper is refused.
     const inner = shellC(part);
-    if (inner !== null && depth < 3) {
+    if (inner !== null && depth >= 3) return TOO_DEEP;
+    if (inner !== null) {
       const v = agentGuardDecision(inner, depth + 1);
       if (!v.allow) return v;
     }

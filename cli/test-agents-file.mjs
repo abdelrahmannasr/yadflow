@@ -280,6 +280,31 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <<< "x"\nyad gate approve EP-x epic',
     'echo $((1<<2))\nyad gate approve EP-x epic',
     'cat <<EOF\r\nx\r\nEOF\r\nyad gate approve EP-x epic',
+    // #492: the reader splits as bash and zsh do. A CR is a word character (so `x\r#` holds no comment), a heredoc's
+    // end word is every character the shell reads as one word and its end line must match exactly, `(` and `)`
+    // end a part, and a command nested past three levels is refused.
+    'x\r#; gh pr merge 5', 'x\r#; yad gate approve EP-x epic', 'cat <<EOF#;gh pr merge 5\nbody\nEOF#\n', 'cat <<EOF#;git push --force\nb\nEOF#',
+    'cat <<EOF+\nEOF\ncat <<X\nEOF+\ngh pr merge 5\nX\n', 'cat <<EOF\nEOF\r\ncat <<X\nEOF\ngh pr merge 5\nX\n', 'cat <<EOF\r\nEOF\ncat <<X\nEOF\r\ngh pr merge 5\nX\n',
+    'cat <(gh pr merge 5)', 'echo x > >(gh pr merge 5)', 'f(){ gh pr merge 5; }; f', 'case x in x) gh pr merge 5;; esac', '(gh pr merge 5)',
+    'echo $(echo $(echo $(echo $(gh pr merge 5))))', 'echo $(echo $(echo $(echo $(echo hi))))', "bash -c 'bash -c \"bash -c \\\"bash -c ls\\\"\"'",
+    'git push --force\r', 'git push \\\r\n--force',
+    // #492 review: a `\`-newline join hiding a `$(` or splitting an end word; an end word holding `$` (the outer
+    // shell expands it first); and a heredoc that never ends, whose `$(…)` the shell still runs.
+    'echo "$\\\r\n(gh pr merge 5)"', 'cat <<EOF\r\n$\\\r\n(npx yadflow gate advance EP-x)\nEOF\r\n', 'echo "$\\\n(gh pr merge 5)"', 'cat <<EOF\n$\\\n(gh pr merge 5)\nEOF',
+    'cat <<EOF\nx\nEO\\\nF\ngh pr merge 5\nEOF\n', 'bash -c "cat <<EOF$x\nEOF\ngh pr merge 5\nEOF$x"', 'bash -lc "cat <<E$F\nE$Fx\ngh pr merge 5\nE$F\n"',
+    'cat <<< "x"\ncat <<EOF+\nbody\nEOF#\ncat <<\'EOF\'\n$(git push --force)\nEOF\n\n', "cat <<X\ncat <<'EOF'\n$(gh pr merge 5)\nEOF", "cat <<X\necho '$(gh pr merge 5)'",
+    // #492 review 2: an expanding end word is still a redirect, read past; a `#` right after `(` or `)` starts no comment.
+    '<<"E$x" gh pr merge 1', 'echo hi; <<"E$x" gh pr merge 1', "<<'E`x`' yad gate approve EP-a", '<<E$x gh pr merge 1', 'x=1 <<E$x gh pr merge 1',
+    '[[ a =~ (#|$(gh pr merge 1)) ]]', '[[ a =~ (#|`gh pr merge 1`) ]]', '[[ a =~ (x)#$(gh pr merge 1) ]]', 'shopt -s extglob\necho @(#$(gh pr merge 1))',
+    'echo foo(#$(gh pr merge 1))', 'ls foo(#q$(gh pr merge 1))', 'A((#$(gh pr merge 1)', '<<<((###;gh pr merge 1',
+    // #492 review 3: every reading the shells may make — an expanding end word as a heredoc, as none, and line by
+    // line (its value is unknown); a `#` after a parenthesis as a comment (command position) and as text.
+    'cat <<"E$x"\n\'\nE$x\ngh pr merge 1', "cat <<'E$x'\n'\nE$x\ngh pr merge 1", 'cat <<"E$x"\n"\nE$x\ngh pr merge 1', 'bash -c "cat <<E$x\n\'\nE\ngh pr merge 1"',
+    'x=F; bash -c "cat <<E$x\n\'\nEF\ngh pr merge 1"', "cat <<E$x\nit's a note\nE$x\ngh pr merge 1",
+    "(cd web && npm ci)# don't skip\ngh pr merge 1", "(true)# x '\ngh pr merge 1", "(# '\ngh pr merge 1\n)", "if (true)# '\nthen gh pr merge 1; fi",
+    "x=(# '\n$(gh pr merge 1)\n)", "f()# '\n{ gh pr merge 1; }; f", "()# x '\ngh pr merge 1", "x=(a b)# don't\ngh pr merge 1",
+    // A body of many `$(` overflowed the stack (the hook then exited 1, which lets the command run).
+    `cat <<E >/dev/null\n${'$((1))\n'.repeat(130000)}$(gh pr merge 1)\n`, `cat <<E >/dev/null\n${'$((1))'.repeat(130000)}\nE\ngh pr merge 1\n`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -491,6 +516,50 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
+  // #492: a heredoc opened and closed with CRLF is text up to its `EOF\r` line; what follows is a command.
+  assert.deepEqual(shellParts('cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\r\n'), [['cat'], ['gh', 'pr', 'merge', '5\r']]);
+  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
+  for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n',
+    '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"',
+    // A docs heredoc naming a guarded command stays allowed: only an end word that expands adds line-by-line reading.
+    `cat <<'EOF' > "$f"\ngh pr merge 1 is the person's\nEOF`, "gh pr create --body-file - <<'EOF' # $x\ngh pr merge 1 stays with the person\nEOF",
+    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`]) {
+    assert.equal(agentGuardDecision(ok).allow, true, ok);
+  }
+});
+
+test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
+  const { MAX_JUDGED } = await import('./agent-guard.mjs');
+  const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
+  const t0 = Date.now();
+  assert.equal(agentGuardDecision(line).allow, false);
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  // Distinct end words, just under the cap: each end line is found by a lookup, not a scan.
+  let distinct = '';
+  for (let i = 0; distinct.length < MAX_JUDGED - 20; i++) distinct += `<<A${i}\n`;
+  const t1 = Date.now();
+  assert.equal(agentGuardDecision(`${distinct}gh pr merge 5`).allow, false);
+  assert.ok(Date.now() - t1 < 3000, `distinct words took ${Date.now() - t1} ms`);
+  // Many `$(…)`, each holding a heredoc, near the cap: one line index per text, shared by every `$(` in it.
+  for (const unit of ['$(cat <<E\nx\nE\n)', '$(cat <<E\n$(cat <<F\nx\nF\n)\nE\n)']) {
+    const many = `${unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length))}\ngh pr merge 1`;
+    const t3 = Date.now();
+    assert.equal(agentGuardDecision(many).allow, false);
+    assert.ok(Date.now() - t3 < 3000, `many $( took ${Date.now() - t3} ms`);
+  }
+  // A run of `<<` with no newline: the expanding-word check reads the matches one by one, never a backtracking regex.
+  const t4 = Date.now();
+  assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
+  assert.ok(Date.now() - t4 < 2000, `a run of << took ${Date.now() - t4} ms`);
+  let inSub = 'echo $(';
+  for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
+  const t2 = Date.now();
+  agentGuardDecision(`${inSub})`);
+  assert.ok(Date.now() - t2 < 2000, `inside $( took ${Date.now() - t2} ms`);
+  const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
+  assert.equal(long.allow, false);
+  assert.match(long.message, /too long to judge/);
 });
 
 test('the refusal says what to do instead: the person runs it', () => {
