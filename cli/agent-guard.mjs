@@ -88,7 +88,10 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // `mode` picks the reading where bash and zsh decide by context the reader does not track (#492): `literalExpanding`
 // reads an end word holding `$` or a backtick as a heredoc ending at that literal word (else: no heredoc), and
 // `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
-export function shellParts(line, mode = {}) {
+export function shellParts(rawLine, mode = {}) {
+  // The private-use characters that shield quoted braces (below) cannot come from the line itself: a typed one
+  // would turn into a real `{` when a carried command is re-read (`bash -c "gh pr {merge,\uE000} 5"`).
+  const line = rawLine.replace(/[\uE000-\uE002]/g, '\uFFFD');
   const parts = [];
   // Not enumerable: `parts` reads as the plain list of parts it always was. `bodies` and `herestrings` (#495) are
   // the text a part's heredocs and here-strings feed it, by part index: a shell reading them runs them.

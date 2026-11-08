@@ -337,6 +337,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     "{ echo 'gh pr merge 5'; } | bash", "{ echo 'gh pr merge 5'; } 2>&1 | bash", "(echo 'gh pr merge 5'; true) | bash", "if true; then echo 'gh pr merge 5'; fi | bash",
     "for i in 1; do echo 'gh pr merge 5'; done | bash", "case x in x) echo 'gh pr merge 5';; esac | bash", "{ cat <<'E'; } | bash\ngh pr merge 5\nE", "f() { echo 'gh pr merge 5'; }; f | bash",
     "echo 'gh pr merge 5' > f; bash < f", "echo 'gh pr merge 5 #' \\||bash", "git commit -m {'}',-n}", "git commit -m {'{',-n}", 'git commit -m {"}",--no-verify}', "git commit {-n,'{'} -m x",
+    // A typed shield character stays inert, in a carried command too.
+    'bash -c "gh pr {merge,} 5"', "eval 'gh pr {merge,} 5'", "echo 'gh pr {merge,} 5' | bash", "bash -c 'git push {--force,}'", "bash -c 'git commit {-n,} -m x'",
     // A word too long to expand, or too many words, is refused rather than expanded: a 1 MB JSON word crashed the heap.
     `echo x${'{'.repeat(200000)}a,b${'}'.repeat(200000)}; gh pr merge 5`, `echo ${'{a,b}'.repeat(190000)}; gh pr merge 5`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
