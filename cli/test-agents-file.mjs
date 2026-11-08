@@ -284,6 +284,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
     'git log \\\r\ngh pr merge 5', 'git status \\\r\ngit push --force', 'git log \\\r\ngit commit --no-verify -m x',
+    // ... and a join to a shell that drops CRs (Git Bash with igncr): refused under either reading.
+    'git push \\\r\n--force', 'git push \\\r\n-f', 'yad gate \\\r\napprove EP-x epic', 'gh pr \\\r\nmerge 5',
     '# <<x\nyad gate approve EP-x epic',
     'env -i yad gate approve EP-x epic',
     'sudo -u me yad gate approve EP-x epic',
@@ -1118,6 +1120,7 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'glab api projects/1/triggers', 'glab api projects/1/integrations/slack', 'gh api repos/o/r/actions/runs/1/logs', 'glab api projects/1/jobs/2/trace',
       'glab api projects/1/secure_files/3/download', 'glab api projects/1/terraform/state/prod', 'glab api projects/1/pipeline_schedules/2', 'glab api projects/1/jobs/2/artifacts',
       'gh api repos/o/r/actions/artifacts/1/zip', 'glab api application/settings', 'glab api user',
+      'glab api user.json', 'glab api user.', 'glab api projects/1/jobs/2/trace.json', 'glab api user%2F', 'glab api application%2Fsettings', 'gh api user', 'gh api %zz',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);
