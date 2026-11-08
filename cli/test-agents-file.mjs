@@ -288,6 +288,11 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <(gh pr merge 5)', 'echo x > >(gh pr merge 5)', 'f(){ gh pr merge 5; }; f', 'case x in x) gh pr merge 5;; esac', '(gh pr merge 5)',
     'echo $(echo $(echo $(echo $(gh pr merge 5))))', 'echo $(echo $(echo $(echo $(echo hi))))', "bash -c 'bash -c \"bash -c \\\"bash -c ls\\\"\"'",
     'git push --force\r', 'git push \\\r\n--force',
+    // #492 review: a `\`-newline join hiding a `$(` or splitting an end word; an end word holding `$` (the outer
+    // shell expands it first); and a heredoc that never ends, whose `$(…)` the shell still runs.
+    'echo "$\\\r\n(gh pr merge 5)"', 'cat <<EOF\r\n$\\\r\n(npx yadflow gate advance EP-x)\nEOF\r\n', 'echo "$\\\n(gh pr merge 5)"', 'cat <<EOF\n$\\\n(gh pr merge 5)\nEOF',
+    'cat <<EOF\nx\nEO\\\nF\ngh pr merge 5\nEOF\n', 'bash -c "cat <<EOF$x\nEOF\ngh pr merge 5\nEOF$x"', 'bash -lc "cat <<E$F\nE$Fx\ngh pr merge 5\nE$F\n"',
+    'cat <<< "x"\ncat <<EOF+\nbody\nEOF#\ncat <<\'EOF\'\n$(git push --force)\nEOF\n\n', "cat <<X\ncat <<'EOF'\n$(gh pr merge 5)\nEOF", "cat <<X\necho '$(gh pr merge 5)'",
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -514,6 +519,17 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t0 = Date.now();
   assert.equal(agentGuardDecision(line).allow, false);
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  // Distinct end words, just under the cap: each end line is found by a lookup, not a scan.
+  let distinct = '';
+  for (let i = 0; distinct.length < MAX_JUDGED - 20; i++) distinct += `<<A${i}\n`;
+  const t1 = Date.now();
+  assert.equal(agentGuardDecision(`${distinct}gh pr merge 5`).allow, false);
+  assert.ok(Date.now() - t1 < 3000, `distinct words took ${Date.now() - t1} ms`);
+  let inSub = 'echo $(';
+  for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
+  const t2 = Date.now();
+  agentGuardDecision(`${inSub})`);
+  assert.ok(Date.now() - t2 < 2000, `inside $( took ${Date.now() - t2} ms`);
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);

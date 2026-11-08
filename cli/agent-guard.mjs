@@ -28,7 +28,35 @@ import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
 // `EOF#`, `EOF+` and a CR (`EOF\r`, from a line written with CRLF) are part of it. Sticky, matched in place
 // (`heredocAt`): slicing the rest of the line for each `<<` made a long line take quadratic time.
 const HEREDOC = /<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[^ \t\n;&|()<>'"\\])+)/y;
-const heredocAt = (line, i) => { HEREDOC.lastIndex = i; return HEREDOC.exec(line); };
+// An end word holding `$` or a backtick is read as no heredoc (#492 review): inside `bash -c "…"` the outer shell
+// expands it first (`EOF$x` becomes `EOF`), so where it ends cannot be known here, and the lines after it are
+// judged as commands instead.
+const heredocAt = (line, i) => { HEREDOC.lastIndex = i; const m = HEREDOC.exec(line); return m && !/[$`]/.test(m[2]) ? m : null; };
+
+// Where each line of `text` starts, by its exact text and by its text with leading tabs removed (`<<-`), so a
+// heredoc's end line is found by a binary search, not by scanning on: a line of many heredocs with different
+// end words is read in near-linear time (#492). `endAfter` gives the index just past the first line at or
+// after `at` that reads `word`, or -1.
+function lineIndex(text) {
+  const exact = new Map(), stripped = new Map();
+  for (let at = 0; at <= text.length;) {
+    const eol = text.indexOf('\n', at);
+    const t = text.slice(at, eol < 0 ? text.length : eol);
+    for (const [map, k] of [[exact, t], [stripped, t.replace(/^\t+/, '')]]) { const list = map.get(k); if (list) list.push(at); else map.set(k, [at]); }
+    at = eol < 0 ? text.length + 1 : eol + 1;
+  }
+  return {
+    endAfter(word, tabs, at) {
+      const list = (tabs ? stripped : exact).get(word);
+      if (!list) return -1;
+      let lo = 0, hi = list.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] < at) lo = mid + 1; else hi = mid; }
+      if (lo === list.length) return -1;
+      const eol = text.indexOf('\n', list[lo]);
+      return eol < 0 ? text.length + 1 : eol + 1;
+    },
+  };
+}
 const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] === '-', quoted: /['"\\]/.test(m[2]) });
 
 // One command line split into its simple commands: on `;`, `&`, `&&`, `||`, `|` and newlines, outside
@@ -49,31 +77,31 @@ export function shellParts(line) {
   let inWord = false;
   let quote = null;
   const heredocs = [];
-  const notFrom = new Map();
   const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
   const endPart = () => { endWord(); if (words.length) parts.push(words); words = []; };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
   // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
   // `$(…)` and backticks, so those go to `parts.subs`.
   // The end line must match exactly: `EOF\r` ends only a heredoc whose word is `EOF\r`, as in bash and zsh (a
-  // shell that drops CRs is the other reading, judged by agentGuardDecision). `notFrom` remembers, per end
-  // word, the earliest place it was searched for and not found: a later search from there fails at once, so a
-  // line of many heredocs that never end is read in linear time (#492).
+  // shell that drops CRs is the other reading, judged by agentGuardDecision). A heredoc whose end line never
+  // comes is ended by the shell at the end of the input, and an unquoted one still runs its `$(…)` there: those
+  // are judged too, as the rest of the line is also read as commands.
+  let index = null;
+  let restFrom = -1;
   const heredocsEnd = (from) => {
+    index ??= lineIndex(line);
     let at = from;
     const bodies = [];
     for (const h of heredocs) {
       const start = at;
-      const key = `${h.tabs ? '-' : ''}${h.word}`;
-      if (notFrom.has(key) && at >= notFrom.get(key)) return -1;
-      for (;;) {
-        if (at > line.length) { notFrom.set(key, Math.min(notFrom.get(key) ?? Infinity, start)); return -1; }
-        const eol = line.indexOf('\n', at);
-        const text = line.slice(at, eol < 0 ? line.length : eol);
-        const lineStart = at;
-        at = eol < 0 ? line.length + 1 : eol + 1;
-        if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) { if (!h.quoted) bodies.push(line.slice(start, lineStart)); break; }
+      const next = index.endAfter(h.word, h.tabs, at);
+      if (next < 0) {
+        // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
+        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; parts.subs.push(...substitutionsIn(line.slice(from))); }
+        return -1;
       }
+      if (!h.quoted) bodies.push(line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start));
+      at = next;
     }
     for (const body of bodies) parts.subs.push(...substitutionsIn(body));
     return at;
@@ -132,7 +160,7 @@ function substitutionEnd(line, from) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
-  const notFrom = new Map();
+  let index = null;
   for (let i = from; i < line.length; i++) {
     const ch = line[i];
     if (quote) {
@@ -148,20 +176,13 @@ function substitutionEnd(line, from) {
     }
     if (ch === '\n' && heredocs.length) {
       // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
+      index ??= lineIndex(line);
       let at = i + 1;
       let found = true;
       for (const h of heredocs) {
-        const start = at;
-        const key = `${h.tabs ? '-' : ''}${h.word}`;
-        if (notFrom.has(key) && at >= notFrom.get(key)) { found = false; break; }
-        for (;;) {
-          if (at > line.length) { found = false; notFrom.set(key, Math.min(notFrom.get(key) ?? Infinity, start)); break; }
-          const eol = line.indexOf('\n', at);
-          const text = line.slice(at, eol < 0 ? line.length : eol);
-          at = eol < 0 ? line.length + 1 : eol + 1;
-          if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
-        }
-        if (!found) break;
+        const next = index.endAfter(h.word, h.tabs, at);
+        if (next < 0) { found = false; break; }
+        at = next;
       }
       heredocs.length = 0;
       if (found) i = at - 2;
@@ -495,6 +516,13 @@ export function agentGuardDecision(line, depth = 0) {
   if (typeof line === 'string' && line.includes('\r')) {
     const dropped = judgeLine(line.replace(/\r/g, ''), depth);
     if (!dropped.allow) return dropped;
+  }
+  // And with every `\` + newline join already made (CRs dropped first), so a `$\<LF>(` or an end word split by a
+  // join (`EO\<LF>F`) reads as the shell joins it (#492 review). Inside single quotes a join is literal text:
+  // judging it joined only refuses more.
+  if (typeof line === 'string' && /\\\r?\n/.test(line)) {
+    const joined = judgeLine(line.replace(/\r/g, '').replace(/\\\n/g, ''), depth);
+    if (!joined.allow) return joined;
   }
   return judgeLine(line, depth);
 }
