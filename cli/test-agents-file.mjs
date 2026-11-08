@@ -333,6 +333,10 @@ test('the agent guard refuses every human-only yad command and every force push,
     "bash -euo pipefail <<'EOF'\ngh pr merge 5\nEOF", "echo 'gh pr merge 5' | bash -eo pipefail", "zsh --emulate sh <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash {-s,}",
     "{bash,} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | $SHELL", "${SHELL:-bash} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash $NOPE", 'git push origin {+..+}main',
     'git push origin main -{-..-}force',
+    // #495 review 4: text printed in a group or a file reaches a real shell; `\||` is a pipe; quoted brace characters are text.
+    "{ echo 'gh pr merge 5'; } | bash", "{ echo 'gh pr merge 5'; } 2>&1 | bash", "(echo 'gh pr merge 5'; true) | bash", "if true; then echo 'gh pr merge 5'; fi | bash",
+    "for i in 1; do echo 'gh pr merge 5'; done | bash", "case x in x) echo 'gh pr merge 5';; esac | bash", "{ cat <<'E'; } | bash\ngh pr merge 5\nE", "f() { echo 'gh pr merge 5'; }; f | bash",
+    "echo 'gh pr merge 5' > f; bash < f", "echo 'gh pr merge 5 #' \\||bash", "git commit -m {'}',-n}", "git commit -m {'{',-n}", 'git commit -m {"}",--no-verify}', "git commit {-n,'{'} -m x",
     // A word too long to expand, or too many words, is refused rather than expanded: a 1 MB JSON word crashed the heap.
     `echo x${'{'.repeat(200000)}a,b${'}'.repeat(200000)}; gh pr merge 5`, `echo ${'{a,b}'.repeat(190000)}; gh pr merge 5`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
@@ -569,6 +573,7 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     '$EDITOR notes.md', '${PYTHON:-python3} x.py', '$(npm bin)/eslint .', "cat <<'EOF' | bash\necho hi\nEOF", 'ls <->', 'echo "gh pr merge 5" > notes.md; bash build.sh',
     'curl x | bash -s stable', 'cat build.sh | bash', 'bash -x ./build.sh arg', 'mkdir -p src/{a,b,c}', 'git add src/{a,b}.js', "jq '{a,b}' f.json", 'echo {1..5}', 'ls {a,b}{c,d}',
     'for i in {1..100}; do echo $i; done', 'echo {0..64}', 'touch file{001..100}.txt', `curl -d '[${'{"id":0,"v":2},'.repeat(5)}{}]' https://x`,
+    'echo x || bash', 'docker ps --format {{.Names}}', 'gh pr view {1,2,3}', 'gh pr {merge\\,x,} 5',
     `gh api repos/x -f body='[${'{"a":1,"b":2},'.repeat(10)}{}]'`, "echo '{a,b}{a,b}{a,b}{a,b}{a,b}'", 'echo {a,b}{a,b}{a,b}{a,b}{a,b}', 'bash -euo pipefail ./x.sh', 'echo {a..z}',
     `curl -d '[${'{"a":1,"b":2},'.repeat(66000)}{}]' https://x`,
     `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
@@ -600,6 +605,11 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
   assert.ok(Date.now() - t4 < 2000, `a run of << took ${Date.now() - t4} ms`);
   // #495 review: a `case` scan per `$(` and a loop over every body for every part were quadratic.
+  // Many words under the length bound, each with lists and a nested tail: the budget is checked inside the expansion.
+  const nestedTail = `x {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}${'{'.repeat(2000)}${'}'.repeat(2000)};`;
+  const t7 = Date.now();
+  assert.equal(agentGuardDecision(`${nestedTail.repeat(245)} gh pr merge 5`).allow, false);
+  assert.ok(Date.now() - t7 < 6000, `nested tails took ${Date.now() - t7} ms`);
   // A `{` and many commas with no `}`: the brace check is a scan, never a backtracking regex.
   for (const l of [`echo '{${','.repeat(250000)}'; gh pr merge 5`, `git status {${','.repeat(990000)}`]) {
     const t6 = Date.now();

@@ -107,13 +107,14 @@ export function shellParts(line, mode = {}) {
   Object.defineProperty(parts, 'braced', { value: [] });
   // Which parts read the previous part's output through a pipe (`|`, `|&`), by index.
   Object.defineProperty(parts, 'piped', { value: new Set() });
+  let orAt = -1;
   let wordBraced = false;
   let partBraced = null;
   const endWord = () => {
     if (inWord) {
       // A here-string is the command's input, not one of its words (`x=<<<1 git commit …` runs git).
-      if (hereString) parts.herestrings.push({ part: parts.length, text: word });
-      else if (!dropWord) { words.push(word); if (wordBraced) (partBraced ??= new Set()).add(words.length - 1); }
+      if (hereString) parts.herestrings.push({ part: parts.length, text: unshieldBraces(word) });
+      else if (!dropWord) { words.push(unshieldBraces(word)); if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word); }
     }
     wordBraced = false;
     // Reset only once the target (or the here-string) was read: a space before it ends no word.
@@ -171,18 +172,18 @@ export function shellParts(line, mode = {}) {
     if (quote) {
       if (ch === quote) quote = null;
       else if (ch === '\\' && quote === '"' && line[i + 1] === '\n') i++;
-      else if (ch === '\\' && quote === '"' && i + 1 < line.length) word += line[++i];
-      else word += ch;
+      else if (ch === '\\' && quote === '"' && i + 1 < line.length) word += shieldBrace(line[++i]);
+      else word += shieldBrace(ch);
       continue;
     }
     // `$'…'` is read with its escapes (`\'` is a quote in it, #495); `$"…"` is a double-quoted string.
-    if (ch === '$' && line[i + 1] === '\'') { const r = ansiC(line, i + 2); word += r.text; inWord = true; i = r.end; continue; }
+    if (ch === '$' && line[i + 1] === '\'') { const r = ansiC(line, i + 2); word += [...r.text].map(shieldBrace).join(''); inWord = true; i = r.end; continue; }
     if (ch === '$' && line[i + 1] === '"') { continue; }
     if (ch === '\'' || ch === '"') { quote = ch; inWord = true; continue; }
     if (ch === '\\' && line[i + 1] === '\n') { i++; continue; }
     // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
     // command. So it falls through to the escape below (the CR is a character of the word), and the LF ends the part.
-    if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
+    if (ch === '\\' && i + 1 < line.length) { word += shieldBrace(line[++i]); inWord = true; continue; }
     // A `#` starts a comment only where a word starts after a space, a tab, a newline, `;`, `&` or `|` (or at the
     // start): right after `(` or `)` it is text to zsh's globs and to bash's `[[ =~ ]]` (#492 review).
     if (ch === '#' && !inWord && (i === 0 || (mode.hashAfterParen ? /[ \t\n;&|()]/ : /[ \t\n;&|]/).test(line[i - 1])) && !(mode.hashAfterBar && line[i - 1] === '|')) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
@@ -220,7 +221,11 @@ export function shellParts(line, mode = {}) {
     // `(` and `)` end a part too (#492): `<(cmd)`, `>(cmd)`, `f(){ cmd; }` and `case x in x) cmd;;` run `cmd`.
     if (ch === '\n' || ch === ';' || ch === '&' || ch === '|' || ch === '(' || ch === ')') {
       endPart();
-      if (ch === '|' && line[i + 1] !== '|' && line[i - 1] !== '|') parts.piped.add(parts.length);
+      if (ch === '|') {
+        // The second `|` of `||` is known by where the first one was, not by the raw text before it (`\||bash`).
+        if (line[i + 1] === '|' && orAt !== i) orAt = i + 1;
+        else if (orAt !== i) parts.piped.add(parts.length);
+      }
       continue;
     }
     // A CR is a character of the word, as bash and zsh read it (#492): `x\r#` is one word, so its `#` starts no
@@ -423,6 +428,11 @@ function bareShell(w) {
   }
   return true;
 }
+// A quoted or escaped `{`, `}` or `,` is text to the shell, not brace syntax: the reader carries it as a private-use
+// character until the word's expansion is done (`git commit -m {'}',-n}` is a list of `}` and `-n`).
+const QUOTED_BRACE = { '{': '\uE000', '}': '\uE001', ',': '\uE002' };
+const shieldBrace = (c) => QUOTED_BRACE[c] ?? c;
+const unshieldBraces = (x) => (/[\uE000-\uE002]/.test(x) ? x.replace(/\uE000/g, '{').replace(/\uE001/g, '}').replace(/\uE002/g, ',') : x);
 // A word's brace expansion, as the shell makes it: every alternative of each list, lists side by side multiplied,
 // lists inside lists expanded, `{x..y}` sequences (any one character, as zsh allows: `{-..-}` is `-`). A number
 // sequence stands for one word, since digits spell no flag. Null when the word is too long to expand (over
@@ -431,7 +441,9 @@ function bareShell(w) {
 const BRACE_CAP = 64;
 const BRACE_WORD = 4096;
 function braceExpand(x, budget = { left: BRACE_CAP }) {
-  if (x.length > BRACE_WORD) return null;
+  if (x.length > BRACE_WORD || Date.now() > deadline) return null;
+  // Nothing to expand: no scan of its braces, whatever their nesting.
+  if (!x.includes(',') && !x.includes('..')) return --budget.left < 0 ? null : [x];
   for (let i = x.indexOf('{'); i >= 0; i = x.indexOf('{', i + 1)) {
     let depth = 0, close = -1;
     const commas = [];
@@ -844,20 +856,21 @@ function judgeLine(line, depth, mode = {}) {
     // Every way the shell may read this part's words (#495): as written; with a command word that expands
     // (`$(echo gh)`, `${x:-gh}`, `=gh`, `$SHELL`) dropped (it may be empty) or as each guarded program or a
     // shell; and with its unquoted brace lists expanded, with the empty words kept (zsh) and dropped (bash).
-    // Text printed into a pipe reaches only the parts down that pipe: it starts again with each pipeline.
-    if (!parts.piped.has(n)) printed.length = 0;
+    if (Date.now() > deadline) return OUT_OF_TIME;
     const w = stripPrefix(part);
     const variants = [part];
     const braced = parts.braced[n];
     if (braced) {
-      const expanded = [];
+      const expanded = [], noEmpty = [];
       let added = 0;
       for (let k = 0; k < part.length; k++) {
-        const e = braced.has(k) ? braceExpand(part[k]) : [part[k]];
+        if (!braced.has(k)) { expanded.push(part[k]); noEmpty.push(part[k]); continue; }
+        const e = braceExpand(braced.get(k));
         if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return TOO_MANY_BRACES;
-        for (const y of e) expanded.push(y);
+        // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
+        for (const y of e) { const real = unshieldBraces(y); expanded.push(real); if (y !== '') noEmpty.push(real); }
       }
-      variants.push(expanded, expanded.filter((x, k) => x !== '' || part[k] === ''));
+      variants.push(expanded, noEmpty);
     }
     for (const base of variants.slice()) {
       const bw = stripPrefix(base);
@@ -872,14 +885,16 @@ function judgeLine(line, depth, mode = {}) {
     // any text an earlier part prints (a pipe, `tee`, a `cat <<EOF` body), each judged once, by the first shell.
     const carried = [];
     let readsInput = false;
-    for (const vw of variants) {
-      for (const t of innerLines(vw)) carried.push(t);
-      if (bareShell(stripPrefix(vw))) readsInput = true;
-    }
+    for (const vw of variants) for (const t of innerLines(vw)) carried.push(t);
+    // A real shell (as written, or brace-expanded) takes all the text printed before it: through a pipe, a group
+    // (`{ echo …; } | bash`), or a file it reads back. A command word only guessed to be a shell needs a real pipe:
+    // otherwise any `$x` line after a docs heredoc would be judged as running it.
+    const real = braced ? 3 : 1;
+    let realShell = false;
+    variants.forEach((vw, k) => { if (bareShell(stripPrefix(vw))) { readsInput = true; if (k < real) realShell = true; } });
     if (readsInput) {
       for (const t of fed.get(n) ?? []) carried.push(t);
-      if (parts.piped.has(n)) for (const t of printed) carried.push(t);
-      printed.length = 0;
+      if (realShell || parts.piped.has(n)) { for (const t of printed) carried.push(t); printed.length = 0; }
     }
     if (carried.length && depth >= 3) return TOO_DEEP;
     for (const inner of carried) {
