@@ -129,19 +129,37 @@ paragraph (Step 6) as `design tool not reachable: continued from the frame links
 `not-checkable` means there is nothing to probe: go on from the links. `preflight: null` means no frames.
 
 **In a Unity repo, check the build through Unity MCP (#321).** A Unity repo is one with
-`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root. Run `yad toolbox list --json --dir
-<repo>` and find `unity-mcp`: use it when its `status.state` is `installed` or `available`. If it is not
-found, offer `yad toolbox connect unity-mcp --json` once, under the connect-tool rule, and hand the person
-its steps (they are done in the Unity Editor). A new MCP server is loaded when the agent starts: if your
-session does not see it yet (in Claude Code, `/mcp`), tell the person to restart the agent and run this step
-again. **With it:** after each edit, have Unity refresh and compile, read its console, and fix every error
-your change caused before you commit; when the task declares tests, run them (EditMode or PlayMode) through
-the server. The server never widens the task: no file, scene, prefab or asset outside the task's declared
-files is created, moved or saved, and the ≤3-file rule still holds. **Without it**, or on a no, the
-toolbox's fallback holds:
-`files only: yad-implement edits the C# and asks the person to open Unity and report its console errors`.
-Ask before the commit, fix what they paste, and record `Unity not reachable: console checked by <person>` in
-the commit's `Decisions:` paragraph (Step 6).
+`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root (a Unity project in a subfolder is
+not read as one).
+
+- **Reach.** Run the yad commands from inside the Unity repo (`cd` there): `yad toolbox list --json`, then
+  find `unity-mcp` and use it when its `status.state` is `installed`. If it is not found, offer `yad toolbox
+  connect unity-mcp --json` once, under the connect-tool rule, and hand the person its steps (they are done in
+  the Unity Editor). Unity registers the server for its own project folder only, so its tools load only in an
+  agent started in that folder: if your session started elsewhere (the Product, say) or does not see the
+  server (in Claude Code, `/mcp`), tell the person to start the agent in the Unity repo — or to set **Client
+  Project Dir** in the MCP for Unity window to the folder the agent starts in — and restart it, then run this
+  step again.
+- **Probe once.** Read the console (`read_console`). If it fails, or the Editor is open on another folder
+  than the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor
+  on the folder you edit and start the server from the MCP for Unity window; if they cannot, use the fallback
+  below.
+- **With it, only these tools:** `refresh_unity` (refresh and compile), `read_console`, `run_tests`, and the
+  read-only finders. Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
+  `batch_execute`, a `generate_*` tool, or any tool that writes a scene, prefab or asset: they run code in the
+  Editor or change files the task did not declare, and the agent guard does not see MCP calls. After each
+  edit, refresh, read the console and fix every error your change caused before you commit; when the task
+  declares tests, run them (EditMode or PlayMode).
+- **Unity's files.** Unity writes a `.meta` file beside each new file (it holds the file's ID): a declared
+  file's own `.meta` goes in the commit with it and does not count against the ≤3-file rule. Any other file
+  the Editor writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*` — is left unstaged
+  and named to the person; whether the team commits the `com.coplaydev.unity-mcp` package is theirs to decide,
+  never part of a task commit.
+- **Without it**, or on a no, the toolbox's fallback holds:
+  `files only: yad-implement edits the C# and asks the person to open Unity and report its console errors`.
+  Ask before the commit, fix what they paste, and when the task declares tests ask them to run those too and
+  report the result. Record `Unity not reachable: console checked by <person>` in the commit's `Decisions:`
+  paragraph (Step 6), and the test result in the Step 7 report.
 
 **Then ask the batch (#357)** that **Ask the human-only questions first** above describes, before
 writing any code. Read `spec.md`'s `## Clarifications` first: `yad-spec` recorded its answers there.

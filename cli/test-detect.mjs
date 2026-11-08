@@ -539,7 +539,7 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   }
 });
 
-test('E164: a check run by hand on a pinned version — moving the pin fails until it is run again', () => {
+test('E164: a check run by hand on a pinned version — moving the pin fails until it is run again', async () => {
   const op = TOOLBOX.find((t) => t.id === 'openpencil');
   assert.deepEqual(op.vetted.handCheck, { script: 'scripts/openpencil-node-ids.mjs', package: '@open-pencil/cli', version: '0.16.0' });
   assert.ok(fs.existsSync(path.join(ROOT, op.vetted.handCheck.script)), 'the script it names is shipped');
@@ -551,7 +551,8 @@ test('E164: a check run by hand on a pinned version — moving the pin fails unt
   }
   // The release check reads it through vet-check, which fails on any vetting problem. A fixed day — the newest
   // vetting of any entry, so none is "after today" and the age rule never turns this test red by itself.
-  const newest = TOOLBOX.map((t) => t.vetted.on).sort().pop();
+  const { asVetted, RECOMMENDATIONS } = await import('./recommend.mjs');
+  const newest = [...TOOLBOX.map((t) => t.vetted.on), ...RECOMMENDATIONS.map(asVetted).map((r) => r.vetted.on)].sort().pop();
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), '--today', newest], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
 });
@@ -1296,19 +1297,31 @@ test('#321 Unity MCP: a recommended tool used by yad-implement, found by its Uni
   try {
     const j = JSON.parse(yad(['toolbox', 'connect', 'unity-mcp', '--json'], { cwd: p, home }).stdout);
     assert.ok(j.steps.length === 2 && j.steps.every((x) => x.who === 'person'), JSON.stringify(j.steps));
-    assert.match(j.steps[0].run, /Add package from git URL, and enter https:\/\/github\.com\/CoplayDev\/unity-mcp\.git\?path=\/MCPForUnity#v10\.3\.0$/);
+    assert.match(j.steps[0].run, /package from git URL, and enter https:\/\/github\.com\/CoplayDev\/unity-mcp\.git\?path=\/MCPForUnity#v10\.3\.0$/);
     assert.ok(j.steps[0].run.endsWith(`#${t.vetted.release}`), 'the pin is the vetted release');
-    assert.match(j.steps[1].run, /Configure All Detected Clients, and restart your agent/);
+    assert.match(j.steps[1].run, /Toggle MCP Window, set Client Project Dir to the folder your agent starts in .*, press Configure All Detected Clients, and restart your agent$/);
     assert.equal(j.verify, 'yad toolbox connect unity-mcp --verify --json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // Where Unity really writes it for Claude Code: ~/.claude.json, for the Unity project folder only (local
+  // scope). Found from that folder, not from another (the Product): the reason the skill runs yad from there.
+  const L = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-unity-'));
+  try {
+    const home = path.join(L, 'home'), unity = path.join(L, 'game'), other = path.join(L, 'product');
+    for (const d of [home, path.join(unity, 'Assets'), path.join(unity, 'ProjectSettings'), other]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [fs.realpathSync(unity)]: { mcpServers: { UnityMCP: { type: 'http', url: 'http://localhost:8080/mcp' } } } } }));
+    const state = (cwd) => JSON.parse(yad(['toolbox', '--json'], { cwd, home }).stdout).tools.find((x) => x.id === 'unity-mcp').status.state;
+    assert.equal(state(unity), 'installed', 'from the Unity repo');
+    assert.notEqual(state(other), 'installed', 'not from another folder');
+  } finally { fs.rmSync(L, { recursive: true, force: true }); }
 });
 
 test('#321: yad-implement says when a repo is a Unity repo, how it reaches Unity MCP, and quotes its fallback word for word', () => {
   const t = TOOLBOX.find((x) => x.id === 'unity-mcp');
   const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8');
   assert.ok(skill.includes(`\`${t.fallback}\``), 'the fallback, quoted exactly: change one, change both');
-  for (const words of ['`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder', 'yad toolbox list --json --dir', '`unity-mcp`',
-    'yad toolbox connect unity-mcp --json', 'the ≤3-file rule still holds', '`Unity not reachable: console checked by <person>`']) {
+  for (const words of ['`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder', 'Run the yad commands from inside the Unity repo', '`unity-mcp`',
+    'yad toolbox connect unity-mcp --json', 'Client Project Dir', '`read_console`', 'Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`',
+    "a declared file's own `.meta` goes in the commit with it and does not count against the ≤3-file rule", 'the agent guard does not see MCP calls']) {
     assert.ok(skill.replace(/\s+/g, ' ').includes(words), words);
   }
 });

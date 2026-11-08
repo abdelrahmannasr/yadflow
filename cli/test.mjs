@@ -19456,8 +19456,9 @@ test('E52: yad skill list names the catalogue\'s picks on a step still on the de
 test('E52: the catalogue changes no project file and no toolbox entry', () => {
   // Shipped data, read in place: no new E52.PROJECT_FILES key (a project file would be a shape change).
   assert.ok(!Object.values(E52.PROJECT_FILES).some((f) => /recommend|catalogue/i.test(f)));
-  // The pools stay bound by `yad skill bind`, never named by a skill (E87's two-way test).
-  for (const t of E52.TOOLBOX.filter((x) => x.tier === 'recommended')) assert.deepEqual(E52.skillsUsing(t), [], t.id);
+  // The pools stay bound by `yad skill bind`, never named by a skill (E87's two-way test). Only the pools: a
+  // recommended tool that is not one (Unity MCP, #321) may be named by the skill that uses it.
+  for (const t of E52.TOOLBOX.filter((x) => x.tier === 'recommended' && RECOMMENDATIONS.some((r) => r.pool === x.id))) assert.deepEqual(E52.skillsUsing(t), [], t.id);
   // Every pool a pick comes from is one the toolbox lists, so `yad toolbox list` shows how to install it.
   for (const r of RECOMMENDATIONS) assert.ok(E52.TOOLBOX.some((t) => t.id === r.pool && t.tier === 'recommended'), r.pool);
 });
