@@ -389,29 +389,78 @@ function runnerOf(w) {
 // runner's `-c`/`--call` before its program is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and
 // `pnpm exec|dlx -c` runs the rest of its words as a shell line. A program's own `-c` (`vitest -c x`) is not.
 const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh'];
-// A shell reading its script from its input: no script file, no `-c` (`bash`, `bash -s`, `sh -`, `source /dev/stdin`).
+// A shell reading its script from its input, not from a file: no `-c`, and either no plain word, or `-s` among its
+// options (the words after are `$1…`), or the first plain word is the input itself (`-`, `/dev/stdin`,
+// `/dev/fd/0`, `/proc/self/fd/0`); `source` / `.` of the input too. `--rcfile` / `--init-file` take a value.
+const STDIN_FILES = /^(-|\/dev\/stdin|\/dev\/fd\/0|\/proc\/self\/fd\/0)$/;
 function bareShell(w) {
   if (!w.length) return false;
   const prog = programOf(w[0]);
-  if ((prog === 'source' || prog === '.') && /^\/dev\/(stdin|fd\/0)$/.test(w[1] ?? '')) return true;
+  if ((prog === 'source' || prog === '.') && STDIN_FILES.test(w[1] ?? '')) return true;
   if (!SHELLS.includes(prog) || shellC(w) !== null) return false;
   for (let k = 1; k < w.length; k++) {
-    if (w[k] === '-' || w[k] === '--') return true;
-    if (/^[-+][oO]$/.test(w[k])) { k++; continue; }
-    if (!/^[-+]/.test(w[k])) return false;
+    if (w[k] === '--') return k + 1 >= w.length || STDIN_FILES.test(w[k + 1]);
+    if (/^[-+][oO]$/.test(w[k]) || /^--(rcfile|init-file)$/.test(w[k])) { k++; continue; }
+    if (/^-[A-Za-z]*s[A-Za-z]*$/.test(w[k])) return true;
+    if (/^[-+]/.test(w[k]) && w[k] !== '-') continue;
+    return STDIN_FILES.test(w[k]);
   }
   return true;
 }
-// Each alternative of the brace lists in a part's words, by position (at most 8): `--{force,}` gives `--force`, `--`.
-function braceAlternatives(part) {
-  const out = [];
-  for (let k = 0; k < 8; k++) {
-    let any = false;
-    const alt = part.map((x) => x.replace(/\{([^{}]*,[^{}]*)\}/g, (all, body) => { const opts = body.split(','); if (k < opts.length) any = true; return opts[Math.min(k, opts.length - 1)]; }));
-    if (!any) break;
-    out.push(alt);
+// Does a word hold a brace list or a sequence the shell expands (`{a,b}`, `{1..3}`)? A linear scan: from each `{`
+// to the next `{` or `}`, noting a comma or a `..` on the way (a regex backtracked: quadratic on `{,,,,…`).
+function hasBraceList(x) {
+  for (let i = x.indexOf('{'); i >= 0; i = x.indexOf('{', i + 1)) {
+    let comma = false;
+    for (let j = i + 1; j < x.length; j++) {
+      const c = x[j];
+      if (c === '{') { i = j - 1; break; }
+      if (c === ',' || (c === '.' && x[j + 1] === '.')) comma = true;
+      if (c === '}') { if (comma) return true; i = j; break; }
+    }
   }
-  return out;
+  return false;
+}
+// A word's brace expansion, as the shell makes it: every alternative of each list in turn, lists side by side
+// multiplied, lists inside lists expanded, `{x..y}` sequences of numbers or letters. Null when it would make more
+// than BRACE_CAP words: too many to judge, so the line is refused.
+const BRACE_CAP = 64;
+function braceExpand(x, budget = { left: BRACE_CAP }) {
+  // The first `{` that opens a list with a top-level comma, or a sequence.
+  for (let i = x.indexOf('{'); i >= 0; i = x.indexOf('{', i + 1)) {
+    let depth = 0, close = -1;
+    const commas = [];
+    for (let j = i; j < x.length; j++) {
+      if (x[j] === '{') depth++;
+      else if (x[j] === '}') { depth--; if (depth === 0) { close = j; break; } } else if (x[j] === ',' && depth === 1) commas.push(j);
+    }
+    if (close < 0) return [x];
+    const body = x.slice(i + 1, close), pre = x.slice(0, i), post = x.slice(close + 1);
+    let alts = null;
+    if (commas.length) {
+      alts = [];
+      let from = i + 1;
+      for (const c of [...commas, close]) { alts.push(x.slice(from, c)); from = c + 1; }
+    } else {
+      const m = /^(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.-?\d+)?$/.exec(body);
+      if (m) {
+        const num = /^-?\d+$/.test(m[1]);
+        const a = num ? parseInt(m[1], 10) : m[1].charCodeAt(0), b = num ? parseInt(m[2], 10) : m[2].charCodeAt(0);
+        if (Math.abs(b - a) + 1 > BRACE_CAP) return null;
+        alts = [];
+        for (let k = a; a <= b ? k <= b : k >= b; k += a <= b ? 1 : -1) alts.push(num ? String(k) : String.fromCharCode(k));
+      }
+    }
+    if (!alts) continue;
+    const out = [];
+    for (const alt of alts) {
+      const more = braceExpand(pre + alt + post, budget);
+      if (!more) return null;
+      for (const y of more) { if (--budget.left < 0) return null; out.push(y); }
+    }
+    return out;
+  }
+  return [x];
 }
 // A word quoted for a shell line, so a carried command re-read as a line keeps its words (`find -exec sh -c '…'`).
 const shq = (x) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(x) ? x : `'${x.replace(/'/g, "'\\''")}'`);
@@ -765,6 +814,7 @@ function partVerdict(part) {
   }
   return { allow: true };
 }
+const TOO_MANY_BRACES = { allow: false, message: 'yad agent guard: this command\'s brace lists expand to too many words to judge. Write the words out, or run it as separate commands.' };
 const TOO_DEEP = { allow: false, message: 'yad agent guard: this command nests `$(…)`, backticks or `bash -c` too deep to judge. Run it as separate commands.' };
 function judgeLine(line, depth, mode = {}) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
@@ -809,7 +859,7 @@ function judgeLine(line, depth, mode = {}) {
     // A command word the shell expands (`$(echo gh) pr merge 5`, `${x:-gh} …`, `{gh,} …`) can be any program: the
     // part is judged again as each guarded one (#495).
     const raw = part[part.length - w.length] ?? '';
-    if (w.length && (/[$`]/.test(raw) || /\{[^}]*,[^}]*\}/.test(raw) || /^=[A-Za-z]/.test(raw))) {
+    if (w.length && (/[$`]/.test(raw) || hasBraceList(raw) || /^=[A-Za-z]/.test(raw))) {
       // It may expand to nothing (`$SUDO gh pr merge 5`), to a shell (`$SHELL -c "…"`), or to a guarded program.
       const lead = part.slice(0, part.length - w.length);
       const tries = [[...lead, ...w.slice(1)], ...['gh', 'glab', 'git', 'yad', 'bash'].map((prog) => [...lead, prog, ...w.slice(1)])];
@@ -819,9 +869,20 @@ function judgeLine(line, depth, mode = {}) {
         if (depth < 3) for (const inner of innerLines(t)) { const vi = agentGuardDecision(inner, depth + 1); if (!vi.allow) return vi; }
       }
     }
-    // A brace list in an argument expands to each alternative (`--{force,}`, `gh pr {merge,} 5`).
-    if (w.some((x) => /\{[^{}]*,[^{}]*\}/.test(x))) {
-      for (const alt of braceAlternatives(part)) { const vb = partVerdict(alt); if (!vb.allow) return vb; }
+    // A brace list expands into words, as the shell does (`gh {pr,merge} 5` runs `gh pr merge 5`; `--{force,}`;
+    // `-{f..f}`): the part is judged again with every word expanded. More than BRACE_CAP words is refused.
+    if (part.some(hasBraceList)) {
+      const expanded = [];
+      let added = 0;
+      for (const x of part) {
+        const e = hasBraceList(x) ? braceExpand(x) : [x];
+        // The words the lists add are capped, not the part's own words (a long `git add` with one list is fine).
+        if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return TOO_MANY_BRACES;
+        for (const y of e) expanded.push(y);
+      }
+      const vb = partVerdict(expanded);
+      if (!vb.allow) return vb;
+      for (const inner of depth < 3 ? innerLines(expanded) : []) { const vi = agentGuardDecision(inner, depth + 1); if (!vi.allow) return vi; }
     }
   }
   return { allow: true };
