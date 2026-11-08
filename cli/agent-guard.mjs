@@ -1218,6 +1218,8 @@ export function agentGuardPreapproval(line, { cwd = process.cwd(), root = cwd } 
   const no = { preapproved: false };
   try {
     if (typeof line !== 'string' || !line.trim() || !agentGuardDecision(line).allow) return no;
+    // The reader replaces these (the brace shield), so a file named with one would be judged under another name.
+    if (/[\uE000-\uE002]/.test(line)) return no;
     const at = { cwd: path.resolve(root, cwd), root };
     if (!insideProject('.', at)) return no;
     const clean = blankHarmlessRedirects(line);

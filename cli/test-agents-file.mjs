@@ -1275,6 +1275,9 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
     // A link that leaves the project is outside it.
     fs.symlinkSync('/etc/hosts', path.join(T, 'hosts'));
     no('cat hosts');
+    // A name holding a brace-shield character would be read under another name, past the link check: the prompt.
+    fs.symlinkSync('/etc', path.join(T, 'link'));
+    no("cat 'link/hosts'"); no('cat "link/hosts"');
     no('cat host*'); no('cat host?');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
