@@ -6572,8 +6572,10 @@ test('#321 runCommit: in a Unity repo a .meta beside a staged file or folder is 
     git(T, 'commit', '-q', '--allow-empty', '-m', 'init');
     git(T, 'checkout', '-q', '-b', 'feat/EP-x-S01-T01-thing');
     fs.mkdirSync(path.join(T, 'Assets/Scripts/Foo'), { recursive: true });
+    // A real project always holds more under Assets/: one committed file keeps the folder after a deletion.
+    fs.writeFileSync(path.join(T, 'Assets/Keep.txt'), 'x'); git(T, 'add', '--', 'Assets/Keep.txt'); git(T, 'commit', '-q', '-m', 'keep');
     if (unity) { fs.mkdirSync(path.join(T, 'ProjectSettings')); fs.writeFileSync(path.join(T, 'ProjectSettings/ProjectVersion.txt'), 'm_EditorVersion: 6000.0.0f1\n'); }
-    // Two declared scripts in a new folder: with their .meta files and the folder's, six files staged.
+    // Two declared scripts in a new folder: with their .meta files and the folder's, five files staged.
     for (const f of ['Assets/Scripts/Foo/A.cs', 'Assets/Scripts/Foo/A.cs.meta', 'Assets/Scripts/Foo/B.cs', 'Assets/Scripts/Foo/B.cs.meta', 'Assets/Scripts/Foo.meta']) fs.writeFileSync(path.join(T, f), 'x');
     git(T, 'add', '--', 'Assets');
     return T;
@@ -6593,13 +6595,36 @@ test('#321 runCommit: in a Unity repo a .meta beside a staged file or folder is 
     process.exitCode = 0;
     await runCommit(T, { type: 'feat', message: 'too many' });
     assert.equal(process.exitCode, 1, 'the stray .meta and a fourth file count');
-    assert.throws(() => git(T, 'rev-parse', 'HEAD~1'), 'nothing committed');
+    assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'keep', 'nothing committed');
     fs.rmSync(T, { recursive: true, force: true });
-    // Not a Unity repo: every staged file counts.
+    // A deletion takes its .meta with it: the two scripts and their .meta files removed, plus the folder's.
+    T = setup(true);
+    process.exitCode = 0;
+    await runCommit(T, { type: 'feat', message: 'two scripts' });
+    git(T, 'rm', '-q', '-r', '--', 'Assets/Scripts/Foo', 'Assets/Scripts/Foo.meta');
+    await runCommit(T, { type: 'refactor', message: 'remove the scripts' });
+    assert.equal(process.exitCode, 0, 'a deletion is counted the same way');
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /^refactor: remove the scripts/);
+    fs.rmSync(T, { recursive: true, force: true });
+    // A name git would quote (non-ASCII) still finds its partner.
+    T = setup(true);
+    git(T, 'reset', '-q');
+    for (const f of ['Assets/Scripts/Café.cs', 'Assets/Scripts/Café.cs.meta', 'Assets/Scripts/日本.cs', 'Assets/Scripts/日本.cs.meta']) fs.writeFileSync(path.join(T, f), 'x');
+    git(T, 'add', '--', 'Assets/Scripts/Café.cs', 'Assets/Scripts/Café.cs.meta', 'Assets/Scripts/日本.cs', 'Assets/Scripts/日本.cs.meta');
+    process.exitCode = 0;
+    await runCommit(T, { type: 'feat', message: 'named scripts' });
+    assert.equal(process.exitCode, 0, 'non-ASCII names are read as written');
+    fs.rmSync(T, { recursive: true, force: true });
+    // Not a Unity repo: every staged file counts, and the guard says so.
     T = setup(false);
     process.exitCode = 0;
-    await runCommit(T, { type: 'feat', message: 'not unity' });
+    const errs = [];
+    const write = process.stderr.write.bind(process.stderr), out = process.stdout.write.bind(process.stdout);
+    process.stderr.write = (x, ...a) => { errs.push(String(x)); return write(x, ...a); };
+    process.stdout.write = (x, ...a) => { errs.push(String(x)); return out(x, ...a); };
+    try { await runCommit(T, { type: 'feat', message: 'not unity' }); } finally { process.stderr.write = write; process.stdout.write = out; }
     assert.equal(process.exitCode, 1);
+    assert.match(errs.join(''), /5 files staged \(atomic guard: ≤3\)/);
     fs.rmSync(T, { recursive: true, force: true });
   } finally { process.exitCode = prev; }
 });

@@ -10,6 +10,7 @@
 // and the CI `ledger-guard` check, which quotes it — can see why. It opens this machine's hook and
 // nothing more: CI still fails the commit, because anyone can type a trailer.
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
 import {
@@ -71,7 +72,9 @@ export async function runCommit(root, opts = {}) {
   if (opts.manual && opts.reason === undefined) { fail('--manual needs --reason "<why>" — the reason is recorded in the commit as a Ledger-Override trailer'); process.exitCode = 1; return; }
   if (!opts.manual && opts.reason !== undefined) { fail('--reason is only for --manual (the ledger override)'); process.exitCode = 1; return; }
 
-  const staged = run('git', ['diff', '--cached', '--name-only'], { cwd: root }).stdout.split('\n').filter(Boolean);
+  // NUL-separated and spawned directly (run() trims, and git quotes an unusual name without -z — `Café.cs.meta`
+  // would read as "Assets/Caf\303\251.cs.meta" and miss its partner below).
+  const staged = (spawnSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd: root, encoding: 'utf8' }).stdout || '').split('\0').filter(Boolean);
   if (!staged.length) { fail('nothing staged — `git add` your atomic change first'); process.exitCode = 1; return; }
 
   // An override is recorded only when there is something to override: a staged file the Product's
@@ -85,10 +88,12 @@ export async function runCommit(root, opts = {}) {
     return;
   }
 
-  // In a Unity repo (#321), Unity writes a `.meta` beside each file and folder under Assets/ (it holds the ID):
-  // a staged `X.meta` whose `X` is staged too, or is a folder holding a staged file, goes with it and is not
-  // counted. Only there, and only with its partner: a lone `.meta` still counts.
-  const unity = exists(path.join(root, 'ProjectSettings', 'ProjectVersion.txt')) && exists(path.join(root, 'Assets'));
+  // In a Unity repo (#321), Unity writes a `.meta` beside each file and folder it imports (it holds the ID): a
+  // staged `X.meta` whose `X` is staged too, or is a folder holding a staged file, goes with it and is not
+  // counted. Only there, and only with its partner: a lone `.meta` still counts. Staged paths are from the
+  // repo's top, so the Unity check is made there too (root is a subfolder only under --manual).
+  const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: root }).stdout || root;
+  const unity = exists(path.join(top, 'ProjectSettings', 'ProjectVersion.txt')) && exists(path.join(top, 'Assets'));
   const companion = (f) => unity && f.endsWith('.meta') && (staged.includes(f.slice(0, -5)) || staged.some((g) => g.startsWith(`${f.slice(0, -5)}/`)));
   const counted = staged.filter((f) => !companion(f));
   if (counted.length > ATOMIC_FILE_LIMIT && !opts.force) {

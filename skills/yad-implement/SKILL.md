@@ -147,7 +147,8 @@ not read as one).
   below.
 - **With it, only these tools:** `refresh_unity` with `compile: "request"` (it does not compile unless asked),
   `read_console`, `run_tests` with `get_test_job` (the run is started, then read by its job id), and the
-  read-only finders `find_gameobjects` and `find_in_file`. Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
+  read-only finders `find_gameobjects` and `find_in_file` (if `run_tests` is not offered, its Testing group is
+  off in the MCP for Unity window's Tools section: ask the person to turn it on, or use the fallback). Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
   `batch_execute`, a `generate_*` tool, or any tool that writes a scene, prefab or asset: they run code in the
   Editor or change files the task did not declare, and the agent guard does not see MCP calls. After each
   edit, refresh, read the console and fix every error your change caused before you commit; when the task
