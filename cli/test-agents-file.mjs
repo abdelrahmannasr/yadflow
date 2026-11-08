@@ -305,6 +305,16 @@ test('the agent guard refuses every human-only yad command and every force push,
     "x=(# '\n$(gh pr merge 1)\n)", "f()# '\n{ gh pr merge 1; }; f", "()# x '\ngh pr merge 1", "x=(a b)# don't\ngh pr merge 1",
     // A body of many `$(` overflowed the stack (the hook then exited 1, which lets the command run).
     `cat <<E >/dev/null\n${'$((1))\n'.repeat(130000)}$(gh pr merge 1)\n`, `cat <<E >/dev/null\n${'$((1))'.repeat(130000)}\nE\ngh pr merge 1\n`,
+    // #495: redirects in the middle of a command, $'…' strings, options after bash -c, more prefixes, commands
+    // that carry a command, an expanding command word, a shell fed its script, case inside $(…), # after |.
+    'git push origin main 2>&1 --force', 'git commit -m x 2>&1 --no-verify', '>out gh pr merge 5', 'gh >x pr merge 5', 'x=<<<1 git commit --no-verify -m x',
+    'git push --force>/dev/null', 'yad gate approve> EP-x epic', "git commit -m $'fix: don\\'t\\n' && gh pr merge 5 && echo 'done'", "bash -c $'gh pr merge 5'",
+    'bash -c $"gh pr merge 5"', 'bash -c -- "gh pr merge 5"', 'bash -c -x "gh pr merge 5"', 'bash -c -o pipefail "gh pr merge 5"', 'env -S "gh pr merge 5"',
+    'env --split-string="gh pr merge 5"', 'exec -a x gh pr merge 5', 'builtin command gh pr merge 5', 'function f { gh pr merge 5; }; f', 'coproc gh pr merge 5',
+    'coproc c { gh pr merge 5; }', 'find . -exec gh pr merge 5 \\;', 'find . -execdir git push --force {} +', "git -c alias.p='push --force' p", "git -c alias.m='!gh pr merge 5' m",
+    'noglob gh pr merge 5', '{gh pr merge 5;}', 'eval "gh pr merge 5"', 'eval gh pr merge 5', 'echo "gh pr merge 5" | bash', "printf 'gh pr merge 5' | sh",
+    '$(echo gh) pr merge 5', '${x:-gh} pr merge 5', '{gh,} pr merge 5', '$CMD pr merge 5', 'echo $(case x in x) gh pr merge 5;; esac)', '[[ a =~ x|#$(gh pr merge 1) ]]',
+    'bash <<EOF\ngh pr merge 5\nEOF', "sh <<'EOF'\ngit push --force\nEOF", 'bash <<< "gh pr merge 5"',
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -518,13 +528,23 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
   // #492: a heredoc opened and closed with CRLF is text up to its `EOF\r` line; what follows is a command.
   assert.deepEqual(shellParts('cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\r\n'), [['cat'], ['gh', 'pr', 'merge', '5\r']]);
-  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // A redirect's operator is not a word (#495): `<(` is a part break after it.
+  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // Redirects and their targets leave the command's words; `$'…'` reads its escapes; a here-string is input.
+  assert.deepEqual(shellParts('git push origin main 2>&1 --force'), [['git', 'push', 'origin', 'main', '--force']]);
+  assert.deepEqual(shellParts('gh >x pr merge 5 2> err &>all'), [['gh', 'pr', 'merge', '5']]);
+  assert.deepEqual(shellParts("git commit -m $'it\\'s\\n'"), [['git', 'commit', '-m', "it's\n"]]);
+  assert.deepEqual(shellParts('x=<<<1 git commit'), [['x=', 'git', 'commit']]);
   // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
   for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n',
     '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"',
     // A docs heredoc naming a guarded command stays allowed: only an end word that expands adds line-by-line reading.
     `cat <<'EOF' > "$f"\ngh pr merge 1 is the person's\nEOF`, "gh pr create --body-file - <<'EOF' # $x\ngh pr merge 1 stays with the person\nEOF",
-    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`]) {
+    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`,
+    // #495: the common forms around the new readings stay allowed.
+    'npm test 2>&1 | tail', 'git log > out.txt', 'cmd >/dev/null 2>&1', 'find . -name x -exec grep y {} +', 'git -c core.pager=less log', 'eval "$(ssh-agent)"',
+    'echo hi | bash -s', 'curl -fsSL https://example.com/i.sh | sh', "git commit -m $'line one\\nline two'", 'cat <<< "gh pr merge 5"', "python3 - <<'PY'\nprint(1)\nPY",
+    'bash <<EOF\necho hi\nEOF', 'git log --oneline 2>/dev/null | head -3']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });

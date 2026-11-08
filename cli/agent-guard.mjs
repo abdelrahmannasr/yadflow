@@ -35,6 +35,21 @@ const HEREDOC = /<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[^ \t\n;&|()<>'"\\])+)/
 // heredoc is recorded for it (`expands`).
 const heredocAt = (line, i) => { HEREDOC.lastIndex = i; const m = HEREDOC.exec(line); if (m) m.expands = /[$`]/.test(m[2]); return m; };
 
+// A `$'…'` string from `from` (just past `$'`): its text with the escapes bash applies, and the index of its closing
+// quote (or the end). `\'` is a quote in it, so it does not end the string.
+const ANSI = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' };
+function ansiC(line, from) {
+  let text = '';
+  let i = from;
+  for (; i < line.length && line[i] !== "'"; i++) {
+    if (line[i] !== '\\' || i + 1 >= line.length) { text += line[i]; continue; }
+    const c = line[i + 1];
+    let m;
+    if (c in ANSI) { text += ANSI[c]; i++; } else if ((m = /^x([0-9A-Fa-f]{1,2})/.exec(line.slice(i + 1, i + 4)))) { text += String.fromCharCode(parseInt(m[1], 16)); i += m[0].length; } else if ((m = /^[0-7]{1,3}/.exec(line.slice(i + 1, i + 4)))) { text += String.fromCharCode(parseInt(m[0], 8)); i += m[0].length; } else if ((m = /^u([0-9A-Fa-f]{1,4})/.exec(line.slice(i + 1, i + 6)))) { text += String.fromCharCode(parseInt(m[1], 16)); i += m[0].length; } else { text += `\\${c}`; i++; }
+  }
+  return { text, end: i };
+}
+
 // Where each line of `text` starts, by its exact text and by its text with leading tabs removed (`<<-`), so a
 // heredoc's end line is found by a binary search, not by scanning on: a line of many heredocs with different
 // end words is read in near-linear time (#492). `endAfter` gives the index just past the first line at or
@@ -75,15 +90,30 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
 export function shellParts(line, mode = {}) {
   const parts = [];
-  // Not enumerable: `parts` reads as the plain list of parts it always was.
+  // Not enumerable: `parts` reads as the plain list of parts it always was. `bodies` and `herestrings` (#495) are
+  // the text a part's heredocs and here-strings feed it, by part index: a shell reading them runs them.
   Object.defineProperty(parts, 'subs', { value: [] });
+  Object.defineProperty(parts, 'bodies', { value: [] });
+  Object.defineProperty(parts, 'herestrings', { value: [] });
   let words = [];
   let word = '';
   let inWord = false;
   let quote = null;
   const heredocs = [];
-  const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
-  const endPart = () => { endWord(); if (words.length) parts.push(words); words = []; };
+  // A redirect's target is not a word of the command (#495): `gh >x pr merge 5` runs `gh pr merge 5`.
+  let dropWord = false;
+  let hereString = false;
+  const endWord = () => {
+    if (inWord) {
+      // A here-string is the command's input, not one of its words (`x=<<<1 git commit …` runs git).
+      if (hereString) parts.herestrings.push({ part: parts.length, text: word });
+      else if (!dropWord) words.push(word);
+    }
+    // Reset only once the target (or the here-string) was read: a space before it ends no word.
+    if (inWord) { dropWord = false; hereString = false; }
+    word = ''; inWord = false;
+  };
+  const endPart = () => { endWord(); dropWord = false; hereString = false; if (words.length) parts.push(words); words = []; };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
   // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
   // `$(…)` and backticks, so those go to `parts.subs`.
@@ -100,6 +130,7 @@ export function shellParts(line, mode = {}) {
     for (const h of heredocs) {
       const start = at;
       const next = index.endAfter(h.word, h.tabs, at);
+      if (next >= 0) parts.bodies.push({ part: h.part, text: line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start) });
       if (next < 0) {
         // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
         if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; for (const x of substitutionsIn(line.slice(from))) parts.subs.push(x); }
@@ -116,8 +147,16 @@ export function shellParts(line, mode = {}) {
     const ch = line[i];
     // A command substitution, unquoted or in double quotes (single quotes keep it as text).
     if (quote !== '\'' && ((ch === '$' && line[i + 1] === '(') || ch === '`')) {
-      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)));
+      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)), mode);
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
+      // A `case` in it: its `x)` closes no `$(` to the shell (#495), so the text up to the line's last `)` is
+      // judged too. Only refuses more.
+      if (ch === '$') {
+        const eol = line.indexOf('\n', i);
+        const stop = eol < 0 ? line.length : eol;
+        const last = line.lastIndexOf(')', stop - 1);
+        if (last > end && /\bcase\b/.test(line.slice(i + 2, last))) parts.subs.push(line.slice(i + 2, last));
+      }
       word += line.slice(i, end + 1); inWord = true;
       i = end;
       continue;
@@ -129,6 +168,9 @@ export function shellParts(line, mode = {}) {
       else word += ch;
       continue;
     }
+    // `$'…'` is read with its escapes (`\'` is a quote in it, #495); `$"…"` is a double-quoted string.
+    if (ch === '$' && line[i + 1] === '\'') { const r = ansiC(line, i + 2); word += r.text; inWord = true; i = r.end; continue; }
+    if (ch === '$' && line[i + 1] === '"') { continue; }
     if (ch === '\'' || ch === '"') { quote = ch; inWord = true; continue; }
     if (ch === '\\' && line[i + 1] === '\n') { i++; continue; }
     // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
@@ -136,12 +178,12 @@ export function shellParts(line, mode = {}) {
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
     // A `#` starts a comment only where a word starts after a space, a tab, a newline, `;`, `&` or `|` (or at the
     // start): right after `(` or `)` it is text to zsh's globs and to bash's `[[ =~ ]]` (#492 review).
-    if (ch === '#' && !inWord && (i === 0 || (mode.hashAfterParen ? /[ \t\n;&|()]/ : /[ \t\n;&|]/).test(line[i - 1]))) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
-    if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
+    if (ch === '#' && !inWord && (i === 0 || (mode.hashAfterParen ? /[ \t\n;&|()]/ : /[ \t\n;&|]/).test(line[i - 1])) && !(mode.hashAfterBar && line[i - 1] === '|')) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
+    if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); hereString = true; i += 2; continue; }
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
       const m = heredocAt(line, i);
-      if (m) { if (!m.expands || mode.literalExpanding) heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
+      if (m) { if (!m.expands || mode.literalExpanding) heredocs.push({ ...heredocOf(m), part: parts.length }); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -149,6 +191,18 @@ export function shellParts(line, mode = {}) {
       heredocs.length = 0;
       // No end line: not a heredoc after all, so the next lines are read as commands.
       if (at >= 0) i = at - 1 - 1;
+      continue;
+    }
+    // A redirect (#495): `[n]>`, `>>`, `>|`, `&>`, `&>>`, `<`, `<>`, `[n]>&n`, `[n]<&n`, `>&-`. Its operator and its
+    // target are not words of the command, and the `&` in it splits nothing (`git push origin main 2>&1 --force`
+    // pushes with --force). A `(` right after it is a process substitution: the part break below reads it.
+    if ((ch === '>' || ch === '<') || (ch === '&' && line[i + 1] === '>')) {
+      if (inWord && /^[0-9]+$/.test(word)) { word = ''; inWord = false; } else endWord();
+      let j = i + (ch === '&' ? 2 : 1);
+      if (line[j] === '>' || line[j] === '|' || (ch === '<' && line[j] === '>')) j++;
+      if (line[j] === '&') { j++; while (j < line.length && /[0-9-]/.test(line[j])) j++; i = j - 1; continue; }
+      dropWord = true;
+      i = j - 1;
       continue;
     }
     // `(` and `)` end a part too (#492): `<(cmd)`, `>(cmd)`, `f(){ cmd; }` and `case x in x) cmd;;` run `cmd`.
@@ -166,7 +220,7 @@ export function shellParts(line, mode = {}) {
 // closes. Quotes, nested `(…)` and a heredoc's text inside it are its own, so a `)` in them does not close it.
 // `getIndex` gives the line index of `line`, built once per text and shared by every `$(` in it (#492 review: one
 // per call made many `$(…)` holding heredocs take quadratic time).
-function substitutionEnd(line, from, getIndex) {
+function substitutionEnd(line, from, getIndex, mode = {}) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
@@ -181,7 +235,7 @@ function substitutionEnd(line, from, getIndex) {
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
       const m = heredocAt(line, i);
-      if (m) { if (!m.expands) heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
+      if (m) { if (!m.expands || mode.literalExpanding) heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
@@ -234,7 +288,9 @@ function backtickEnd(line, from) {
 // `command`, `exec`, `time`, `nohup`, `nice`, `timeout` with its duration, the shell's own words (`then`, `do`,
 // `else`, `{`, `!`), `xargs`, `stdbuf`, `watch`, and a `(` stuck to the front of the first word. The options of a prefix are skipped with
 // it, and the value of one that takes a value (`sudo -u <user>`, `nice -n <n>`, `env -u <name>`).
-const PREFIXES = new Set(['env', 'sudo', 'command', 'exec', 'time', 'nohup', 'nice', 'xargs', 'stdbuf', 'watch', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '{', '!']);
+// #495 adds `builtin`, zsh's `noglob` and `nocorrect`, `coproc [NAME]`, `function NAME` and `exec -a NAME`.
+const PREFIXES = new Set(['env', 'sudo', 'command', 'exec', 'time', 'nohup', 'nice', 'xargs', 'stdbuf', 'watch', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', '{', '!',
+  'builtin', 'noglob', 'nocorrect', 'coproc', 'function']);
 const PREFIX_VALUE_OPTIONS = new Set(['-u', '-g', '-n', '-C', '-h', '-U', '-r', '-t', '-s', '-k', '-o', '--user', '--group', '--signal',
   '--kill-after', '--unset', '--chdir', '--adjustment', '--output']);
 // A prefix whose letters mean something else (`xargs -r` and `-t` take no value, `sudo -E` none either) reads
@@ -245,14 +301,19 @@ const PREFIX_OWN_VALUE_OPTIONS = {
     '--max-procs', '--delimiter', '--arg-file', '--eof']),
   stdbuf: new Set(['-i', '-o', '-e', '--input', '--output', '--error']),
   watch: new Set(['-n', '--interval']),
+  exec: new Set(['-a']),
 };
 const stripPrefix = (words) => {
   const w = words.slice();
-  if (w.length && w[0].startsWith('(')) w[0] = w[0].replace(/^\(+/, '');
+  // A `(` or a `{` stuck to the first word (zsh reads `{gh pr merge 5;}` as a group).
+  if (w.length && /^[({]/.test(w[0])) w[0] = w[0].replace(/^[({]+/, '');
   let i = 0;
   for (;;) {
     while (i < w.length && w[i] === '') i++;
     if (i < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i])) { i++; continue; }
+    // `function NAME`, and `coproc NAME {` (a name only before a `{`): the name is not the command.
+    if (i < w.length && w[i] === 'function') { i += 2; continue; }
+    if (i < w.length && w[i] === 'coproc' && w[i + 2] === '{') { i += 2; continue; }
     if (i < w.length && (PREFIXES.has(w[i]) || w[i] === 'timeout')) {
       const isTimeout = w[i] === 'timeout';
       const own = PREFIX_OWN_VALUE_OPTIONS[w[i]];
@@ -322,13 +383,24 @@ function runnerOf(w) {
 // The command line a shell runs from its `-c` argument (`bash -c "yad gate approve …"`), or null. A package
 // runner's `-c`/`--call` before its program is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and
 // `pnpm exec|dlx -c` runs the rest of its words as a shell line. A program's own `-c` (`vitest -c x`) is not.
+const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh'];
 function shellC(words) {
   const w = stripPrefix(words);
   if (!w.length) return null;
   const prog = programOf(w[0]);
-  if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(prog)) {
+  if (SHELLS.includes(prog)) {
     const c = w.findIndex((x, n) => n > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(x));
-    return c > 0 && c + 1 < w.length ? w[c + 1] : null;
+    if (c < 0) return null;
+    // The line is the first word after the options that follow `-c` (#495): `bash -c -- "…"`, `bash -c -x "…"`,
+    // and `-o NAME` / `-O NAME`, which take a value.
+    let k = c + 1;
+    while (k < w.length) {
+      if (w[k] === '--') { k++; break; }
+      if (/^[-+][oO]$/.test(w[k])) { k += 2; continue; }
+      if (/^[-+][A-Za-z]+$/.test(w[k])) { k++; continue; }
+      break;
+    }
+    return k < w.length ? w[k] : null;
   }
   const r = runnerOf(w);
   if (!r) return null;
@@ -350,6 +422,50 @@ function shellC(words) {
     if (r.valued.has(w[i])) i++;
   }
   return null;
+}
+
+// Every command line a part carries and runs (#495): a shell's `-c` line (`shellC`); `env -S "<line>"`; each
+// `find … -exec|-execdir|-ok|-okdir <cmd…> ;|+`; a `git -c alias.NAME=VALUE … NAME …` (a `!VALUE` is a shell
+// line, any other VALUE runs as `git VALUE …`); and `eval <args>`, joined.
+function innerLines(part) {
+  const out = [];
+  const c = shellC(part);
+  if (c !== null) out.push(c);
+  const lead = part.slice(0, part.length - stripPrefix(part).length);
+  const envAt = lead.lastIndexOf('env') >= 0 ? lead.indexOf('env') : (part[0] === 'env' ? 0 : -1);
+  if (envAt >= 0) {
+    for (let i = envAt + 1; i < part.length; i++) {
+      const a = part[i];
+      if (a === '-S' || a === '--split-string') { out.push([part[i + 1] ?? '', ...part.slice(i + 2)].join(' ')); break; }
+      const m = /^(?:-S|--split-string=)(.+)$/.exec(a);
+      if (m) { out.push([m[1], ...part.slice(i + 1)].join(' ')); break; }
+      if (!a.startsWith('-') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) break;
+    }
+  }
+  const w = stripPrefix(part);
+  const prog = w.length ? programOf(w[0]) : '';
+  if (prog === 'find') {
+    for (let i = 1; i < w.length; i++) {
+      if (!/^-(exec|execdir|ok|okdir)$/.test(w[i])) continue;
+      let j = i + 1;
+      while (j < w.length && w[j] !== ';' && w[j] !== '+') j++;
+      out.push(w.slice(i + 1, j).join(' '));
+      i = j;
+    }
+  }
+  if (prog === 'git') {
+    const alias = new Map();
+    let i = 1;
+    while (i < w.length && w[i].startsWith('-')) {
+      const m = w[i] === '-c' ? /^alias\.([^=]+)=(.*)$/s.exec(w[i + 1] ?? '') : null;
+      if (m) alias.set(m[1].toLowerCase(), m[2]);
+      i += GIT_VALUE_OPTIONS.has(w[i]) ? 2 : 1;
+    }
+    const value = i < w.length ? alias.get(w[i].toLowerCase()) : undefined;
+    if (value !== undefined) out.push(value.startsWith('!') ? [value.slice(1), ...w.slice(i + 1)].join(' ') : ['git', value, ...w.slice(i + 1)].join(' '));
+  }
+  if (prog === 'eval') out.push(w.slice(1).join(' '));
+  return out;
 }
 
 // The yad argv after the program, or null when the part does not run yad: `yad …` (any path, `yad.mjs` too),
@@ -559,11 +675,15 @@ function judgeReadings(line, depth) {
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
   if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
-  const modes = [{}];
   const expandsAt = firstExpandingHeredoc(line);
-  if (expandsAt >= 0) modes.push({ literalExpanding: true });
-  if (/[()]#/.test(line)) modes.push({ hashAfterParen: true });
-  if (modes.length === 3) modes.push({ literalExpanding: true, hashAfterParen: true });
+  const flags = [];
+  if (expandsAt >= 0) flags.push('literalExpanding');
+  if (/[()]#/.test(line)) flags.push('hashAfterParen');
+  // A `#` right after `|` is a comment in command position, text in `[[ =~ ]]` (#495).
+  if (/\|#/.test(line)) flags.push('hashAfterBar');
+  // Every combination of the readings that apply (at most 8).
+  const modes = [{}];
+  for (const f of flags) for (const m of modes.slice()) modes.push({ ...m, [f]: true });
   for (const mode of modes) {
     for (const text of texts) {
       const v = judgeLine(text, depth, mode);
@@ -584,6 +704,26 @@ function judgeReadings(line, depth) {
   }
   return { allow: true };
 }
+// The four refusals for one part's words.
+function partVerdict(part) {
+  const args = yadArgs(part);
+  if (args) {
+    const { words, flags, help } = yadWords(args);
+    if (!help && classify(words, flags) === 'human-only') {
+      return { allow: false, message: `yad agent guard: \`yad ${words.join(' ')}${flags.includes('manual') ? ' --manual' : ''}\` is the person's to run, never the agent's (an approval, a gate comment or advance or reopen, or a commit past the ledger guard). Ask the person to run it themselves — in Claude Code they type it with \`!\` in front — then confirm by reading (\`yad gate status\` / \`yad guide --json\`).` };
+    }
+  }
+  if (platformApproval(part)) {
+    return { allow: false, message: 'yad agent guard: approving or merging a PR/MR is the person\'s, never the agent\'s (the yadflow rules), even when your login could. Give the person the link and the exact steps, wait, then confirm by reading (`yad gate status` / `yad guide --json`).' };
+  }
+  if (hookSkip(part)) {
+    return { allow: false, message: 'yad agent guard: skipping the git hooks (`--no-verify`, `-n`, `YAD_HOOK_DISABLE`, `core.hooksPath`) is the person\'s, never the agent\'s (the yadflow rules): it is the door past the ledger guard. When a hook refuses a commit, follow its message; if the commit must go through, the person runs `yad commit --manual --reason "<why>"` themselves (`!` in front in Claude Code).' };
+  }
+  if (forcePush(part)) {
+    return { allow: false, message: 'yad agent guard: a force push is never the agent\'s (the yadflow rules). Tell the person why the push was refused and what a force push would overwrite; if it is needed, they run it themselves.' };
+  }
+  return { allow: true };
+}
 const TOO_DEEP = { allow: false, message: 'yad agent guard: this command nests `$(…)`, backticks or `bash -c` too deep to judge. Run it as separate commands.' };
 function judgeLine(line, depth, mode = {}) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
@@ -595,29 +735,35 @@ function judgeLine(line, depth, mode = {}) {
     const v = agentGuardDecision(sub, depth + 1);
     if (!v.allow) return v;
   }
-  for (const part of parts) {
-    // `bash -c "<line>"`: the line it runs is judged too, as deep; one deeper is refused.
-    const inner = shellC(part);
-    if (inner !== null && depth >= 3) return TOO_DEEP;
-    if (inner !== null) {
+  for (let n = 0; n < parts.length; n++) {
+    const part = parts[n];
+    // The lines a part carries (`bash -c`, `env -S`, `find -exec`, a git alias, `eval`) are judged too, as deep;
+    // one deeper is refused. A shell that reads a heredoc, a here-string or a piped `echo`/`printf` runs that
+    // text as its script (#495).
+    const carried = innerLines(part);
+    const w = stripPrefix(part);
+    if (w.length && SHELLS.includes(programOf(w[0])) && shellC(part) === null) {
+      for (const b of parts.bodies) if (b.part === n) carried.push(b.text);
+      for (const h of parts.herestrings) if (h.part === n) carried.push(h.text);
+      const prev = n > 0 ? stripPrefix(parts[n - 1]) : [];
+      if (prev.length && ['echo', 'printf'].includes(programOf(prev[0]))) carried.push(prev.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
+    }
+    if (carried.length && depth >= 3) return TOO_DEEP;
+    for (const inner of carried) {
       const v = agentGuardDecision(inner, depth + 1);
       if (!v.allow) return v;
     }
-    const args = yadArgs(part);
-    if (args) {
-      const { words, flags, help } = yadWords(args);
-      if (!help && classify(words, flags) === 'human-only') {
-        return { allow: false, message: `yad agent guard: \`yad ${words.join(' ')}${flags.includes('manual') ? ' --manual' : ''}\` is the person's to run, never the agent's (an approval, a gate comment or advance or reopen, or a commit past the ledger guard). Ask the person to run it themselves — in Claude Code they type it with \`!\` in front — then confirm by reading (\`yad gate status\` / \`yad guide --json\`).` };
+    const v = partVerdict(part);
+    if (!v.allow) return v;
+    // A command word the shell expands (`$(echo gh) pr merge 5`, `${x:-gh} …`, `{gh,} …`) can be any program: the
+    // part is judged again as each guarded one (#495).
+    const raw = part[part.length - w.length] ?? '';
+    if (w.length && (/[$`]/.test(raw) || /\{[^}]*,[^}]*\}/.test(raw))) {
+      const lead = part.slice(0, part.length - w.length);
+      for (const prog of ['gh', 'glab', 'git', 'yad']) {
+        const again = partVerdict([...lead, prog, ...w.slice(1)]);
+        if (!again.allow) return again;
       }
-    }
-    if (platformApproval(part)) {
-      return { allow: false, message: 'yad agent guard: approving or merging a PR/MR is the person\'s, never the agent\'s (the yadflow rules), even when your login could. Give the person the link and the exact steps, wait, then confirm by reading (`yad gate status` / `yad guide --json`).' };
-    }
-    if (hookSkip(part)) {
-      return { allow: false, message: 'yad agent guard: skipping the git hooks (`--no-verify`, `-n`, `YAD_HOOK_DISABLE`, `core.hooksPath`) is the person\'s, never the agent\'s (the yadflow rules): it is the door past the ledger guard. When a hook refuses a commit, follow its message; if the commit must go through, the person runs `yad commit --manual --reason "<why>"` themselves (`!` in front in Claude Code).' };
-    }
-    if (forcePush(part)) {
-      return { allow: false, message: 'yad agent guard: a force push is never the agent\'s (the yadflow rules). Tell the person why the push was refused and what a force push would overwrite; if it is needed, they run it themselves.' };
     }
   }
   return { allow: true };
