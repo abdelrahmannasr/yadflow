@@ -151,7 +151,7 @@ export function shellParts(line, mode = {}) {
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
       // A `case` in it: its `x)` closes no `$(` to the shell (#495), so the text up to the line's last `)` is
       // judged too. Only refuses more.
-      if (ch === '$') {
+      if (ch === '$' && /\bcase\b/.test(line.slice(i + 2, end))) {
         const eol = line.indexOf('\n', i);
         const stop = eol < 0 ? line.length : eol;
         const last = line.lastIndexOf(')', stop - 1);
@@ -196,6 +196,11 @@ export function shellParts(line, mode = {}) {
     // A redirect (#495): `[n]>`, `>>`, `>|`, `&>`, `&>>`, `<`, `<>`, `[n]>&n`, `[n]<&n`, `>&-`. Its operator and its
     // target are not words of the command, and the `&` in it splits nothing (`git push origin main 2>&1 --force`
     // pushes with --force). A `(` right after it is a process substitution: the part break below reads it.
+    // zsh's numeric glob (`<->`, `<1-9>`) is one word, not two redirects (#495 review): judged both ways.
+    if (mode.numericGlob && ch === '<') {
+      const g = /^<[0-9]*-[0-9]*>/.exec(line.slice(i, i + 24));
+      if (g) { word += g[0]; inWord = true; i += g[0].length - 1; continue; }
+    }
     if ((ch === '>' || ch === '<') || (ch === '&' && line[i + 1] === '>')) {
       if (inWord && /^[0-9]+$/.test(word)) { word = ''; inWord = false; } else endWord();
       let j = i + (ch === '&' ? 2 : 1);
@@ -384,6 +389,32 @@ function runnerOf(w) {
 // runner's `-c`/`--call` before its program is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and
 // `pnpm exec|dlx -c` runs the rest of its words as a shell line. A program's own `-c` (`vitest -c x`) is not.
 const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh'];
+// A shell reading its script from its input: no script file, no `-c` (`bash`, `bash -s`, `sh -`, `source /dev/stdin`).
+function bareShell(w) {
+  if (!w.length) return false;
+  const prog = programOf(w[0]);
+  if ((prog === 'source' || prog === '.') && /^\/dev\/(stdin|fd\/0)$/.test(w[1] ?? '')) return true;
+  if (!SHELLS.includes(prog) || shellC(w) !== null) return false;
+  for (let k = 1; k < w.length; k++) {
+    if (w[k] === '-' || w[k] === '--') return true;
+    if (/^[-+][oO]$/.test(w[k])) { k++; continue; }
+    if (!/^[-+]/.test(w[k])) return false;
+  }
+  return true;
+}
+// Each alternative of the brace lists in a part's words, by position (at most 8): `--{force,}` gives `--force`, `--`.
+function braceAlternatives(part) {
+  const out = [];
+  for (let k = 0; k < 8; k++) {
+    let any = false;
+    const alt = part.map((x) => x.replace(/\{([^{}]*,[^{}]*)\}/g, (all, body) => { const opts = body.split(','); if (k < opts.length) any = true; return opts[Math.min(k, opts.length - 1)]; }));
+    if (!any) break;
+    out.push(alt);
+  }
+  return out;
+}
+// A word quoted for a shell line, so a carried command re-read as a line keeps its words (`find -exec sh -c '…'`).
+const shq = (x) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(x) ? x : `'${x.replace(/'/g, "'\\''")}'`);
 function shellC(words) {
   const w = stripPrefix(words);
   if (!w.length) return null;
@@ -395,7 +426,7 @@ function shellC(words) {
     // and `-o NAME` / `-O NAME`, which take a value.
     let k = c + 1;
     while (k < w.length) {
-      if (w[k] === '--') { k++; break; }
+      if (w[k] === '--' || w[k] === '-') { k++; break; }
       if (/^[-+][oO]$/.test(w[k])) { k += 2; continue; }
       if (/^[-+][A-Za-z]+$/.test(w[k])) { k++; continue; }
       break;
@@ -439,6 +470,8 @@ function innerLines(part) {
       if (a === '-S' || a === '--split-string') { out.push([part[i + 1] ?? '', ...part.slice(i + 2)].join(' ')); break; }
       const m = /^(?:-S|--split-string=)(.+)$/.exec(a);
       if (m) { out.push([m[1], ...part.slice(i + 1)].join(' ')); break; }
+      // `env`'s options that take a value come before `-S` too (`env -u X -S "…"`).
+      if (['-u', '--unset', '-C', '--chdir', '-a', '--argv0'].includes(a)) { i++; continue; }
       if (!a.startsWith('-') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) break;
     }
   }
@@ -449,7 +482,7 @@ function innerLines(part) {
       if (!/^-(exec|execdir|ok|okdir)$/.test(w[i])) continue;
       let j = i + 1;
       while (j < w.length && w[j] !== ';' && w[j] !== '+') j++;
-      out.push(w.slice(i + 1, j).join(' '));
+      out.push(w.slice(i + 1, j).map(shq).join(' '));
       i = j;
     }
   }
@@ -461,8 +494,15 @@ function innerLines(part) {
       if (m) alias.set(m[1].toLowerCase(), m[2]);
       i += GIT_VALUE_OPTIONS.has(w[i]) ? 2 : 1;
     }
-    const value = i < w.length ? alias.get(w[i].toLowerCase()) : undefined;
-    if (value !== undefined) out.push(value.startsWith('!') ? [value.slice(1), ...w.slice(i + 1)].join(' ') : ['git', value, ...w.slice(i + 1)].join(' '));
+    // Aliases may name aliases (`-c alias.a=b -c alias.b='push --force' a`): followed a few steps.
+    let rest = w.slice(i);
+    for (let step = 0; step < 5 && rest.length; step++) {
+      const value = alias.get(rest[0].toLowerCase());
+      if (value === undefined) break;
+      if (value.startsWith('!')) { out.push([value.slice(1), ...rest.slice(1).map(shq)].join(' ')); break; }
+      out.push(['git', value, ...rest.slice(1).map(shq)].join(' '));
+      rest = [...value.split(/\s+/).filter(Boolean), ...rest.slice(1)];
+    }
   }
   if (prog === 'eval') out.push(w.slice(1).join(' '));
   return out;
@@ -639,7 +679,7 @@ export const MAX_JUDGED = 1_000_000;
 // Every reading costs time, so the whole judgement has a budget: past it the line is refused, as a line too long
 // is — a hook that runs out its harness's time lets the command through (#492).
 // (agentGuardPreapproval asks again for an allowed line, so a hook can spend it twice: about 10 s at worst, well
-// under a harness's hook timeout.)
+// under a harness's hook timeout. Each reading is linear, so a 1 MB line costs well under a second per reading.)
 export const JUDGE_BUDGET_MS = 5000;
 let deadline = Infinity;
 const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
@@ -681,7 +721,8 @@ function judgeReadings(line, depth) {
   if (/[()]#/.test(line)) flags.push('hashAfterParen');
   // A `#` right after `|` is a comment in command position, text in `[[ =~ ]]` (#495).
   if (/\|#/.test(line)) flags.push('hashAfterBar');
-  // Every combination of the readings that apply (at most 8).
+  if (/<[0-9]*-[0-9]*>/.test(line)) flags.push('numericGlob');
+  // Every combination of the readings that apply (at most 16).
   const modes = [{}];
   for (const f of flags) for (const m of modes.slice()) modes.push({ ...m, [f]: true });
   for (const mode of modes) {
@@ -735,6 +776,10 @@ function judgeLine(line, depth, mode = {}) {
     const v = agentGuardDecision(sub, depth + 1);
     if (!v.allow) return v;
   }
+  // The text each part is fed, grouped once by part (a loop over every body for every part was quadratic).
+  const fed = new Map();
+  const printed = [];
+  for (const x of [...parts.bodies, ...parts.herestrings]) { if (!fed.has(x.part)) fed.set(x.part, []); fed.get(x.part).push(x.text); }
   for (let n = 0; n < parts.length; n++) {
     const part = parts[n];
     // The lines a part carries (`bash -c`, `env -S`, `find -exec`, a git alias, `eval`) are judged too, as deep;
@@ -742,11 +787,13 @@ function judgeLine(line, depth, mode = {}) {
     // text as its script (#495).
     const carried = innerLines(part);
     const w = stripPrefix(part);
-    if (w.length && SHELLS.includes(programOf(w[0])) && shellC(part) === null) {
-      for (const b of parts.bodies) if (b.part === n) carried.push(b.text);
-      for (const h of parts.herestrings) if (h.part === n) carried.push(h.text);
-      const prev = n > 0 ? stripPrefix(parts[n - 1]) : [];
-      if (prev.length && ['echo', 'printf'].includes(programOf(prev[0]))) carried.push(prev.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
+    if (bareShell(w)) {
+      // Its script: its own heredoc or here-string, and any text an earlier part prints into it (a pipe, `tee`, a
+      // `cat <<EOF` body) — each earlier part's heredoc bodies and `echo` / `printf` text (#495 review). Each is
+      // judged once: the first shell after it takes it, so many shells after many texts stay linear.
+      for (const t of fed.get(n) ?? []) carried.push(t);
+      for (const t of printed) carried.push(t);
+      printed.length = 0;
     }
     if (carried.length && depth >= 3) return TOO_DEEP;
     for (const inner of carried) {
@@ -755,15 +802,26 @@ function judgeLine(line, depth, mode = {}) {
     }
     const v = partVerdict(part);
     if (!v.allow) return v;
+    // What this part prints or is fed, for a shell later on the line.
+    for (const t of fed.get(n) ?? []) printed.push(t);
+    if (w.length && programOf(w[0]) === 'echo') printed.push(w.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
+    if (w.length && programOf(w[0]) === 'printf') printed.push(w.slice(1).join(' '), w.slice(2).join(' '));
     // A command word the shell expands (`$(echo gh) pr merge 5`, `${x:-gh} …`, `{gh,} …`) can be any program: the
     // part is judged again as each guarded one (#495).
     const raw = part[part.length - w.length] ?? '';
-    if (w.length && (/[$`]/.test(raw) || /\{[^}]*,[^}]*\}/.test(raw))) {
+    if (w.length && (/[$`]/.test(raw) || /\{[^}]*,[^}]*\}/.test(raw) || /^=[A-Za-z]/.test(raw))) {
+      // It may expand to nothing (`$SUDO gh pr merge 5`), to a shell (`$SHELL -c "…"`), or to a guarded program.
       const lead = part.slice(0, part.length - w.length);
-      for (const prog of ['gh', 'glab', 'git', 'yad']) {
-        const again = partVerdict([...lead, prog, ...w.slice(1)]);
+      const tries = [[...lead, ...w.slice(1)], ...['gh', 'glab', 'git', 'yad', 'bash'].map((prog) => [...lead, prog, ...w.slice(1)])];
+      for (const t of tries) {
+        const again = partVerdict(t);
         if (!again.allow) return again;
+        if (depth < 3) for (const inner of innerLines(t)) { const vi = agentGuardDecision(inner, depth + 1); if (!vi.allow) return vi; }
       }
+    }
+    // A brace list in an argument expands to each alternative (`--{force,}`, `gh pr {merge,} 5`).
+    if (w.some((x) => /\{[^{}]*,[^{}]*\}/.test(x))) {
+      for (const alt of braceAlternatives(part)) { const vb = partVerdict(alt); if (!vb.allow) return vb; }
     }
   }
   return { allow: true };
