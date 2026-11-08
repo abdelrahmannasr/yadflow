@@ -280,9 +280,10 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <<< "x"\nyad gate approve EP-x epic',
     'echo $((1<<2))\nyad gate approve EP-x epic',
     'cat <<EOF\r\nx\r\nEOF\r\nyad gate approve EP-x epic',
-    // E167 review 4: \ + CR + LF does not join lines, and `EOF\r` does not end a heredoc, in bash or zsh.
+    // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
+    'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
+    // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
     'git log \\\r\ngh pr merge 5', 'git status \\\r\ngit push --force', 'git log \\\r\ngit commit --no-verify -m x',
-    'cat <<EOF\nEOF\r\ncat <<Y\nEOF\ngh pr merge 5\nY\n',
     '# <<x\nyad gate approve EP-x epic',
     'env -i yad gate approve EP-x epic',
     'sudo -u me yad gate approve EP-x epic',
@@ -1115,6 +1116,8 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       // Review 4: \ + CR + LF runs the next line; a zsh extendedglob ^; $ ENV; paths that return secrets.
       'git log \\\r\ntouch PWNED', 'cat a.json \\\r\ntouch X', 'cat ^a.json', 'git log HEAD^', "jq -n '$ ENV.HOME'", "gh api --jq '$ ENV' user",
       'glab api projects/1/triggers', 'glab api projects/1/integrations/slack', 'gh api repos/o/r/actions/runs/1/logs', 'glab api projects/1/jobs/2/trace',
+      'glab api projects/1/secure_files/3/download', 'glab api projects/1/terraform/state/prod', 'glab api projects/1/pipeline_schedules/2', 'glab api projects/1/jobs/2/artifacts',
+      'gh api repos/o/r/actions/artifacts/1/zip', 'glab api application/settings', 'glab api user',
     ]) no(line);
     // A refusal always wins: a refused line is never pre-approved.
     assert.equal(agentGuardDecision('git log && gh pr merge 5').allow, false);

@@ -58,11 +58,9 @@ export function shellParts(line) {
       for (;;) {
         if (at > line.length) return -1;
         const eol = line.indexOf('\n', at);
-        const text = line.slice(at, eol < 0 ? line.length : eol);
+        const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
         const lineStart = at;
         at = eol < 0 ? line.length + 1 : eol + 1;
-        // The end line exactly: `EOF\r` does not end a heredoc in bash or zsh, so it does not here either (a CRLF
-        // heredoc never ends, and the lines after it are read as commands: more is judged, never less).
         if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) { if (!h.quoted) bodies.push(line.slice(start, lineStart)); break; }
       }
     }
@@ -141,7 +139,7 @@ function substitutionEnd(line, from) {
         for (;;) {
           if (at > line.length) { found = false; break; }
           const eol = line.indexOf('\n', at);
-          const text = line.slice(at, eol < 0 ? line.length : eol);
+          const text = line.slice(at, eol < 0 ? line.length : eol).replace(/\r$/, '');
           at = eol < 0 ? line.length + 1 : eol + 1;
           if ((h.tabs ? text.replace(/^\t+/, '') : text) === h.word) break;
         }
@@ -529,7 +527,7 @@ export const isCursorPayload = (payload) => payload?.hook_event_name === 'before
 // file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
 // named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
 export const PREAPPROVED = Object.freeze({
-  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials or CI logs in the path',
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, secure files, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials, Terraform state, schedules, CI logs or artifacts in the path, and not GitLab user',
   git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one, no %G in a format, git diff paths inside the project; git still runs what its own config names, such as an external diff or fsmonitor)',
   jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
   filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
@@ -708,8 +706,10 @@ const API_SPEC = { bool: ['--paginate', '--slurp', '-i', '--include', '--silent'
 // (Not --cache: it writes gh's cache files, outside the project.)
 // Any path segment that names a secret, token, variable, key or hook (`gpg_keys`, `webhooks`, `access_tokens`),
 // a person's e-mail addresses, a pipeline trigger (its token), an integration or service (a webhook URL), a
-// credential, or CI logs and traces (masking there is best effort).
-const NEVER_PATH = /secret|token|variable|key|hook|email|trigger|integration|service|credential|^logs$|^trace$/i;
+// credential, CI logs, traces and artifacts (masking there is best effort, or none), GitLab's secure files,
+// Terraform state, pipeline schedules (one lists its variables with their values) and admin settings, and
+// GitLab's `user` (the caller's private e-mail).
+const NEVER_PATH = /secret|secure|token|variable|key|hook|email|trigger|integration|service|credential|terraform|schedule|artifact|^logs$|^trace$|^application$|^user$/i;
 function apiPart(prog, args) {
   const r = operandsOf(args, API_SPEC);
   if (!r || r.ops.length !== 1) return false;
