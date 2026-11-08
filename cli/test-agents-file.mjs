@@ -521,7 +521,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
   // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
   for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n',
-    '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"']) {
+    '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"',
+    // A docs heredoc naming a guarded command stays allowed: only an end word that expands adds line-by-line reading.
+    `cat <<'EOF' > "$f"\ngh pr merge 1 is the person's\nEOF`, "gh pr create --body-file - <<'EOF' # $x\ngh pr merge 1 stays with the person\nEOF",
+    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -545,6 +548,10 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.equal(agentGuardDecision(many).allow, false);
     assert.ok(Date.now() - t3 < 3000, `many $( took ${Date.now() - t3} ms`);
   }
+  // A run of `<<` with no newline: the expanding-word check reads the matches one by one, never a backtracking regex.
+  const t4 = Date.now();
+  assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
+  assert.ok(Date.now() - t4 < 2000, `a run of << took ${Date.now() - t4} ms`);
   let inSub = 'echo $(';
   for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
   const t2 = Date.now();

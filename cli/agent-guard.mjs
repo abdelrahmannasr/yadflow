@@ -522,6 +522,8 @@ function platformApproval(words) {
 export const MAX_JUDGED = 1_000_000;
 // Every reading costs time, so the whole judgement has a budget: past it the line is refused, as a line too long
 // is — a hook that runs out its harness's time lets the command through (#492).
+// (agentGuardPreapproval asks again for an allowed line, so a hook can spend it twice: about 10 s at worst, well
+// under a harness's hook timeout.)
 export const JUDGE_BUDGET_MS = 5000;
 let deadline = Infinity;
 const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
@@ -540,6 +542,15 @@ export function agentGuardDecision(line, depth = 0) {
     deadline = Infinity;
   }
 }
+// Where the first heredoc whose end word expands (`<<E$x`, `<<"E\`x\`"`) opens, or -1: read from the actual matches,
+// one `<<` at a time, so it is linear (a regex over the line backtracked: quadratic on a run of `<<`).
+function firstExpandingHeredoc(text) {
+  for (let i = text.indexOf('<<'); i >= 0; i = text.indexOf('<<', i + 2)) {
+    const m = heredocAt(text, i);
+    if (m?.expands) return i;
+  }
+  return -1;
+}
 // Every reading the shells may make of the line: as written; with CRs dropped (a CR-dropping shell); with every
 // `\` + newline join made, CRs dropped first (a `$\<LF>(`, an end word split by a join: `EO\<LF>F`); and, where
 // the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
@@ -549,7 +560,8 @@ function judgeReadings(line, depth) {
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
   if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
   const modes = [{}];
-  if (/<<[^\n]*[$`]/.test(line)) modes.push({ literalExpanding: true });
+  const expandsAt = firstExpandingHeredoc(line);
+  if (expandsAt >= 0) modes.push({ literalExpanding: true });
   if (/[()]#/.test(line)) modes.push({ hashAfterParen: true });
   if (modes.length === 3) modes.push({ literalExpanding: true, hashAfterParen: true });
   for (const mode of modes) {
@@ -561,9 +573,10 @@ function judgeReadings(line, depth) {
   // An end word that expands can end the heredoc on any line, whatever the variable holds (`bash -c "cat <<E$x …"`
   // with an empty $x ends at `E`): each line is judged on its own too, so the command after it is seen wherever
   // the heredoc ends. Only refuses more.
-  if (modes.some((m) => m.literalExpanding)) {
+  if (expandsAt >= 0) {
     for (const text of texts) {
-      for (const one of text.split('\n')) {
+      const from = firstExpandingHeredoc(text);
+      for (const one of text.slice(from < 0 ? 0 : from).split('\n')) {
         const v = judgeLine(one, depth, {});
         if (!v.allow) return v;
       }
