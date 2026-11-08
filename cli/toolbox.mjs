@@ -237,6 +237,29 @@ export const TOOLBOX = Object.freeze([
     note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (an access token) are set with `docker mcp secret set`, never in yad.',
     usedBy: [],
   },
+  {
+    // #321 (E168): a Unity code repo's editor, for yad-implement. Recommended, not a connector: it is set up in
+    // the Unity Editor of one repo, with no Product file, and yad-implement's "A Unity repo" section says
+    // when to use it (a recommended tool has no generated "When a tool is missing" section).
+    id: 'unity-mcp', name: 'Unity MCP (MCP for Unity)', tier: 'recommended', role: 'drives the Unity Editor in a Unity code repo: compile errors, the console, tests',
+    licence: 'MIT', source: 'https://github.com/CoplayDev/unity-mcp', checked: '2026-11-08',
+    vetted: {
+      on: '2026-11-08', licenceFrom: 'https://github.com/CoplayDev/unity-mcp/blob/beta/LICENSE',
+      source: 'https://github.com/CoplayDev/unity-mcp', release: 'v10.3.0',
+      packages: [{ registry: 'pypi', name: 'mcpforunityserver', version: '10.3.0' }],
+      note: 'Formerly justinpbarnett/unity-mcp. The Unity package is added from the repository (Package Manager, a git URL pinned to the tag), not a registry; its Python server is the mcpforunityserver package, which the package itself sets up.',
+    },
+    // It is set up inside the Unity Editor: none of the four install types fits.
+    install: [],
+    manual: 'https://github.com/CoplayDev/unity-mcp#quickstart',
+    // Claude Code names it UnityMCP, other clients unityMCP: one name, matched whatever its case.
+    detect: { mcp: ['UnityMCP'] },
+    versions: null,
+    fallback: 'files only: yad-implement edits the C# and asks the person to open Unity and report its console errors',
+    records: null,
+    note: 'Needs Unity 2021.3 or newer, Python 3.10 or newer with uv, and the Unity Editor open on the repo while the agent works. Found by its server name only (yad never reads a server\'s settings).',
+    usedBy: ['yad-implement'],
+  },
 
   // ---- connectors: what a Product connects (skills/sdlc/config.yaml names the same adapters) -------
   {

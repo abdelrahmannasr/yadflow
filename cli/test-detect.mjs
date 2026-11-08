@@ -549,9 +549,10 @@ test('E164: a check run by hand on a pinned version — moving the pin fails unt
   for (const handCheck of [null, { script: 'x.mjs', package: '@open-pencil/cli', version: '0.16.0' }, { script: 'scripts/openpencil-node-ids.mjs', package: '@other/pkg', version: '0.16.0' }]) {
     assert.deepEqual(vettingProblems({ ...op, vetted: { ...op.vetted, handCheck } }), ['vetted.handCheck names its script (scripts/<name>.mjs) and one of vetted.packages'], JSON.stringify(handCheck));
   }
-  // The release check reads it through vet-check, which fails on any vetting problem. A fixed day, so the
-  // age rule never turns this test red by itself.
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), '--today', op.vetted.on], { encoding: 'utf8' });
+  // The release check reads it through vet-check, which fails on any vetting problem. A fixed day — the newest
+  // vetting of any entry, so none is "after today" and the age rule never turns this test red by itself.
+  const newest = TOOLBOX.map((t) => t.vetted.on).sort().pop();
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/vet-check.mjs'), '--today', newest], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
 });
 
@@ -1264,6 +1265,41 @@ test('#361 Docker MCP Toolkit: a recommended tool, found by its MCP_DOCKER serve
     assert.match(r.stdout, /Docker MCP Toolkit is used here now/);
     assert.match(r.stdout, /set it up by hand: https:\/\/docs\.docker\.com\//, 'it comes with Docker Desktop: the manual page is the way in');
     assert.deepEqual(toolboxJSON(p).shipped, { 'docker-mcp': 'use' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#321 Unity MCP: a recommended tool used by yad-implement, found by its UnityMCP server in any case, set up by the person', () => {
+  const t = TOOLBOX.find((x) => x.id === 'unity-mcp');
+  assert.equal(t.tier, 'recommended');
+  assert.deepEqual([toolProblems(t), vettingProblems(t)], [[], []]);
+  assert.deepEqual(t.install, [], 'it is set up inside the Unity Editor');
+  assert.deepEqual(t.usedBy, ['yad-implement']);
+  // Claude Code names it UnityMCP, other clients unityMCP.
+  for (const name of ['UnityMCP', 'unityMCP']) {
+    const { T, p, home } = product({ '.mcp.json': JSON.stringify({ mcpServers: { [name]: { type: 'http', url: 'http://localhost:8080/mcp' } } }) });
+    try {
+      const r = yad(['toolbox', '--json'], { cwd: p, home });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(JSON.parse(r.stdout).tools.find((x) => x.id === 'unity-mcp').status.state, 'installed', name);
+      if (name === 'UnityMCP') {
+        const human = yad(['toolbox', 'list'], { cwd: p, home }).stdout;
+        assert.match(human.slice(human.indexOf('Recommended'), human.indexOf('Connectors')), /Unity MCP/, 'listed under Recommended');
+        const added = yad(['toolbox', 'add', 'unity-mcp'], { cwd: p, home });
+        assert.equal(added.status, 0, added.stdout + added.stderr);
+        assert.match(added.stdout, /set it up by hand: https:\/\/github\.com\/CoplayDev\/unity-mcp#quickstart/);
+        assert.deepEqual(toolboxJSON(p).shipped, { 'unity-mcp': 'use' });
+      }
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  // Not found: connect hands the person the steps, with the package pinned to the vetted tag.
+  const { T, p, home } = product();
+  try {
+    const j = JSON.parse(yad(['toolbox', 'connect', 'unity-mcp', '--json'], { cwd: p, home }).stdout);
+    assert.ok(j.steps.length === 2 && j.steps.every((x) => x.who === 'person'), JSON.stringify(j.steps));
+    assert.match(j.steps[0].run, /Add package from git URL, and enter https:\/\/github\.com\/CoplayDev\/unity-mcp\.git\?path=\/MCPForUnity#v10\.3\.0$/);
+    assert.ok(j.steps[0].run.endsWith(`#${t.vetted.release}`), 'the pin is the vetted release');
+    assert.match(j.steps[1].run, /Configure All Detected Clients, and restart your agent/);
+    assert.equal(j.verify, 'yad toolbox connect unity-mcp --verify --json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

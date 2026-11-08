@@ -43,6 +43,10 @@ export const RECIPES = Object.freeze({
   ecc: [P('npx ecc-universal install --guided', INTERACTIVE)],
   'mattpocock-skills': [P('claude plugin install mattpocock-skills', 'it comes from its own plugin marketplace, which you add in your agent first')],
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
+  'unity-mcp': [
+    PT('in the Unity Editor, open Window → Package Manager → + → Add package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),
+    PT('then open Window → MCP for Unity → Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings, and an agent loads a new MCP server when it starts'),
+  ],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),
     PT('sign in to Figma in your agent (its Figma MCP server)', 'a sign-in is yours: it is your Figma account'),
