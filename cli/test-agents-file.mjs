@@ -280,6 +280,14 @@ test('the agent guard refuses every human-only yad command and every force push,
     'cat <<< "x"\nyad gate approve EP-x epic',
     'echo $((1<<2))\nyad gate approve EP-x epic',
     'cat <<EOF\r\nx\r\nEOF\r\nyad gate approve EP-x epic',
+    // #492: the reader splits as bash and zsh do. A CR is a word character (so `x\r#` holds no comment), a heredoc's
+    // end word is every character the shell reads as one word and its end line must match exactly, `(` and `)`
+    // end a part, and a command nested past three levels is refused.
+    'x\r#; gh pr merge 5', 'x\r#; yad gate approve EP-x epic', 'cat <<EOF#;gh pr merge 5\nbody\nEOF#\n', 'cat <<EOF#;git push --force\nb\nEOF#',
+    'cat <<EOF+\nEOF\ncat <<X\nEOF+\ngh pr merge 5\nX\n', 'cat <<EOF\nEOF\r\ncat <<X\nEOF\ngh pr merge 5\nX\n', 'cat <<EOF\r\nEOF\ncat <<X\nEOF\r\ngh pr merge 5\nX\n',
+    'cat <(gh pr merge 5)', 'echo x > >(gh pr merge 5)', 'f(){ gh pr merge 5; }; f', 'case x in x) gh pr merge 5;; esac', '(gh pr merge 5)',
+    'echo $(echo $(echo $(echo $(gh pr merge 5))))', 'echo $(echo $(echo $(echo $(echo hi))))', "bash -c 'bash -c \"bash -c \\\"bash -c ls\\\"\"'",
+    'git push --force\r', 'git push \\\r\n--force',
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -491,6 +499,24 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   ]) assert.equal(agentGuardDecision(cmd).allow, true, cmd);
   assert.equal(agentGuardDecision(undefined).allow, true);
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
+  // #492: a heredoc opened and closed with CRLF is text up to its `EOF\r` line; what follows is a command.
+  assert.deepEqual(shellParts('cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\r\n'), [['cat'], ['gh', 'pr', 'merge', '5\r']]);
+  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
+  for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n']) {
+    assert.equal(agentGuardDecision(ok).allow, true, ok);
+  }
+});
+
+test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
+  const { MAX_JUDGED } = await import('./agent-guard.mjs');
+  const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
+  const t0 = Date.now();
+  assert.equal(agentGuardDecision(line).allow, false);
+  assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
+  assert.equal(long.allow, false);
+  assert.match(long.message, /too long to judge/);
 });
 
 test('the refusal says what to do instead: the person runs it', () => {
