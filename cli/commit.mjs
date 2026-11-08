@@ -74,7 +74,9 @@ export async function runCommit(root, opts = {}) {
 
   // NUL-separated and spawned directly (run() trims, and git quotes an unusual name without -z — `Café.cs.meta`
   // would read as "Assets/Caf\303\251.cs.meta" and miss its partner below).
-  const staged = (spawnSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd: root, encoding: 'utf8' }).stdout || '').split('\0').filter(Boolean);
+  const listed = spawnSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (listed.error || listed.status !== 0) { fail(`git could not list the staged files (${listed.error ? listed.error.message : (listed.stderr || '').trim() || `exit ${listed.status}`}) — check git is installed and this is a git repo`); process.exitCode = 1; return; }
+  const staged = listed.stdout.split('\0').filter(Boolean);
   if (!staged.length) { fail('nothing staged — `git add` your atomic change first'); process.exitCode = 1; return; }
 
   // An override is recorded only when there is something to override: a staged file the Product's

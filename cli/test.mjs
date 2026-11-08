@@ -6618,13 +6618,9 @@ test('#321 runCommit: in a Unity repo a .meta beside a staged file or folder is 
     // Not a Unity repo: every staged file counts, and the guard says so.
     T = setup(false);
     process.exitCode = 0;
-    const errs = [];
-    const write = process.stderr.write.bind(process.stderr), out = process.stdout.write.bind(process.stdout);
-    process.stderr.write = (x, ...a) => { errs.push(String(x)); return write(x, ...a); };
-    process.stdout.write = (x, ...a) => { errs.push(String(x)); return out(x, ...a); };
-    try { await runCommit(T, { type: 'feat', message: 'not unity' }); } finally { process.stderr.write = write; process.stdout.write = out; }
+    const { out } = await captureConsole(() => runCommit(T, { type: 'feat', message: 'not unity' }));
     assert.equal(process.exitCode, 1);
-    assert.match(errs.join(''), /5 files staged \(atomic guard: ≤3\)/);
+    assert.match(out, /5 files staged \(atomic guard: ≤3\)/);
     fs.rmSync(T, { recursive: true, force: true });
   } finally { process.exitCode = prev; }
 });
