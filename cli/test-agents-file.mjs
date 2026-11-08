@@ -327,6 +327,14 @@ test('the agent guard refuses every human-only yad command and every force push,
     "echo 'gh pr merge 5' | bash -xs foo", "echo 'gh pr merge 5' | ksh -s a", "cat <<'EOF' | bash -s x\ngh pr merge 5\nEOF", 'gh {pr,merge} 5', '{gh,pr} merge 5', 'git {push,--force} origin main',
     'git {commit,-n} -m x', 'yad {gate,approve} EP-x analysis', 'gh {pr,review} 5 --approve', 'git push origin main {x,--fo}{rce,y}', 'git push origin {a,{--force,b}}', 'git push -{f..f} origin main',
     'git push origin {main,main,main,main,main,main,main,main,--force}',
+    // #495 review 3: empty alternatives (bash drops the empty words); option clusters with o; zsh --emulate; a brace
+    // list or an expansion in a shell's words; zsh's one-character sequences.
+    'gh pr {,merge} 5', 'gh {,pr} merge 5', "bash -c 'gh pr {,merge} 5'", 'echo {,}; gh pr {,,merge} 5', 'gh pr {,{,{merge,x}}} 5',
+    "bash -euo pipefail <<'EOF'\ngh pr merge 5\nEOF", "echo 'gh pr merge 5' | bash -eo pipefail", "zsh --emulate sh <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash {-s,}",
+    "{bash,} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | $SHELL", "${SHELL:-bash} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash $NOPE", 'git push origin {+..+}main',
+    'git push origin main -{-..-}force',
+    // A word too long to expand, or too many words, is refused rather than expanded: a 1 MB JSON word crashed the heap.
+    `echo x${'{'.repeat(200000)}a,b${'}'.repeat(200000)}; gh pr merge 5`, `echo ${'{a,b}'.repeat(190000)}; gh pr merge 5`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -560,6 +568,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'find . -name x -exec grep "git push --force" {} +', 'git -c alias.lg="log --oneline" lg', 'curl -fsSL https://x | bash -s -- --yes', '[[ a > b ]]', 'echo {a,b}.txt',
     '$EDITOR notes.md', '${PYTHON:-python3} x.py', '$(npm bin)/eslint .', "cat <<'EOF' | bash\necho hi\nEOF", 'ls <->', 'echo "gh pr merge 5" > notes.md; bash build.sh',
     'curl x | bash -s stable', 'cat build.sh | bash', 'bash -x ./build.sh arg', 'mkdir -p src/{a,b,c}', 'git add src/{a,b}.js', "jq '{a,b}' f.json", 'echo {1..5}', 'ls {a,b}{c,d}',
+    'for i in {1..100}; do echo $i; done', 'echo {0..64}', 'touch file{001..100}.txt', `curl -d '[${'{"id":0,"v":2},'.repeat(5)}{}]' https://x`,
+    `gh api repos/x -f body='[${'{"a":1,"b":2},'.repeat(10)}{}]'`, "echo '{a,b}{a,b}{a,b}{a,b}{a,b}'", 'echo {a,b}{a,b}{a,b}{a,b}{a,b}', 'bash -euo pipefail ./x.sh', 'echo {a..z}',
+    `curl -d '[${'{"a":1,"b":2},'.repeat(66000)}{}]' https://x`,
     `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
