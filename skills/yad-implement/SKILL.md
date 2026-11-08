@@ -132,26 +132,30 @@ paragraph (Step 6) as `design tool not reachable: continued from the frame links
 `ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root (a Unity project in a subfolder is
 not read as one).
 
-- **Reach.** Run the yad commands from inside the Unity repo (`cd` there): `yad toolbox list --json`, then
+- **Reach.** Run the yad commands from inside the folder you edit — the Unity repo, or its worktree
+  (`<repo>--<epic>`) when there is one (`cd` there): `yad toolbox list --json`, then
   find `unity-mcp` and use it when its `status.state` is `installed`. If it is not found, offer `yad toolbox
   connect unity-mcp --json` once, under the connect-tool rule, and hand the person its steps (they are done in
   the Unity Editor). Unity registers the server for its own project folder only, so its tools load only in an
   agent started in that folder: if your session started elsewhere (the Product, say) or does not see the
-  server (in Claude Code, `/mcp`), tell the person to start the agent in the Unity repo — or to set **Client
-  Project Dir** in the MCP for Unity window to the folder the agent starts in — and restart it, then run this
-  step again.
+  server (in Claude Code, `/mcp`), tell the person to start the agent in the folder you edit — or to set
+  **Client Project Dir** in the MCP for Unity window to the folder the agent starts in, and press Configure
+  again (a worktree is a new folder, so it needs this too) — and restart it, then run this step again.
 - **Probe once.** Read the console (`read_console`). If it fails, or the Editor is open on another folder
   than the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor
   on the folder you edit and start the server from the MCP for Unity window; if they cannot, use the fallback
   below.
-- **With it, only these tools:** `refresh_unity` (refresh and compile), `read_console`, `run_tests`, and the
-  read-only finders. Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
+- **With it, only these tools:** `refresh_unity` with `compile: "request"` (it does not compile unless asked),
+  `read_console`, `run_tests` with `get_test_job` (the run is started, then read by its job id), and the
+  read-only finders `find_gameobjects` and `find_in_file`. Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
   `batch_execute`, a `generate_*` tool, or any tool that writes a scene, prefab or asset: they run code in the
   Editor or change files the task did not declare, and the agent guard does not see MCP calls. After each
   edit, refresh, read the console and fix every error your change caused before you commit; when the task
   declares tests, run them (EditMode or PlayMode).
-- **Unity's files.** Unity writes a `.meta` file beside each new file (it holds the file's ID): a declared
-  file's own `.meta` goes in the commit with it and does not count against the ≤3-file rule. Any other file
+- **Unity's files.** Unity writes a `.meta` file beside each new file and folder under `Assets/` (it holds the
+  ID): a declared file's own `.meta`, and the `.meta` of a folder made for it, go in the commit with it, and a
+  declared file deleted or renamed takes its `.meta` with it. They do not count against the ≤3-file rule —
+  `yad commit` counts a `.meta` only when its own file or folder is not staged. Any other file
   the Editor writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*` — is left unstaged
   and named to the person; whether the team commits the `com.coplaydev.unity-mcp` package is theirs to decide,
   never part of a task commit.
@@ -179,7 +183,7 @@ actually exercises the task's acceptance criterion** — the task is not done un
 demonstrably met (record the result in the Step 7 report).
 
 **File-boundary rule (hard):** if the implementation genuinely needs a file **not** in the declared
-list, **flag and STOP** — do not silently widen the diff. Report the extra file(s) needed so the
+list (in a Unity repo, a declared file's own `.meta`, and the `.meta` of a folder made for it, are part of it: see "In a Unity repo" in Step 3), **flag and STOP** — do not silently widen the diff. Report the extra file(s) needed so the
 task's spec can be corrected (re-run `yad-spec` / re-scope the task) before implementing. A task whose
 declared files are wrong is a spec bug, not an implementation decision.
 
@@ -216,7 +220,7 @@ A contract change means the diff alters the agreed cross-repo shape itself.
   to a human**: the work belongs to a new epic on `classic`.
 
 ### Step 6 — Commit on the task branch
-Stage only the declared files. Commit with the convention: a conventional subject, a short body (with
+Stage only the declared files (in a Unity repo, a declared file's own `.meta`, and the `.meta` of a folder made for it, are part of it: see "In a Unity repo" in Step 3). Commit with the convention: a conventional subject, a short body (with
 the `Decisions:` paragraph when Step 3 asked anything — pass the body with `yad commit --body`, as
 `yad ship` takes no body), and a
 `Task: <story>-<task>` trailer (plus `Contract-Change: yes` if Step 5 applies). The human author owns the
@@ -255,7 +259,7 @@ at the engineer review in `yad-engineer-review`: merged as authored → `approve
 
 ## Hard rules (build plan §B, Cross-cutting)
 
-- **One atomic task = one branch = one PR/MR.** Never bundle tasks; never exceed the declared files. The one
+- **One atomic task = one branch = one PR/MR.** Never bundle tasks; never exceed the declared files (a Unity `.meta` beside one is part of it). The one
   exception (#350): several SMALL tasks of the same story may share one branch and PR/MR, each commit
   keeping its own `Task:` line, under the Product's `group_limit` (default 200 lines, 10 files) — `yad open-pr`
   warns when a group is over it.

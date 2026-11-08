@@ -85,8 +85,15 @@ export async function runCommit(root, opts = {}) {
     return;
   }
 
-  if (staged.length > ATOMIC_FILE_LIMIT && !opts.force) {
-    fail(`${staged.length} files staged (atomic guard: ≤${ATOMIC_FILE_LIMIT}). Split the change, or pass --force.`);
+  // In a Unity repo (#321), Unity writes a `.meta` beside each file and folder under Assets/ (it holds the ID):
+  // a staged `X.meta` whose `X` is staged too, or is a folder holding a staged file, goes with it and is not
+  // counted. Only there, and only with its partner: a lone `.meta` still counts.
+  const unity = exists(path.join(root, 'ProjectSettings', 'ProjectVersion.txt')) && exists(path.join(root, 'Assets'));
+  const companion = (f) => unity && f.endsWith('.meta') && (staged.includes(f.slice(0, -5)) || staged.some((g) => g.startsWith(`${f.slice(0, -5)}/`)));
+  const counted = staged.filter((f) => !companion(f));
+  if (counted.length > ATOMIC_FILE_LIMIT && !opts.force) {
+    const metas = staged.length - counted.length;
+    fail(`${counted.length} files staged (atomic guard: ≤${ATOMIC_FILE_LIMIT}${metas ? `; ${metas} Unity .meta file${metas === 1 ? '' : 's'} beside them not counted` : ''}). Split the change, or pass --force.`);
     for (const f of staged) info(f);
     process.exitCode = 1;
     return;

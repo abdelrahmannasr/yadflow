@@ -45,7 +45,7 @@ export const RECIPES = Object.freeze({
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
   'unity-mcp': [
     PT('in the Unity Editor, open the Package Manager (Window → Package Manager), choose + → Add (in Unity 6: Install) package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),
-    PT('then open Window → MCP for Unity → Toggle MCP Window, set Client Project Dir to the folder your agent starts in (the Unity repo, unless you start it elsewhere), press Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings for that folder only, and an agent loads a new MCP server when it starts'),
+    PT('then open Window → MCP for Unity → Toggle MCP Window; under Per-client setup, with Claude Code chosen, set Client Project Dir to the folder your agent starts in (the Unity repo, unless you start it elsewhere); press Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings for that folder only, and an agent loads a new MCP server when it starts'),
   ],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),

@@ -6565,6 +6565,45 @@ test('runCommit writes a conventional commit with trailers', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('#321 runCommit: in a Unity repo a .meta beside a staged file or folder is not counted by the atomic guard; elsewhere it is', async () => {
+  const setup = (unity) => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-unity-'));
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    git(T, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(T, 'checkout', '-q', '-b', 'feat/EP-x-S01-T01-thing');
+    fs.mkdirSync(path.join(T, 'Assets/Scripts/Foo'), { recursive: true });
+    if (unity) { fs.mkdirSync(path.join(T, 'ProjectSettings')); fs.writeFileSync(path.join(T, 'ProjectSettings/ProjectVersion.txt'), 'm_EditorVersion: 6000.0.0f1\n'); }
+    // Two declared scripts in a new folder: with their .meta files and the folder's, six files staged.
+    for (const f of ['Assets/Scripts/Foo/A.cs', 'Assets/Scripts/Foo/A.cs.meta', 'Assets/Scripts/Foo/B.cs', 'Assets/Scripts/Foo/B.cs.meta', 'Assets/Scripts/Foo.meta']) fs.writeFileSync(path.join(T, f), 'x');
+    git(T, 'add', '--', 'Assets');
+    return T;
+  };
+  const prev = process.exitCode;
+  try {
+    let T = setup(true);
+    process.exitCode = 0;
+    await runCommit(T, { type: 'feat', message: 'two scripts' });
+    assert.equal(process.exitCode, 0, 'two files counted, their three .meta files go with them');
+    assert.equal(git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n').length, 5);
+    fs.rmSync(T, { recursive: true, force: true });
+    // A lone .meta (its file not staged) still counts: 2 scripts + 1 stray meta + 1 more file = 4.
+    T = setup(true);
+    fs.writeFileSync(path.join(T, 'Assets/Other.cs.meta'), 'x'); fs.writeFileSync(path.join(T, 'Assets/C.cs'), 'x');
+    git(T, 'add', '--', 'Assets');
+    process.exitCode = 0;
+    await runCommit(T, { type: 'feat', message: 'too many' });
+    assert.equal(process.exitCode, 1, 'the stray .meta and a fourth file count');
+    assert.throws(() => git(T, 'rev-parse', 'HEAD~1'), 'nothing committed');
+    fs.rmSync(T, { recursive: true, force: true });
+    // Not a Unity repo: every staged file counts.
+    T = setup(false);
+    process.exitCode = 0;
+    await runCommit(T, { type: 'feat', message: 'not unity' });
+    assert.equal(process.exitCode, 1);
+    fs.rmSync(T, { recursive: true, force: true });
+  } finally { process.exitCode = prev; }
+});
+
 test('runCommit refuses when nothing is staged', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit2-'));
   git(T, 'init', '-q');

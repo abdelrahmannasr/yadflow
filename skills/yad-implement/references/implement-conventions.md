@@ -76,7 +76,8 @@ Co-Authored-By: CodeRabbit <noreply@coderabbit.ai>
 
 Each task in `tasks.md` (a light spec: its block between `<!-- yad:tasks -->` and `<!-- /yad:tasks -->`
 in `spec.md`, #348) declares a `Files:` list (≤3 where possible). The implementation diff must stay
-**inside that list**. If the task genuinely needs a file not listed:
+**inside that list** (in a Unity repo, a declared file's own `.meta`, and the `.meta` of a folder made for it,
+are part of it, #321). If the task genuinely needs a file not listed:
 
 1. **Stop.** Do not widen the diff silently.
 2. Report the extra file(s) needed.

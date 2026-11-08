@@ -247,7 +247,7 @@ export const TOOLBOX = Object.freeze([
       on: '2026-11-08', licenceFrom: 'https://github.com/CoplayDev/unity-mcp/blob/beta/LICENSE',
       source: 'https://github.com/CoplayDev/unity-mcp', release: 'v10.3.0',
       packages: [{ registry: 'pypi', name: 'mcpforunityserver', version: '10.3.0' }],
-      note: 'Formerly justinpbarnett/unity-mcp. The Unity package is added from the repository (Package Manager, a git URL pinned to the tag), not a registry; its Python server is the mcpforunityserver package, which the package itself sets up. It sends anonymous usage telemetry by default (tool names, timings, the Unity version, error text cut to 200 characters): DISABLE_TELEMETRY=true, or its Editor setting, turns it off.',
+      note: 'Formerly justinpbarnett/unity-mcp. The Unity package is added from the repository (Package Manager, a git URL pinned to the tag), not a registry; its Python server is the mcpforunityserver package, which the package itself sets up. It sends anonymous usage telemetry by default (tool names, timings, the Unity version, error text cut to 200–500 characters, with a random install ID): DISABLE_TELEMETRY=true, or its Editor setting, turns it off.',
     },
     // It is set up inside the Unity Editor: none of the four install types fits.
     install: [],

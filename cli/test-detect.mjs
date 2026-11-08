@@ -1299,7 +1299,7 @@ test('#321 Unity MCP: a recommended tool used by yad-implement, found by its Uni
     assert.ok(j.steps.length === 2 && j.steps.every((x) => x.who === 'person'), JSON.stringify(j.steps));
     assert.match(j.steps[0].run, /package from git URL, and enter https:\/\/github\.com\/CoplayDev\/unity-mcp\.git\?path=\/MCPForUnity#v10\.3\.0$/);
     assert.ok(j.steps[0].run.endsWith(`#${t.vetted.release}`), 'the pin is the vetted release');
-    assert.match(j.steps[1].run, /Toggle MCP Window, set Client Project Dir to the folder your agent starts in .*, press Configure All Detected Clients, and restart your agent$/);
+    assert.match(j.steps[1].run, /Toggle MCP Window; under Per-client setup, with Claude Code chosen, set Client Project Dir to the folder your agent starts in .*; press Configure All Detected Clients, and restart your agent$/);
     assert.equal(j.verify, 'yad toolbox connect unity-mcp --verify --json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // Where Unity really writes it for Claude Code: ~/.claude.json, for the Unity project folder only (local
@@ -1311,7 +1311,7 @@ test('#321 Unity MCP: a recommended tool used by yad-implement, found by its Uni
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [fs.realpathSync(unity)]: { mcpServers: { UnityMCP: { type: 'http', url: 'http://localhost:8080/mcp' } } } } }));
     const state = (cwd) => JSON.parse(yad(['toolbox', '--json'], { cwd, home }).stdout).tools.find((x) => x.id === 'unity-mcp').status.state;
     assert.equal(state(unity), 'installed', 'from the Unity repo');
-    assert.notEqual(state(other), 'installed', 'not from another folder');
+    assert.equal(state(other), 'missing', 'not from another folder');
   } finally { fs.rmSync(L, { recursive: true, force: true }); }
 });
 
@@ -1319,9 +1319,9 @@ test('#321: yad-implement says when a repo is a Unity repo, how it reaches Unity
   const t = TOOLBOX.find((x) => x.id === 'unity-mcp');
   const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8');
   assert.ok(skill.includes(`\`${t.fallback}\``), 'the fallback, quoted exactly: change one, change both');
-  for (const words of ['`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder', 'Run the yad commands from inside the Unity repo', '`unity-mcp`',
-    'yad toolbox connect unity-mcp --json', 'Client Project Dir', '`read_console`', 'Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`',
-    "a declared file's own `.meta` goes in the commit with it and does not count against the ≤3-file rule", 'the agent guard does not see MCP calls']) {
+  for (const words of ['`ProjectSettings/ProjectVersion.txt` and an `Assets/` folder', 'Run the yad commands from inside the folder you edit', '`unity-mcp`',
+    'yad toolbox connect unity-mcp --json', 'Client Project Dir', '`read_console`', '`get_test_job`', '`find_gameobjects` and `find_in_file`', '`compile: "request"`', 'Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`',
+    "a declared file's own `.meta`, and the `.meta` of a folder made for it, go in the commit with it", '`yad commit` counts a `.meta` only when its own file or folder is not staged', 'the agent guard does not see MCP calls']) {
     assert.ok(skill.replace(/\s+/g, ' ').includes(words), words);
   }
 });
