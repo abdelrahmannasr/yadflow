@@ -286,6 +286,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     'git log \\\r\ngh pr merge 5', 'git status \\\r\ngit push --force', 'git log \\\r\ngit commit --no-verify -m x',
     // ... and a join to a shell that drops CRs (Git Bash with igncr): refused under either reading.
     'git push \\\r\n--force', 'git push \\\r\n-f', 'yad gate \\\r\napprove EP-x epic', 'gh pr \\\r\nmerge 5',
+    // ... also inside a bash -c string built from quoted pieces.
+    "bash -c 'git push \\'\"\r\n\"'--force'", "bash -c 'git push \\''\r\n--force'",
     '# <<x\nyad gate approve EP-x epic',
     'env -i yad gate approve EP-x epic',
     'sudo -u me yad gate approve EP-x epic',
@@ -1081,6 +1083,8 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
       'jq . a.json', "jq -r '.a > 1' a.json", "jq --arg x y -n '$x'", "git log -- '*.mjs'", 'git log -n5 -p', 'git blame -L 1,2 a.json',
       'cat a.json', 'head -5 a.json', 'tail -n 2 a.json', 'wc -l a.json', 'grep -rn foo src/', 'grep -e foo a.json', 'git log | cut -d" " -f1 | uniq -c | tr a-z A-Z',
       'yad status --json | jq .x', 'yad gate status EP-a', 'yad doctor && git status',
+      // Decoded paths and suffixes do not block ordinary reads.
+      'glab api projects/grp%2Fproj/merge_requests', 'gh api repos/o/r/contents/README.md', 'gh api repos/o/r/releases/tags/v1.2.3', 'gh api repos/o/r/compare/main...feat',
       // Review 2: forms the allow list of characters keeps.
       'gh api repos/{owner}/{repo}/pulls', 'git rev-parse @{u}', 'git log -S foo', 'git diff --text', 'git diff HEAD~1', "git diff 'HEAD^' -- a.json", 'git diff main...HEAD -- src',
       'git log --format=%H -3', "grep -n 'a.*b' a.json", 'git blame --ignore-rev abc a.json', 'git log\t--oneline -2', 'git log \\\n  --oneline',

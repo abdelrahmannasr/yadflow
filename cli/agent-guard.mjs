@@ -466,10 +466,11 @@ function platformApproval(words) {
 
 // The verdict for one shell command line: `{allow: true}` or `{allow: false, message}`.
 // A `\` + CR + LF is a part break to bash and zsh with their default options, but a line join to a shell that
-// drops CRs (Git Bash with `igncr`). Refuse under either reading: judge the joined line too.
+// drops CRs (Git Bash with `igncr`). Refuse under either reading: judge the joined line too, at every depth, since
+// a `bash -c` string built from quoted pieces holds one only once its quotes are gone.
 export function agentGuardDecision(line, depth = 0) {
-  if (depth === 0 && typeof line === 'string' && line.includes('\\\r\n')) {
-    const joined = judgeLine(line.replace(/\\\r\n/g, ''), 0);
+  if (typeof line === 'string' && line.includes('\\\r\n')) {
+    const joined = judgeLine(line.replace(/\\\r\n/g, ''), depth);
     if (!joined.allow) return joined;
   }
   return judgeLine(line, depth);
@@ -536,7 +537,7 @@ export const isCursorPayload = (payload) => payload?.hook_event_name === 'before
 // file written or a file read from outside the project, a `$(…)`, a `bash -c`, an env prefix, and any program not
 // named here. What it lists is printed by `yad setup` and given to agents by `yad guide --json`.
 export const PREAPPROVED = Object.freeze({
-  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, secure files, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials, Terraform state, schedules, CI logs or artifacts, admin settings (application) or user in the path',
+  api: 'gh api / glab api: a GET (no -X other than GET, no fields, no --input, --hostname or --cache, only an Accept header), not graphql, and no secrets, secure files, variables, tokens, keys, hooks, e-mails, triggers, integrations, services, credentials, Terraform state, schedules, CI logs, traces or artifacts, admin settings (application) or user in the path, with or without a .json-style suffix',
   git: 'git log, status, diff, show, rev-parse, ls-files, blame (no git option before them; no --output, --ext-diff, --textconv, --no-index, --contents, --show-signature or a shortening of one, no %G in a format, git diff paths inside the project; git still runs what its own config names, such as an external diff or fsmonitor)',
   jq: 'jq (a filter on the line, never from a file; no env, $ENV, import or include in it; files inside the project)',
   filters: 'head, tail, wc, grep (not -R), cut, uniq, tr, cat (files inside the project)',
