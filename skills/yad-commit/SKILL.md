@@ -16,7 +16,9 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 - Run **inside the repo holding the staged change** — a code repo under
   `{project-root}/demo-repos/<repo>/`, or the Product itself. Use absolute paths.
 - **Stage first.** Only the staged (`git add`) atomic change is committed. The guard refuses more than
-  `ATOMIC_FILE_LIMIT` (3) staged files unless `--force` — split the change instead.
+  `ATOMIC_FILE_LIMIT` (3) staged files unless `--force` — split the change instead. In a Unity repo
+  (`ProjectSettings/ProjectVersion.txt` and `Assets/`), a staged `.meta` whose own file or folder is staged
+  too is not counted (#321).
 - **Subject** — `<type>: <lowercase imperative description, no trailing period>`; types are
   `feat|fix|docs|refactor|test|perf|build|ci|chore|revert`; proper nouns/acronyms keep their case.
 - **Task trailer** — required on a code repo (anchors the `spec-link` + `commit-message` gates). Given

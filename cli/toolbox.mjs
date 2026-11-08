@@ -237,6 +237,29 @@ export const TOOLBOX = Object.freeze([
     note: 'The first gateway start pulls every server image and can outlast a client\'s 30-second timeout: warm it once with `docker mcp gateway run --profile <id> --dry-run`. A server\'s secrets (an access token) are set with `docker mcp secret set`, never in yad.',
     usedBy: [],
   },
+  {
+    // #321 (E168): a Unity code repo's editor, for yad-implement. Recommended, not a connector: it is set up in
+    // the Unity Editor of one repo, with no Product file, and yad-implement's "In a Unity repo" section says
+    // when to use it (a recommended tool has no generated "When a tool is missing" section).
+    id: 'unity-mcp', name: 'Unity MCP (MCP for Unity)', tier: 'recommended', role: 'drives the Unity Editor in a Unity code repo: compile errors, the console, tests',
+    licence: 'MIT', source: 'https://github.com/CoplayDev/unity-mcp', checked: '2026-11-08',
+    vetted: {
+      on: '2026-11-08', licenceFrom: 'https://github.com/CoplayDev/unity-mcp/blob/beta/LICENSE',
+      source: 'https://github.com/CoplayDev/unity-mcp', release: 'v10.3.0',
+      packages: [{ registry: 'pypi', name: 'mcpforunityserver', version: '10.3.0' }],
+      note: 'Formerly justinpbarnett/unity-mcp. The Unity package is added from the repository (Package Manager, a git URL pinned to the tag), not a registry; its Python server is the mcpforunityserver package, which the package itself sets up. It sends anonymous usage telemetry by default (tool names, timings, the Unity version, error text cut to 200–500 characters, with a random install ID): DISABLE_TELEMETRY=true, or its Editor setting, turns it off.',
+    },
+    // It is set up inside the Unity Editor: none of the four install types fits.
+    install: [],
+    manual: 'https://github.com/CoplayDev/unity-mcp#quickstart',
+    // Claude Code names it UnityMCP, other clients unityMCP: one name, matched whatever its case.
+    detect: { mcp: ['UnityMCP'] },
+    versions: null,
+    fallback: 'files only: yad-implement edits the C# and asks the person to open Unity and report its console errors',
+    records: 'Unity not reachable: console checked by <person>',
+    note: 'Needs Unity 2021.3 or newer, Python 3.10 or newer with uv, and the Unity Editor open on the repo while the agent works. Unity registers it for Claude Code for the Unity project folder only, so its tools load in an agent started there. Found by its server name only (yad never reads a server\'s settings).',
+    usedBy: ['yad-implement'],
+  },
 
   // ---- connectors: what a Product connects (skills/sdlc/config.yaml names the same adapters) -------
   {
