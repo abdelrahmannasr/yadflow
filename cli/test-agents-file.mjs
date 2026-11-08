@@ -293,6 +293,10 @@ test('the agent guard refuses every human-only yad command and every force push,
     'echo "$\\\r\n(gh pr merge 5)"', 'cat <<EOF\r\n$\\\r\n(npx yadflow gate advance EP-x)\nEOF\r\n', 'echo "$\\\n(gh pr merge 5)"', 'cat <<EOF\n$\\\n(gh pr merge 5)\nEOF',
     'cat <<EOF\nx\nEO\\\nF\ngh pr merge 5\nEOF\n', 'bash -c "cat <<EOF$x\nEOF\ngh pr merge 5\nEOF$x"', 'bash -lc "cat <<E$F\nE$Fx\ngh pr merge 5\nE$F\n"',
     'cat <<< "x"\ncat <<EOF+\nbody\nEOF#\ncat <<\'EOF\'\n$(git push --force)\nEOF\n\n', "cat <<X\ncat <<'EOF'\n$(gh pr merge 5)\nEOF", "cat <<X\necho '$(gh pr merge 5)'",
+    // #492 review 2: an expanding end word is still a redirect, read past; a `#` right after `(` or `)` starts no comment.
+    '<<"E$x" gh pr merge 1', 'echo hi; <<"E$x" gh pr merge 1', "<<'E`x`' yad gate approve EP-a", '<<E$x gh pr merge 1', 'x=1 <<E$x gh pr merge 1',
+    '[[ a =~ (#|$(gh pr merge 1)) ]]', '[[ a =~ (#|`gh pr merge 1`) ]]', '[[ a =~ (x)#$(gh pr merge 1) ]]', 'shopt -s extglob\necho @(#$(gh pr merge 1))',
+    'echo foo(#$(gh pr merge 1))', 'ls foo(#q$(gh pr merge 1))', 'A((#$(gh pr merge 1)', '<<<((###;gh pr merge 1',
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -525,6 +529,13 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t1 = Date.now();
   assert.equal(agentGuardDecision(`${distinct}gh pr merge 5`).allow, false);
   assert.ok(Date.now() - t1 < 3000, `distinct words took ${Date.now() - t1} ms`);
+  // Many `$(…)`, each holding a heredoc, near the cap: one line index per text, shared by every `$(` in it.
+  for (const unit of ['$(cat <<E\nx\nE\n)', '$(cat <<E\n$(cat <<F\nx\nF\n)\nE\n)']) {
+    const many = `${unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length))}\ngh pr merge 1`;
+    const t3 = Date.now();
+    assert.equal(agentGuardDecision(many).allow, false);
+    assert.ok(Date.now() - t3 < 3000, `many $( took ${Date.now() - t3} ms`);
+  }
   let inSub = 'echo $(';
   for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
   const t2 = Date.now();

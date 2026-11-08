@@ -31,7 +31,9 @@ const HEREDOC = /<<(-?)[ \t]*((?:\\.|'[^'\n]*'|"[^"\n]*"|[^ \t\n;&|()<>'"\\])+)/
 // An end word holding `$` or a backtick is read as no heredoc (#492 review): inside `bash -c "…"` the outer shell
 // expands it first (`EOF$x` becomes `EOF`), so where it ends cannot be known here, and the lines after it are
 // judged as commands instead.
-const heredocAt = (line, i) => { HEREDOC.lastIndex = i; const m = HEREDOC.exec(line); return m && !/[$`]/.test(m[2]) ? m : null; };
+// It is still a redirect (`<<"E$x" gh pr merge 1` runs gh), so the `<<word` is read past either way: only no
+// heredoc is recorded for it (`expands`).
+const heredocAt = (line, i) => { HEREDOC.lastIndex = i; const m = HEREDOC.exec(line); if (m) m.expands = /[$`]/.test(m[2]); return m; };
 
 // Where each line of `text` starts, by its exact text and by its text with leading tabs removed (`<<-`), so a
 // heredoc's end line is found by a binary search, not by scanning on: a line of many heredocs with different
@@ -110,7 +112,7 @@ export function shellParts(line) {
     const ch = line[i];
     // A command substitution, unquoted or in double quotes (single quotes keep it as text).
     if (quote !== '\'' && ((ch === '$' && line[i + 1] === '(') || ch === '`')) {
-      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2);
+      const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)));
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
       word += line.slice(i, end + 1); inWord = true;
       i = end;
@@ -128,12 +130,14 @@ export function shellParts(line) {
     // `\` + CR + LF is NOT a line join: bash and zsh read an escaped CR, then run the next line as its own
     // command. So it falls through to the escape below (the CR is a character of the word), and the LF ends the part.
     if (ch === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
-    if (ch === '#' && !inWord) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
+    // A `#` starts a comment only where a word starts after a space, a tab, a newline, `;`, `&` or `|` (or at the
+    // start): right after `(` or `)` it is text to zsh's globs and to bash's `[[ =~ ]]` (#492 review).
+    if (ch === '#' && !inWord && (i === 0 || /[ \t\n;&|]/.test(line[i - 1]))) { while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') { endWord(); i += 2; continue; }
     if (ch === '<' && line[i + 1] === '<') {
       // A heredoc: its delimiter, bare or quoted, with `<<-` stripping leading tabs from the lines.
       const m = heredocAt(line, i);
-      if (m) { heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
+      if (m) { if (!m.expands) heredocs.push(heredocOf(m)); endWord(); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       endPart();
@@ -156,11 +160,12 @@ export function shellParts(line) {
 
 // Where the `$(` whose text starts at `from` closes: the index of its `)`, or the end of the line when it never
 // closes. Quotes, nested `(…)` and a heredoc's text inside it are its own, so a `)` in them does not close it.
-function substitutionEnd(line, from) {
+// `getIndex` gives the line index of `line`, built once per text and shared by every `$(` in it (#492 review: one
+// per call made many `$(…)` holding heredocs take quadratic time).
+function substitutionEnd(line, from, getIndex) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
-  let index = null;
   for (let i = from; i < line.length; i++) {
     const ch = line[i];
     if (quote) {
@@ -172,11 +177,11 @@ function substitutionEnd(line, from) {
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
       const m = heredocAt(line, i);
-      if (m) { heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
+      if (m) { if (!m.expands) heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
     }
     if (ch === '\n' && heredocs.length) {
       // Skip each heredoc's text to its end line; one that never ends is not a heredoc.
-      index ??= lineIndex(line);
+      const index = getIndex();
       let at = i + 1;
       let found = true;
       for (const h of heredocs) {
@@ -198,11 +203,13 @@ function substitutionEnd(line, from) {
 // keeps the next one as text.
 function substitutionsIn(text) {
   const out = [];
+  let index = null;
+  const getIndex = () => (index ??= lineIndex(text));
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === '\\') { i++; continue; }
     if ((ch === '$' && text[i + 1] === '(') || ch === '`') {
-      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2);
+      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2, getIndex);
       out.push(ch === '`' ? text.slice(i + 1, end).replace(/\\`/g, '`') : text.slice(i + 2, end));
       i = end;
     }
