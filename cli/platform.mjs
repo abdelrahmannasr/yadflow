@@ -735,3 +735,33 @@ export function issueUrl(platform, repo, { title = '', body = '', labels = [] } 
   if (labels.length) q.set('labels', labels.join(','));
   return `https://github.com/${repo}/issues/new?${q.toString()}`;
 }
+
+// ---- writes to a tracker item (E170) -----------------------------------------------------------------
+// `t` is a `prTarget`: { platform, cli, host, repo }. Each returns the runner's result. `-f` sends the value as
+// plain text, so a body starting with `@` is never read as a file name.
+const itemAt = (t, number) => (t.platform === 'github' ? `repos/${t.repo}/issues/${number}` : `projects/${encodeURIComponent(t.repo)}/issues/${number}`);
+const itemWrite = (t, method, at, fields, runner) => runner(t.cli, ['api', '--hostname', t.host, '-X', method, at, ...fields.flatMap((f) => ['-f', f])], { timeout: 30000 });
+
+export function addItemLabels(t, number, labels, { runner = run } = {}) {
+  if (t.platform === 'github') return itemWrite(t, 'POST', `${itemAt(t, number)}/labels`, labels.map((l) => `labels[]=${l}`), runner);
+  if (labels.some((l) => l.includes(','))) return { ok: false, stderr: 'a GitLab label name with a comma cannot be sent' };
+  return itemWrite(t, 'PUT', itemAt(t, number), [`add_labels=${labels.join(',')}`], runner);
+}
+
+export function removeItemLabels(t, number, labels, { runner = run } = {}) {
+  if (t.platform === 'github') {
+    let last = { ok: true };
+    for (const l of labels) { const r = itemWrite(t, 'DELETE', `${itemAt(t, number)}/labels/${encodeURIComponent(l)}`, [], runner); if (!r.ok) last = r; }
+    return last;
+  }
+  if (labels.some((l) => l.includes(','))) return { ok: false, stderr: 'a GitLab label name with a comma cannot be sent' };
+  return itemWrite(t, 'PUT', itemAt(t, number), [`remove_labels=${labels.join(',')}`], runner);
+}
+
+export function commentOnItem(t, number, body, { runner = run } = {}) {
+  return itemWrite(t, 'POST', `${itemAt(t, number)}/${t.platform === 'github' ? 'comments' : 'notes'}`, [`body=${body}`], runner);
+}
+
+export function closeItem(t, number, { runner = run } = {}) {
+  return itemWrite(t, t.platform === 'github' ? 'PATCH' : 'PUT', itemAt(t, number), [t.platform === 'github' ? 'state=closed' : 'state_event=close'], runner);
+}

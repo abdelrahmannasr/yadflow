@@ -140,6 +140,8 @@ ${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and Gi
                                        --format html writes a page you can sort and filter; titles are
                                        included, so check it before sharing it outside the team
   yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
+  yad issues show <ref>                One item in full. <ref> is 12 (Product repo) or <repo>#12
+  yad issues link|unlink <ref> <EP>    Link an item to an epic: comments on it and sets its type and status labels
 
 ${c.bold('Daily standup')} ${c.dim('(derived live, read-only, facts only — no score, no ranking)')}
   yad standup                          Each member on the team list: done since the last standup
@@ -162,6 +164,7 @@ ${c.bold('Team usage (EM adoption & behavior report)')}
                                        --member <name>, --format html|json|md, --repos (code commits)
 
 ${c.bold('Where am I / what next')}
+  yad epic new <slug> --issue <ref>    Seed from an item: its label sets the type; a defect or change finds its parent or gets a stub
   yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--parent <epic> --inherits <bases>] [--json]
                                        Seed a new epic's lifecycle: writes its step chain from a
                                        profile, plus empty approval/comment ledgers and reviews/.
@@ -508,7 +511,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
-const ISSUES_USAGE = 'usage: yad issues [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
+const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -645,7 +648,7 @@ const ACTIONS = {
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
-  issues: { known: ['list', 'labels'], default: 'list' },
+  issues: { known: ['list', 'labels', 'show', 'link', 'unlink'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
@@ -998,6 +1001,12 @@ async function main() {
         break;
       }
       if (noProduct()) break;
+      if (o.issue !== undefined) {
+        const foreign = commands.seedForeign(process.argv.slice(2));
+        if (foreign.length) { refuse(`yad epic new --issue does not take ${foreign.join(', ')}`); break; }
+        result = await commands.runEpicNewFromIssue(o.dir, { slug, issue: o.issue, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
+        break;
+      }
       result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
       break;
     }
@@ -1252,9 +1261,17 @@ async function main() {
       // E169. `list` reads and may write the --out file; `labels` adds the predefined labels to the repos.
       if (noProduct()) break;
       const action = o._[1] ?? 'list';
-      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels)`, ISSUES_USAGE); break; }
+      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink)`, ISSUES_USAGE); break; }
       const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
       if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
+      if (['show', 'link', 'unlink'].includes(action)) {
+        const words = o._.slice(2);
+        const want = action === 'show' ? 1 : 2;
+        if (words.length !== want) { refuse(`yad issues ${action} takes ${action === 'show' ? '<ref>' : '<ref> <EP-id>'}`, ISSUES_USAGE); break; }
+        result = action === 'show' ? await commands.runIssuesShow(o.dir, { ref: words[0], json: !!o.json })
+          : await (action === 'link' ? commands.runIssuesLink : commands.runIssuesUnlink)(o.dir, { ref: words[0], epic: words[1], json: !!o.json });
+        break;
+      }
       if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
       if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       result = await commands.runIssuesList(o.dir, {
