@@ -62,6 +62,15 @@ export function pick(labels, table) {
   return { value: found[0] ?? null, more: found.length > 1 };
 }
 
+// An item's type. A finding's label sits beside an ordinary one (`bug` and `security` is common), and the ordinary one
+// decides: only two ordinary labels, or two finding labels with no ordinary one, are "more than one".
+const FINDING_TYPES = new Set(['security', 'tech-debt', 'suggestion']);
+export function pickType(labels, table) {
+  const part = (keep) => Object.fromEntries(Object.entries(table).filter(([k]) => keep(FINDING_TYPES.has(k))));
+  const ordinary = pick(labels, part((f) => !f));
+  return ordinary.value ? ordinary : pick(labels, part((f) => f));
+}
+
 // ---- reading ---------------------------------------------------------------------------------------
 
 const str = (v) => (typeof v === 'string' && v ? v : null);
@@ -212,7 +221,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
     if (res.partial) notes.push(`${s.label}: not every item was read${res.why ? ` — ${res.why}` : ` (the limit is ${MAX_ITEMS} of each state)`}, so the list is incomplete`);
     for (const it of res.items) {
       const p = pick(it.labels, rules.priority);
-      const ty = pick(it.labels, rules.type);
+      const ty = pickType(it.labels, rules.type);
       // Several epics can share an item. A linked epic whose ledger cannot be read still counts as started.
       const linked = links.byItem.get(itemKey({ host: target.host, repo: target.repo, number: it.number })) || [];
       const st = itemStatus(it.state, linked.length ? (combinedStage(linked.map(stageOf)) ?? 'in-shape') : null);

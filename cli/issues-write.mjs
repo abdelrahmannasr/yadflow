@@ -14,7 +14,7 @@ import { productIdentity } from './members.mjs';
 import { prTarget } from './pr-list.mjs';
 import { repoSources } from './standup.mjs';
 import { api, shown, whyFailed, httpStatus, TIMEOUT } from './protection.mjs';
-import { labelRules, pick, itemStatus } from './issues.mjs';
+import { labelRules, pick, pickType, itemStatus } from './issues.mjs';
 import { runEpicNew, epicIdFrom } from './epic.mjs';
 import { allLinks, combinedStage, epicStage, itemKey, readLinks, writeLinks } from './issue-links.mjs';
 
@@ -112,7 +112,7 @@ export async function runIssuesShow(root, { ref, json = false, env = process.env
   const { item, t, label, productConfig } = got;
   const rules = labelRules(productConfig);
   const out = { ref: `${label === 'Product' ? '' : label}#${item.number}`, repo: label, platform: t.platform, host: t.host, number: item.number, url: item.url, state: item.state, kind: item.kind,
-    priority: item.confidential ? null : pick(item.labels, rules.priority).value, type: item.confidential ? null : pick(item.labels, rules.type).value,
+    priority: item.confidential ? null : pick(item.labels, rules.priority).value, type: item.confidential ? null : pickType(item.labels, rules.type).value,
     labels: item.confidential ? [] : item.labels, assignees: item.logins, confidential: item.confidential, title: item.title, body: item.body, untrusted: true, untrustedFields: ['title', 'body', 'labels'] };
   if (json) return emitJSON({ ok: true, ...out });
   log(`${c.bold(out.ref)} ${out.title ?? '(confidential: open it on GitLab to read it)'}`);
@@ -144,7 +144,7 @@ export function writeBack(root, epic, entry, t, { item, rules, epicType, runner 
   const add = [];
   const typeOf = EPIC_TO_ITEM[epicType];
   // Only an item with no type label gets one: a second would make the item's type ambiguous.
-  if (typeOf && !pick(item.labels, rules.type).value) add.push(rules.type[typeOf][0]);
+  if (typeOf && !pickType(item.labels, rules.type).value) add.push(rules.type[typeOf][0]);
   const status = statusFor(root, epics, item.state);
   const linksUnknown = item.state !== 'closed' && unreadable.length > 0;
   if (linksUnknown) failed.push(`the status label: the item links of ${unreadable.join(', ')} could not be read (.sdlc/issue-links.json), so this item's epics are unknown`);
@@ -387,7 +387,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
   const rules = labelRules(productConfig);
   let epicType = type;
   if (!epicType) {
-    const ty = pick(item.labels, rules.type);
+    const ty = pickType(item.labels, rules.type);
     if (ty.more) return bail('the item has more than one type label', 'choose with --type feature|change|defect|chore|hotfix');
     if (!ty.value) return bail('the item has no type label', item.confidential ? 'a confidential item\'s labels are not used. Pass --type' : 'add one (bug, feature, enhancement), or pass --type');
     epicType = ITEM_TO_EPIC[ty.value];

@@ -32,7 +32,7 @@ const MARKER = /<!-- yad-finding: ([0-9a-f]{64}) -->/g;
 export function badPath(p) {
   if (typeof p !== 'string' || !p || p.length > 300) return true;
   if (/^[/\\]|^[a-zA-Z]:|\\/.test(p) || [...p].some((ch) => ch.charCodeAt(0) < 32)) return true;
-  return p.split('/').some((seg) => seg === '..' || seg === '');
+  return p.split('/').some((seg) => seg === '..' || seg === '.' || seg === '');
 }
 
 const text = (v, max) => typeof v === 'string' && v.trim() !== '' && v.length <= max;
@@ -71,8 +71,14 @@ export const fingerprint = (f) => createHash('sha256').update(JSON.stringify([f.
 const SECRET = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|glpat-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?|-----BEGIN[^-]*-----|[A-Za-z0-9+_=-]{40,})/g;
 export const redact = (s) => String(s ?? '').replace(SECRET, '[redacted]');
 const plain = (s, max) => { const t = forTerminal(redact(s)).replace(/\s+/g, ' ').trim(); return t.length > max ? `${t.slice(0, max - 1)}…` : t; };
-// `mdEscape` stops links, images, tags and code. A backslash may still let a mention through, so these two become entities.
-export const safeMd = (s, max = 2000) => mdEscape(plain(s, max)).replace(/\\@/g, '&#64;').replace(/\\#/g, '&#35;');
+// An invisible space after each trigger stops a mention or a reference. GitHub reads backslashes and HTML entities as
+// the real character before it looks for one, so neither of those is enough (checked against its renderer).
+const ZWSP = '\u200b';
+const breakRefs = (t) => t.replace(/GH-(?=\d)/gi, (m) => `${m}${ZWSP}`).replace(/[%$](?=\w)/g, (m) => `${m}${ZWSP}`);
+// A title is not Markdown, but a mention in one can still notify.
+export const safeTitle = (s) => breakRefs(plain(s, 200).replace(/[@#!~&](?=\S)/g, (m) => `${m}${ZWSP}`));
+// `mdEscape` stops links, images, tags and code.
+export const safeMd = (s, max = 2000) => breakRefs(mdEscape(plain(s, max)).replace(/\\([@#!~&])/g, `$1${ZWSP}`));
 
 export function findingBody(f, fp, { task = null, labelled = true } = {}) {
   return [
@@ -104,20 +110,33 @@ function filedFingerprints(t, runner) {
 
 // Paging here is by cursor, so a full page is treated as not fully read.
 function draftAdvisories(t, runner) {
-  const res = api(runner, t.cli, t.host, `repos/${t.repo}/security-advisories?state=draft&per_page=${PAGE}`);
-  if (!res.ok || !Array.isArray(res.body)) return { why: res.ok ? 'the draft advisories could not be understood' : `the draft advisories could not be read${res.status ? ` (HTTP ${res.status})` : ''}: an administrator or security manager must run this` };
-  if (res.body.length >= PAGE) return { why: 'there are too many draft advisories to read them all' };
+  // Every state: a draft a person closed or published must not come back.
+  const res = api(runner, t.cli, t.host, `repos/${t.repo}/security-advisories?per_page=${PAGE}`);
+  if (!res.ok || !Array.isArray(res.body)) return { why: res.ok ? 'the advisories could not be understood' : `the advisories could not be read${res.status ? ` (HTTP ${res.status})` : ''}: an administrator or security manager must run this` };
+  if (res.body.length >= PAGE) return { why: 'there are too many advisories to read them all' };
   const seen = new Set();
   for (const a of res.body) for (const m of String(a?.description ?? '').matchAll(MARKER)) seen.add(m[1]);
   return { seen };
 }
 
-// public, private, internal, or null.
-function visibility(t, runner) {
+// `vis` is public, private, internal, or null. `noPush` is true only when GitHub says so: it silently drops the labels
+// and milestone of an item made without push access, and the next run could not recognise that item.
+function repoFacts(t, runner) {
   const res = api(runner, t.cli, t.host, `repos/${t.repo}`);
-  if (!res.ok || !res.body || typeof res.body !== 'object') return null;
-  if (['public', 'private', 'internal'].includes(res.body.visibility)) return res.body.visibility;
-  return typeof res.body.private === 'boolean' ? (res.body.private ? 'private' : null) : null;
+  if (!res.ok || !res.body || typeof res.body !== 'object') return { vis: null, noPush: false };
+  const b = res.body;
+  const vis = ['public', 'private', 'internal'].includes(b.visibility) ? b.visibility : (b.private === true ? 'private' : null);
+  return { vis, noPush: b.permissions?.push === false };
+}
+
+// What the platform really did with an item: why it is not what was asked, or null.
+function droppedFrom(stdout, confidential) {
+  let b;
+  try { b = JSON.parse(stdout); } catch { return 'the answer could not be read'; }
+  const names = (Array.isArray(b?.labels) ? b.labels : []).map((l) => String(typeof l === 'string' ? l : l?.name).toLowerCase());
+  if (confidential && b?.confidential !== true) return 'it was NOT made confidential: restrict it now';
+  if (!names.includes(FINDING_LABEL)) return 'the platform dropped its label, so a later scan would file it again';
+  return null;
 }
 
 // Map(title → id), across open and closed. Null if unread. GitHub assigns by number, GitLab by id.
@@ -156,7 +175,8 @@ function scanSettings(productConfig) {
 function targetFor(root, productConfig, repo, { env, runner }) {
   const identity = productIdentity(root, { productConfig, runner });
   const notRead = [];
-  const s = repoSources(root, identity, productConfig, notRead, env, { localPaths: false }).find((x) => x.label === repo);
+  // The first source is the Product itself. Findings belong to a registered code repo, even one named `Product`.
+  const s = repoSources(root, identity, productConfig, notRead, env, { localPaths: false }).slice(1).find((x) => x.label === repo);
   if (!s) return { why: notRead.length ? 'the repo list could not be read' : `no registered repo is called ${forTerminal(repo)}` };
   const t = prTarget({ platform: s.platform, gitUrl: s.gitUrl }, { env, runner });
   return t.ok ? { t } : { why: t.why };
@@ -182,7 +202,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
   if (parsed.error) return refuse(`findings refused: ${forTerminal(parsed.error)}`, 'fix the file and run it again. Nothing was filed');
   const productConfig = readJSON(productConfigPath(root), null);
   const settings = scanSettings(productConfig);
-  const skip = (why) => { if (json) return emitJSON({ ok: true, skipped: why, filed: [], duplicates: 0, notFiled: [], failed: [], overCap: 0, dryRun }); info(`scan not filed: ${why}`); return undefined; };
+  const skip = (why) => { if (json) return emitJSON({ ok: true, skipped: why, filed: [], duplicates: 0, notFiled: [], failed: [], notes: [], overCap: 0, dryRun }); info(`scan not filed: ${why}`); return undefined; };
   if (!settings.enabled) return skip('issues.scan.enabled is false in .sdlc/product.json');
   if (env.YAD_PLATFORM_READ === '0') return skip('platform reads are turned off (YAD_PLATFORM_READ=0)');
   const where = targetFor(root, productConfig, repo, { env, runner });
@@ -195,7 +215,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
   const unique = [...new Map(parsed.findings.map((f) => [fingerprint(f), f])).entries()];
   const fresh = unique.filter(([fp]) => !filed.seen.has(fp));
   let duplicates = unique.length - fresh.length;
-  const vis = t.platform === 'github' && fresh.some(([, f]) => f.category === 'security') ? visibility(t, runner) : null;
+  const { vis, noPush } = t.platform === 'github' && fresh.length ? repoFacts(t, runner) : { vis: null, noPush: false };
   const notFiled = [];
   const ordered = [];
   let drafts = null;
@@ -213,7 +233,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
   const chosen = ordered.slice(0, MAX_FILED);
   const overCap = ordered.length - chosen.length;
   const rules = labelRules(productConfig);
-  const result = { ok: true, dryRun, filed: [], duplicates, notFiled, failed: [], notes: [], overCap };
+  const result = { ok: true, skipped: null, dryRun, filed: [], duplicates, notFiled, failed: [], notes: [], overCap };
   const labelsOf = (f) => [FINDING_LABEL, rules.priority[f.priority][0], rules.type[f.category][0]];
 
   const wantsTracker = chosen.filter((x) => x.route !== 'advisory');
@@ -221,8 +241,8 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
     for (const { fp, f, route } of chosen) result.filed.push({ fingerprint: fp, category: f.category, priority: f.priority, title: plain(f.title, 200), to: route, url: null, wouldFile: true });
   } else {
     // A finding without its label could not be recognised next time, and would be filed again: labels come first.
-    let labelsReady = true;
-    if (wantsTracker.length) {
+    let labelsReady = !noPush;
+    if (wantsTracker.length && labelsReady) {
       const have = readLabels(t, runner);
       if (!have.ok) labelsReady = false;
       else for (const name of new Set(wantsTracker.flatMap(({ f }) => labelsOf(f)))) {
@@ -247,17 +267,22 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
       return id;
     };
     for (const { fp, f, route } of chosen) {
-      const title = plain(f.title, 200);
+      const title = safeTitle(f.title);
       const row = { fingerprint: fp, category: f.category, priority: f.priority, title };
       if (route === 'advisory') {
         const r = createDraftAdvisory(t, { summary: title, description: findingBody(f, fp, { task, labelled: false }), severity: SEVERITY[f.priority], cwe: f.rule }, { runner });
         if (r.ok) { let url = null; try { url = JSON.parse(r.stdout).html_url ?? null; } catch { /* filed, with no address */ } result.filed.push({ ...row, to: 'advisory', url }); }
-        else notFiled.push({ ...row, file: f.file, line: f.line, why: `the draft advisory was refused${httpStatus(r) ? ` (HTTP ${httpStatus(r)})` : ''}: an administrator or security manager must run this` });
+        else notFiled.push({ ...row, file: f.file, line: f.line, why: [403, 404].includes(httpStatus(r)) ? `the draft advisory was refused (HTTP ${httpStatus(r)}): an administrator or security manager must run this` : `GitHub did not accept the draft advisory${httpStatus(r) ? ` (HTTP ${httpStatus(r)})` : ''}` });
         continue;
       }
-      if (!labelsReady) { result.failed.push({ ...row, why: 'the labels could not be read or created, so it would not be recognised next time' }); continue; }
+      if (!labelsReady) { result.failed.push({ ...row, why: noPush ? 'your login cannot push to this repo, so the platform would drop its labels' : 'the labels could not be read or created, so it would not be recognised next time' }); continue; }
       const r = createFinding(t, { title, body: findingBody(f, fp, { task }), labels: labelsOf(f), milestone: milestoneFor(f.category), confidential: route === 'confidential' }, { runner });
-      if (r.ok) { let url = null; try { const b = JSON.parse(r.stdout); url = b.html_url ?? b.web_url ?? null; } catch { /* filed, with no address */ } result.filed.push({ ...row, to: route, url }); }
+      if (r.ok) {
+        let url = null;
+        try { const b = JSON.parse(r.stdout); url = b.html_url ?? b.web_url ?? null; } catch { /* the check below says so */ }
+        const dropped = droppedFrom(r.stdout, route === 'confidential');
+        if (dropped) result.failed.push({ ...row, url, why: dropped }); else result.filed.push({ ...row, to: route, url });
+      }
       else result.failed.push({ ...row, why: httpStatus(r) ? `${t.host} answered HTTP ${httpStatus(r)}` : 'the platform refused it' });
     }
   }
@@ -268,7 +293,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
     if (x.priority === 'P0') warn(line); else log(`  ${line}`);
   }
   for (const x of notFiled) warn(`NOT FILED ${x.priority} ${x.category}: ${forTerminal(x.title)} (${forTerminal(x.file)}:${x.line}): ${forTerminal(x.why)}`);
-  for (const x of result.failed) warn(`failed ${x.priority} ${x.category}: ${forTerminal(x.title)}: ${forTerminal(x.why)}`);
+  for (const x of result.failed) warn(`failed ${x.priority} ${x.category}: ${forTerminal(x.title)}: ${forTerminal(x.why)}${x.url ? ` ${x.url}` : ''}`);
   for (const n of result.notes) info(n);
   if (overCap) info(`${overCap} more finding(s) were left out: at most ${MAX_FILED} are filed per run, most urgent first. Run the scan again to file them`);
   info(`${result.filed.length} ${dryRun ? 'would be filed' : 'filed'}, ${duplicates} already filed, ${notFiled.length} not filed`);

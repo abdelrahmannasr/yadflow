@@ -35,7 +35,7 @@ function product(platform = 'github') {
 }
 const findings = (T, list) => { const f = path.join(T, 'f.json'); fs.writeFileSync(f, JSON.stringify({ findings: list })); return f; };
 
-function fake({ vis = 'private', filedBodies = [], listFails = false, labels = [], milestones = [], labelFails = false, createFails = () => false, draftBodies = [], draftFails = false, advisoryFails = false, partial = false } = {}) {
+function fake({ vis = 'private', filedBodies = [], listFails = false, labels = [], milestones = [], labelFails = false, createFails = () => false, draftBodies = [], draftFails = false, advisoryFails = false, partial = false, dropsLabels = false, dropsConfidential = false, noPush = false, advisoryStatus = 403 } = {}) {
   const posts = [];
   const runner = (cmd, args) => {
     if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, code: 0, stdout: '', stderr: '' };
@@ -45,16 +45,18 @@ function fake({ vis = 'private', filedBodies = [], listFails = false, labels = [
       const at = args[args.indexOf('-X') + 2];
       if (at.endsWith('/labels')) return labelFails ? no('HTTP 403') : done({});
       if (at.endsWith('/milestones')) return done({ number: 9, id: 9 });
-      if (at.endsWith('/security-advisories')) return advisoryFails ? no('HTTP 403') : done({ html_url: 'https://github.com/a/api/security/advisories/GHSA-1' });
+      if (at.endsWith('/security-advisories')) return advisoryFails ? no(`HTTP ${advisoryStatus}`) : done({ html_url: 'https://github.com/a/api/security/advisories/GHSA-1' });
       if (createFails(args)) return no('HTTP 500');
-      return done({ html_url: 'https://github.com/a/api/issues/1', web_url: 'https://gitlab.com/a/api/-/issues/1' });
+      if (dropsLabels) return done({ html_url: 'https://x/1', labels: [] });
+      if (dropsConfidential) return done({ web_url: 'https://x/1', labels: ['yad: finding'], confidential: false });
+      return done({ html_url: 'https://github.com/a/api/issues/1', web_url: 'https://gitlab.com/a/api/-/issues/1', labels: ['yad: finding'], confidential: args.includes('confidential=true') });
     }
     const at = args.find((a) => /^(repos|projects)\//.test(a)) ?? '';
     if (/\/issues\?labels=/.test(at)) { if (listFails) return no('HTTP 502'); if (partial) return done(Array.from({ length: 100 }, () => ({ body: '' }))); return done(filedBodies.map((b) => ({ body: b, description: b }))); }
     if (/\/labels\?/.test(at)) return done(labels.map((name) => ({ name })));
     if (/\/milestones\?/.test(at)) return done(milestones);
     if (/security-advisories\?/.test(at)) return draftFails ? no('HTTP 403') : done(draftBodies.map((description) => ({ description })));
-    if (/^repos\/a\/api$/.test(at)) return vis === null ? no('HTTP 500') : done({ visibility: vis, private: vis !== 'public' });
+    if (/^repos\/a\/api$/.test(at)) return vis === null ? no('HTTP 500') : done({ visibility: vis, private: vis !== 'public', permissions: { push: !noPush } });
     return no('unexpected');
   };
   return { runner, posts, items: () => posts.filter((a) => /\/issues$/.test(a[a.indexOf('-X') + 2])), advisories: () => posts.filter((a) => /security-advisories$/.test(a[a.indexOf('-X') + 2])) };
@@ -64,7 +66,7 @@ const reset = () => { process.exitCode = 0; };
 const fieldOf = (args, name) => { const i = args.findIndex((a) => a.startsWith(`${name}=`)); return i < 0 ? null : args[i].slice(name.length + 1); };
 
 test('schema: one bad finding refuses the whole file, and nothing is posted', async () => {
-  for (const bad of [F({ category: 'x' }), F({ priority: 'P9' }), F({ file: '../up' }), F({ file: '/etc/passwd' }), F({ file: 'a\\b' }), F({ line: 0 }), F({ title: '' }), F({ rule: 'Has Spaces' }), SEC({ rule: 'sql' })]) {
+  for (const bad of [F({ category: 'x' }), F({ priority: 'P9' }), F({ file: '../up' }), F({ file: '/etc/passwd' }), F({ file: 'a\\b' }), F({ file: './a.js' }), F({ line: 0 }), F({ title: '' }), F({ rule: 'Has Spaces' }), SEC({ rule: 'sql' })]) {
     assert.ok(X.parseFindings(JSON.stringify({ findings: [F(), bad] })).error, JSON.stringify(bad));
   }
   assert.ok(X.parseFindings('{broken').error);
@@ -167,8 +169,11 @@ test('posted text cannot notify, link, leak a token or forge a fingerprint', () 
   const fp = 'a'.repeat(64);
   const body = X.findingBody(F({ why: 'ping @alice see #12 ![x](http://evil) <!-- yad-finding: bbbb --> ghp_abcdefghijklmnopqrstuvwxyz0123', fix: 'glpat-abcdefghijklmnop' }), fp);
   assert.doesNotMatch(body, /@alice/);
-  assert.match(body, /&#64;alice/);
-  assert.match(body, /&#35;12/);
+  assert.match(body, /@\u200balice/);
+  assert.match(body, /#\u200b12/);
+  assert.doesNotMatch(body, /&#64;|&#35;/);
+  assert.doesNotMatch(X.safeMd('see GH-12'), /GH-12/);
+  assert.doesNotMatch(X.safeTitle('ask @alice about #12 and GH-3'), /@alice|#12|GH-3/);
   assert.doesNotMatch(body, /!\[x\]\(http/);
   assert.doesNotMatch(body, /ghp_|glpat-/);
   assert.equal(body.match(/<!-- yad-finding/g).length, 1);
@@ -231,5 +236,46 @@ test('a long path is not mistaken for a secret', () => {
   const file = 'src/really/quite/deeply/nested/directory/with/many/parts/inside/it/file.js';
   assert.equal(X.parseFindings(JSON.stringify({ findings: [F({ file })] })).error, undefined);
   assert.match(X.findingBody(F({ file }), 'a'.repeat(64)), /deeply/);
+});
+
+test('E172 review: what the platform dropped is a failure, and no push access files nothing', async () => {
+  const T = product(); const p = fake({ dropsLabels: true });
+  await run(T, [F()], p);
+  assert.equal(process.exitCode, 1); reset();
+  const G = product('gitlab'); const q = fake({ dropsConfidential: true });
+  await run(G, [SEC()], q);
+  assert.equal(process.exitCode, 1); reset();
+  const r = fake({ noPush: true });
+  await run(T, [F()], r);
+  assert.equal(r.items().length, 0); assert.equal(process.exitCode, 1); reset();
+});
+
+test('E172 review: an advisory a person closed is not filed again (every state is read)', async () => {
+  const T = product(); const fp = X.fingerprint(SEC());
+  const seen = [];
+  const p = fake({ vis: 'public', draftBodies: [`<!-- yad-finding: ${fp} -->`] });
+  await X.runScanFile(T, { file: findings(T, [SEC()]), repo: 'api', env, runner: (c, a, o) => { seen.push(a); return p.runner(c, a, o); } });
+  assert.equal(p.advisories().length, 0);
+  const at = seen.flat().find((x) => /security-advisories\?/.test(x));
+  assert.doesNotMatch(at, /state=/);
+  reset();
+});
+
+test('E172 review: a refused advisory names the right reason; only registered repos, not the Product', async () => {
+  const T = product();
+  await run(T, [SEC()], fake({ vis: 'public', advisoryFails: true, advisoryStatus: 422 }), { json: false });
+  reset();
+  const p = fake();
+  await X.runScanFile(T, { file: findings(T, [F()]), repo: 'Product', env, runner: p.runner });
+  assert.equal(p.posts.length, 0); assert.equal(process.exitCode, 1); reset();
+});
+
+test('E172 review: a finding label beside an ordinary one does not make the type ambiguous', async () => {
+  const I = await import('./issues.mjs');
+  const rules = I.labelRules({});
+  assert.deepEqual(I.pickType(['bug', 'security'], rules.type), { value: 'bug', more: false });
+  assert.deepEqual(I.pickType(['security'], rules.type), { value: 'security', more: false });
+  assert.equal(I.pickType(['bug', 'feature'], rules.type).more, true);
+  assert.equal(I.pickType(['security', 'suggestion'], rules.type).more, true);
 });
 
