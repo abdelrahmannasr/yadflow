@@ -29,6 +29,8 @@ const GROUPS = [
       'yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json] — each team member\'s done / working on / waiting since the previous working day; derived live, facts only; a repo the platform cannot be asked about says "platform not read"',
       'yad issues [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status <status>] [--assignee <login>|none|--me] [--format md|html] [--json] — the team\'s GitHub issues and GitLab issues and tasks, with priority, type, status and assignee; the HTML page sorts and filters (E169)',
       'yad issues labels [--dry-run] — create the predefined priority, type and status labels each repo lacks (E169)',
+      'yad issues show <ref> — one item in full; link / unlink <ref> <EP-id> — tie an item to an epic, with a comment and labels on the item',
+      'yad epic new <slug> --issue <ref> — seed an epic from an item: its label sets the type, and a defect or change finds its parent or gets a stub',
     ],
   },
   {

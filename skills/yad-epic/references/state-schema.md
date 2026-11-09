@@ -1116,3 +1116,14 @@ Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its S
 `status: "open"` blocks the **next** normal change on the thread (`reconcile-debt-check.sh`) until it is
 `"paid"` (evidence: the Shape artifacts updated **and** a regression test added). The debt lets a hotfix
 jump the queue once, but freezes new thread work until the SDLC again describes production.
+
+## `issue-links.json` (E170)
+
+Per epic, at `epics/<epic>/.sdlc/issue-links.json`. Written by `yad issues link` and `yad epic new --issue`. It is optional, and older CLIs never read it, so it needs no shape bump. It holds where each item is, never its text.
+
+```json
+{ "items": [{ "platform": "github", "host": "github.com", "repo": "a/b", "number": 12, "url": "https://github.com/a/b/issues/12", "linkedAt": "2026-11-09T10:00:00.000Z", "commentedAt": "2026-11-09T10:00:01.000Z" }] }
+```
+
+`commentedAt` is set once the comment is posted, so it is never posted twice. A file that cannot be parsed is refused, never overwritten.
+
