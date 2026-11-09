@@ -289,7 +289,7 @@ test('labels: creates only what no accepted spelling covers, on each host in its
   posted.length = 0;
   const d = await I.runIssuesLabels(T, { dryRun: true, json: true, env, runner });
   assert.equal(posted.length, 0);
-  assert.equal(d.repos[0].missing.length, 6);
+  assert.equal(d.repos[0].missing.length, 9);
 });
 
 test('labels: a repo that cannot be read creates nothing and fails the command', async () => {
