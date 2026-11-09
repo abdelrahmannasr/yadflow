@@ -178,8 +178,11 @@ export const SORTERS = {
   updated: (a, b) => cmp(b.updated || '', a.updated || '') || tie(a, b),
 };
 
+// One account, across platforms: the same login on two hosts can be two people.
+export const accountId = (a) => `${a.platform}/${String(a.host).toLowerCase()}/${String(a.login).toLowerCase()}`;
+
 // The Product repo's items are `#12`, every other repo's `<label>#12`.
-export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFAULT_CLOSED_DAYS * DAY, env = process.env, runner } = {}) {
+export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFAULT_CLOSED_DAYS * DAY, env = process.env, runner, authCache = new Map() } = {}) {
   const r = runner ? { runner } : {};
   const notes = [];
   const productConfig = readJSON(productConfigPath(root), null);
@@ -191,7 +194,6 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
   const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
   const registryUnread = notRead.length > 0;
   const seen = new Set();
-  const authCache = new Map();
   const links = allLinks(root);
   if (links.unreadable.length) notes.push(`the item links of ${links.unreadable.join(', ')} could not be read, so items linked there show as unlinked`);
   const stages = new Map();
@@ -221,7 +223,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
       if (ty.more) flags.push('more than one type label');
       const assignees = it.logins.map((login) => {
         const m = whoseAccount(got.members, { platform: target.platform, host: target.host, login }, got.disputed);
-        return { login: clean(login), member: m.member ? m.member.primary.login : null };
+        return { login: clean(login), member: m.member ? m.member.primary.login : null, memberKey: m.member ? accountId(m.member.primary) : null, ambiguous: !!m.ambiguous };
       });
       items.push({ ref: `${s.label === 'Product' ? '' : s.label}#${it.number}`, repo: s.label, platform: target.platform, host: target.host, number: it.number, title: it.title, url: it.url,
         state: it.state, kind: it.kind, priority: p.value, type: ty.value, labels: it.labels, assignees, created: it.created, updated: it.updated, closed: it.closed, due: it.due,
@@ -336,9 +338,12 @@ var num={priority:1,type:1,status:1};document.querySelectorAll('[data-sort]').fo
 // ---- the commands ----------------------------------------------------------------------------------
 
 const LIST_ONLY = new Set(['--priority', '--type', '--status', '--assignee', '--me', '--repo', '--since', '--until', '--date', '--sort', '--closed-since', '--format', '--out', '--json', '--dir']);
+// The Markdown link of an item's URL, with the characters that would end it encoded.
+export const mdUrl = (u) => u.replace(/[()|]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+
 const LABEL_FLAGS = new Set(['--dry-run', '--json', '--dir']);
 const WORD_FLAGS = new Set(['--json', '--dir']);
-export const foreignFlags = (argv, action) => argv.filter((a) => a.startsWith('-') && !(action === 'labels' ? LABEL_FLAGS : action === 'list' ? LIST_ONLY : WORD_FLAGS).has(a.split('=')[0]));
+export const foreignFlags = (argv, action) => argv.filter((a) => a.startsWith('-') && !(action === 'labels' || action === 'sync' ? LABEL_FLAGS : action === 'list' ? LIST_ONLY : WORD_FLAGS).has(a.split('=')[0]));
 
 function checkValues(flag, value, allowed) {
   if (!value) return null;

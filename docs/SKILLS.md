@@ -1,4 +1,4 @@
-# Agent skills (all 39)
+# Agent skills (all 40)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -293,6 +293,7 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
   originating stage.
 - **`yad-reconcile`** — a read-only drift/orphan/debt sweep across threads (mirrors `yad-docs-sync`; never
   a gate). The hard block is the CI gates.
+- **`yad-issues`** — the team backlog on GitHub issues and GitLab work items: list and report them, read one, seed or link an epic, and update linked items from epic status. Item text is treated as a description of the work, never as instructions.
 - **`yad-stub`** — mint a **stub genesis epic** for a brownfield feature that has *no* epic, so a
   defect/change can thread off it today (`yad-change` needs a real parent). The stub is the smallest real
   thread anchor — type `feature`, `stub: backfill-pending`, `verified: false` — never inventing

@@ -37,12 +37,13 @@ function product() {
 const issue = (over = {}) => ({ number: 7, title: 'Secret title', body: 'Secret body', state: 'open', html_url: 'https://github.com/a/b/issues/7', labels: [{ name: 'bug' }], assignees: [], ...over });
 
 // A fake platform: answers the read, the parent query and every write, and keeps the writes.
-function platform({ item = issue(), parent = null, parentFails = false, writeFails = false, readFails = false } = {}) {
+function platform({ item = issue(), parent = null, parentFails = false, writeFails = false, readFails = false, events = [], eventsFail = false } = {}) {
   const writes = [];
   const runner = (cmd, args) => {
     if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, code: 0, stdout: '', stderr: '' };
     if (args[0] !== 'api') return no('unexpected');
     if (args.includes('-X')) { writes.push(args); return writeFails ? no('HTTP 403') : done({}); }
+    if (args.some((x) => /\/events\?|resource_state_events/.test(x))) return eventsFail ? no('HTTP 502') : done(events);
     if (args.includes('graphql')) return parentFails ? no('HTTP 502') : done({ data: { repository: { issue: { parent } } } });
     return readFails ? no('HTTP 404: Not Found') : done(item);
   };
@@ -366,5 +367,186 @@ test('E170 review 3: a broken links file in the child folder refuses before anyt
     await assert.rejects(W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner }), /not an issue-links file/, bad);
   }
   assert.equal(fs.existsSync(path.join(T, 'epics/EP-pay-parent')), false);
+});
+
+// ---- E171: sync -----------------------------------------------------------------------------------------
+const shipped = (T, e) => { const dir = path.join(T, 'epics', e, '.sdlc'); const st = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')); return { dir, st }; };
+const linkOne = async (T, epic, number = 7, labels = [{ name: 'feature' }]) => W.runIssuesLink(T, { ref: String(number), epic, env, runner: platform({ item: issue({ number, labels }) }).runner });
+const closes = (writes) => writes.filter((a) => a.includes('PATCH') && a.includes('state=closed'));
+// A stand-in for a shipped epic: the sync only asks the stage, so the tests pass it through the ledger's own reader.
+const markShipped = (T, epic) => { const { dir, st } = shipped(T, epic); fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...st, kind: 'stub', currentStep: 'backfill-pending' })); };
+
+test('E171: sync moves the status label and leaves an up-to-date item alone', async () => {
+  const T = product();
+  await seed(T, 'base');
+  await linkOne(T, 'EP-base');
+  const stale = platform({ item: issue({ labels: [{ name: 'feature' }, { name: 'status: todo' }] }) });
+  const r = W.syncItems(T, { env, runner: stale.runner });
+  assert.deepEqual(r.items[0].labelled, ['status: in progress']);
+  assert.deepEqual(r.items[0].removed, ['status: todo']);
+  const fresh = platform({ item: issue({ labels: [{ name: 'feature' }, { name: 'status: in progress' }] }) });
+  W.syncItems(T, { env, runner: fresh.runner });
+  assert.equal(fresh.writes.length, 0);
+  reset();
+});
+
+test('E171: --dry-run writes nothing, on the platform or in the links file', async () => {
+  const T = product();
+  await seed(T, 'base');
+  await W.runIssuesLink(T, { ref: '7', epic: 'EP-base', env, runner: platform({ item: issue({ labels: [{ name: 'feature' }] }), writeFails: true }).runner });
+  const before = fs.readFileSync(path.join(T, 'epics/EP-base/.sdlc/issue-links.json'), 'utf8');
+  reset();
+  const { runner, writes } = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  const r = W.syncItems(T, { dryRun: true, env, runner });
+  assert.equal(r.items[0].commented, true);
+  assert.equal(writes.length, 0);
+  assert.equal(fs.readFileSync(path.join(T, 'epics/EP-base/.sdlc/issue-links.json'), 'utf8'), before);
+});
+
+test('E171: closes once every epic shipped, once only, and not over a person who reopened it', async () => {
+  const T = product();
+  await seed(T, 'a1'); await seed(T, 'a2');
+  await linkOne(T, 'EP-a1'); await linkOne(T, 'EP-a2');
+  markShipped(T, 'EP-a1');
+  const one = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  W.syncItems(T, { env, runner: one.runner });
+  assert.equal(closes(one.writes).length, 0, 'one epic still running');
+  markShipped(T, 'EP-a2');
+  const both = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  W.syncItems(T, { env, runner: both.runner });
+  assert.equal(closes(both.writes).length, 1);
+  assert.ok(linksOf(T, 'EP-a1')[0].closedByYadAt);
+  assert.ok(linksOf(T, 'EP-a2')[0].closedByYadAt);
+  const reopened = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  W.syncItems(T, { env, runner: reopened.runner });
+  assert.equal(closes(reopened.writes).length, 0);
+  reset();
+});
+
+test('E171: an item in a repo that is not registered is never written', async () => {
+  const T = product();
+  await seed(T, 'base');
+  fs.writeFileSync(path.join(T, 'epics/EP-base/.sdlc/issue-links.json'), JSON.stringify({ items: [{ platform: 'github', host: 'github.com', repo: 'someone/else', number: 1, url: 'https://github.com/someone/else/issues/1' }] }));
+  const { runner, writes } = platform();
+  const r = W.syncItems(T, { env, runner });
+  assert.equal(writes.length, 0);
+  assert.equal(r.skipped.length, 1);
+});
+
+test('E171: an unreadable links file holds back closes and status labels', async () => {
+  const T = product();
+  await seed(T, 'a1'); await seed(T, 'broken');
+  await linkOne(T, 'EP-a1');
+  markShipped(T, 'EP-a1');
+  fs.writeFileSync(path.join(T, 'epics/EP-broken/.sdlc/issue-links.json'), '{broken');
+  const { runner, writes } = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  const r = W.syncItems(T, { env, runner });
+  assert.equal(closes(writes).length, 0);
+  assert.equal(writes.some((a) => a.some((x) => x.startsWith('labels[]=status:'))), false);
+  assert.deepEqual(r.unreadable, ['EP-broken']);
+});
+
+test('E171: one item failing does not stop the others, and the command exits 1', async () => {
+  const T = product();
+  await seed(T, 'base');
+  await linkOne(T, 'EP-base', 7); await linkOne(T, 'EP-base', 8);
+  const runner = (cmd, args) => {
+    if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, code: 0, stdout: '', stderr: '' };
+    if (args.includes('-X')) return done({});
+    return args.some((a) => a.endsWith('/issues/7')) ? no('HTTP 404') : done(issue({ number: 8, labels: [{ name: 'feature' }] }));
+  };
+  await W.runIssuesSync(T, { env, runner, json: false });
+  assert.equal(process.exitCode, 1);
+  reset();
+});
+
+test('E171: after a gate, an epic with no items makes no call, and a failure never throws', async () => {
+  const T = product();
+  await seed(T, 'base');
+  let calls = 0;
+  W.syncAfterGate(T, 'EP-base', { env, runner: () => { calls++; return no('x'); } });
+  assert.equal(calls, 0);
+  await linkOne(T, 'EP-base');
+  W.syncAfterGate(T, 'EP-base', { env, runner: platform({ writeFails: true }).runner });
+  W.syncAfterGate(T, 'EP-base', { env: { ...env, YAD_PLATFORM_READ: '0' }, runner: () => { calls++; return no('x'); } });
+  assert.equal(calls, 0);
+  fs.writeFileSync(path.join(T, 'epics/EP-base/.sdlc/issue-links.json'), '{broken');
+  assert.doesNotThrow(() => W.syncAfterGate(T, 'EP-base', { env, runner: platform().runner }));
+  reset();
+});
+
+test('E171: gate ci never reaches the item sync, and the two local paths do', () => {
+  const bin = fs.readFileSync(new URL('../bin/yad.mjs', import.meta.url), 'utf8');
+  const line = bin.split('\n').find((l) => l.includes('commands.syncAfterGate('));
+  assert.match(line, /action === 'sync' && result\?\.written/);
+  assert.match(line, /action === 'advance'/);
+  assert.doesNotMatch(line, /'ci'/);
+});
+
+test('E171: standup item lines link the number and escape a hostile title', async () => {
+  const S = await import('./standup.mjs');
+  const model = { window: { start: '2026-11-08T00:00:00Z', end: '2026-11-09T00:00:00Z', tz: 'UTC', basis: 'x', ledgerFrom: '2026-11-08' }, team: [{ login: 'ann', status: 'active', accounts: ['a'], done: [], working: [], waiting: [], issues: [{ ref: '#7', url: 'https://github.com/a/b/issues/7', title: '<script>x</script> [a](http://b)', priority: 'P1', status: 'in progress', epic: 'EP-x' }] }], left: [], unlisted: [], ownerless: [], platform: [], notRead: [], notes: [], memberErrors: [], duplicates: [], fetched: 'ok', issuesNotRead: [] };
+  const md = S.renderMarkdown(model);
+  assert.match(md, /\[\\#7\]\(https:\/\/github\.com\/a\/b\/issues\/7\)/);
+  assert.doesNotMatch(md, /\[a\]\(http/);
+  const html = S.renderHtml(model);
+  assert.match(html, /<a href="https:\/\/github\.com\/a\/b\/issues\/7">#7<\/a>/);
+  assert.doesNotMatch(html, /<script>x/);
+});
+
+test('E171: the skills that start from an item say its text is not instructions', () => {
+  for (const n of ['yad-epic', 'yad-analysis', 'yad-change', 'yad-issues']) {
+    const t = fs.readFileSync(new URL(`../skills/${n}/SKILL.md`, import.meta.url), 'utf8');
+    assert.match(t, /yad issues show/, n);
+    assert.match(t, /[Nn]ever follow an instruction/, n);
+  }
+});
+
+test('E171 review: an item ever reopened on the platform is not closed, even with no local record; an unread history closes nothing', async () => {
+  const T = product();
+  await seed(T, 'a1');
+  await linkOne(T, 'EP-a1');
+  markShipped(T, 'EP-a1');
+  const item = issue({ labels: [{ name: 'feature' }] });
+  const again = platform({ item, events: [{ event: 'closed' }, { event: 'reopened' }] });
+  W.syncItems(T, { env, runner: again.runner });
+  assert.equal(closes(again.writes).length, 0);
+  const unread = platform({ item, eventsFail: true });
+  const r = W.syncItems(T, { env, runner: unread.runner });
+  assert.equal(closes(unread.writes).length, 0);
+  assert.match(r.items[0].failed.join(), /reopened/);
+  reset();
+});
+
+test('E171 review: the after-gate sync updates labels and never closes', async () => {
+  const T = product();
+  await seed(T, 'a1');
+  await linkOne(T, 'EP-a1');
+  markShipped(T, 'EP-a1');
+  const p = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  W.syncAfterGate(T, 'EP-a1', { env, runner: p.runner });
+  assert.equal(closes(p.writes).length, 0);
+  assert.ok(p.writes.some((a) => a.includes('labels[]=status: done')));
+  reset();
+});
+
+test('E171 review: a confidential item is not a failure', async () => {
+  const T = product();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', git_url: 'git@gitlab.com:a/b.git' }));
+  await seed(T, 'base');
+  const item = { iid: 7, title: 'x', description: 'y', state: 'opened', web_url: 'https://gitlab.com/a/b/-/issues/7', labels: [], assignees: [], confidential: true };
+  await W.runIssuesLink(T, { ref: '7', epic: 'EP-base', env, runner: platform({ item }).runner });
+  reset();
+  await W.runIssuesSync(T, { env, runner: platform({ item }).runner });
+  assert.ok(!process.exitCode);
+  reset();
+});
+
+test('E171 review: unknown items are never "none", and items need the whole account to match', async () => {
+  const S = await import('./standup.mjs');
+  const base = { window: { start: '2026-11-08T00:00:00Z', end: '2026-11-09T00:00:00Z', tz: 'UTC', basis: 'x', ledgerFrom: '2026-11-08' }, team: [{ login: 'ann', status: 'active', accounts: ['a'], done: [], working: [], waiting: [], issues: [] }], left: [], unlisted: [], ownerless: [], platform: [], notRead: [], notes: [], memberErrors: [], duplicates: [], fetched: 'ok', issuesNotRead: [] };
+  assert.match(S.renderMarkdown({ ...base, issuesUnknown: true }), /could not be read or matched/);
+  assert.doesNotMatch(S.renderMarkdown({ ...base, issuesUnknown: false }), /could not be read or matched/);
+  assert.notEqual(I.accountId({ platform: 'github', host: 'github.com', login: 'alice' }), I.accountId({ platform: 'gitlab', host: 'gitlab.com', login: 'alice' }));
 });
 

@@ -130,15 +130,16 @@ const statusFor = (root, epics, state) => {
 };
 
 // Put the comment and labels on the item. Never throws, and returns what failed; the link is kept either way.
-export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic], unreadable = [] }) {
+export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic], unreadable = [], dryRun = false }) {
   const failed = [];
   const failedWhy = (what, r) => { const code = httpStatus(r); failed.push(`${what}: ${code ? `${t.host} answered HTTP ${code}` : clean(r.stderr || 'the write failed').slice(0, 200)}`); };
-  const out = { commented: false, labelled: [], failed };
-  if (!entry.commentedAt) {
+  const out = { commented: false, labelled: [], removed: [], failed, notes: [] };
+  if (!entry.commentedAt && dryRun) out.commented = true;
+  else if (!entry.commentedAt) {
     const r = commentOnItem(t, entry.number, `Linked to yadflow epic \`${epic}\`${epicType ? ` (type: ${epicType})` : ''}.`, { runner });
     if (r.ok) { entry.commentedAt = new Date().toISOString(); out.commented = true; } else failedWhy('the comment', r);
   }
-  if (item.confidential) { failed.push('a confidential item is left unlabelled, because its labels are not read'); return out; }
+  if (item.confidential) { out.notes.push('a confidential item is left unlabelled, because its labels are not read'); return out; }
   const have = new Set(item.labels.map((l) => l.toLowerCase()));
   const add = [];
   const typeOf = EPIC_TO_ITEM[epicType];
@@ -151,8 +152,9 @@ export function writeBack(root, epic, entry, t, { item, rules, epicType, runner 
   const known = status !== null && !linksUnknown;
   if (known && !have.has(rules.status[status][0].toLowerCase())) add.push(rules.status[status][0]);
   const stale = known ? Object.entries(rules.status).filter(([s]) => s !== status).flatMap(([, names]) => names).filter((l) => have.has(l.toLowerCase())) : [];
+  if (dryRun) { out.labelled = add; out.removed = stale; return out; }
   if (add.length) { const r = addItemLabels(t, entry.number, add, { runner }); if (r.ok) out.labelled = add; else failedWhy(`the labels ${add.join(', ')}`, r); }
-  if (stale.length && !removeItemLabels(t, entry.number, stale, { runner }).ok) failed.push('the old status label could not be removed');
+  if (stale.length) { if (removeItemLabels(t, entry.number, stale, { runner }).ok) out.removed = stale; else failed.push('the old status label could not be removed'); }
   return out;
 }
 
@@ -176,6 +178,7 @@ function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner })
 function sayBack(back) {
   if (back.commented) info('commented on the item');
   if (back.labelled.length) info(`labels added: ${back.labelled.map(forTerminal).join(', ')}`);
+  for (const n of back.notes) info(forTerminal(n));
   for (const f of back.failed) warn(`not written to the item — ${forTerminal(f)}. The link is kept${/^the labels/.test(f) ? '; `yad issues labels` creates missing labels' : ''}`);
 }
 
@@ -185,6 +188,135 @@ export const seedForeignFlags = (argv) => argv.filter((a) => a.startsWith('-') &
 
 // A leftover approvals.json the child's seed would refuse: records in it, or one that does not parse.
 const hasApprovals = (p) => { if (!fs.existsSync(p)) return false; try { const a = JSON.parse(fs.readFileSync(p, 'utf8')); return !Array.isArray(a) || a.length > 0; } catch { return true; } };
+
+// Whether a person ever reopened the item: true, false, or null when the history could not all be read.
+function everReopened(t, number, runner) {
+  const gh = t.platform === 'github';
+  const at = gh ? `repos/${t.repo}/issues/${number}/events?per_page=100` : `projects/${encodeURIComponent(t.repo)}/issues/${number}/resource_state_events?per_page=100`;
+  for (let page = 1; page <= 10; page++) {
+    const res = api(runner, t.cli, t.host, `${at}&page=${page}`);
+    if (!res.ok || !Array.isArray(res.body)) return null;
+    if (res.body.some((e) => (gh ? e?.event === 'reopened' : e?.state === 'reopened'))) return true;
+    if (res.body.length < 100) return false;
+  }
+  return null;
+}
+
+// ---- sync (E171) -------------------------------------------------------------------------------------
+
+// The repos yad may write to, as Map(host/repo → target). The links file is committed, so anyone with a PR could
+// point it at another repo: an item is only ever written if its repo is registered here.
+function registeredTargets(root, { env, runner }) {
+  const productConfig = readJSON(productConfigPath(root), null);
+  const identity = productIdentity(root, { productConfig, runner });
+  const notRead = [];
+  const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
+  const authCache = new Map();
+  const targets = new Map();
+  for (const s of sources) {
+    const t = prTarget({ platform: s.platform, gitUrl: s.gitUrl }, { env, authCache, runner });
+    if (t.host && t.repo) targets.set(`${t.host}/${t.repo}`.toLowerCase(), { ...t, label: s.label });
+  }
+  return { targets, productConfig, registryUnread: notRead.length > 0 };
+}
+
+// Bring each linked item up to date. `only` limits it to one epic's items. Returns the plan of what happened.
+export function syncItems(root, { only = null, dryRun = false, close = true, env = process.env, runner = run, now = Date.now() } = {}) {
+  const links = allLinks(root);
+  const epicsOf = (key) => links.byItem.get(key) || [];
+  const scope = new Set();
+  const entriesByEpic = new Map();
+  for (const epic of new Set([...links.byItem.values()].flat())) {
+    const items = readLinks(root, epic);
+    entriesByEpic.set(epic, items);
+    if (only === null || epic === only) for (const l of items) scope.add(itemKey(l));
+  }
+  const out = { items: [], unreadable: links.unreadable, skipped: [], dryRun };
+  if (!scope.size) return out;
+  const { targets, productConfig, registryUnread } = registeredTargets(root, { env, runner });
+  const rules = labelRules(productConfig);
+  const touched = new Set();
+  for (const key of scope) {
+    const epics = epicsOf(key);
+    const entries = epics.map((epic) => ({ epic, entry: entriesByEpic.get(epic).find((l) => itemKey(l) === key) }));
+    const first = entries[0].entry;
+    const t = targets.get(`${first.host}/${first.repo}`.toLowerCase());
+    const shownRef = `${forTerminal(first.repo)}#${first.number}`;
+    if (!t) { out.skipped.push(`${shownRef}: ${registryUnread ? 'the repo list could not be read' : 'its repo is not registered in this Product'}, so it was not written`); continue; }
+    if (!t.ok) { out.items.push({ ref: shownRef, epics, commented: false, labelled: [], removed: [], closed: false, failed: [t.why], notes: [] }); continue; }
+    const item = readItem(t, first.number, { runner });
+    if (!item.ok) { out.items.push({ ref: shownRef, epics, commented: false, labelled: [], removed: [], closed: false, failed: [item.why], notes: [] }); continue; }
+    const row = { ref: shownRef, epics, commented: false, labelled: [], removed: [], closed: false, failed: [], notes: [] };
+    for (const { epic, entry } of entries) {
+      const had = entry.commentedAt;
+      const back = writeBack(root, epic, entry, t, { item, rules, epicType: epicTypeOf(root, epic), runner, epics, unreadable: links.unreadable, dryRun });
+      if (entry.commentedAt !== had) touched.add(epic);
+      row.commented ||= back.commented;
+      row.labelled.push(...back.labelled);
+      row.removed.push(...back.removed);
+      for (const f of back.failed) if (!row.failed.includes(f)) row.failed.push(f);
+      for (const n of back.notes) if (!row.notes.includes(n)) row.notes.push(n);
+      // What the next epic of this item must see, so the same label is not sent twice.
+      const gone = new Set(back.removed.map((l) => l.toLowerCase()));
+      item.labels = [...item.labels.filter((l) => !gone.has(l.toLowerCase())), ...back.labelled];
+    }
+    // Close once, and only when every epic has shipped. An item a person reopened keeps its `closedByYadAt`.
+    const allShipped = !links.unreadable.length && epics.every((e) => epicStage(root, e) === 'shipped');
+    if (close && item.state === 'open' && allShipped && !entries.some(({ entry }) => entry.closedByYadAt)) {
+      // The links file may not be committed, so the platform decides: an item ever reopened is a person's call.
+      const again = everReopened(t, first.number, runner);
+      if (again === null) row.failed.push('could not read whether the item was reopened, so it was not closed');
+      else if (again) row.notes.push('someone reopened this item, so it stays open');
+      else if (dryRun) row.closed = true;
+      else if (closeItem(t, first.number, { runner }).ok) {
+        row.closed = true;
+        for (const { entry } of entries) entry.closedByYadAt = new Date(now).toISOString();
+        for (const { epic } of entries) { writeLinks(root, epic, entriesByEpic.get(epic)); touched.add(epic); }
+      } else row.failed.push('the item could not be closed');
+    }
+    out.items.push(row);
+  }
+  if (!dryRun) for (const epic of touched) writeLinks(root, epic, entriesByEpic.get(epic));
+  return out;
+}
+
+export async function runIssuesSync(root, { dryRun = false, json = false, env = process.env, runner = run, now = Date.now() } = {}) {
+  if (!fs.existsSync(productConfigPath(root))) return bailer(json)('not a Product (no .sdlc/product.json here)', 'run it from the Product, or pass --dir');
+  if (env.YAD_PLATFORM_READ === '0') return bailer(json)('platform reads are turned off (YAD_PLATFORM_READ=0)', 'unset it to sync');
+  const r = syncItems(root, { dryRun, env, runner, now });
+  const failed = r.items.filter((i) => i.failed.length).length + r.skipped.length;
+  if (failed || r.unreadable.length) process.exitCode = 1;
+  if (json) return emitJSON({ ok: !failed && !r.unreadable.length, ...r });
+  for (const i of r.items) {
+    const did = [i.commented && 'comment', i.labelled.length && `labels +${i.labelled.map(forTerminal).join(', +')}`, i.removed.length && `labels -${i.removed.map(forTerminal).join(', -')}`, i.closed && 'close'].filter(Boolean);
+    log(`  ${i.ref} (${i.epics.join(', ')}): ${did.length ? `${dryRun ? 'would ' : ''}${did.join('; ')}` : 'up to date'}`);
+    for (const n of i.notes ?? []) info(`${i.ref}: ${forTerminal(n)}`);
+    for (const f of i.failed) warn(`${i.ref}: ${forTerminal(f)}`);
+  }
+  for (const s of r.skipped) warn(s);
+  for (const e of r.unreadable) warn(`${e}: its .sdlc/issue-links.json could not be read, so status labels and closes were held back`);
+  if (!r.items.length && !r.skipped.length && !r.unreadable.length) info('no items are linked to an epic');
+  else if (!dryRun) info('commit any .sdlc/issue-links.json this changed, so the team keeps the record');
+  return undefined;
+}
+
+// After a gate advances, on this machine. Best effort: it prints a warning and never fails the gate. An epic
+// with no linked items makes no network call. A gate advanced in CI is caught by the next `yad issues sync`.
+export function syncAfterGate(root, epic, { env = process.env, runner = run, now = Date.now() } = {}) {
+  try {
+    if (env.YAD_PLATFORM_READ === '0') return;
+    if (!readLinks(root, epic).length) return;
+    // Status and labels only. Closing an item is asked for, with `yad issues sync`.
+    const r = syncItems(root, { only: epic, close: false, env, runner, now });
+    const changed = r.items.filter((i) => i.commented || i.labelled.length || i.removed.length);
+    for (const i of changed) info(`updated ${i.ref}: ${[i.commented && 'comment', ...i.labelled.map((l) => `+${forTerminal(l)}`), ...i.removed.map((l) => `-${forTerminal(l)}`)].filter(Boolean).join(', ')}`);
+    if (changed.some((i) => i.commented)) info('commit .sdlc/issue-links.json so the team keeps the record');
+    for (const i of r.items) for (const f of i.failed) warn(`${i.ref}: ${forTerminal(f)}. The gate still passed; \`yad issues sync\` catches up`);
+    for (const s of r.skipped) warn(s);
+  } catch (e) {
+    warn(`the linked items were not updated (${forTerminal(e?.message ?? String(e))}). The gate still passed; \`yad issues sync\` catches up`);
+  }
+}
 
 const epicTypeOf = (root, epic) => readJSON(epicFiles(epicRoot(root, epic)).state, null)?.type ?? null;
 const knownEpic = (root, epic) => isValidEpicId(epic) && !PRODUCT_EPICS.includes(epic) && fs.existsSync(epicFiles(epicRoot(root, epic)).state);
@@ -197,7 +329,7 @@ export async function runIssuesLink(root, { ref, epic: raw, json = false, now = 
   if (!got) return undefined;
   const rules = labelRules(got.productConfig);
   const { entry, created, back } = linkAndWriteBack(root, epic, got.t, got.item, { rules, epicType: epicTypeOf(root, epic), now, runner });
-  if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed });
+  if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${created ? 'linked' : 'already linked:'} ${got.label === 'Product' ? '' : forTerminal(got.label)}#${entry.number} → ${epic}`);
   sayBack(back);
   if (created) info('commit .sdlc/issue-links.json on the epic\'s branch so the team sees the link');
@@ -287,7 +419,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
   const seeded = await runEpicNew(root, { slug: epic, type: epicType, profile, parent: parentId, inherits, today, json: true, returnResult: true });
   if (!seeded?.ok) return bail(`${seeded?.error ?? 'the epic could not be seeded'}${stubbed ? ` (the stub ${stubbed} was created and stays)` : ''}`, seeded?.hint);
   const { entry, back } = linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner });
-  if (json) return emitJSON({ ...seeded, issue: { number: entry.number, url: entry.url }, parent: parentId ?? null, stubParent: stubbed, commented: back.commented, labelled: back.labelled, failed: back.failed });
+  if (json) return emitJSON({ ...seeded, issue: { number: entry.number, url: entry.url }, parent: parentId ?? null, stubParent: stubbed, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${epic} seeded from item ${entry.number} — type ${epicType}${parentId ? `, parent ${parentId}${stubbed ? ' (new stub)' : ''}` : ''}`);
   sayBack(back);
   if (seeded.next) hand(`next: the ${seeded.next} skill. It reads the item with \`yad issues show\``);

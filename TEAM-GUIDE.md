@@ -30,7 +30,7 @@ You will have **four separate git repos**, each with one job, plus the **yadflow
 
 ```
   yadflow         ──►  the TOOL
-  (npm package)        The `yad` CLI and the 39 workflow skills, installed from npm
+  (npm package)        The `yad` CLI and the 40 workflow skills, installed from npm
                        (`npx yadflow …` or `npm install -g yadflow`). You never clone it,
                        and no real product work happens inside it.
 
@@ -818,7 +818,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 12. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions of all 39 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
+descriptions of all 40 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -853,6 +853,7 @@ descriptions of all 39 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-timeline` | Render a feature **thread** (its evolution) + resolve its current truth. |
 | `yad-defects` | Per-epic/per-thread **quality-gap report** by escape stage + root cause. |
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
+| `yad-issues` | **The team backlog** on GitHub issues and GitLab work items: report, read one item, seed or link an epic, and update linked items. |
 | `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
 | `yad-run` | Drive Build on the automation dial; kill switch. |
 | `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(product)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
@@ -870,6 +871,6 @@ descriptions of all 39 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
-- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 39 agent skills.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 40 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-checkout/`** — a full worked epic (Shape + Build) you can copy from.

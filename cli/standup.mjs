@@ -3,7 +3,7 @@
 //
 // READ-ONLY, DERIVED LIVE, FACTS ONLY. Nothing here is stored; every line is rebuilt from git, the Product
 // ledgers, the capture branches and the platform each time. No score, no ranking and no judging flag
-// (`yad usage`'s rule), and never an email, a commit message, a PR title or a comment body. The one write
+// (`yad usage`'s rule), and never an email, a commit message, a PR title or a comment body. Issue and work item titles are the one exception (E171). The one write
 // is E131's access cache in git's own folder (`memberStatuses`), never a Product file.
 //
 // WHO. The team list is E131's member files. Each member is one block, joined through every identity the
@@ -41,6 +41,7 @@ import { readClaims, fetchCaptures } from './claims.mjs';
 import { gitIn, wipName, WIP_PREFIX } from './capture.mjs';
 import { gitAuthors, personKey } from './people.mjs';
 import { isBot } from './riskmap.mjs';
+import { accountId, buildIssues, mdEscape, mdUrl } from './issues.mjs';
 import { readMembers, memberStatuses, memberMatches, productIdentity, ttlDays, accountLabel, accessCheck } from './members.mjs';
 import { ledgerEvents, esc, mdText, writeReport } from './usage.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
@@ -504,9 +505,21 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   const shape = (m) => ({
     login: m.primary.login, logins: m.accounts.map((a) => a.login), account: accountLabel(m.primary), accounts: m.accounts.map(accountLabel), status: m.status, lastActive: isDay(m.lastActive) ? m.lastActive : null, ...blocks.get(m),
   });
-  const team = members.filter((m) => m.status !== 'left').map(shape);
+  // E171. Each member's items: open ones, and those closed in this window. Titles are shown on purpose: a list of
+  // numbers is no use in a standup. A repo not read is "not read", through `gapLines`, never "no items".
+  const active = members.filter((m) => m.status !== 'left');
+  const backlog = active.length ? buildIssues(root, { now, closedSinceMs: win.startMs, env, authCache, ...(runner ? { runner } : {}) }) : { items: [], repos: [], notes: [], registryUnread: false };
+  const platformGone = new Set(prMissing.map((p) => p.label));
+  // Each repo's failure is said once, with its PR read's line if that failed too. The flag does not depend on that.
+  const issuesNotRead = backlog.repos.filter((r) => !r.read && !platformGone.has(r.label)).map((r) => `${r.label}: items not read — ${r.why}`);
+  notes.push(...backlog.notes.filter((n) => !notes.includes(n)));
+  const issuesUnknown = backlog.registryUnread || backlog.repos.some((r) => !r.read || r.partial) || backlog.items.some((i) => i.assignees.some((a) => a.ambiguous));
+  const itemsFor = (m) => backlog.items.filter((i) => i.assignees.some((a) => a.memberKey === accountId(m.primary))).map((i) => ({ ref: i.ref, url: i.url, title: i.title, priority: i.priority, status: i.status, epic: i.epic?.id ?? null, flags: i.flags }));
+  const team = active.map((m) => ({ ...shape(m), issues: itemsFor(m) }));
   const left = members.filter((m) => m.status === 'left').map(shape);
   return {
+    issuesNotRead,
+    issuesUnknown,
     window: { start: new Date(win.startMs).toISOString(), end: new Date(now).toISOString(), tz, basis: win.basis, ledgerFrom: win.startUtcDay },
     fetched,
     ttlDays: ttl,
@@ -534,7 +547,7 @@ export function onlyMember(model, login) {
 // ---- rendering -----------------------------------------------------------------------------------
 
 const SECTIONS = [['done', 'Done'], ['working', 'Working on'], ['waiting', 'Waiting']];
-const FOOTER = 'Derived, read-only — rebuilt from git, the Product ledgers, the capture branches and the platform each time it runs. Facts only: no score, no ranking, and no emails, commit messages, PR titles or comment bodies.';
+const FOOTER = 'Derived, read-only — rebuilt from git, the Product ledgers, the capture branches and the platform each time it runs. Facts only: no score, no ranking, and no emails, commit messages, PR titles or comment bodies. Issue and work item titles are shown: check before sharing outside the team.';
 
 const LOCAL_ONLY = 'no remote named origin — only your own capture branches are read';
 
@@ -544,6 +557,7 @@ export function gapLines(model) {
     ...(model.fetched === 'failed' ? ['could not fetch the capture branches — claims and drafts are as last fetched'] : []),
     ...model.platform.filter((p) => !p.read).map((p) => `${p.repo}: platform not read — ${p.why}`),
     ...model.notRead,
+    ...(model.issuesNotRead ?? []),
     ...model.notes,
     ...(model.fetched === 'local' ? [LOCAL_ONLY] : []),
     ...model.memberErrors,
@@ -577,6 +591,9 @@ const emptyLine = (model) => {
   return gaps.length ? `nothing recorded here — but ${gaps.join(', and ')}, so something may be missing (see the end)` : 'nothing';
 };
 
+const itemMeta = (i) => [i.priority ?? 'no priority', i.status, i.epic ?? 'no epic', ...(i.flags ?? [])].join(' · ');
+const noItems = (model) => (model.issuesUnknown ? 'none found — but some items could not be read or matched to a member (see the end)' : 'none');
+
 function blockText(model, b, title) {
   log(`\n  ${c.bold(title)}`);
   for (const [k, label] of SECTIONS) {
@@ -584,6 +601,10 @@ function blockText(model, b, title) {
     if (!b[k].length) log(`      ${c.dim(emptyLine(model))}`);
     for (const it of b[k]) log(`      • ${it.text}`);
   }
+  if (!b.issues) return;
+  log(`    ${c.dim('Assigned items')}`);
+  if (!b.issues.length) log(`      ${c.dim(noItems(model))}`);
+  for (const i of b.issues) log(`      • ${forTerminal(i.ref)} ${i.title} ${c.dim(`[${itemMeta(i)}]`)}${i.url ? ` ${i.url}` : ''}`);
 }
 
 const memberTitle = (m) => `${forTerminal(m.login)} ${c.dim(`— ${m.status}${m.lastActive ? `, last active ${m.lastActive}` : ''}${m.accounts.length > 1 ? ` · ${m.accounts.join(', ')}` : ''}`)}`;
@@ -623,6 +644,11 @@ export function renderMarkdown(model) {
       for (const it of b[k]) L.push(`- ${mdText(it.text)}`);
       L.push('');
     }
+    if (!b.issues) return;
+    L.push('**Assigned items**', '');
+    if (!b.issues.length) L.push(`- _${noItems(model)}_`);
+    for (const i of b.issues) L.push(`- ${i.url ? `[${mdEscape(i.ref)}](${mdUrl(i.url)})` : mdEscape(i.ref)} ${mdEscape(i.title)} (${mdEscape(itemMeta(i))})`);
+    L.push('');
   };
   const none = noTeamLine(model);
   if (none) L.push(`_${mdText(none)}_`, '');
@@ -641,7 +667,7 @@ export function renderMarkdown(model) {
 
 export function renderHtml(model) {
   const list = (items, empty) => (items.length ? `<ul>${items.map((it) => `<li>${esc(it.text)}</li>`).join('')}</ul>` : `<p class="none">${esc(empty)}</p>`);
-  const block = (b, title, sub = '') => `<section class="member"><h2>${esc(title)}${sub ? ` <span>${esc(sub)}</span>` : ''}</h2>${SECTIONS.map(([k, label]) => `<h3>${label}</h3>${list(b[k], emptyLine(model))}`).join('')}</section>`;
+  const block = (b, title, sub = '') => `<section class="member"><h2>${esc(title)}${sub ? ` <span>${esc(sub)}</span>` : ''}</h2>${SECTIONS.map(([k, label]) => `<h3>${label}</h3>${list(b[k], emptyLine(model))}`).join('')}${b.issues ? `<h3>Assigned items</h3>${b.issues.length ? `<ul>${b.issues.map((it) => `<li>${it.url ? `<a href="${esc(it.url)}">${esc(it.ref)}</a>` : esc(it.ref)} ${esc(it.title)} <span class="none">(${esc(itemMeta(it))})</span></li>`).join('')}</ul>` : `<p class="none">${esc(noItems(model))}</p>`}` : ''}</section>`;
   const missing = gapLines(model);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>yadflow — standup</title><style>
