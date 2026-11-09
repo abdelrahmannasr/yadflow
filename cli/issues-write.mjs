@@ -224,7 +224,7 @@ export async function runIssuesUnlink(root, { ref, epic: raw, json = false, env 
 }
 
 // The epics an item names for certain: a label `epic: EP-x`, an `EP-x` in its text, or a parent item that is
-// already linked. Only epics that exist count. `{ ids }` or `{ unknown:true }` if the hierarchy could not be read.
+// already linked. Only epics that exist count. `{ ids }`, or `{ unknown:true, why }` if the hierarchy or a links file could not be read.
 export function definiteParents(root, t, item, { self, runner = run }) {
   // A parent needs an epic.md: an epic only just seeded cannot be threaded off yet.
   const known = new Set(epicIds(root).filter((e) => !PRODUCT_EPICS.includes(e) && e !== self && fs.existsSync(path.join(epicRoot(root, e), 'epic.md'))));
@@ -248,6 +248,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
   const epic = epicIdFrom(slug);
   if (!epic || !isValidEpicId(epic)) return bail(`invalid epic id: ${forTerminal(String(slug ?? ''))} (expected EP-<slug>, [a-z0-9-] only)`);
   if (fs.existsSync(epicFiles(epicRoot(root, epic)).state)) return bail(`${epic} already has a lifecycle`, `to link an item to it: yad issues link ${forTerminal(String(issue))} ${epic}`);
+  readLinks(root, epic); // a leftover links file that cannot be read refuses here, before anything is made
   const got = loadItem(root, issue, { env, runner, bail });
   if (!got) return undefined;
   const { t, item, productConfig } = got;
