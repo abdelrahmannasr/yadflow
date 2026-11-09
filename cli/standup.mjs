@@ -168,7 +168,7 @@ function wipSaves(root, env, startMs) {
 
 // The repos to read: the Product and every registered repo. `dir` is set only when git may run there
 // (judged first, E81); `gitUrl` is what the platform is asked about.
-export function repoSources(root, identity, productConfig, notRead, env) {
+export function repoSources(root, identity, productConfig, notRead, env, { localPaths = true } = {}) {
   const productUrl = typeof productConfig?.git_url === 'string' && productConfig.git_url ? productConfig.git_url
     : (gitIn(root, env)(['remote', 'get-url', 'origin']).out.trim() || '');
   const out = [{ label: 'Product', dir: root, gitUrl: productUrl, platform: identity.platform }];
@@ -178,7 +178,7 @@ export function repoSources(root, identity, productConfig, notRead, env) {
     if (!r || typeof r.name !== 'string' || !r.name) continue;
     const label = forTerminal(r.name);
     let dir = null;
-    if (typeof r.path === 'string' && r.path) {
+    if (!localPaths) { /* a platform-only read (`yad issues`) needs no checkout */ } else if (typeof r.path === 'string' && r.path) {
       const j = judgeRepo(root, r);
       if (runnable(j)) dir = path.resolve(root, r.path);
       else notRead.push(`${label}: ${j.state === 'missing' ? 'not cloned on this machine' : j.linked ? "reached through a link inside a repo's tree" : safe(j.reason)} — its commits are not read`);
@@ -209,7 +209,7 @@ function whoseWip(members, w) {
 // and the same login on GitLab can be two people, so the platform and host must match too; an account two
 // files claim (`matchLogins` leaves it out) matches nobody.
 const keyOf = (a) => `${a.platform}\0${String(a.host).toLowerCase()}\0${String(a.login).toLowerCase()}`;   // members.mjs's accountKey
-function whoseAccount(members, { platform, host, login }, disputed = new Set()) {
+export function whoseAccount(members, { platform, host, login }, disputed = new Set()) {
   const want = keyOf({ platform, host: host || '', login: login || '' });
   // An account two files claim is matched by nobody — unless it is a member's own primary (E131's rule).
   const hit = members.filter((m) => m.accounts.some((a) => keyOf(a) === want && (keyOf(a) === keyOf(m.primary) || !disputed.has(want))));

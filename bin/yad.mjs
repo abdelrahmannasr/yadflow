@@ -133,6 +133,14 @@ ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no
   yad member remove [<login>] [--reason <why>]
                                        Delete a member file — your own, or anyone's with --reason
 
+${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and GitLab issues, tasks and incidents)')}
+  yad issues [list]                    Items of the Product and every registered repo, with priority,
+                                       type, status and assignee. Filter with --priority --type --status
+                                       --assignee --me --repo --since --until --date; order with --sort.
+                                       --format html writes a page you can sort and filter; titles are
+                                       included, so check it before sharing it outside the team
+  yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
+
 ${c.bold('Daily standup')} ${c.dim('(derived live, read-only, facts only — no score, no ranking)')}
   yad standup                          Each member on the team list: done since the last standup
                                        (commits, approvals, comments, closed steps, ships, merged
@@ -500,6 +508,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
+const ISSUES_USAGE = 'usage: yad issues [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -636,6 +645,7 @@ const ACTIONS = {
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
+  issues: { known: ['list', 'labels'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
@@ -647,7 +657,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'build', 'worktree', 'ci',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'build', 'worktree', 'ci',
   'story',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
@@ -1236,6 +1246,22 @@ async function main() {
       if (action === 'add') result = await commands.runWorktreeAdd(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, dryRun: !!o.dryRun, today });
       else if (action === 'list') result = await commands.runWorktreeList(o.dir, { epic: epic ?? null });
       else result = await commands.runWorktreeRemove(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, cwd: shellCwd() });
+      break;
+    }
+    case 'issues': {
+      // E169. `list` reads and may write the --out file; `labels` adds the predefined labels to the repos.
+      if (noProduct()) break;
+      const action = o._[1] ?? 'list';
+      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels)`, ISSUES_USAGE); break; }
+      const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
+      if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
+      if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
+      if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
+      result = await commands.runIssuesList(o.dir, {
+        priority: o.priority ?? null, type: o.type ?? null, status: o.status ?? null, assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null,
+        since: o.since ?? null, until: o.until ?? null, date: o.date ?? null, sort: o.sort ?? null, closedSince: o['closed-since'] ?? null,
+        format: o.format ?? null, out: o.out ?? null, json: !!o.json,
+      });
       break;
     }
     case 'standup': {
