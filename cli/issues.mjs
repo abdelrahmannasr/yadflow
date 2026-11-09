@@ -188,6 +188,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
   const notRead = [];
   // With no local paths judged, the one thing written here is an unreadable registry: code repos went unread.
   const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
+  const registryUnread = notRead.length > 0;
   const seen = new Set();
   const authCache = new Map();
   const items = [];
@@ -219,7 +220,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
     }
   }
   items.sort(SORTERS.priority);
-  return { items, repos, notRead, notes, closedSince: new Date(closedSinceMs).toISOString().slice(0, 10), untrustedFields: ['title', 'labels'], memberErrors: got.errors?.length ?? 0 };
+  return { items, repos, notRead, notes, closedSince: new Date(closedSinceMs).toISOString().slice(0, 10), untrustedFields: ['title', 'labels'], registryUnread, memberErrors: got.errors?.length ?? 0 };
 }
 
 const list = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
@@ -259,7 +260,7 @@ function renderText(m) {
 
 // A title in Markdown: every character that could start a link, an image, code or a tag is escaped, and so
 // are the triggers of GitHub's automatic links (`https:`, `www.`, an address's `@`).
-export const mdEscape = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/([\\`*_{}[\]()<>#|!~&:@])/g, '\\$1').replace(/\bwww\./gi, (w) => `${w.slice(0, 3)}\\.`);
+export const mdEscape = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/([\\`*_{}[\]()<>#|!~&:@])/g, '\\$1').replace(/(?<![a-z0-9])www\./gi, (w) => `${w.slice(0, 3)}\\.`);
 
 export function renderMarkdown(m) {
   const L = ['# Issues and work items', '', `- ${counts(m.summary)}`, `- Closed items since ${m.closedSince}`, '', '| Item | Priority | Type | Status | Assignee | Due | Title | Notes |', '|---|---|---|---|---|---|---|---|'];
@@ -369,7 +370,8 @@ export async function runIssuesList(root, { priority = null, type = null, status
     if (!mine.size && whole.repos.some((r) => r.read)) return refuse('yad cannot tell who you are on these platforms', 'pass --assignee <login>, or log in (gh auth login / glab auth login)');
     for (const r of whole.repos) if (r.read && !mine.has(`${r.platform}\0${r.host}`)) whole.notes.push(`${r.label}: yad cannot tell who you are on ${shown(r.host)}, so its items are left out of --me`);
   }
-  if (repo) {
+  // With no readable registry the list of names is incomplete, so a name it lacks proves nothing.
+  if (repo && !whole.registryUnread) {
     const known = whole.repos.map((r) => r.label);
     const bad = list(repo).filter((v) => !known.map(lower).includes(lower(v)));
     if (bad.length) return refuse(`no repo named ${forTerminal(bad.join(', '))}`, `use one of: ${known.join(', ')}`);

@@ -355,3 +355,17 @@ test('a GitLab login is asked of the host named; a call with no host is unchange
   platformLogin('/x', 'gitlab', { runner, env });
   assert.deepEqual(seen, [['api', '--hostname', 'git.acme.dev', 'user'], ['api', 'user']]);
 });
+
+test('an unreadable registry: --repo is not refused, and the report says why', async () => {
+  const T = product();
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), '{not json');
+  const r = await I.runIssuesList(T, { repo: 'api', json: true, now: NOW, env, runner: single([]) });
+  assert.equal(r.registryUnread, true);
+  assert.equal(r.notRead.length, 1);
+  assert.deepEqual(r.items, []);
+});
+
+test('Markdown: www. after a word-joining character is still broken', () => {
+  assert.doesNotMatch(I.mdEscape('_www.evil.com'), /www\./);
+  assert.ok(I.mdEscape('awww.good').includes('awww.good'));
+});
