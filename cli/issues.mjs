@@ -17,6 +17,7 @@ import { prTarget } from './pr-list.mjs';
 import { repoSources, whoseAccount } from './standup.mjs';
 import { api, httpStatus, shown, whyFailed, PAGE, TIMEOUT } from './protection.mjs';
 import { esc, writeReport } from './usage.mjs';
+import { allLinks, combinedStage, epicStage, itemKey } from './issue-links.mjs';
 
 export const MAX_ITEMS = 1000;
 const MAX_PAGES = Math.ceil(MAX_ITEMS / PAGE);
@@ -55,7 +56,7 @@ export function labelRules(productConfig, notes = []) {
 }
 
 // The first value (in the fixed order: most urgent first) with a label on the item, and whether two differ.
-function pick(labels, table) {
+export function pick(labels, table) {
   const have = new Set(labels.map((l) => l.toLowerCase()));
   const found = Object.keys(table).filter((v) => table[v].some((l) => have.has(l.toLowerCase())));
   return { value: found[0] ?? null, more: found.length > 1 };
@@ -191,6 +192,10 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
   const registryUnread = notRead.length > 0;
   const seen = new Set();
   const authCache = new Map();
+  const links = allLinks(root);
+  if (links.unreadable.length) notes.push(`the item links of ${links.unreadable.join(', ')} could not be read, so items linked there show as unlinked`);
+  const stages = new Map();
+  const stageOf = (e) => { if (!stages.has(e)) stages.set(e, epicStage(root, e)); return stages.get(e); };
   const items = [];
   const repos = [];
   for (const s of sources) {
@@ -206,8 +211,11 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
     for (const it of res.items) {
       const p = pick(it.labels, rules.priority);
       const ty = pick(it.labels, rules.type);
-      const st = itemStatus(it.state, null);
+      // Several epics can share an item. A linked epic whose ledger cannot be read still counts as started.
+      const linked = links.byItem.get(itemKey({ host: target.host, repo: target.repo, number: it.number })) || [];
+      const st = itemStatus(it.state, linked.length ? (combinedStage(linked.map(stageOf)) ?? 'in-shape') : null);
       const flags = [...st.flags];
+      const epicRows = linked.map((id) => ({ id, stage: stageOf(id) }));
       if (p.more) flags.push('more than one priority label');
       if (ty.more) flags.push('more than one type label');
       const assignees = it.logins.map((login) => {
@@ -216,7 +224,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
       });
       items.push({ ref: `${s.label === 'Product' ? '' : s.label}#${it.number}`, repo: s.label, platform: target.platform, host: target.host, number: it.number, title: it.title, url: it.url,
         state: it.state, kind: it.kind, priority: p.value, type: ty.value, labels: it.labels, assignees, created: it.created, updated: it.updated, closed: it.closed, due: it.due,
-        confidential: it.confidential, status: st.status, epic: null, flags });
+        confidential: it.confidential, status: st.status, epic: epicRows[0] ?? null, epics: epicRows, flags });
     }
   }
   items.sort(SORTERS.priority);
@@ -328,7 +336,8 @@ var num={priority:1,type:1,status:1};document.querySelectorAll('[data-sort]').fo
 
 const LIST_ONLY = new Set(['--priority', '--type', '--status', '--assignee', '--me', '--repo', '--since', '--until', '--date', '--sort', '--closed-since', '--format', '--out', '--json', '--dir']);
 const LABEL_FLAGS = new Set(['--dry-run', '--json', '--dir']);
-export const foreignFlags = (argv, action) => argv.filter((a) => a.startsWith('-') && !(action === 'labels' ? LABEL_FLAGS : LIST_ONLY).has(a.split('=')[0]));
+const WORD_FLAGS = new Set(['--json', '--dir']);
+export const foreignFlags = (argv, action) => argv.filter((a) => a.startsWith('-') && !(action === 'labels' ? LABEL_FLAGS : action === 'list' ? LIST_ONLY : WORD_FLAGS).has(a.split('=')[0]));
 
 function checkValues(flag, value, allowed) {
   if (!value) return null;

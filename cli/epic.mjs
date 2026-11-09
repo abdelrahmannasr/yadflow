@@ -51,11 +51,15 @@ export function epicIdFrom(slug) {
 
 // `type` defaults to null rather than `feature` so an explicit `--type` is distinguishable from no
 // flag at all — which is what lets an existing `epic.md` supply the answer without overriding the user.
-export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false } = {}) {
+export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false, returnResult = false } = {}) {
+  // `returnResult` (E170, with json): a caller that seeds as one part of its work gets the answer back, and
+  // it alone speaks, so stdout stays one JSON document.
+  const answer = returnResult ? (payload) => payload : emitJSON;
   const bail = (message, hint) => {
-    if (json) emitJSON({ ok: false, error: message, hint });
-    else { fail(message); if (hint) hand(hint); }
     process.exitCode = 1;
+    if (json) return answer({ ok: false, error: message, hint });
+    fail(message); if (hint) hand(hint);
+    return undefined;
   };
 
   const epic = epicIdFrom(slug);
@@ -169,7 +173,7 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   if (parent) {
     return seedThreaded(root, {
       epic, dir, files, mdPath, fm, type, parent, profile,
-      inherits: flagInherits ?? declaredInherits ?? [], headerLists: declaredInherits !== null, today, json, bail,
+      inherits: flagInherits ?? declaredInherits ?? [], headerLists: declaredInherits !== null, today, json, bail, answer,
     });
   }
   profile = profile || 'classic';
@@ -230,7 +234,7 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // `nextSkills` appears only for a bound chain, the same rule `yad next --json` follows — a key that
   // showed up on every seed would be one more always-null field for every reader to ignore.
   if (json) {
-    return emitJSON({
+    return answer({
       ok: true, epic, type, profile, stub, currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
@@ -266,7 +270,7 @@ const listOf = (v) => (Array.isArray(v) ? v : String(v ?? '').replace(/^\s*\[|\]
 // The threaded half of `yad epic new` (E42): a change, defect or hotfix off an epic that exists. The
 // engine plans the chain from the parent (`planThreadedSeed`) and this writes it — the ledger, one
 // provenance record per inherited gate, and the pointer-lock when the contract is carried.
-function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profile, inherits, headerLists, today, json, bail }) {
+function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profile, inherits, headerLists, today, json, bail, answer }) {
   const plan = planThreadedSeed(root, { epic, parent, inherits, type, today });
   if (!plan.ok) return bail(plan.message, plan.hint);
   // The route is the parent's. A flag naming the same one is harmless; a different one is refused
@@ -319,7 +323,7 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
   const skills = stepSkills(first.id, bindingsForEpic(loadSkillBindings(root), state));
   const carried = state.steps.filter((s) => s.inherited);
   if (json) {
-    return emitJSON({
+    return answer({
       ok: true, epic, type, profile: plan.profile, stub: false, parent, thread: plan.thread,
       inherits, inheritedFrom: plan.owners, pointerLock: plan.lock ? plan.lock.ref : null, anchor: plan.anchor,
       currentStep: state.currentStep, steps: state.steps.map((s) => s.id), next: skills[0] || null,

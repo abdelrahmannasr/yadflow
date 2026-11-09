@@ -36,6 +36,7 @@ export { runAssign, runUnassign, runOwners } from '../cli/owners.mjs';
 export { runMemberAdd, runMemberList, runMemberRemove } from '../cli/members.mjs';
 export { runWorktreeAdd, runWorktreeList, runWorktreeRemove } from '../cli/worktree.mjs';
 export { runStandup, foreignFlags as standupForeignFlags } from '../cli/standup.mjs';
+export { runIssuesShow, runIssuesLink, runIssuesUnlink, runEpicNewFromIssue } from '../cli/issues-write.mjs';
 export { runIssuesList, runIssuesLabels, foreignFlags as issuesForeignFlags } from '../cli/issues.mjs';
 export { runIndex } from '../cli/index-command.mjs';
 export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';

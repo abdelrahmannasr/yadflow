@@ -98,7 +98,8 @@ export const COMMAND_CLASS = {
   report: { class: 'read', flags: { post: 'public-post' } },
   usage: { class: 'local-write' },
   'sync-status': { class: 'local-write' },
-  'epic new': { class: 'local-write' },
+  // E170: --issue also comments on and labels the item on the platform.
+  'epic new': { class: 'local-write', flags: { issue: 'on-request' } },
   'foundation new': { class: 'local-write' },
   'foundation status': { class: 'read' },
   status: { class: 'read' },
@@ -173,6 +174,10 @@ export const COMMAND_CLASS = {
   'issues list': { class: 'read' },
   // Adds labels on the team's repos: asked for, never a side effect.
   'issues labels': { class: 'on-request' },
+  // E170. `show` prints text anyone can write, so it is read but not pre-approved. Link writes to the item.
+  'issues show': { class: 'read' },
+  'issues link': { class: 'on-request' },
+  'issues unlink': { class: 'on-request' },
   claims: { class: 'read' },
   // `--force` replaces or removes another person's ownership.
   assign: { class: 'local-write', flags: { force: 'on-request' } },
@@ -361,7 +366,7 @@ export const claudeBlock = () => ['@AGENTS.md'];
 // command that is not a read (`yad mode` begins `yad mode team`). Written into `.claude/settings.json`
 // `permissions.allow` as `Bash(yad <words>:*)`; nothing that writes, pushes, posts or approves is ever there.
 // `standup` reads, but `--out <file>` writes the file named: a prefix rule would let it overwrite any file.
-const NOT_PREAPPROVED = new Set(['standup', 'issues list']);
+const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show']);
 export function readAllowList() {
   const keys = Object.keys(COMMAND_CLASS);
   const reads = keys.filter((key) => {
