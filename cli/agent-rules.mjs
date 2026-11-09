@@ -218,7 +218,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 // A test holds this to bin/yad.mjs.
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
-  toolbox: 'list', member: 'list', worktree: 'list', signing: 'check', ci: 'check',
+  toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).

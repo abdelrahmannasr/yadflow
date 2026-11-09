@@ -76,14 +76,14 @@ export function platformLogin(cwd, platform, { runner = run, env = process.env, 
   const ghHost = platform === 'github'
     ? (host || hostFromGitUrl(runner('git', ['remote', 'get-url', 'origin'], { cwd }).stdout) || null)
     : null;
-  const key = `${platform}\0${cwd}\0${ghHost || ''}`;
+  const key = `${platform}\0${cwd}\0${ghHost || host || ''}`;
   if (runner === run && loginCache.has(key)) return loginCache.get(key);
   let login = null;
   if (platform === 'github') {
     const r = runner('gh', ['api', ...(ghHost ? ['--hostname', ghHost] : []), 'user', '--jq', '.login'], { cwd, timeout: 10000 });
     if (r.ok) login = r.stdout.trim();
   } else {
-    const r = runner('glab', ['api', 'user'], { cwd, timeout: 10000 });
+    const r = runner('glab', ['api', ...(host ? ['--hostname', host] : []), 'user'], { cwd, timeout: 10000 });
     if (r.ok) { try { login = String(JSON.parse(r.stdout).username || ''); } catch { /* not JSON — no login */ } }
   }
   if (!login || !LOGIN_RE.test(login)) login = null;

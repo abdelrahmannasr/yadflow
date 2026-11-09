@@ -226,7 +226,7 @@ test('HTML: a URL that is not http(s) never reaches a link, from either platform
 test('Markdown: a hostile title cannot make a link, an image, a tag or a new column', () => {
   const md = I.renderMarkdown(model());
   const row = md.split('\n').find((l) => l.includes('onerror'));
-  assert.ok(row.includes('\\[x\\]\\(javascript:alert\\(3\\)\\)'));
+  assert.ok(row.includes('\\[x\\]\\(javascript\\:alert\\(3\\)\\)'));
   assert.ok(row.includes('\\<img'));
   assert.ok(row.includes('y |'));
   assert.equal(row.split(/(?<!\\)\|/).length, 10);
@@ -300,4 +300,58 @@ test('labels: a repo that cannot be read creates nothing and fails the command',
   assert.equal(r.repos[0].read, false);
   assert.equal(process.exitCode, 1);
   process.exitCode = 0;
+});
+
+test('the review lines: a bad registry is not read, and labels fails on it', async () => {
+  const T = product();
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), '{not json');
+  const m = I.buildIssues(T, { now: NOW, env, runner: single([]) });
+  assert.equal(m.notRead.length, 1);
+  process.exitCode = 0;
+  const runner = (cmd, args) => auth(cmd, args) || (args.includes('remote') ? no('') : ok([]));
+  const r = await I.runIssuesLabels(T, { dryRun: true, json: true, env, runner });
+  assert.equal(r.notRead.length, 1);
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+});
+
+test('--me says which host it could not place, and never hides that silently', async () => {
+  const T = product({}, [{ name: 'other', git_url: 'git@ghe.acme.dev:a/c.git', platform: 'github' }]);
+  const runner = (cmd, args) => auth(cmd, args) || (args.includes('remote') ? no('') : stateOf(args) === 'CLOSED' ? ghPage([]) : ghPage([ghNode(1, { assignees: { nodes: [{ login: 'me' }] } })]));
+  const r = await I.runIssuesList(T, { me: true, json: true, now: NOW, env, runner, loginOf: (root, p, { host }) => (host === 'github.com' ? 'me' : null) });
+  assert.deepEqual(r.items.map((i) => i.ref), ['#1']);
+  assert.match(r.notes.join(), /ghe\.acme\.dev/);
+});
+
+test('refuses a list for --sort or --date, an impossible date, and an unknown --repo', async () => {
+  const T = product();
+  const runner = single([ghNode(1)]);
+  for (const o of [{ sort: 'priority,due' }, { date: 'created,due' }, { since: '2026-13-45' }, { until: '2026-02-31' }, { closedSince: '2026-02-31' }, { repo: 'typo' }]) {
+    assert.equal(await I.runIssuesList(T, { ...o, json: true, now: NOW, env, runner }), undefined, JSON.stringify(o));
+  }
+  process.exitCode = 0;
+  assert.equal((await I.runIssuesList(T, { repo: 'product', json: true, now: NOW, env, runner })).items.length, 1);
+});
+
+test('Markdown: automatic links are broken, and a URL cannot end its link or cell', () => {
+  const e = I.mdEscape('see https://evil.example www.evil.example a@evil.example');
+  assert.doesNotMatch(e, /https:\/\/|www\.|a@/);
+  const md = I.renderMarkdown(model({ items: [it({ url: 'https://x.test/1(a)|b' })] }));
+  assert.ok(md.includes('https://x.test/1%28a%29%7Cb)'));
+});
+
+test('the closed window starts at the top of the day it names', () => {
+  const asked = [];
+  const runner = (c, args) => { asked.push(...args); return ghPage([]); };
+  I.listTrackerItems(ghTarget, { closedSinceMs: Date.parse('2026-10-10T15:00:00Z'), runner });
+  assert.ok(asked.includes('since=2026-10-10T00:00:00.000Z'));
+});
+
+test('a GitLab login is asked of the host named; a call with no host is unchanged', async () => {
+  const { platformLogin } = await import('./platform.mjs');
+  const seen = [];
+  const runner = (c, args) => { seen.push(args); return ok({ username: 'a' }); };
+  assert.equal(platformLogin('/x', 'gitlab', { runner, env, host: 'git.acme.dev' }), 'a');
+  platformLogin('/x', 'gitlab', { runner, env });
+  assert.deepEqual(seen, [['api', '--hostname', 'git.acme.dev', 'user'], ['api', 'user']]);
 });

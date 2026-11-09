@@ -143,7 +143,8 @@ export function listTrackerItems(target, { closedSinceMs, runner = run, env = pr
   if (!t.ok) return t;
   const gh = t.platform === 'github';
   const read = gh ? readGitHub : readGitLab;
-  const since = new Date(closedSinceMs).toISOString();
+  // Whole UTC days: what is asked, what is kept and what the report's heading says are the same day.
+  const since = `${new Date(closedSinceMs).toISOString().slice(0, 10)}T00:00:00.000Z`;
   const open = read(t, runner, gh ? 'OPEN' : 'opened', null);
   if (!open.ok) return { ...t, ...open };
   if (open.off) return { ...t, ok: true, items: [], partial: false, off: true };
@@ -185,7 +186,8 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
   const identity = productIdentity(root, { productConfig, ...r });
   const got = readMembers(root, { identity });
   const notRead = [];
-  const sources = repoSources(root, identity, productConfig, notes, env, { localPaths: false });
+  // With no local paths judged, the one thing written here is an unreadable registry: code repos went unread.
+  const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
   const seen = new Set();
   const authCache = new Map();
   const items = [];
@@ -255,13 +257,14 @@ function renderText(m) {
   for (const g of gaps(m)) note(c.yellow(g));
 }
 
-// A title in Markdown: every character that could start a link, an image, code or a tag is escaped.
-export const mdEscape = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/([\\`*_{}[\]()<>#|!~&])/g, '\\$1');
+// A title in Markdown: every character that could start a link, an image, code or a tag is escaped, and so
+// are the triggers of GitHub's automatic links (`https:`, `www.`, an address's `@`).
+export const mdEscape = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/([\\`*_{}[\]()<>#|!~&:@])/g, '\\$1').replace(/\bwww\./gi, (w) => `${w.slice(0, 3)}\\.`);
 
 export function renderMarkdown(m) {
   const L = ['# Issues and work items', '', `- ${counts(m.summary)}`, `- Closed items since ${m.closedSince}`, '', '| Item | Priority | Type | Status | Assignee | Due | Title | Notes |', '|---|---|---|---|---|---|---|---|'];
   for (const i of m.items) {
-    L.push(`| ${i.url ? `[${mdEscape(i.ref)}](${i.url.replace(/[()]/g, encodeURIComponent)})` : mdEscape(i.ref)} | ${i.priority ?? 'none'} | ${i.type ?? 'none'} | ${i.status} | ${mdEscape(who(i))} | ${i.due ?? ''} | ${mdEscape(i.title)} | ${mdEscape(i.flags.join('; '))} |`);
+    L.push(`| ${i.url ? `[${mdEscape(i.ref)}](${i.url.replace(/[()|]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)})` : mdEscape(i.ref)} | ${i.priority ?? 'none'} | ${i.type ?? 'none'} | ${i.status} | ${mdEscape(who(i))} | ${i.due ?? ''} | ${mdEscape(i.title)} | ${mdEscape(i.flags.join('; '))} |`);
   }
   if (gaps(m).length) L.push('', '## Not read, or incomplete', '', ...gaps(m).map((g) => `- ${mdEscape(g)}`));
   L.push('', `_${FOOTER}_`, '');
@@ -332,11 +335,14 @@ function checkValues(flag, value, allowed) {
   return bad.length ? `unknown ${flag} ${forTerminal(bad.join(', '))} (use ${allowed.join(', ')})` : null;
 }
 
+const oneValue = (flag, value, allowed) => (value && !allowed.map(lower).includes(lower(value)) ? `unknown ${flag} ${forTerminal(String(value))} (use one of ${allowed.join(', ')})` : null);
+const realDate = (v) => DATE_RE.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
+
 function closedSince(value, now) {
   if (value === null || value === undefined) return { ms: now - DEFAULT_CLOSED_DAYS * DAY };
   const d = String(value).match(/^(\d{1,4})d$/);
   if (d) return { ms: now - Number(d[1]) * DAY };
-  if (DATE_RE.test(value) && !Number.isNaN(Date.parse(value))) return { ms: Date.parse(value) };
+  if (realDate(value)) return { ms: Date.parse(value) };
   return { error: `--closed-since must be YYYY-MM-DD or <N>d (got ${forTerminal(String(value))})` };
 }
 
@@ -347,8 +353,8 @@ export async function runIssuesList(root, { priority = null, type = null, status
   if (!format && out) format = /\.html?$/i.test(out) ? 'html' : 'md';
   if (format && !['md', 'html'].includes(format)) return refuse(`unknown --format ${forTerminal(String(format))}`, 'use --format md or --format html (or --json for the data)');
   if (assignee && me) return refuse('pass --assignee <login> or --me, not both');
-  for (const bad of [checkValues('--priority', priority, [...PRIORITIES, 'none']), checkValues('--type', type, [...ITEM_TYPES, 'none']), checkValues('--status', status, STATUSES), checkValues('--sort', sort, SORTS), checkValues('--date', date, DATE_FIELDS)]) if (bad) return refuse(bad);
-  for (const [flag, v] of [['--since', since], ['--until', until]]) if (v && !DATE_RE.test(v)) return refuse(`${flag} must be YYYY-MM-DD (got ${forTerminal(String(v))})`);
+  for (const bad of [checkValues('--priority', priority, [...PRIORITIES, 'none']), checkValues('--type', type, [...ITEM_TYPES, 'none']), checkValues('--status', status, STATUSES), oneValue('--sort', sort, SORTS), oneValue('--date', date, DATE_FIELDS)]) if (bad) return refuse(bad);
+  for (const [flag, v] of [['--since', since], ['--until', until]]) if (v && !realDate(v)) return refuse(`${flag} must be a real date, YYYY-MM-DD (got ${forTerminal(String(v))})`);
   const window = closedSince(closed, now);
   if (window.error) return refuse(window.error);
   const whole = buildIssues(root, { now, closedSinceMs: window.ms, env, ...(runner ? { runner } : {}) });
@@ -361,6 +367,12 @@ export async function runIssuesList(root, { priority = null, type = null, status
       if (!mine.has(key)) { const l = loginOf(root, r.platform, { env, host: r.host, ...(runner ? { runner } : {}) }); if (l) mine.set(key, l); }
     }
     if (!mine.size && whole.repos.some((r) => r.read)) return refuse('yad cannot tell who you are on these platforms', 'pass --assignee <login>, or log in (gh auth login / glab auth login)');
+    for (const r of whole.repos) if (r.read && !mine.has(`${r.platform}\0${r.host}`)) whole.notes.push(`${r.label}: yad cannot tell who you are on ${shown(r.host)}, so its items are left out of --me`);
+  }
+  if (repo) {
+    const known = whole.repos.map((r) => r.label);
+    const bad = list(repo).filter((v) => !known.map(lower).includes(lower(v)));
+    if (bad.length) return refuse(`no repo named ${forTerminal(bad.join(', '))}`, `use one of: ${known.join(', ')}`);
   }
   const items = applyFilters(whole.items, { priority, type, status, assignee, repo, since, until, date: date ? lower(date) : 'created', sort: sort ? lower(sort) : 'priority', mine });
   const model = { ...whole, items, summary: summarize(items), unfiltered: whole.items.length };
@@ -403,7 +415,8 @@ export async function runIssuesLabels(root, { dryRun = false, json = false, env 
   const productConfig = readJSON(productConfigPath(root), null);
   const rules = labelRules(productConfig, notes);
   const identity = productIdentity(root, { productConfig, runner });
-  const sources = repoSources(root, identity, productConfig, notes, env, { localPaths: false });
+  const notRead = [];
+  const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
   const authCache = new Map();
   const seen = new Set();
   const repos = [];
@@ -428,8 +441,8 @@ export async function runIssuesLabels(root, { dryRun = false, json = false, env 
       else if (dryRun) info(`${r.label}: would create ${r.missing.join(', ')}`);
       else { if (r.created.length) info(`${r.label}: created ${r.created.join(', ')}`); if (r.failed.length) note(c.yellow(`${r.label}: could not create ${r.failed.join(', ')} (your login may not be allowed to)`)); }
     }
-    for (const n of notes) note(c.yellow(n));
+    for (const n of [...notRead, ...notes]) note(c.yellow(n));
   }
-  if (repos.some((r) => !r.read || r.failed.length)) process.exitCode = 1;
-  return { dryRun, repos, notes };
+  if (notRead.length || repos.some((r) => !r.read || r.failed.length)) process.exitCode = 1;
+  return { dryRun, repos, notRead, notes };
 }
