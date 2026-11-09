@@ -17,7 +17,7 @@ where it matters.
 
 - **The `yad` command-line tool.** It is written in Node and has no dependencies. It sets up a
   project, tells you the next action, runs reviews, and reads the project history.
-- **40 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
+- **41 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
   such as "write the architecture". The skills run in Claude Code, Codex CLI, Cursor, Gemini CLI,
   GitHub Copilot, Zencoder and opencode.
 - **Plain files in git.** Every plan, decision, approval and link lives as a readable file in a
@@ -298,7 +298,7 @@ The record is worth trusting because people approve what goes into it.
 - `yad guide`, the step brief an AI coding agent reads before each step — what the step is for, whether it can be skipped, who does it, the skills that fit, what the agent runs, and what only the person can do
 - `yad status --brief`, where the work stands in about 20 lines — this checkout's task, each open epic's next action, your open PRs/MRs and what is owed — for picking up after a break or an AI context reset
 - `yad standup`, a daily status for each team member — what they did since the last working day, what they are on now, and what is waiting — rebuilt live from git, the ledgers and the platform, facts only
-- `yad issues`, the team's GitHub issues and GitLab issues and tasks, with priority, type, status and assignee, as a list or an HTML page you can sort and filter. Items link to epics, update from epic status, and appear in `yad standup`
+- `yad issues`, the team's GitHub issues and GitLab issues and tasks, with priority, type, status and assignee, as a list or an HTML page you can sort and filter. Items link to epics, update from epic status, and appear in `yad standup`. `yad-run` also scans each implementation and files security findings, technical debt and suggestions there
 - `yad detect`, which lists the skills, agents, MCP servers and plugins installed for each AI agent
 - `yad toolbox list`, which shows the external tools yadflow can use, which ones you have, and what happens without each; `yad toolbox add` / `remove` record the tools your team uses, and `yad toolbox check` lists the ones not ready on your machine (`yad setup`, `check`, `update` and `join` print the same list, and never install anything without asking: your agent can connect a tool after one yes, with `yad toolbox connect`); each skill that uses a tool reads the same answer and says what it does without it
 - `yad skill recommend`, which lists hand-picked skills from the recommended skill collections for each step, why each fits, and the command to bind one; it binds nothing, and every pick was checked against its source
@@ -324,7 +324,7 @@ The record is worth trusting because people approve what goes into it.
   - [working together: capture, claims, owners, fold](docs/CLI.md#working-together-capture-claims-owners-and-fold)
   - [troubleshooting and error codes](docs/CLI.md#troubleshooting-yad-doctor--error-codes)
   - [every CI gate: rules, exemptions and failures](docs/GATES.md)
-  - [all 40 skills](docs/SKILLS.md)
+  - [all 41 skills](docs/SKILLS.md)
   - [the by-hand walkthrough](docs/WALKTHROUGH.md)
 - **Upgrade:** [staying up to date](docs/CLI.md#staying-up-to-date) ·
   [upgrading to 4.0](docs/migrations/upgrading-to-4.md) ·
