@@ -74,11 +74,12 @@ const plain = (s, max) => { const t = forTerminal(redact(s)).replace(/\s+/g, ' '
 // An invisible space after each trigger stops a mention or a reference. GitHub reads backslashes and HTML entities as
 // the real character before it looks for one, so neither of those is enough (checked against its renderer).
 const ZWSP = '\u200b';
-const breakRefs = (t) => t.replace(/GH-(?=\d)/gi, (m) => `${m}${ZWSP}`).replace(/[%$](?=\w)/g, (m) => `${m}${ZWSP}`);
+const breakRefs = (t) => t.replace(/GH-(?=\d)/gi, (m) => `${m}${ZWSP}`).replace(/[%$](?=[\w"])/g, (m) => `${m}${ZWSP}`);
 // A title is not Markdown, but a mention in one can still notify.
 export const safeTitle = (s) => breakRefs(plain(s, 200).replace(/[@#!~&](?=\S)/g, (m) => `${m}${ZWSP}`));
 // `mdEscape` stops links, images, tags and code.
-export const safeMd = (s, max = 2000) => breakRefs(mdEscape(plain(s, max)).replace(/\\([@#!~&])/g, `$1${ZWSP}`));
+// A leading `/` is broken too: at the start of a line GitLab runs it as a quick action, such as `/assign`.
+export const safeMd = (s, max = 2000) => breakRefs(mdEscape(plain(s, max)).replace(/\\([@#!~&])/g, `$1${ZWSP}`)).replace(/^\//, `${ZWSP}/`);
 
 export function findingBody(f, fp, { task = null, labelled = true } = {}) {
   return [
@@ -238,7 +239,11 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
 
   const wantsTracker = chosen.filter((x) => x.route !== 'advisory');
   if (dryRun) {
-    for (const { fp, f, route } of chosen) result.filed.push({ fingerprint: fp, category: f.category, priority: f.priority, title: plain(f.title, 200), to: route, url: null, wouldFile: true });
+    for (const { fp, f, route } of chosen) {
+      const row = { fingerprint: fp, category: f.category, priority: f.priority, title: plain(f.title, 200) };
+      if (noPush && route !== 'advisory') result.failed.push({ ...row, why: 'your login cannot push to this repo, so the platform would drop its labels' });
+      else result.filed.push({ ...row, to: route, url: null, wouldFile: true });
+    }
   } else {
     // A finding without its label could not be recognised next time, and would be filed again: labels come first.
     let labelsReady = !noPush;
@@ -266,6 +271,8 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
       milestones.set(category, id);
       return id;
     };
+    // Once the platform has dropped something, the next item would lose the same thing.
+    let halted = null;
     for (const { fp, f, route } of chosen) {
       const title = safeTitle(f.title);
       const row = { fingerprint: fp, category: f.category, priority: f.priority, title };
@@ -275,19 +282,21 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
         else notFiled.push({ ...row, file: f.file, line: f.line, why: [403, 404].includes(httpStatus(r)) ? `the draft advisory was refused (HTTP ${httpStatus(r)}): an administrator or security manager must run this` : `GitHub did not accept the draft advisory${httpStatus(r) ? ` (HTTP ${httpStatus(r)})` : ''}` });
         continue;
       }
+      if (halted) { result.failed.push({ ...row, why: `not sent, because an earlier finding was changed by the platform: ${halted}` }); continue; }
       if (!labelsReady) { result.failed.push({ ...row, why: noPush ? 'your login cannot push to this repo, so the platform would drop its labels' : 'the labels could not be read or created, so it would not be recognised next time' }); continue; }
       const r = createFinding(t, { title, body: findingBody(f, fp, { task }), labels: labelsOf(f), milestone: milestoneFor(f.category), confidential: route === 'confidential' }, { runner });
       if (r.ok) {
         let url = null;
         try { const b = JSON.parse(r.stdout); url = b.html_url ?? b.web_url ?? null; } catch { /* the check below says so */ }
         const dropped = droppedFrom(r.stdout, route === 'confidential');
-        if (dropped) result.failed.push({ ...row, url, why: dropped }); else result.filed.push({ ...row, to: route, url });
+        if (dropped) { halted = dropped; result.failed.push({ ...row, url, why: dropped }); } else result.filed.push({ ...row, to: route, url });
       }
       else result.failed.push({ ...row, why: httpStatus(r) ? `${t.host} answered HTTP ${httpStatus(r)}` : 'the platform refused it' });
     }
   }
   if (result.failed.length) { process.exitCode = 1; result.ok = false; }
-  if (json) return emitJSON(result);
+  // The answer of a --json run: the command runner prints what is returned, once.
+  if (json) return result;
   for (const x of result.filed) {
     const line = `${x.priority} ${x.category}: ${forTerminal(x.title)} ${c.dim(`→ ${dryRun ? 'would file as ' : ''}${x.to}`)}${x.url ? ` ${x.url}` : ''}`;
     if (x.priority === 'P0') warn(line); else log(`  ${line}`);

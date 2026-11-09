@@ -45,7 +45,7 @@ function fake({ vis = 'private', filedBodies = [], listFails = false, labels = [
       const at = args[args.indexOf('-X') + 2];
       if (at.endsWith('/labels')) return labelFails ? no('HTTP 403') : done({});
       if (at.endsWith('/milestones')) return done({ number: 9, id: 9 });
-      if (at.endsWith('/security-advisories')) return advisoryFails ? no(`HTTP ${advisoryStatus}`) : done({ html_url: 'https://github.com/a/api/security/advisories/GHSA-1' });
+      if (at.endsWith('/security-advisories')) return advisoryFails ? no(`gh: refused (HTTP ${advisoryStatus})`) : done({ html_url: 'https://github.com/a/api/security/advisories/GHSA-1' });
       if (createFails(args)) return no('HTTP 500');
       if (dropsLabels) return done({ html_url: 'https://x/1', labels: [] });
       if (dropsConfidential) return done({ web_url: 'https://x/1', labels: ['yad: finding'], confidential: false });
@@ -263,7 +263,11 @@ test('E172 review: an advisory a person closed is not filed again (every state i
 
 test('E172 review: a refused advisory names the right reason; only registered repos, not the Product', async () => {
   const T = product();
-  await run(T, [SEC()], fake({ vis: 'public', advisoryFails: true, advisoryStatus: 422 }), { json: false });
+  const r = await run(T, [SEC()], fake({ vis: 'public', advisoryFails: true, advisoryStatus: 422 }), { json: true });
+  assert.match(r.notFiled[0].why, /did not accept/);
+  assert.doesNotMatch(r.notFiled[0].why, /administrator/);
+  const s = await run(T, [SEC()], fake({ vis: 'public', advisoryFails: true }), { json: true });
+  assert.match(s.notFiled[0].why, /administrator/);
   reset();
   const p = fake();
   await X.runScanFile(T, { file: findings(T, [F()]), repo: 'Product', env, runner: p.runner });
@@ -277,5 +281,29 @@ test('E172 review: a finding label beside an ordinary one does not make the type
   assert.deepEqual(I.pickType(['security'], rules.type), { value: 'security', more: false });
   assert.equal(I.pickType(['bug', 'feature'], rules.type).more, true);
   assert.equal(I.pickType(['security', 'suggestion'], rules.type).more, true);
+});
+
+test('E172 review 2: a leading slash cannot run a GitLab quick action', () => {
+  const body = X.findingBody(F({ why: '/assign alice', fix: '/label bad' }), 'a'.repeat(64));
+  for (const l of body.split('\n')) assert.doesNotMatch(l, /^\//, l);
+});
+
+test('E172 review 2: after the platform drops something, no more items are sent to the tracker', async () => {
+  const T = product('gitlab'); const p = fake({ dropsConfidential: true });
+  const r = await run(T, [SEC({ symbol: 'a' }), SEC({ symbol: 'b' }), SEC({ symbol: 'c' })], p, { json: true });
+  assert.equal(p.items().length, 1);
+  assert.equal(r.failed.length, 3);
+  assert.match(r.failed[0].why, /NOT made confidential/);
+  assert.match(r.failed[1].why, /not sent/);
+  reset();
+});
+
+test('E172 review 2: --dry-run says the same as the real run when the login cannot push', async () => {
+  const T = product(); const p = fake({ noPush: true });
+  const r = await run(T, [F()], p, { dryRun: true, json: true });
+  assert.equal(r.filed.length, 0);
+  assert.equal(r.failed.length, 1);
+  assert.equal(p.posts.length, 0);
+  reset();
 });
 
