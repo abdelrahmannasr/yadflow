@@ -361,6 +361,10 @@ test('E170 review 3: a broken links file in the child folder refuses before anyt
   assert.equal(exists(T, 'EP-pay'), false);
   fs.writeFileSync(path.join(T, 'epics/EP-pay/.sdlc/issue-links.json'), '{"items":[null]}');
   await assert.rejects(W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner }), /not an issue-links file/);
+  for (const bad of ['[[]]', '[{}]', '[{"host":"github.com","repo":"a/b","number":"7"}]']) {
+    fs.writeFileSync(path.join(T, 'epics/EP-pay/.sdlc/issue-links.json'), `{"items":${bad}}`);
+    await assert.rejects(W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner }), /not an issue-links file/, bad);
+  }
   assert.equal(fs.existsSync(path.join(T, 'epics/EP-pay-parent')), false);
 });
 

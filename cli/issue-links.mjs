@@ -12,11 +12,14 @@ export const ISSUE_LINKS_FILE = path.join('.sdlc', 'issue-links.json');
 export const linksPath = (root, epic) => path.join(epicRoot(root, epic), ISSUE_LINKS_FILE);
 export const itemKey = ({ host, repo, number }) => `${String(host).toLowerCase()}/${String(repo).toLowerCase()}#${number}`;
 
+// The one rule for what a record is: an entry that fails it makes the whole file unreadable, never "not linked".
+const validLink = (l) => !!l && typeof l === 'object' && !Array.isArray(l) && !!l.host && !!l.repo && Number.isInteger(l.number);
+
 // Strict: this is read before a write, and a file that cannot be understood is refused, never replaced.
 export function readLinks(root, epic) {
   const p = linksPath(root, epic);
   const doc = readJSONStrict(p, { items: [] });
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items) || doc.items.some((l) => !l || typeof l !== 'object')) throw err('YAD-STATE-001', `${p} is not an issue-links file (it needs an "items" list of records)`, 'fix the file or restore it from git');
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items) || !doc.items.every(validLink)) throw err('YAD-STATE-001', `${p} is not an issue-links file (it needs an "items" list of records)`, 'fix the file or restore it from git');
   return doc.items;
 }
 export function writeLinks(root, epic, items) {
@@ -36,7 +39,6 @@ export function allLinks(root) {
     let items;
     try { items = readLinks(root, epic); } catch { unreadable.push(epic); continue; }
     for (const l of items) {
-      if (!l || !l.host || !l.repo || !Number.isInteger(l.number)) continue;
       const k = itemKey(l);
       byItem.set(k, [...(byItem.get(k) || []), epic]);
     }
