@@ -1001,7 +1001,12 @@ async function main() {
         break;
       }
       if (noProduct()) break;
-      if (o.issue) { result = await commands.runEpicNewFromIssue(o.dir, { slug, issue: o.issue, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json }); break; }
+      if (o.issue !== undefined) {
+        const foreign = commands.seedForeign(process.argv.slice(2));
+        if (foreign.length) { refuse(`yad epic new --issue does not take ${foreign.join(', ')}`); break; }
+        result = await commands.runEpicNewFromIssue(o.dir, { slug, issue: o.issue, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
+        break;
+      }
       result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
       break;
     }

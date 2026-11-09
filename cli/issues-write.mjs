@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run, readJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON } from './lib.mjs';
 import { epicFiles, productConfigPath } from './manifest.mjs';
-import { epicIds, epicRoot, isGenesisType, isValidEpicId, PRODUCT_EPICS } from './epic-state.mjs';
+import { epicIds, epicRoot, isGenesisType, isValidEpicId, PRODUCT_EPICS, WORK_ITEM_TYPES } from './epic-state.mjs';
 import { addItemLabels, closeItem, commentOnItem, removeItemLabels } from './platform.mjs';
 import { productIdentity } from './members.mjs';
 import { prTarget } from './pr-list.mjs';
@@ -55,7 +55,7 @@ function readParent(t, number, runner) {
   const [owner, name] = t.repo.split('/');
   const args = gh
     ? ['api', '--hostname', t.host, 'graphql', '-f', 'query=query($o:String!,$n:String!,$i:Int!){repository(owner:$o,name:$n){issue(number:$i){parent{number repository{nameWithOwner}}}}}', '-f', `o=${owner}`, '-f', `n=${name}`, '-F', `i=${number}`]
-    : ['api', '--hostname', t.host, 'graphql', '-f', `query=query($p:ID!,$i:[String!]){project(fullPath:$p){workItems(iids:$i){nodes{widgets{... on WorkItemWidgetHierarchy{parent{iid namespace{fullPath}}}}}}}}`, '-f', `p=${t.repo}`, '-f', `i[]=${number}`];
+    : ['api', '--hostname', t.host, 'graphql', '-f', `query=query($p:ID!){project(fullPath:$p){workItems(iids:["${number}"]){nodes{widgets{... on WorkItemWidgetHierarchy{parent{iid namespace{fullPath}}}}}}}}`, '-f', `p=${t.repo}`];
   const r = runner(t.cli, args, { timeout: TIMEOUT });
   if (NO_FIELD.test(`${r.stdout || ''}${r.stderr || ''}`)) return { parent: null };
   if (!r.ok) return { unknown: true };
@@ -82,9 +82,10 @@ export function readItem(t, number, { runner = run } = {}) {
   const n = res.body;
   if (gh && n.pull_request) return { ok: false, why: `${number} in ${shown(t.repo)} is a pull request, not an issue` };
   const confidential = n.confidential === true;
-  const labels = (Array.isArray(n.labels) ? n.labels : []).map((l) => clean(typeof l === 'string' ? l : l?.name)).filter(Boolean);
+  // A confidential item's labels and text drive nothing: not the type, not the parent, not a message.
+  const labels = confidential ? [] : (Array.isArray(n.labels) ? n.labels : []).map((l) => clean(typeof l === 'string' ? l : l?.name)).filter(Boolean);
   const logins = (Array.isArray(n.assignees) ? n.assignees : []).map((a) => clean(gh ? a?.login : a?.username)).filter(Boolean);
-  return { ok: true, number, confidential, labels, logins, rawText: `${n.title ?? ''}\n${(gh ? n.body : n.description) ?? ''}`,
+  return { ok: true, number, confidential, labels, logins, rawText: confidential ? '' : `${n.title ?? ''}\n${(gh ? n.body : n.description) ?? ''}`,
     title: confidential ? null : clean(n.title), body: confidential ? null : cleanBody(gh ? n.body : n.description),
     url: httpUrl(gh ? n.html_url : n.web_url), state: (n.state === 'closed') ? 'closed' : 'open', kind: !gh && ['issue', 'task', 'incident', 'test_case'].includes(n.issue_type) ? n.issue_type : 'issue' };
 }
@@ -121,26 +122,32 @@ export async function runIssuesShow(root, { ref, json = false, env = process.env
   return undefined;
 }
 
-const statusFor = (root, epics, state) => itemStatus(state, combinedStage(epics.map((e) => epicStage(root, e))) ?? 'in-shape').status;
+// Null when a linked epic cannot be read: a label yad cannot stand behind is not written.
+const statusFor = (root, epics, state) => {
+  const stage = combinedStage(epics.map((e) => epicStage(root, e)));
+  return stage === null ? null : itemStatus(state, stage).status;
+};
 
 // Put the comment and labels on the item. Never throws, and returns what failed; the link is kept either way.
-export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic] }) {
+export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic], unknownLinks = false }) {
   const failed = [];
-  const failedWhy = (what, r) => failed.push(`${what}: ${whyFailed({ ok: false, status: httpStatus(r) }, { platform: t.platform, host: t.host, what })}`);
+  const failedWhy = (what, r) => { const code = httpStatus(r); failed.push(`${what}: ${code ? `${t.host} answered HTTP ${code}` : clean(r.stderr || 'the write failed').slice(0, 200)}`); };
   const out = { commented: false, labelled: [], failed };
   if (!entry.commentedAt) {
     const r = commentOnItem(t, entry.number, `Linked to yadflow epic \`${epic}\`${epicType ? ` (type: ${epicType})` : ''}.`, { runner });
     if (r.ok) { entry.commentedAt = new Date().toISOString(); out.commented = true; } else failedWhy('the comment', r);
   }
-  if (item.confidential) { failed.push('labels: a confidential item is left unlabelled, because its labels are not read'); return out; }
+  if (item.confidential) { failed.push('a confidential item is left unlabelled, because its labels are not read'); return out; }
   const have = new Set(item.labels.map((l) => l.toLowerCase()));
   const add = [];
   const typeOf = EPIC_TO_ITEM[epicType];
-  if (typeOf && !rules.type[typeOf].some((l) => have.has(l.toLowerCase()))) add.push(rules.type[typeOf][0]);
+  // Only an item with no type label gets one: a second would make the item's type ambiguous.
+  if (typeOf && !pick(item.labels, rules.type).value) add.push(rules.type[typeOf][0]);
   const status = statusFor(root, epics, item.state);
-  const statusLabel = rules.status[status][0];
-  if (!have.has(statusLabel.toLowerCase())) add.push(statusLabel);
-  const stale = Object.entries(rules.status).filter(([s]) => s !== status).flatMap(([, names]) => names).filter((l) => have.has(l.toLowerCase()));
+  if (status === null || unknownLinks) failed.push('the status label: a linked epic could not be read, so the status is unknown');
+  const known = status !== null && !unknownLinks;
+  if (known && !have.has(rules.status[status][0].toLowerCase())) add.push(rules.status[status][0]);
+  const stale = known ? Object.entries(rules.status).filter(([s]) => s !== status).flatMap(([, names]) => names).filter((l) => have.has(l.toLowerCase())) : [];
   if (add.length) { const r = addItemLabels(t, entry.number, add, { runner }); if (r.ok) out.labelled = add; else failedWhy(`the labels ${add.join(', ')}`, r); }
   if (stale.length && !removeItemLabels(t, entry.number, stale, { runner }).ok) failed.push('the old status label could not be removed');
   return out;
@@ -157,8 +164,8 @@ function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner })
   let entry = items.find((l) => itemKey(l) === key);
   const created = !entry;
   if (created) { entry = makeEntry(t, item, now); items.push(entry); writeLinks(root, epic, items); }
-  const others = allLinks(root).byItem.get(key) || [epic];
-  const back = writeBack(root, epic, entry, t, { item, rules, epicType, runner, epics: others });
+  const every = allLinks(root);
+  const back = writeBack(root, epic, entry, t, { item, rules, epicType, runner, epics: every.byItem.get(key) || [epic], unknownLinks: every.unreadable.length > 0 });
   writeLinks(root, epic, items);
   return { entry, created, back };
 }
@@ -166,8 +173,12 @@ function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner })
 function sayBack(back) {
   if (back.commented) info('commented on the item');
   if (back.labelled.length) info(`labels added: ${back.labelled.map(forTerminal).join(', ')}`);
-  for (const f of back.failed) warn(`not written to the item — ${forTerminal(f)}. The link is kept${/labels/.test(f) ? '; `yad issues labels` creates missing labels' : ''}`);
+  for (const f of back.failed) warn(`not written to the item — ${forTerminal(f)}. The link is kept${/^the labels/.test(f) ? '; `yad issues labels` creates missing labels' : ''}`);
 }
+
+const SEED_FLAGS = new Set(['--issue', '--type', '--profile', '--stub', '--parent', '--inherits', '--json', '--dir']);
+// `epic new --issue` writes to a platform, so a flag it does not use (`--repo`, `--dry-run`) is refused, not dropped.
+export const seedForeignFlags = (argv) => argv.filter((a) => a.startsWith('-') && !SEED_FLAGS.has(a.split('=')[0]));
 
 const epicTypeOf = (root, epic) => readJSON(epicFiles(epicRoot(root, epic)).state, null)?.type ?? null;
 const knownEpic = (root, epic) => isValidEpicId(epic) && !PRODUCT_EPICS.includes(epic) && fs.existsSync(epicFiles(epicRoot(root, epic)).state);
@@ -215,9 +226,10 @@ export function definiteParents(root, t, item, { self, runner = run }) {
   for (const l of item.labels) { const m = /^epic:\s*(EP-[a-z0-9][a-z0-9-]*)$/i.exec(l); if (m) found.add(m[1]); }
   for (const m of item.rawText.matchAll(/(?<![A-Za-z0-9-])EP-[a-z0-9]+(?:-[a-z0-9]+)*/g)) found.add(m[0]);
   const p = readParent(t, item.number, runner);
-  if (p.parent) for (const e of allLinks(root).byItem.get(itemKey({ host: t.host, repo: p.parent.repo, number: p.parent.number })) || []) found.add(e);
+  const links = p.parent ? allLinks(root) : null;
+  if (p.parent) for (const e of links.byItem.get(itemKey({ host: t.host, repo: p.parent.repo, number: p.parent.number })) || []) found.add(e);
   const ids = [...found].filter((e) => known.has(e)).sort();
-  return ids.length || !p.unknown ? { ids } : { unknown: true };
+  return ids.length || !(p.unknown || links?.unreadable.length) ? { ids } : { unknown: true };
 }
 
 // `yad epic new <slug> --issue <ref>`.
@@ -238,7 +250,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
     if (!ty.value) return bail('the item has no type label', item.confidential ? 'a confidential item\'s labels are not used. Pass --type' : 'add one (bug, feature, enhancement), or pass --type');
     epicType = ITEM_TO_EPIC[ty.value];
   }
-  if (item.confidential && !type) return bail('a confidential item\'s labels are not used', 'pass --type');
+  if (!WORK_ITEM_TYPES.includes(epicType)) return bail(`unknown work-item type: ${forTerminal(String(epicType))}`, `use one of ${WORK_ITEM_TYPES.join(', ')}`);
   let parentId = parent;
   let stubbed = null;
   if (!isGenesisType(epicType) && !parentId) {
@@ -247,8 +259,12 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
     if (d.ids.length > 1) return bail(`the item points at more than one epic: ${d.ids.join(', ')}`, 'choose one with --parent');
     if (d.ids.length) parentId = d.ids[0];
     else {
+      // Everything that would refuse the child is refused here first: a stub left behind by a typo stays for good.
+      if (profile && profile !== 'classic') return bail(`a new stub parent is on the classic route, and a child takes its parent's route: --profile ${forTerminal(profile)} cannot apply`, 'drop --profile, or pass --parent');
+      if (inherits) return bail('a new stub parent has nothing to inherit', 'drop --inherits, or pass --parent');
+      if (fs.existsSync(path.join(epicRoot(root, epic), 'epic.md'))) return bail(`${epic} already has an epic.md`, 'pass --parent, so its header and the parent agree');
       stubbed = `${epic}-parent`;
-      if (fs.existsSync(epicFiles(epicRoot(root, stubbed)).state)) return bail(`${stubbed} already exists`, `if it is this item's parent, pass --parent ${stubbed}`);
+      if (fs.existsSync(epicFiles(epicRoot(root, stubbed)).state) || fs.existsSync(path.join(epicRoot(root, stubbed), 'epic.md'))) return bail(`${stubbed} already exists`, `if it is this item's parent, pass --parent ${stubbed}`);
       const s = await runEpicNew(root, { slug: stubbed, stub: true, today, json: true, returnResult: true });
       if (!s?.ok) return bail(`the stub parent ${stubbed} could not be created: ${s?.error ?? 'unknown reason'}`, s?.hint);
       // The same header the yad-stub skill writes: a parent needs an epic.md. It names only the ids, so the

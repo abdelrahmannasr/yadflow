@@ -216,6 +216,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
       const st = itemStatus(it.state, linked.length ? (combinedStage(linked.map(stageOf)) ?? 'in-shape') : null);
       const flags = [...st.flags];
       const epicRows = linked.map((id) => ({ id, stage: stageOf(id) }));
+      if (epicRows.some((e) => e.stage === null)) flags.push('linked epic could not be read, so this status is a guess');
       if (p.more) flags.push('more than one priority label');
       if (ty.more) flags.push('more than one type label');
       const assignees = it.logins.map((login) => {

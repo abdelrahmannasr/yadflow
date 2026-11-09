@@ -250,3 +250,76 @@ test('the list shows the link and works out in progress and done from the epic',
   assert.deepEqual(by[2].epics, []);
   reset();
 });
+
+test('E170 review: the GitLab parent query carries the number in the query, and a real parent answer is read', () => {
+  const T = product();
+  const t = { ok: true, cli: 'glab', platform: 'gitlab', host: 'gitlab.com', repo: 'a/b' };
+  const seen = [];
+  const runner = (c, a) => { seen.push(a); return done({ data: { project: { workItems: { nodes: [{ widgets: [{}, { parent: { iid: '3', namespace: { fullPath: 'a/b' } } }] }] } } } }); };
+  const item = { number: 7, labels: [], rawText: '' };
+  assert.deepEqual(W.definiteParents(T, t, item, { self: 'EP-x', runner }), { ids: [] });
+  assert.ok(seen[0].some((x) => x.includes('iids:["7"]')));
+  assert.equal(seen[0].some((x) => x.includes('[]=')), false);
+});
+
+test('E170 review: nothing a child would refuse leaves a stub behind', async () => {
+  for (const extra of [{ type: 'defct' }, { profile: 'lean' }, { inherits: 'epic' }]) {
+    const T = product();
+    await W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner, ...extra });
+    assert.equal(process.exitCode, 1);
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-pay-parent')), false, JSON.stringify(extra));
+    reset();
+  }
+});
+
+test('E170 review: an authored epic.md in the stub folder is refused, never replaced', async () => {
+  const T = product();
+  fs.mkdirSync(path.join(T, 'epics/EP-pay-parent'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-pay-parent/epic.md'), 'mine');
+  await W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner });
+  assert.equal(fs.readFileSync(path.join(T, 'epics/EP-pay-parent/epic.md'), 'utf8'), 'mine');
+  assert.equal(exists(T, 'EP-pay'), false);
+  reset();
+});
+
+test('E170 review: a parent item with an unreadable sidecar about is unknown, so no stub is made', async () => {
+  const T = product();
+  await seed(T, 'base');
+  fs.writeFileSync(path.join(T, 'epics/EP-base/.sdlc/issue-links.json'), '{broken');
+  await W.runEpicNewFromIssue(T, { slug: 'fix', issue: '7', today, env, runner: platform({ parent: { number: 3, repository: { nameWithOwner: 'a/b' } } }).runner });
+  assert.equal(exists(T, 'EP-fix-parent'), false);
+  assert.equal(process.exitCode, 1);
+  reset();
+});
+
+test('E170 review: --issue refuses flags it does not use, and an empty one is not a plain seed', () => {
+  assert.deepEqual(W.seedForeignFlags(['epic', 'new', 'x', '--issue', '7', '--repo', 'api', '--dry-run', '--json']), ['--repo', '--dry-run']);
+  assert.equal(W.parseRef(''), null);
+});
+
+test('E170 review: --type does not add a second type label', async () => {
+  const T = product();
+  const { runner, writes } = platform();
+  await W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', type: 'feature', today, env, runner });
+  assert.equal(writes.some((a) => a.includes('labels[]=feature')), false);
+  reset();
+});
+
+test('E170 review: an unreadable linked epic gets no status label', async () => {
+  const T = product();
+  await seed(T, 'base');
+  fs.writeFileSync(path.join(T, 'epics/EP-base/.sdlc/state.json'), '{broken');
+  const { runner, writes } = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  const before = fs.existsSync(path.join(T, 'epics/EP-base/.sdlc/state.json'));
+  assert.ok(before);
+  await W.runIssuesLink(T, { ref: '7', epic: 'EP-base', env, runner });
+  assert.equal(writes.some((a) => a.some((x) => x.startsWith('labels[]=status:'))), false);
+  reset();
+});
+
+test('E170 review: a confidential item drives neither type nor parent', () => {
+  const t = { ok: true, cli: 'glab', platform: 'gitlab', host: 'gitlab.com', repo: 'a/b' };
+  const item = { iid: 7, title: 'EP-base', description: 'EP-base', state: 'opened', labels: ['bug'], assignees: [], confidential: true };
+  const r = W.readItem(t, 7, { runner: platform({ item }).runner });
+  assert.deepEqual([r.labels, r.rawText], [[], '']);
+});
