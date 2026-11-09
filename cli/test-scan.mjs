@@ -308,3 +308,15 @@ test('E172 review 2: --dry-run says the same as the real run when the login cann
   reset();
 });
 
+test('yad-implement scans when used alone, after its commit, and leaves it to yad-run otherwise', () => {
+  const t = fs.readFileSync(new URL('../skills/yad-implement/SKILL.md', import.meta.url), 'utf8');
+  const commit = t.indexOf('### Step 6 — Commit');
+  const scan = t.indexOf('### Step 6b — Scan');
+  const report = t.indexOf('### Step 7 — Report');
+  assert.ok(commit > 0 && commit < scan && scan < report);
+  const step = t.slice(scan, report);
+  assert.match(step, /`yad-scan`/);
+  assert.match(step, /never blocks/);
+  assert.match(step, /Run by `yad-run`:\*\* skip/);
+});
+

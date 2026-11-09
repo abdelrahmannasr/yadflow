@@ -1,6 +1,6 @@
 ---
 name: yad-scan
-description: 'After a repo implementation, review what changed for security vulnerabilities, technical debt (performance, best practice) and code suggestions, then file the findings on the repo''s GitHub issues or GitLab work items, categorised, prioritised and in a milestone per category. yad-run runs it for every task, before the PR opens. It never blocks the PR. Use when the user says "scan this branch", "look for vulnerabilities and tech debt", or when yad-run reaches this step.'
+description: 'After a repo implementation, review what changed for security vulnerabilities, technical debt (performance, best practice) and code suggestions, then file the findings on the repo''s GitHub issues or GitLab work items, categorised, prioritised and in a milestone per category. yad-run runs it for every task before the PR opens, and yad-implement runs it when used alone. It never blocks the PR. Use when the user says "scan this branch", "look for vulnerabilities and tech debt", or when yad-run reaches this step.'
 ---
 
 # yad-scan

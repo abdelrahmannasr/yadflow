@@ -229,6 +229,14 @@ commit; **no `Co-Authored-By:` footer by default** — add one only when the hum
 (`yad commit --ai <id>` / the `.gitmessage` choices from `config.yaml` `build.ai_coauthor.allowed`),
 never on the AI's own initiative. Keep all trailers in one contiguous block. Do not commit sibling tasks' work.
 
+### Step 6b — Scan the change (E172)
+
+**Run standalone** (not by `yad-run`): once the commit in Step 6 has landed, run the `yad-scan` skill for this task and
+repo. It files security findings, technical debt and suggestions on the repo's tracker. It never blocks: if it fails,
+say so and carry on to Step 7. A halted task has no commit to scan, so it skips this step.
+
+**Run by `yad-run`:** skip this step. `yad-run` runs the scan itself, once the checks have passed.
+
 ### Step 7 — Report; the advance decision belongs to the dial (Phase 4)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,
 the result of any test/smoke run, and the next action — the **check gates** (Step C — `yad-checks`)
