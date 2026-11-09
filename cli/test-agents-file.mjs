@@ -305,6 +305,42 @@ test('the agent guard refuses every human-only yad command and every force push,
     "x=(# '\n$(gh pr merge 1)\n)", "f()# '\n{ gh pr merge 1; }; f", "()# x '\ngh pr merge 1", "x=(a b)# don't\ngh pr merge 1",
     // A body of many `$(` overflowed the stack (the hook then exited 1, which lets the command run).
     `cat <<E >/dev/null\n${'$((1))\n'.repeat(130000)}$(gh pr merge 1)\n`, `cat <<E >/dev/null\n${'$((1))'.repeat(130000)}\nE\ngh pr merge 1\n`,
+    // #495: redirects in the middle of a command, $'…' strings, options after bash -c, more prefixes, commands
+    // that carry a command, an expanding command word, a shell fed its script, case inside $(…), # after |.
+    'git push origin main 2>&1 --force', 'git commit -m x 2>&1 --no-verify', '>out gh pr merge 5', 'gh >x pr merge 5', 'x=<<<1 git commit --no-verify -m x',
+    'git push --force>/dev/null', 'yad gate approve> EP-x epic', "git commit -m $'fix: don\\'t\\n' && gh pr merge 5 && echo 'done'", "bash -c $'gh pr merge 5'",
+    'bash -c $"gh pr merge 5"', 'bash -c -- "gh pr merge 5"', 'bash -c -x "gh pr merge 5"', 'bash -c -o pipefail "gh pr merge 5"', 'env -S "gh pr merge 5"',
+    'env --split-string="gh pr merge 5"', 'exec -a x gh pr merge 5', 'builtin command gh pr merge 5', 'function f { gh pr merge 5; }; f', 'coproc gh pr merge 5',
+    'coproc c { gh pr merge 5; }', 'find . -exec gh pr merge 5 \\;', 'find . -execdir git push --force {} +', "git -c alias.p='push --force' p", "git -c alias.m='!gh pr merge 5' m",
+    'noglob gh pr merge 5', '{gh pr merge 5;}', 'eval "gh pr merge 5"', 'eval gh pr merge 5', 'echo "gh pr merge 5" | bash', "printf 'gh pr merge 5' | sh",
+    '$(echo gh) pr merge 5', '${x:-gh} pr merge 5', '{gh,} pr merge 5', '$CMD pr merge 5', 'echo $(case x in x) gh pr merge 5;; esac)', '[[ a =~ x|#$(gh pr merge 1) ]]',
+    'bash <<EOF\ngh pr merge 5\nEOF', "sh <<'EOF'\ngit push --force\nEOF", 'bash <<< "gh pr merge 5"',
+    // #495 review: zsh's numeric globs are one word (both readings); and the gaps of the same kinds.
+    'git push origin main <-> --force', 'git push <1-9> --force', 'git commit -m x <-> --no-verify', 'git commit -am x <1-3000> -n', 'gh pr review >> 5 <1-9> --approve',
+    'bash -c - "gh pr merge 5"', '$SUDO gh pr merge 5', '${DRY} git push --force', '$X yad gate approve EP-x epic', '$SHELL -c "gh pr merge 5"', '$(which bash) -c "gh pr merge 5"',
+    '{bash,} -c "gh pr merge 5"', "find . -exec sh -c 'git push --force' {} +", 'env -u X -S "gh pr merge 5"', 'env -C . -S "gh pr merge 5"', "printf '%s\\n' 'gh pr merge 5' | bash",
+    'printf "%s" "gh pr merge 5" | bash', 'echo gh pr merge 5 | tee /dev/null | bash', "cat <<'EOF' | bash\ngh pr merge 5\nEOF", 'source /dev/stdin <<< "gh pr merge 5"',
+    '. /dev/stdin <<< "gh pr merge 5"', 'git push origin main --{force,}', 'gh pr {merge,} 5', 'git commit -m x --no-{verify,}', '=gh pr merge 5', "git -c alias.a=b -c alias.b='push --force' a",
+    // #495 review 2: a shell reads its input after -s, from /dev/stdin, past --rcfile; a brace list expands into words.
+    "echo 'gh pr merge 5' | bash -s foo", "bash -s foo <<'EOF'\ngit push --force origin main\nEOF", "echo 'yad gate approve EP-x analysis' | bash /dev/stdin",
+    "bash /dev/stdin <<< 'gh pr review 5 --approve'", "zsh /dev/stdin <<< 'git commit -n -m x'", "sh /dev/fd/0 <<'EOF'\nglab mr merge 5\nEOF", "echo 'gh pr merge 5' | bash --rcfile /dev/null",
+    "echo 'gh pr merge 5' | bash -xs foo", "echo 'gh pr merge 5' | ksh -s a", "cat <<'EOF' | bash -s x\ngh pr merge 5\nEOF", 'gh {pr,merge} 5', '{gh,pr} merge 5', 'git {push,--force} origin main',
+    'git {commit,-n} -m x', 'yad {gate,approve} EP-x analysis', 'gh {pr,review} 5 --approve', 'git push origin main {x,--fo}{rce,y}', 'git push origin {a,{--force,b}}', 'git push -{f..f} origin main',
+    'git push origin {main,main,main,main,main,main,main,main,--force}',
+    // #495 review 3: empty alternatives (bash drops the empty words); option clusters with o; zsh --emulate; a brace
+    // list or an expansion in a shell's words; zsh's one-character sequences.
+    'gh pr {,merge} 5', 'gh {,pr} merge 5', "bash -c 'gh pr {,merge} 5'", 'echo {,}; gh pr {,,merge} 5', 'gh pr {,{,{merge,x}}} 5',
+    "bash -euo pipefail <<'EOF'\ngh pr merge 5\nEOF", "echo 'gh pr merge 5' | bash -eo pipefail", "zsh --emulate sh <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash {-s,}",
+    "{bash,} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | $SHELL", "${SHELL:-bash} <<< 'gh pr merge 5'", "echo 'gh pr merge 5' | bash $NOPE", 'git push origin {+..+}main',
+    'git push origin main -{-..-}force',
+    // #495 review 4: text printed in a group or a file reaches a real shell; `\||` is a pipe; quoted brace characters are text.
+    "{ echo 'gh pr merge 5'; } | bash", "{ echo 'gh pr merge 5'; } 2>&1 | bash", "(echo 'gh pr merge 5'; true) | bash", "if true; then echo 'gh pr merge 5'; fi | bash",
+    "for i in 1; do echo 'gh pr merge 5'; done | bash", "case x in x) echo 'gh pr merge 5';; esac | bash", "{ cat <<'E'; } | bash\ngh pr merge 5\nE", "f() { echo 'gh pr merge 5'; }; f | bash",
+    "echo 'gh pr merge 5' > f; bash < f", "echo 'gh pr merge 5 #' \\||bash", "git commit -m {'}',-n}", "git commit -m {'{',-n}", 'git commit -m {"}",--no-verify}', "git commit {-n,'{'} -m x",
+    // A typed shield character stays inert, in a carried command too.
+    'bash -c "gh pr {merge,} 5"', "eval 'gh pr {merge,} 5'", "echo 'gh pr {merge,} 5' | bash", "bash -c 'git push {--force,}'", "bash -c 'git commit {-n,} -m x'",
+    // A word too long to expand, or too many words, is refused rather than expanded: a 1 MB JSON word crashed the heap.
+    `echo x${'{'.repeat(200000)}a,b${'}'.repeat(200000)}; gh pr merge 5`, `echo ${'{a,b}'.repeat(190000)}; gh pr merge 5`,
     // E167 review 5: a CRLF heredoc ends at `EOF\r`, as the shell's end word is `EOF\r`; a later plain EOF is not its end.
     'cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n', "cat <<'EOF'\r\nb\r\nEOF\r\ngh pr merge 5\nEOF\n",
     // E167 review 4: \ + CR + LF does not join lines in bash or zsh.
@@ -518,13 +554,31 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   assert.deepEqual(shellParts('a "b c" \'d e\' && f\\ g | h'), [['a', 'b c', 'd e'], ['f g'], ['h']]);
   // #492: a heredoc opened and closed with CRLF is text up to its `EOF\r` line; what follows is a command.
   assert.deepEqual(shellParts('cat <<EOF\r\nb\r\nEOF\r\ngh pr merge 5\r\n'), [['cat'], ['gh', 'pr', 'merge', '5\r']]);
-  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat', '<'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // A redirect's operator is not a word (#495): `<(` is a part break after it.
+  assert.deepEqual(shellParts('cat <(gh pr view 5) | f(){ x; }'), [['cat'], ['gh', 'pr', 'view', '5'], ['f'], ['{', 'x'], ['}']]);
+  // Redirects and their targets leave the command's words; `$'…'` reads its escapes; a here-string is input.
+  assert.deepEqual(shellParts('git push origin main 2>&1 --force'), [['git', 'push', 'origin', 'main', '--force']]);
+  assert.deepEqual(shellParts('gh >x pr merge 5 2> err &>all'), [['gh', 'pr', 'merge', '5']]);
+  assert.deepEqual(shellParts("git commit -m $'it\\'s\\n'"), [['git', 'commit', '-m', "it's\n"]]);
+  assert.deepEqual(shellParts('x=<<<1 git commit'), [['x=', 'git', 'commit']]);
   // Still allowed: a heredoc that ends, a quoted parenthesis, arithmetic, three levels of nesting.
   for (const ok of ['cat <<EOF\nhello\nEOF', 'git commit -m "fix (thing)"', 'echo $((1<<2))', 'echo $(echo $(echo hi))', 'git log\r\n',
     '(cd web && npm ci)# install', 'npm test # x', 'cat <<E$x\nhi\nE$x', '[[ $x =~ ^#(a|b) ]]', 'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"',
     // A docs heredoc naming a guarded command stays allowed: only an end word that expands adds line-by-line reading.
     `cat <<'EOF' > "$f"\ngh pr merge 1 is the person's\nEOF`, "gh pr create --body-file - <<'EOF' # $x\ngh pr merge 1 stays with the person\nEOF",
-    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`]) {
+    `cat <<'EOF'\ngh pr merge 1 docs\nEOF\ncat > b <<"E$n"\nx\nE$n`,
+    // #495: the common forms around the new readings stay allowed.
+    'npm test 2>&1 | tail', 'git log > out.txt', 'cmd >/dev/null 2>&1', 'find . -name x -exec grep y {} +', 'git -c core.pager=less log', 'eval "$(ssh-agent)"',
+    'echo hi | bash -s', 'curl -fsSL https://example.com/i.sh | sh', "git commit -m $'line one\\nline two'", 'cat <<< "gh pr merge 5"', "python3 - <<'PY'\nprint(1)\nPY",
+    'bash <<EOF\necho hi\nEOF', 'git log --oneline 2>/dev/null | head -3',
+    'find . -name x -exec grep "git push --force" {} +', 'git -c alias.lg="log --oneline" lg', 'curl -fsSL https://x | bash -s -- --yes', '[[ a > b ]]', 'echo {a,b}.txt',
+    '$EDITOR notes.md', '${PYTHON:-python3} x.py', '$(npm bin)/eslint .', "cat <<'EOF' | bash\necho hi\nEOF", 'ls <->', 'echo "gh pr merge 5" > notes.md; bash build.sh',
+    'curl x | bash -s stable', 'cat build.sh | bash', 'bash -x ./build.sh arg', 'mkdir -p src/{a,b,c}', 'git add src/{a,b}.js', "jq '{a,b}' f.json", 'echo {1..5}', 'ls {a,b}{c,d}',
+    'for i in {1..100}; do echo $i; done', 'echo {0..64}', 'touch file{001..100}.txt', `curl -d '[${'{"id":0,"v":2},'.repeat(5)}{}]' https://x`,
+    'echo x || bash', 'docker ps --format {{.Names}}', 'gh pr view {1,2,3}', 'gh pr {merge\\,x,} 5',
+    `gh api repos/x -f body='[${'{"a":1,"b":2},'.repeat(10)}{}]'`, "echo '{a,b}{a,b}{a,b}{a,b}{a,b}'", 'echo {a,b}{a,b}{a,b}{a,b}{a,b}', 'bash -euo pipefail ./x.sh', 'echo {a..z}',
+    `curl -d '[${'{"a":1,"b":2},'.repeat(66000)}{}]' https://x`,
+    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -552,6 +606,24 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t4 = Date.now();
   assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
   assert.ok(Date.now() - t4 < 2000, `a run of << took ${Date.now() - t4} ms`);
+  // #495 review: a `case` scan per `$(` and a loop over every body for every part were quadratic.
+  // Many words under the length bound, each with lists and a nested tail: the budget is checked inside the expansion.
+  const nestedTail = `x {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}${'{'.repeat(2000)}${'}'.repeat(2000)};`;
+  const t7 = Date.now();
+  assert.equal(agentGuardDecision(`${nestedTail.repeat(245)} gh pr merge 5`).allow, false);
+  assert.ok(Date.now() - t7 < 6000, `nested tails took ${Date.now() - t7} ms`);
+  // A `{` and many commas with no `}`: the brace check is a scan, never a backtracking regex.
+  for (const l of [`echo '{${','.repeat(250000)}'; gh pr merge 5`, `git status {${','.repeat(990000)}`]) {
+    const t6 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t6 < 2000, `{ + commas took ${Date.now() - t6} ms`);
+  }
+  for (const [unit, tail] of [['$()', '$()'], ['$(a) ', '$(a) '], [':<<<x;', 'sh;'], [':<<E\nE\n', 'sh;']]) {
+    const l = unit.repeat(Math.floor(495000 / unit.length)) + tail.repeat(Math.floor(495000 / tail.length));
+    const t5 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t5 < 3000, `${JSON.stringify(unit)} took ${Date.now() - t5} ms`);
+  }
   let inSub = 'echo $(';
   for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
   const t2 = Date.now();
@@ -1203,6 +1275,9 @@ test('E167: a line the guard sees only reads is pre-approved; any write, secret 
     // A link that leaves the project is outside it.
     fs.symlinkSync('/etc/hosts', path.join(T, 'hosts'));
     no('cat hosts');
+    // A name holding a brace-shield character would be read under another name, past the link check: the prompt.
+    fs.symlinkSync('/etc', path.join(T, 'link'));
+    no("cat 'link/hosts'"); no('cat "link/hosts"');
     no('cat host*'); no('cat host?');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
