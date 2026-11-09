@@ -140,6 +140,7 @@ ${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and Gi
                                        --format html writes a page you can sort and filter; titles are
                                        included, so check it before sharing it outside the team
   yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
+  yad issues sync [--dry-run]          Update linked items: status and type labels, and close once every epic shipped
   yad issues show <ref>                One item in full. <ref> is 12 (Product repo) or <repo>#12
   yad issues link|unlink <ref> <EP>    Link an item to an epic: comments on it and sets its type and status labels
 
@@ -511,7 +512,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
-const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
+const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -648,7 +649,7 @@ const ACTIONS = {
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
-  issues: { known: ['list', 'labels', 'show', 'link', 'unlink'], default: 'list' },
+  issues: { known: ['list', 'labels', 'show', 'link', 'unlink', 'sync'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
@@ -1141,6 +1142,8 @@ async function main() {
       else if (action === 'comment') result = await commands.gateComment(o.dir, { epic, artifact, by: o.by, count: o.count ?? null, newRound: !!o.newRound, today });
       else if (action === 'advance') result = await commands.gateAdvance(o.dir, { epic, artifact, today });
       else { refuse(`unknown gate action: ${action} (open|sync|comments|status|repair|reopen|review|walkthrough|trailer|ci|approve|comment|advance)`); }
+      // E171: a gate that really advanced here updates its linked items. `gate ci` is left out: CI cannot write to issues.
+      if ((action === 'sync' && result?.written && result?.advanced > 0) || (action === 'advance' && result?.advanced === true)) commands.syncAfterGate(o.dir, epic);
       break;
     }
     case 'review': {
@@ -1261,7 +1264,7 @@ async function main() {
       // E169. `list` reads and may write the --out file; `labels` adds the predefined labels to the repos.
       if (noProduct()) break;
       const action = o._[1] ?? 'list';
-      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink)`, ISSUES_USAGE); break; }
+      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink, sync)`, ISSUES_USAGE); break; }
       const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
       if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
       if (['show', 'link', 'unlink'].includes(action)) {
@@ -1273,6 +1276,7 @@ async function main() {
         break;
       }
       if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
+      if (action === 'sync') { result = await commands.runIssuesSync(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       result = await commands.runIssuesList(o.dir, {
         priority: o.priority ?? null, type: o.type ?? null, status: o.status ?? null, assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null,

@@ -63,6 +63,7 @@ export const SKILLS = [
   'yad-defects',
   'yad-reconcile',
   'yad-stub',
+  'yad-issues',
 ];
 
 // Old skill names. `check`/`update` migrate any install still carrying one: remove the old copy,
