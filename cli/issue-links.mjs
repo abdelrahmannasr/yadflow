@@ -16,7 +16,7 @@ export const itemKey = ({ host, repo, number }) => `${String(host).toLowerCase()
 export function readLinks(root, epic) {
   const p = linksPath(root, epic);
   const doc = readJSONStrict(p, { items: [] });
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items)) throw err('YAD-STATE-001', `${p} is not an issue-links file (no "items" list)`, 'fix the file or restore it from git');
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items) || doc.items.some((l) => !l || typeof l !== 'object')) throw err('YAD-STATE-001', `${p} is not an issue-links file (it needs an "items" list of records)`, 'fix the file or restore it from git');
   return doc.items;
 }
 export function writeLinks(root, epic, items) {
