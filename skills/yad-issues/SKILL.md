@@ -35,5 +35,5 @@ The team's backlog lives on the platform. In yadflow the platform's thing is a *
 
 - A repo marked "not read" has unknown items. Never report that as "no items".
 - Status is worked out from facts: the item's state and the linked epic. A `status:` label is only an output.
-- yad closes an item once, after every linked epic has shipped. If a person reopens it, leave it open.
+- `yad issues sync` closes an item after every linked epic has shipped, unless the platform shows it was ever reopened. Closing happens only in that command, never after a gate.
 - On a verified Product, gates advance in CI, which cannot write to issues. Those items update at the next `yad issues sync`.

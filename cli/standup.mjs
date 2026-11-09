@@ -41,7 +41,7 @@ import { readClaims, fetchCaptures } from './claims.mjs';
 import { gitIn, wipName, WIP_PREFIX } from './capture.mjs';
 import { gitAuthors, personKey } from './people.mjs';
 import { isBot } from './riskmap.mjs';
-import { buildIssues, mdEscape, mdUrl } from './issues.mjs';
+import { accountId, buildIssues, mdEscape, mdUrl } from './issues.mjs';
 import { readMembers, memberStatuses, memberMatches, productIdentity, ttlDays, accountLabel, accessCheck } from './members.mjs';
 import { ledgerEvents, esc, mdText, writeReport } from './usage.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
@@ -507,15 +507,19 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   });
   // E171. Each member's items: open ones, and those closed in this window. Titles are shown on purpose: a list of
   // numbers is no use in a standup. A repo not read is "not read", through `gapLines`, never "no items".
-  const backlog = buildIssues(root, { now, closedSinceMs: win.startMs, env, ...(runner ? { runner } : {}) });
+  const active = members.filter((m) => m.status !== 'left');
+  const backlog = active.length ? buildIssues(root, { now, closedSinceMs: win.startMs, env, authCache, ...(runner ? { runner } : {}) }) : { items: [], repos: [], notes: [], registryUnread: false };
   const platformGone = new Set(prMissing.map((p) => p.label));
+  // Each repo's failure is said once, with its PR read's line if that failed too. The flag does not depend on that.
   const issuesNotRead = backlog.repos.filter((r) => !r.read && !platformGone.has(r.label)).map((r) => `${r.label}: items not read — ${r.why}`);
-  const issuesPartial = backlog.repos.filter((r) => r.partial).map((r) => `${r.label}: not every item was read`);
-  const itemsFor = (login) => backlog.items.filter((i) => i.assignees.some((a) => a.member === login)).map((i) => ({ ref: i.ref, url: i.url, title: i.title, priority: i.priority, status: i.status, epic: i.epic?.id ?? null }));
-  const team = members.filter((m) => m.status !== 'left').map((m) => ({ ...shape(m), issues: itemsFor(m.primary.login) }));
+  notes.push(...backlog.notes.filter((n) => !notes.includes(n)));
+  const issuesUnknown = backlog.registryUnread || backlog.repos.some((r) => !r.read || r.partial) || backlog.items.some((i) => i.assignees.some((a) => a.ambiguous));
+  const itemsFor = (m) => backlog.items.filter((i) => i.assignees.some((a) => a.memberKey === accountId(m.primary))).map((i) => ({ ref: i.ref, url: i.url, title: i.title, priority: i.priority, status: i.status, epic: i.epic?.id ?? null, flags: i.flags }));
+  const team = active.map((m) => ({ ...shape(m), issues: itemsFor(m) }));
   const left = members.filter((m) => m.status === 'left').map(shape);
   return {
-    issuesNotRead: [...issuesNotRead, ...issuesPartial],
+    issuesNotRead,
+    issuesUnknown,
     window: { start: new Date(win.startMs).toISOString(), end: new Date(now).toISOString(), tz, basis: win.basis, ledgerFrom: win.startUtcDay },
     fetched,
     ttlDays: ttl,
@@ -587,8 +591,8 @@ const emptyLine = (model) => {
   return gaps.length ? `nothing recorded here — but ${gaps.join(', and ')}, so something may be missing (see the end)` : 'nothing';
 };
 
-const itemMeta = (i) => [i.priority ?? 'no priority', i.status, i.epic ?? 'no epic'].join(' · ');
-const noItems = (model) => (model.issuesNotRead?.length ? 'none found — but not every repo was read (see the end)' : 'none');
+const itemMeta = (i) => [i.priority ?? 'no priority', i.status, i.epic ?? 'no epic', ...(i.flags ?? [])].join(' · ');
+const noItems = (model) => (model.issuesUnknown ? 'none found — but not every repo was read (see the end)' : 'none');
 
 function blockText(model, b, title) {
   log(`\n  ${c.bold(title)}`);

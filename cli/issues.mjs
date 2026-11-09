@@ -178,8 +178,11 @@ export const SORTERS = {
   updated: (a, b) => cmp(b.updated || '', a.updated || '') || tie(a, b),
 };
 
+// One account, across platforms: the same login on two hosts can be two people.
+export const accountId = (a) => `${a.platform}/${String(a.host).toLowerCase()}/${String(a.login).toLowerCase()}`;
+
 // The Product repo's items are `#12`, every other repo's `<label>#12`.
-export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFAULT_CLOSED_DAYS * DAY, env = process.env, runner } = {}) {
+export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFAULT_CLOSED_DAYS * DAY, env = process.env, runner, authCache = new Map() } = {}) {
   const r = runner ? { runner } : {};
   const notes = [];
   const productConfig = readJSON(productConfigPath(root), null);
@@ -191,7 +194,6 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
   const sources = repoSources(root, identity, productConfig, notRead, env, { localPaths: false });
   const registryUnread = notRead.length > 0;
   const seen = new Set();
-  const authCache = new Map();
   const links = allLinks(root);
   if (links.unreadable.length) notes.push(`the item links of ${links.unreadable.join(', ')} could not be read, so items linked there show as unlinked`);
   const stages = new Map();
@@ -221,7 +223,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
       if (ty.more) flags.push('more than one type label');
       const assignees = it.logins.map((login) => {
         const m = whoseAccount(got.members, { platform: target.platform, host: target.host, login }, got.disputed);
-        return { login: clean(login), member: m.member ? m.member.primary.login : null };
+        return { login: clean(login), member: m.member ? m.member.primary.login : null, memberKey: m.member ? accountId(m.member.primary) : null, ambiguous: !!m.ambiguous };
       });
       items.push({ ref: `${s.label === 'Product' ? '' : s.label}#${it.number}`, repo: s.label, platform: target.platform, host: target.host, number: it.number, title: it.title, url: it.url,
         state: it.state, kind: it.kind, priority: p.value, type: ty.value, labels: it.labels, assignees, created: it.created, updated: it.updated, closed: it.closed, due: it.due,

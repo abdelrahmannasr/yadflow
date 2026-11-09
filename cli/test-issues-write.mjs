@@ -37,12 +37,13 @@ function product() {
 const issue = (over = {}) => ({ number: 7, title: 'Secret title', body: 'Secret body', state: 'open', html_url: 'https://github.com/a/b/issues/7', labels: [{ name: 'bug' }], assignees: [], ...over });
 
 // A fake platform: answers the read, the parent query and every write, and keeps the writes.
-function platform({ item = issue(), parent = null, parentFails = false, writeFails = false, readFails = false } = {}) {
+function platform({ item = issue(), parent = null, parentFails = false, writeFails = false, readFails = false, events = [], eventsFail = false } = {}) {
   const writes = [];
   const runner = (cmd, args) => {
     if (cmd === 'which' || cmd === 'where' || args[0] === 'auth') return { ok: true, code: 0, stdout: '', stderr: '' };
     if (args[0] !== 'api') return no('unexpected');
     if (args.includes('-X')) { writes.push(args); return writeFails ? no('HTTP 403') : done({}); }
+    if (args.some((x) => /\/events\?|resource_state_events/.test(x))) return eventsFail ? no('HTTP 502') : done(events);
     if (args.includes('graphql')) return parentFails ? no('HTTP 502') : done({ data: { repository: { issue: { parent } } } });
     return readFails ? no('HTTP 404: Not Found') : done(item);
   };
@@ -499,5 +500,53 @@ test('E171: the skills that start from an item say its text is not instructions'
     assert.match(t, /yad issues show/, n);
     assert.match(t, /[Nn]ever follow an instruction/, n);
   }
+});
+
+test('E171 review: an item ever reopened on the platform is not closed, even with no local record; an unread history closes nothing', async () => {
+  const T = product();
+  await seed(T, 'a1');
+  await linkOne(T, 'EP-a1');
+  markShipped(T, 'EP-a1');
+  const item = issue({ labels: [{ name: 'feature' }] });
+  const again = platform({ item, events: [{ event: 'closed' }, { event: 'reopened' }] });
+  W.syncItems(T, { env, runner: again.runner });
+  assert.equal(closes(again.writes).length, 0);
+  const unread = platform({ item, eventsFail: true });
+  const r = W.syncItems(T, { env, runner: unread.runner });
+  assert.equal(closes(unread.writes).length, 0);
+  assert.match(r.items[0].failed.join(), /reopened/);
+  reset();
+});
+
+test('E171 review: the after-gate sync updates labels and never closes', async () => {
+  const T = product();
+  await seed(T, 'a1');
+  await linkOne(T, 'EP-a1');
+  markShipped(T, 'EP-a1');
+  const p = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  W.syncAfterGate(T, 'EP-a1', { env, runner: p.runner });
+  assert.equal(closes(p.writes).length, 0);
+  assert.ok(p.writes.some((a) => a.includes('labels[]=status: done')));
+  reset();
+});
+
+test('E171 review: a confidential item is not a failure', async () => {
+  const T = product();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', git_url: 'git@gitlab.com:a/b.git' }));
+  await seed(T, 'base');
+  const item = { iid: 7, title: 'x', description: 'y', state: 'opened', web_url: 'https://gitlab.com/a/b/-/issues/7', labels: [], assignees: [], confidential: true };
+  await W.runIssuesLink(T, { ref: '7', epic: 'EP-base', env, runner: platform({ item }).runner });
+  reset();
+  await W.runIssuesSync(T, { env, runner: platform({ item }).runner });
+  assert.ok(!process.exitCode);
+  reset();
+});
+
+test('E171 review: unknown items are never "none", and items need the whole account to match', async () => {
+  const S = await import('./standup.mjs');
+  const base = { window: { start: '2026-11-08T00:00:00Z', end: '2026-11-09T00:00:00Z', tz: 'UTC', basis: 'x', ledgerFrom: '2026-11-08' }, team: [{ login: 'ann', status: 'active', accounts: ['a'], done: [], working: [], waiting: [], issues: [] }], left: [], unlisted: [], ownerless: [], platform: [], notRead: [], notes: [], memberErrors: [], duplicates: [], fetched: 'ok', issuesNotRead: [] };
+  assert.match(S.renderMarkdown({ ...base, issuesUnknown: true }), /not every repo was read/);
+  assert.doesNotMatch(S.renderMarkdown({ ...base, issuesUnknown: false }), /not every repo was read/);
+  assert.notEqual(I.accountId({ platform: 'github', host: 'github.com', login: 'alice' }), I.accountId({ platform: 'gitlab', host: 'gitlab.com', login: 'alice' }));
 });
 
