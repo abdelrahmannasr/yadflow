@@ -124,12 +124,13 @@ export async function runIssuesShow(root, { ref, json = false, env = process.env
 
 // Null when a linked epic cannot be read: a label yad cannot stand behind is not written.
 const statusFor = (root, epics, state) => {
+  if (state === 'closed') return 'done'; // closed is done, whatever the epic says
   const stage = combinedStage(epics.map((e) => epicStage(root, e)));
   return stage === null ? null : itemStatus(state, stage).status;
 };
 
 // Put the comment and labels on the item. Never throws, and returns what failed; the link is kept either way.
-export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic], unknownLinks = false }) {
+export function writeBack(root, epic, entry, t, { item, rules, epicType, runner = run, epics = [epic], unreadable = [] }) {
   const failed = [];
   const failedWhy = (what, r) => { const code = httpStatus(r); failed.push(`${what}: ${code ? `${t.host} answered HTTP ${code}` : clean(r.stderr || 'the write failed').slice(0, 200)}`); };
   const out = { commented: false, labelled: [], failed };
@@ -144,8 +145,10 @@ export function writeBack(root, epic, entry, t, { item, rules, epicType, runner 
   // Only an item with no type label gets one: a second would make the item's type ambiguous.
   if (typeOf && !pick(item.labels, rules.type).value) add.push(rules.type[typeOf][0]);
   const status = statusFor(root, epics, item.state);
-  if (status === null || unknownLinks) failed.push('the status label: a linked epic could not be read, so the status is unknown');
-  const known = status !== null && !unknownLinks;
+  const linksUnknown = item.state !== 'closed' && unreadable.length > 0;
+  if (linksUnknown) failed.push(`the status label: the item links of ${unreadable.join(', ')} could not be read (.sdlc/issue-links.json), so this item's epics are unknown`);
+  else if (status === null) failed.push('the status label: a linked epic could not be read, so the status is unknown');
+  const known = status !== null && !linksUnknown;
   if (known && !have.has(rules.status[status][0].toLowerCase())) add.push(rules.status[status][0]);
   const stale = known ? Object.entries(rules.status).filter(([s]) => s !== status).flatMap(([, names]) => names).filter((l) => have.has(l.toLowerCase())) : [];
   if (add.length) { const r = addItemLabels(t, entry.number, add, { runner }); if (r.ok) out.labelled = add; else failedWhy(`the labels ${add.join(', ')}`, r); }
@@ -165,7 +168,7 @@ function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner })
   const created = !entry;
   if (created) { entry = makeEntry(t, item, now); items.push(entry); writeLinks(root, epic, items); }
   const every = allLinks(root);
-  const back = writeBack(root, epic, entry, t, { item, rules, epicType, runner, epics: every.byItem.get(key) || [epic], unknownLinks: every.unreadable.length > 0 });
+  const back = writeBack(root, epic, entry, t, { item, rules, epicType, runner, epics: every.byItem.get(key) || [epic], unreadable: every.unreadable });
   writeLinks(root, epic, items);
   return { entry, created, back };
 }
@@ -179,6 +182,9 @@ function sayBack(back) {
 const SEED_FLAGS = new Set(['--issue', '--type', '--profile', '--stub', '--parent', '--inherits', '--json', '--dir']);
 // `epic new --issue` writes to a platform, so a flag it does not use (`--repo`, `--dry-run`) is refused, not dropped.
 export const seedForeignFlags = (argv) => argv.filter((a) => a.startsWith('-') && !SEED_FLAGS.has(a.split('=')[0]));
+
+// A leftover approvals.json the child's seed would refuse: records in it, or one that does not parse.
+const hasApprovals = (p) => { if (!fs.existsSync(p)) return false; try { const a = JSON.parse(fs.readFileSync(p, 'utf8')); return !Array.isArray(a) || a.length > 0; } catch { return true; } };
 
 const epicTypeOf = (root, epic) => readJSON(epicFiles(epicRoot(root, epic)).state, null)?.type ?? null;
 const knownEpic = (root, epic) => isValidEpicId(epic) && !PRODUCT_EPICS.includes(epic) && fs.existsSync(epicFiles(epicRoot(root, epic)).state);
@@ -229,7 +235,10 @@ export function definiteParents(root, t, item, { self, runner = run }) {
   const links = p.parent ? allLinks(root) : null;
   if (p.parent) for (const e of links.byItem.get(itemKey({ host: t.host, repo: p.parent.repo, number: p.parent.number })) || []) found.add(e);
   const ids = [...found].filter((e) => known.has(e)).sort();
-  return ids.length || !(p.unknown || links?.unreadable.length) ? { ids } : { unknown: true };
+  if (ids.length) return { ids };
+  if (p.unknown) return { unknown: true, why: 'could not read whether the item has a parent item' };
+  if (links?.unreadable.length) return { unknown: true, why: `the item has a parent item, but the item links of ${links.unreadable.join(', ')} could not be read (.sdlc/issue-links.json)` };
+  return { ids };
 }
 
 // `yad epic new <slug> --issue <ref>`.
@@ -255,7 +264,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
   let stubbed = null;
   if (!isGenesisType(epicType) && !parentId) {
     const d = definiteParents(root, t, item, { self: epic, runner });
-    if (d.unknown) return bail('could not read whether the item has a parent item', `pass --parent <EP-id>, so a duplicate stub is not created`);
+    if (d.unknown) return bail(d.why, 'pass --parent <EP-id>, so a duplicate stub is not created');
     if (d.ids.length > 1) return bail(`the item points at more than one epic: ${d.ids.join(', ')}`, 'choose one with --parent');
     if (d.ids.length) parentId = d.ids[0];
     else {
@@ -263,6 +272,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
       if (profile && profile !== 'classic') return bail(`a new stub parent is on the classic route, and a child takes its parent's route: --profile ${forTerminal(profile)} cannot apply`, 'drop --profile, or pass --parent');
       if (inherits) return bail('a new stub parent has nothing to inherit', 'drop --inherits, or pass --parent');
       if (fs.existsSync(path.join(epicRoot(root, epic), 'epic.md'))) return bail(`${epic} already has an epic.md`, 'pass --parent, so its header and the parent agree');
+      if (hasApprovals(epicFiles(epicRoot(root, epic)).approvals)) return bail(`${epic} has approval records but no lifecycle`, 'look at that folder first: nothing here overwrites a ledger');
       stubbed = `${epic}-parent`;
       if (fs.existsSync(epicFiles(epicRoot(root, stubbed)).state) || fs.existsSync(path.join(epicRoot(root, stubbed), 'epic.md'))) return bail(`${stubbed} already exists`, `if it is this item's parent, pass --parent ${stubbed}`);
       const s = await runEpicNew(root, { slug: stubbed, stub: true, today, json: true, returnResult: true });

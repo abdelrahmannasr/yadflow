@@ -323,3 +323,32 @@ test('E170 review: a confidential item drives neither type nor parent', () => {
   const r = W.readItem(t, 7, { runner: platform({ item }).runner });
   assert.deepEqual([r.labels, r.rawText], [[], '']);
 });
+
+test('E170 review 2: an unrelated broken sidecar is named; a closed item still gets done', async () => {
+  const T = product();
+  await seed(T, 'a1'); await seed(T, 'other');
+  fs.writeFileSync(path.join(T, 'epics/EP-other/.sdlc/issue-links.json'), '{broken');
+  const openItem = platform({ item: issue({ labels: [{ name: 'feature' }] }) });
+  const lines = [];
+  const orig = process.stderr.write; const origLog = console.log; const origErr = console.error;
+  process.stderr.write = (x) => { lines.push(String(x)); return true; };
+  console.log = (...a) => lines.push(a.join(' ')); console.error = (...a) => lines.push(a.join(' '));
+  try { await W.runIssuesLink(T, { ref: '7', epic: 'EP-a1', env, runner: openItem.runner }); } finally { process.stderr.write = orig; console.log = origLog; console.error = origErr; }
+  assert.equal(openItem.writes.some((a) => a.some((x) => x.startsWith('labels[]=status:'))), false);
+  assert.match(lines.join('\n'), /EP-other/);
+  const closed = platform({ item: issue({ state: 'closed', labels: [{ name: 'feature' }] }) });
+  await W.runIssuesLink(T, { ref: '8', epic: 'EP-a1', env, runner: closed.runner });
+  assert.ok(closed.writes.some((a) => a.includes('labels[]=status: done')));
+  reset();
+});
+
+test('E170 review 2: leftover approvals in the child folder refuse before a stub is made', async () => {
+  const T = product();
+  fs.mkdirSync(path.join(T, 'epics/EP-pay/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-pay/.sdlc/approvals.json'), '[{"x":1}]');
+  await W.runEpicNewFromIssue(T, { slug: 'pay', issue: '7', today, env, runner: platform().runner });
+  assert.equal(fs.existsSync(path.join(T, 'epics/EP-pay-parent')), false);
+  assert.equal(process.exitCode, 1);
+  reset();
+});
+
