@@ -284,7 +284,7 @@ test('labels: creates only what no accepted spelling covers, on each host in its
     return ok([{ name: 'P0' }, { name: 'priority: p1' }, { name: 'priority: P2' }, { name: 'type: bug' }]);
   };
   const r = await I.runIssuesLabels(T, { json: true, env, runner });
-  assert.deepEqual(r.repos[0].created.sort(), ['enhancement', 'feature', 'priority: P3', 'status: done', 'status: in progress', 'status: todo'].sort());
+  assert.deepEqual(r.repos[0].created.sort(), ['enhancement', 'feature', 'priority: P3', 'security', 'status: done', 'status: in progress', 'status: todo', 'suggestion', 'tech-debt'].sort());
   assert.ok(posted.every((a) => a.includes('--hostname') && a.some((x) => /^color=[0-9a-f]{6}$/.test(x))));
   posted.length = 0;
   const d = await I.runIssuesLabels(T, { dryRun: true, json: true, env, runner });

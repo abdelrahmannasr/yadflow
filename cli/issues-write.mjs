@@ -26,7 +26,7 @@ const cleanBody = (v) => String(v ?? '').split(/\r?\n/).map((l) => forTerminal(l
 const httpUrl = (v) => { try { const u = new URL(v); return ['http:', 'https:'].includes(u.protocol) ? u.href : null; } catch { return null; } };
 const NO_FIELD = /doesn't exist on type|Field '[^']+' doesn't exist/i;
 
-const ITEM_TO_EPIC = { bug: 'defect', feature: 'feature', enhancement: 'change' };
+const ITEM_TO_EPIC = { bug: 'defect', feature: 'feature', enhancement: 'change', security: 'defect', 'tech-debt': 'change', suggestion: 'change' };
 const EPIC_TO_ITEM = { defect: 'bug', hotfix: 'bug', feature: 'feature', change: 'enhancement' };
 
 // `12`, `#12` (the Product repo) or `<repo>#12`. A bare `#12` is a shell comment unless quoted, so `12` works too.
