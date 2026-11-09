@@ -545,8 +545,8 @@ test('E171 review: a confidential item is not a failure', async () => {
 test('E171 review: unknown items are never "none", and items need the whole account to match', async () => {
   const S = await import('./standup.mjs');
   const base = { window: { start: '2026-11-08T00:00:00Z', end: '2026-11-09T00:00:00Z', tz: 'UTC', basis: 'x', ledgerFrom: '2026-11-08' }, team: [{ login: 'ann', status: 'active', accounts: ['a'], done: [], working: [], waiting: [], issues: [] }], left: [], unlisted: [], ownerless: [], platform: [], notRead: [], notes: [], memberErrors: [], duplicates: [], fetched: 'ok', issuesNotRead: [] };
-  assert.match(S.renderMarkdown({ ...base, issuesUnknown: true }), /not every repo was read/);
-  assert.doesNotMatch(S.renderMarkdown({ ...base, issuesUnknown: false }), /not every repo was read/);
+  assert.match(S.renderMarkdown({ ...base, issuesUnknown: true }), /could not be read or matched/);
+  assert.doesNotMatch(S.renderMarkdown({ ...base, issuesUnknown: false }), /could not be read or matched/);
   assert.notEqual(I.accountId({ platform: 'github', host: 'github.com', login: 'alice' }), I.accountId({ platform: 'gitlab', host: 'gitlab.com', login: 'alice' }));
 });
 

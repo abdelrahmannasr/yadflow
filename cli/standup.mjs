@@ -592,7 +592,7 @@ const emptyLine = (model) => {
 };
 
 const itemMeta = (i) => [i.priority ?? 'no priority', i.status, i.epic ?? 'no epic', ...(i.flags ?? [])].join(' · ');
-const noItems = (model) => (model.issuesUnknown ? 'none found — but not every repo was read (see the end)' : 'none');
+const noItems = (model) => (model.issuesUnknown ? 'none found — but some items could not be read or matched to a member (see the end)' : 'none');
 
 function blockText(model, b, title) {
   log(`\n  ${c.bold(title)}`);

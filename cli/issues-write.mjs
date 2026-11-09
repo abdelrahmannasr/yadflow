@@ -329,7 +329,7 @@ export async function runIssuesLink(root, { ref, epic: raw, json = false, now = 
   if (!got) return undefined;
   const rules = labelRules(got.productConfig);
   const { entry, created, back } = linkAndWriteBack(root, epic, got.t, got.item, { rules, epicType: epicTypeOf(root, epic), now, runner });
-  if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed });
+  if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${created ? 'linked' : 'already linked:'} ${got.label === 'Product' ? '' : forTerminal(got.label)}#${entry.number} → ${epic}`);
   sayBack(back);
   if (created) info('commit .sdlc/issue-links.json on the epic\'s branch so the team sees the link');
@@ -419,7 +419,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
   const seeded = await runEpicNew(root, { slug: epic, type: epicType, profile, parent: parentId, inherits, today, json: true, returnResult: true });
   if (!seeded?.ok) return bail(`${seeded?.error ?? 'the epic could not be seeded'}${stubbed ? ` (the stub ${stubbed} was created and stays)` : ''}`, seeded?.hint);
   const { entry, back } = linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner });
-  if (json) return emitJSON({ ...seeded, issue: { number: entry.number, url: entry.url }, parent: parentId ?? null, stubParent: stubbed, commented: back.commented, labelled: back.labelled, failed: back.failed });
+  if (json) return emitJSON({ ...seeded, issue: { number: entry.number, url: entry.url }, parent: parentId ?? null, stubParent: stubbed, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${epic} seeded from item ${entry.number} — type ${epicType}${parentId ? `, parent ${parentId}${stubbed ? ' (new stub)' : ''}` : ''}`);
   sayBack(back);
   if (seeded.next) hand(`next: the ${seeded.next} skill. It reads the item with \`yad issues show\``);
