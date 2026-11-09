@@ -44,7 +44,7 @@ You judge the code. `yad scan file` does everything that must be exact: duplicat
    - **Never quote a secret.** Say where it is and what kind it is.
 
 6. File them: `yad scan file <file> --repo <repo> --task <task> --json`, from the Product. With no findings, skip this step.
-7. Tell the person what was filed, with links. Say each P0 first and plainly. Say every finding in `failed`, with its reason. If a reason says an item was not made confidential, tell the person to restrict that item now, and give the link. Say every finding marked as not filed: those are security findings kept off the tracker on purpose, and this is the only place the person sees them.
+7. Tell the person what was filed, with links. Say each P0 first and plainly. Say every finding in `failed`, with its reason. If a reason says an item was not made confidential, tell the person to restrict that item now, give the link, and do not run the scan again until it is fixed. A reason starting "not sent" means nothing was posted for that finding. Say every finding marked as not filed: those are security findings kept off the tracker on purpose, and this is the only place the person sees them.
 
 ## Never block
 

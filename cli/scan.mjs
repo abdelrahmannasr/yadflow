@@ -183,6 +183,7 @@ function targetFor(root, productConfig, repo, { env, runner }) {
   return t.ok ? { t } : { why: t.why };
 }
 
+const NO_PUSH = 'your login cannot push to this repo, so the platform would drop its labels';
 const rank = (p) => PRIORITIES.indexOf(p);
 
 // ---- the command --------------------------------------------------------------------------------------
@@ -241,7 +242,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
   if (dryRun) {
     for (const { fp, f, route } of chosen) {
       const row = { fingerprint: fp, category: f.category, priority: f.priority, title: plain(f.title, 200) };
-      if (noPush && route !== 'advisory') result.failed.push({ ...row, why: 'your login cannot push to this repo, so the platform would drop its labels' });
+      if (noPush && route !== 'advisory') result.failed.push({ ...row, why: NO_PUSH });
       else result.filed.push({ ...row, to: route, url: null, wouldFile: true });
     }
   } else {
@@ -272,7 +273,7 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
       return id;
     };
     // Once the platform has dropped something, the next item would lose the same thing.
-    let halted = null;
+    let halted = false;
     for (const { fp, f, route } of chosen) {
       const title = safeTitle(f.title);
       const row = { fingerprint: fp, category: f.category, priority: f.priority, title };
@@ -282,14 +283,14 @@ export async function runScanFile(root, { file, repo, task = null, dryRun = fals
         else notFiled.push({ ...row, file: f.file, line: f.line, why: [403, 404].includes(httpStatus(r)) ? `the draft advisory was refused (HTTP ${httpStatus(r)}): an administrator or security manager must run this` : `GitHub did not accept the draft advisory${httpStatus(r) ? ` (HTTP ${httpStatus(r)})` : ''}` });
         continue;
       }
-      if (halted) { result.failed.push({ ...row, why: `not sent, because an earlier finding was changed by the platform: ${halted}` }); continue; }
-      if (!labelsReady) { result.failed.push({ ...row, why: noPush ? 'your login cannot push to this repo, so the platform would drop its labels' : 'the labels could not be read or created, so it would not be recognised next time' }); continue; }
+      if (halted) { result.failed.push({ ...row, why: 'not sent: an earlier finding in this run did not come back as asked. Fix that first; running the scan again would send one more' }); continue; }
+      if (!labelsReady) { result.failed.push({ ...row, why: noPush ? NO_PUSH : 'the labels could not be read or created, so it would not be recognised next time' }); continue; }
       const r = createFinding(t, { title, body: findingBody(f, fp, { task }), labels: labelsOf(f), milestone: milestoneFor(f.category), confidential: route === 'confidential' }, { runner });
       if (r.ok) {
         let url = null;
         try { const b = JSON.parse(r.stdout); url = b.html_url ?? b.web_url ?? null; } catch { /* the check below says so */ }
         const dropped = droppedFrom(r.stdout, route === 'confidential');
-        if (dropped) { halted = dropped; result.failed.push({ ...row, url, why: dropped }); } else result.filed.push({ ...row, to: route, url });
+        if (dropped) { halted = true; result.failed.push({ ...row, url, why: dropped }); } else result.filed.push({ ...row, to: route, url });
       }
       else result.failed.push({ ...row, why: httpStatus(r) ? `${t.host} answered HTTP ${httpStatus(r)}` : 'the platform refused it' });
     }

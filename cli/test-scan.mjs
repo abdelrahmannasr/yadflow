@@ -295,6 +295,7 @@ test('E172 review 2: after the platform drops something, no more items are sent 
   assert.equal(r.failed.length, 3);
   assert.match(r.failed[0].why, /NOT made confidential/);
   assert.match(r.failed[1].why, /not sent/);
+  assert.doesNotMatch(r.failed[1].why, /confidential|restrict/i);
   reset();
 });
 
