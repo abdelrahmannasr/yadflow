@@ -496,6 +496,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     "cat <<E\n$(echo $'\\''x) it's $(gh pr merge 5)\nE", `gh pr merge 5\necho $(${' case $('.repeat(40)}`,
     // Round 3: the budget still refuses a 33rd such `$(…)`, and each in the copy is read to its own end.
     Array.from({ length: 33 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), "echo $(echo $'\\')'; gh pr merge 5\n) $(echo $'\\')' x\n)",
+    // Round 4: past the first `$(…)` the shells end elsewhere, a later one may be text to the shell (bash and zsh run these).
+    "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
+    "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -615,7 +618,7 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 2: a line read again with `$(:)` is judged at its own depth, and `a|esac)` is a pattern.
     `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"',
     // Review round 3: one copy of the line, however many `$(…)` the shells end elsewhere (up to the budget of 32).
-    Array.from({ length: 32 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' ')]) {
+    Array.from({ length: 32 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(32).fill("$(echo $'\\')')").join(' ')]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });

@@ -112,8 +112,7 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'piped', { value: new Set() });
   // Words whose backslashes in double quotes the shell keeps (#498), by part: their kept spelling.
   Object.defineProperty(parts, 'posix', { value: [] });
-  // The line again with every `$(…)` the shells end elsewhere read to that end and set to `$(:)`, as a shell reads
-  // them all (#498). One copy, not one per `$(…)`: copies of copies grew factorially (#498 review round 3).
+  // The line again with the first `$(…)` the shells end elsewhere read to that end and set to `$(:)` (#498).
   Object.defineProperty(parts, 'again', { value: [] });
   let partPosix = null;
   const wordKeep = [];
@@ -198,7 +197,9 @@ export function shellParts(rawLine, mode = {}) {
       // a newline. Its text, and what follows it, are judged too. A scan that ends where the first one did costs
       // what that one cost; one that ends elsewhere may run to the end of the line, so past 32 of those in one
       // reading of the command (every level counted), the command is refused.
-      if (ch === '$' && (realMarks ??= marksOf(line)).any.length && markWithin(realMarks.any, i + 2, end)) {
+      // Only up to the first one that differs: past it, this reading's quote state may not be the shell's, so a later
+      // `$(…)` may be text to the shell. The copy reads on from there, one `$(…)` at a time (#498 review round 4).
+      if (ch === '$' && !againAt.length && (realMarks ??= marksOf(line)).any.length && markWithin(realMarks.any, i + 2, end)) {
         const realEnd = substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)), { ...mode, real: true, past: end });
         // One that ends sooner was not charged by the scan; its readings are, here.
         if (realEnd === -2 || (realEnd < end && --realLeft.n < 0)) parts.tooComplex = true;
@@ -206,7 +207,6 @@ export function shellParts(rawLine, mode = {}) {
           parts.subs.push(line.slice(i + 2, realEnd));
           // The whole line again, that `$(…)` read to its real end and set to a neutral `$(:)`: the words around
           // it are read as the shells read them (`git commit -m {$(echo $'\')'),-n}` is `-n`, #498 review).
-          // Noted here; the copy is built once, after the loop.
           againAt.push([i, realEnd]);
         }
       }
@@ -285,16 +285,11 @@ export function shellParts(rawLine, mode = {}) {
     word += ch; inWord = true;
   }
   endPart();
-  // The one copy, judged at the same depth (it is this line, not one inside it). A `$(…)` that starts inside one
-  // already replaced is left to that copy's own reading.
+  // The copy, judged at the same depth (it is this line, not one inside it). It finds the next such `$(…)` itself,
+  // so k of them make a chain of k copies, each charged once: never a copy per pair of them (#498 review round 3).
   if (againAt.length) {
-    let copy = '', from = 0;
-    for (const [at, realEnd] of againAt) {
-      if (at < from) continue;
-      copy += `${line.slice(from, at)}$(:)`;
-      from = realEnd + 1;
-    }
-    parts.again.push(copy + line.slice(from));
+    const [at, realEnd] = againAt[0];
+    parts.again.push(`${line.slice(0, at)}$(:)${line.slice(realEnd + 1)}`);
   }
   return parts;
 }
