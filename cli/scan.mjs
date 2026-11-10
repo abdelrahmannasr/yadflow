@@ -122,7 +122,7 @@ function draftAdvisories(t, runner) {
 
 // `vis` is public, private, internal, or null. `noPush` is true only when GitHub says so: it silently drops the labels
 // and milestone of an item made without push access, and the next run could not recognise that item.
-function repoFacts(t, runner) {
+export function repoFacts(t, runner) {
   const res = api(runner, t.cli, t.host, `repos/${t.repo}`);
   if (!res.ok || !res.body || typeof res.body !== 'object') return { vis: null, noPush: false };
   const b = res.body;

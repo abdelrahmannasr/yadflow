@@ -141,6 +141,10 @@ ${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and Gi
                                        included, so check it before sharing it outside the team
   yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
   yad scan file <f> --repo <r>         File a scan's findings on the repo's tracker, by category and priority (the yad-scan skill runs it)
+  yad issues new --title <t> [--body-file <f>] [--type <t>] [--priority P1] [--assignee <login>|--me] [--repo <r>]
+                                       Open an issue / work item (in the Product repo unless --repo names one)
+  yad issues assign <ref> <login>|--me|--none · label <ref> --priority P1 --type bug
+  yad issues edit <ref> [--title] [--body-file] · comment <ref> --body-file <f> · close <ref> · reopen <ref>
   yad issues sync [--dry-run]          Update linked items: status and type labels, and close once every epic shipped
   yad issues show <ref>                One item in full. <ref> is 12 (Product repo) or <repo>#12
   yad issues link|unlink <ref> <EP>    Link an item to an epic: comments on it and sets its type and status labels
@@ -513,7 +517,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
-const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement,security,tech-debt,suggestion] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
+const ISSUES_USAGE = 'usage: yad issues new --title <t> [--body-file <f>] [--type <t>] [--priority P0-P3] [--assignee <login>|--me] [--repo <name>] | assign <ref> <login>|--me|--none | label <ref> [--priority P0-P3] [--type <t>] | edit <ref> [--title <t>] [--body-file <f>] | comment <ref> --body-file <f> | close <ref> | reopen <ref> | show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement,security,tech-debt,suggestion] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -527,6 +531,7 @@ function parseArgs(argv) {
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--manual') o.manual = true;
     else if (a === '--me') o.me = true;
+    else if (a === '--none') o.none = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--no-fetch') o.noFetch = true;
     else if (a === '--no-build') o.noBuild = true;
@@ -651,7 +656,7 @@ const ACTIONS = {
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
   scan: { known: ['file'] },
-  issues: { known: ['list', 'labels', 'show', 'link', 'unlink', 'sync'], default: 'list' },
+  issues: { known: ['list', 'labels', 'show', 'link', 'unlink', 'sync', 'new', 'assign', 'label', 'edit', 'comment', 'close', 'reopen'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
@@ -1266,7 +1271,7 @@ async function main() {
       // E169. `list` reads and may write the --out file; `labels` adds the predefined labels to the repos.
       if (noProduct()) break;
       const action = o._[1] ?? 'list';
-      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink, sync)`, ISSUES_USAGE); break; }
+      if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink, sync, new, assign, label, edit, comment, close, reopen)`, ISSUES_USAGE); break; }
       const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
       if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
       if (['show', 'link', 'unlink'].includes(action)) {
@@ -1278,6 +1283,22 @@ async function main() {
         break;
       }
       if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
+      if (commands.ACT_ACTIONS.includes(action)) {
+        // E173: the agent acts on an item when an engineer asks.
+        const foreign = commands.actForeignFlags(process.argv.slice(2), action);
+        if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
+        const words = o._.slice(2);
+        const wants = action === 'new' ? 0 : action === 'assign' ? (o.me || o.none ? 1 : 2) : 1;
+        if (words.length !== wants) { refuse(`yad issues ${action} takes ${action === 'new' ? 'no words (use --title)' : action === 'assign' ? '<ref> <login>, or <ref> --me|--none' : '<ref>'}`, ISSUES_USAGE); break; }
+        const common = { json: !!o.json };
+        if (action === 'new') result = await commands.runIssuesNew(o.dir, { ...common, title: o.title, body: o.body ?? null, bodyFile: o['body-file'] ?? null, type: o.type ?? null, priority: o.priority ?? null, assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null });
+        else if (action === 'assign') result = await commands.runIssuesAssign(o.dir, { ...common, ref: words[0], assignee: words[1] ?? null, me: !!o.me, none: !!o.none });
+        else if (action === 'label') result = await commands.runIssuesLabel(o.dir, { ...common, ref: words[0], priority: o.priority ?? null, type: o.type ?? null });
+        else if (action === 'edit') result = await commands.runIssuesEdit(o.dir, { ...common, ref: words[0], title: o.title ?? null, body: o.body ?? null, bodyFile: o['body-file'] ?? null });
+        else if (action === 'comment') result = await commands.runIssuesComment(o.dir, { ...common, ref: words[0], body: o.body ?? null, bodyFile: o['body-file'] ?? null });
+        else result = await (action === 'close' ? commands.runIssuesClose : commands.runIssuesReopen)(o.dir, { ...common, ref: words[0] });
+        break;
+      }
       if (action === 'sync') { result = await commands.runIssuesSync(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       result = await commands.runIssuesList(o.dir, {

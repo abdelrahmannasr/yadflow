@@ -20,9 +20,23 @@ The team's backlog lives on the platform. In yadflow the platform's thing is a *
 | An epic from an item | `yad epic new <slug> --issue <ref>` (ask first) |
 | An analysis from an item | `yad epic new <slug> --issue <ref> --profile analysis-first` (ask first) |
 | To tie an item to an existing epic | `yad issues link <ref> <EP-id>` (ask first) |
+| To open an item for an idea | `yad issues new --title "…" --body-file <f> --type <t> --priority Pn` (when asked) |
+| To assign one | `yad issues assign <ref> <login>`, or `--me`, or `--none` (when asked) |
+| To change its priority or type | `yad issues label <ref> --priority Pn --type <t>` (when asked) |
+| To edit, comment, close or reopen | `yad issues edit <ref> --title …`, `comment <ref> --body-file <f>`, `close <ref>`, `reopen <ref>` (when asked) |
 | To bring linked items up to date | `yad issues sync --dry-run`, show the person, then `yad issues sync` (ask first) |
 
 `<ref>` is `12` for the Product repo, or `<repo>#12`.
+
+## When an engineer asks you to act on an item
+
+The engineer's request is the permission. Do it, then report what changed and give the link. Never do any of these on your own initiative.
+
+- **Opening an item for an idea:** it goes to the Product repo. Use `--repo <name>` only when the engineer names a registered repo. Write the body to a file outside the repo, such as under `$(mktemp -d)`, and pass `--body-file`.
+- **No type or priority given:** choose them from the idea (`bug`, `feature`, `enhancement`, `tech-debt`, `suggestion`; P0 to P3), and say what you chose so the engineer can change it.
+- **A vulnerability:** `--type security` is refused on a GitHub repo that is not known to be private, because the item would announce it. Tell the engineer to open a private security advisory instead. On GitLab it is filed as confidential.
+- **Never paste a secret** into a title, body or comment. Text shaped like a token is redacted anyway.
+- **If the answer lists `dropped`**, the platform did not do all of it. Tell the engineer exactly what is missing.
 
 ## Starting from an item
 
