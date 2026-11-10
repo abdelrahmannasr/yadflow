@@ -63,7 +63,7 @@ function fake(platform = 'github', { existing = [], listFails = false, milestone
       }
       return done({});
     }
-    if (/\/issues\?/.test(at)) return listFails ? no('HTTP 502') : done(existing.map((e) => ({ number: e.number, iid: e.number, body: e.body, description: e.body })));
+    if (/\/issues\?/.test(at)) { if (listFails) return no('HTTP 502'); const want = decodeURIComponent((at.match(/labels=([^&]+)/) || [])[1] || ''); return done(existing.filter((e) => (e.labels ?? []).includes(want)).map((e) => ({ number: e.number, iid: e.number, body: e.body, description: e.body, labels: e.labels }))); }
     if (/\/milestones\?/.test(at)) return done(milestones);
     if (/\/labels\?/.test(at)) return done([]);
     if (/\/issues\/\d+$/.test(at)) return done({ number: 41, iid: 41, title: 'x', body: '', state: 'open', html_url: 'https://x/41', web_url: 'https://x/41', labels: [], assignees: [] });
@@ -106,7 +106,7 @@ test('re-running creates nothing new; a lost record plus the marker creates no d
   const r = await P.runFoundationPublish(T, { json: true, env, runner: g.runner });
   assert.equal(g.created.length, 0); assert.equal(r.alreadyPublished, 4);
   fs.rmSync(path.join(T, 'foundation/.sdlc/roadmap-items.json'));
-  const h = fake('github', { existing: [{ number: 5, body: 'x <!-- yad-roadmap: EP-signup -->' }] });
+  const h = fake('github', { existing: [{ number: 5, body: 'x <!-- yad-roadmap: EP-signup -->', labels: ['epic: EP-signup'] }] });
   const s = await P.runFoundationPublish(T, { json: true, env, runner: h.runner });
   assert.equal(h.created.length, 3);
   assert.deepEqual(s.recovered.map((x) => x.epicId), ['EP-signup']);
@@ -173,3 +173,48 @@ test('the real yad command reaches publish', async () => {
   assert.match(out, /turned off/);
   assert.doesNotMatch(out, /unknown foundation action/);
 });
+
+test('E174 review: only the parked heading itself is parked, and it is said', () => {
+  const skipped = [];
+  const rows = P.roadmapRows('## Phase 1 — Car park finder\n| Feature | Proposed epic id |\n|---|---|\n| Find | EP-find |\n\n## Later / parked\n| Feature | Proposed epic id |\n|---|---|\n| X | EP-x |\n', skipped);
+  assert.deepEqual(rows.map((r) => [r.epicId, r.priority]), [['EP-find', 'P1']]);
+  assert.deepEqual(skipped, ['Later / parked']);
+});
+
+test('E174 review: a roadmap edited after its review is refused', async () => {
+  const T = await product();
+  for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'stack.md', 'repos.md']) fs.writeFileSync(path.join(T, 'foundation', f), `# ${f}\n`);
+  const sp = path.join(T, 'foundation/.sdlc/state.json');
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  const review = st.steps.find((s) => s.type === 'review+approve');
+  review.status = 'done';
+  fs.writeFileSync(sp, JSON.stringify(st));
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: review.id, status: 'approved', by: 'ann', artifactHash: 'sha256:old' }]));
+  const f = fake();
+  await P.runFoundationPublish(T, { env, runner: f.runner });
+  assert.equal(f.posts.length, 0); assert.equal(process.exitCode, 1); reset();
+  // The same Foundation, approved as it stands, publishes.
+  const { artifactHash } = await import('./epic-state.mjs');
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: review.id, status: 'approved', by: 'ann', artifactHash: artifactHash(path.join(T, 'foundation'), 'foundation/') }]));
+  const g = fake();
+  await P.runFoundationPublish(T, { env, runner: g.runner });
+  assert.ok(g.created.length > 0); reset();
+});
+
+test('E174 review: a stranger\'s issue with the marker but no label does not claim the row', async () => {
+  const T = await product();
+  const f = fake('github', { existing: [{ number: 9, body: '<!-- yad-roadmap: EP-signup -->', labels: [] }] });
+  const r = await P.runFoundationPublish(T, { json: true, env, runner: f.runner });
+  assert.equal(r.recovered.length, 0);
+  assert.equal(f.created.length, 4);
+});
+
+test('E174 review: a phase heading cannot mention anyone in the body', async () => {
+  const T = await product();
+  fs.writeFileSync(path.join(T, 'foundation/roadmap.md'), '## Phase 1 — For @acme/web #12\n| Feature | Proposed epic id |\n|---|---|\n| A | EP-aa |\n');
+  const f = fake();
+  await P.runFoundationPublish(T, { env, runner: f.runner });
+  const body = field(f.created[0].args, 'body')[0];
+  assert.doesNotMatch(body, /@acme|#12/);
+});
+

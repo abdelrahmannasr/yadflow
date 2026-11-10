@@ -514,5 +514,5 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   }
   const next = features.find((f) => f.status === 'planned');
   if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId}${next.item ? `, from item #${next.item.number}` : ''})`);
-  if (approved && !items?.size && features.length) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
+  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
 }

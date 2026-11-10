@@ -11,20 +11,20 @@ import path from 'node:path';
 import { run, forTerminal, readJSONStrict, writeJSON, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { err } from './errors.mjs';
 import { productConfigPath, epicFiles } from './manifest.mjs';
-import { epicRoot, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, roadmapFeatures } from './epic-state.mjs';
+import { doneStepUnapproved, epicRoot, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, roadmapFeatures } from './epic-state.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
 import { linkAndWriteBack, readItem } from './issues-write.mjs';
 import { readLinks, itemKey } from './issue-links.mjs';
 import { targetOf } from './issues-act.mjs';
-import { readMilestones } from './scan.mjs';
+import { readMilestones, safeTitle } from './scan.mjs';
 import { api } from './protection.mjs';
 import { createMilestone, newItem } from './platform.mjs';
 
 const RECORD = path.join('.sdlc', 'roadmap-items.json');
 const MARKER = /<!-- yad-roadmap: (EP-[a-z0-9-]+) -->/g;
 const PAGE = 100;
-const MAX_PAGES = 10;
-const PARKED = /\b(park|parked|later\s*\/\s*parked)\b/i;
+// The template's own heading for deferred work, exactly: a phase that merely contains the word ("Car park finder") counts.
+const PARKED = /^(later\s*\/\s*)?parked?$/i;
 
 export const priorityForPhase = (index) => (index === 0 ? 'P1' : index === 1 ? 'P2' : 'P3');
 const recordPath = (root) => path.join(epicRoot(root, FOUNDATION_EPIC), RECORD);
@@ -40,13 +40,13 @@ export function readRecord(root) {
 const writeRecord = (root, items) => { fs.mkdirSync(path.dirname(recordPath(root)), { recursive: true }); writeJSON(recordPath(root), { items }); };
 
 // The rows to publish, with each one's phase, priority and milestone title. The first table row of an id wins.
-export function roadmapRows(text) {
+export function roadmapRows(text, skipped = []) {
   const phases = [];
   const seen = new Set();
   const rows = [];
   for (const r of roadmapFeatures(text)) {
     const phase = (r.phase ?? 'Roadmap').trim();
-    if (PARKED.test(phase)) continue;
+    if (PARKED.test(phase)) { if (!skipped.includes(phase)) skipped.push(phase); continue; }
     if (!isValidEpicId(r.epicId) || PRODUCT_EPICS.includes(r.epicId) || seen.has(r.epicId)) continue;
     seen.add(r.epicId);
     if (!phases.includes(phase)) phases.push(phase);
@@ -55,25 +55,29 @@ export function roadmapRows(text) {
   return rows;
 }
 
-// Every roadmap marker already on the Product repo, open and closed, as Map(epicId → number). Null if not all read.
-function markersOn(t, runner) {
+// The item already published for one row: open or closed, carrying both the row's `epic: EP-x` label and its body
+// marker. The label matters: a person who can only open issues cannot set one, so a stranger's issue that copies
+// the marker does not claim the row. Asked per row, so a busy repo is never too big to read.
+// `{ found: {number,url} | null }`, or `{ unread: true }`.
+function publishedOn(t, epicId, runner) {
   const gh = t.platform === 'github';
-  const at = gh ? `repos/${t.repo}/issues?state=all&per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/issues?scope=all&per_page=${PAGE}`;
-  const found = new Map();
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = api(runner, t.cli, t.host, `${at}&page=${page}`);
-    if (!res.ok || !Array.isArray(res.body)) return null;
-    for (const it of res.body) {
-      if (gh && it?.pull_request) continue;
-      const n = gh ? it?.number : it?.iid;
-      for (const m of String((gh ? it?.body : it?.description) ?? '').matchAll(MARKER)) if (Number.isInteger(n) && !found.has(m[1])) found.set(m[1], { number: n, url: (gh ? it?.html_url : it?.web_url) ?? null });
-    }
-    if (res.body.length < PAGE) return found;
+  const label = encodeURIComponent(`epic: ${epicId}`);
+  const at = gh ? `repos/${t.repo}/issues?labels=${label}&state=all&per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/issues?labels=${label}&scope=all&per_page=${PAGE}`;
+  const res = api(runner, t.cli, t.host, at);
+  if (!res.ok || !Array.isArray(res.body) || res.body.length >= PAGE) return { unread: true };
+  for (const it of res.body) {
+    if (gh && it?.pull_request) continue;
+    const n = gh ? it?.number : it?.iid;
+    const marks = [...String((gh ? it?.body : it?.description) ?? '').matchAll(MARKER)].map((m) => m[1]);
+    if (Number.isInteger(n) && marks.includes(epicId)) return { found: { number: n, url: (gh ? it?.html_url : it?.web_url) ?? null } };
   }
-  return null;
+  return { found: null };
 }
 
-const bodyFor = (row) => `A feature on the approved roadmap, phase **${row.phase.replace(/[*_`<>[\]]/g, '')}**. Its proposed epic is \`${row.epicId}\`.\n\nWhen the epic starts, yadflow links it here and keeps this item's status up to date.\n\n<!-- yad-roadmap: ${row.epicId} -->`;
+// The phase is the team's heading; `safeTitle` breaks a mention or reference so one publish notifies nobody.
+const bodyFor = (row, number = '<this item>') => `A feature on the approved roadmap, phase: ${safeTitle(row.phase.replace(/[*_`<>[\]]/g, ''))}. Its proposed epic is \`${row.epicId}\`.\n\nStart the epic with \`yad epic new ${row.epicId} --issue ${number}\` to link it here, so this item's status follows the epic. \`yad foundation publish\` also links an epic that already exists.\n\n<!-- yad-roadmap: ${row.epicId} -->`;
+// GitLab allows 255 characters in a title; cut by character, never inside one.
+const titleFor = (feature) => [...feature].slice(0, 255).join('');
 
 export async function runFoundationPublish(root, { dryRun = false, json = false, env = process.env, runner = run, now = Date.now() } = {}) {
   const refuse = (message, hint) => {
@@ -89,24 +93,35 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   try { state = loadLedger(dir).state; } catch { return refuse('the Foundation\'s ledger cannot be read', 'run `yad doctor`'); }
   // Only an approved roadmap: a draft could still lose or rename features.
   if (!PRODUCT_DONE.includes(state?.currentStep)) return refuse('the Foundation has not passed its review yet, so the roadmap is not final', 'publish it after the review: the backlog should hold only approved features');
+  // Approved once is not enough: a roadmap edited since its review holds rows nobody approved.
+  try {
+    const ledger = loadLedger(dir);
+    const review = ledger.state.steps.find((st) => st.type === 'review+approve');
+    if (doneStepUnapproved(dir, review, ledger.approvals)) return refuse('the Foundation changed after its review, so its approvals no longer cover the roadmap', 'have the Foundation reviewed again (`yad gate reopen EP-foundation foundation`), then publish');
+  } catch { return refuse('the Foundation\'s review could not be checked', 'run `yad doctor`'); }
   const file = path.join(dir, 'roadmap.md');
   if (!fs.existsSync(file)) return refuse('foundation/roadmap.md does not exist');
-  const rows = roadmapRows(fs.readFileSync(file, 'utf8'));
+  const skipped = [];
+  const rows = roadmapRows(fs.readFileSync(file, 'utf8'), skipped);
   const record = readRecord(root);
   if (env.YAD_PLATFORM_READ === '0') return refuse('platform reads are turned off (YAD_PLATFORM_READ=0)');
   let where;
   try { where = targetOf(root, null, { env, runner }); } catch (e) { return refuse(e.message, e.hint); }
   const { t, productConfig } = where;
   const rules = labelRules(productConfig);
-  const out = { ok: true, dryRun, created: [], recovered: [], alreadyPublished: 0, linked: [], failed: [], notes: [] };
+  const out = { ok: true, dryRun, created: [], recovered: [], alreadyPublished: 0, linked: [], failed: [], notes: skipped.map((p) => `the phase "${forTerminal(p)}" is parked, so its rows were left out`) };
   const known = new Map(record.filter((e) => e.host === t.host && e.repo === t.repo).map((e) => [e.epicId, e]));
   const todo = rows.filter((r) => !known.has(r.epicId));
   out.alreadyPublished = rows.length - todo.length;
 
   if (todo.length) {
     // A lost or uncommitted record must not mean a second item for the same feature.
-    const markers = markersOn(t, runner);
-    if (!markers) return refuse('the Product repo\'s items could not all be read, so nothing was created', 'run it again; already published features are never created twice');
+    const markers = new Map();
+    for (const r of todo) {
+      const p = publishedOn(t, r.epicId, runner);
+      if (p.unread) return refuse(`the items labelled "epic: ${r.epicId}" could not be read, so nothing was created`, 'run it again; already published features are never created twice');
+      if (p.found) markers.set(r.epicId, p.found);
+    }
     const fresh = [];
     for (const r of todo) {
       const m = markers.get(r.epicId);
@@ -138,7 +153,7 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
       for (const r of fresh) {
         const labels = labelsOf(r);
         const milestone = milestoneFor(r.phase);
-        const res = newItem(t, { title: r.feature.slice(0, 256), body: bodyFor(r), labels, milestone }, { runner });
+        const res = newItem(t, { title: titleFor(r.feature), body: bodyFor(r), labels, milestone }, { runner });
         if (!res.ok) { out.failed.push({ epicId: r.epicId, why: 'the platform refused to create it' }); continue; }
         let b = {};
         try { b = JSON.parse(res.stdout); } catch { /* checked below */ }
@@ -150,8 +165,8 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
         const got = (Array.isArray(b.labels) ? b.labels : []).map((l) => String(typeof l === 'string' ? l : l?.name).toLowerCase());
         const missing = labels.filter((l) => !got.includes(l.toLowerCase()));
         const row = { epicId: r.epicId, feature: r.feature, phase: r.phase, priority: r.priority, number, url };
-        if (missing.length) out.failed.push({ ...row, why: `the labels ${missing.join(', ')} were not set` });
-        else if (milestone !== null && !b.milestone) out.failed.push({ ...row, why: 'the milestone was not set' });
+        if (missing.length) out.failed.push({ ...row, why: `created, but the labels ${missing.join(', ')} were not set` });
+        else if (milestone !== null && !b.milestone) out.failed.push({ ...row, why: 'created, but the milestone was not set' });
         else out.created.push(row);
       }
     }
@@ -167,14 +182,16 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
     const item = readItem(t, e.number, { runner });
     if (!item.ok) { out.notes.push(`${e.epicId}: item ${e.number} could not be read, so it was not linked`); continue; }
     const epicType = (() => { try { return loadLedger(epicRoot(root, e.epicId)).state?.type ?? null; } catch { return null; } })();
-    const { back } = linkAndWriteBack(root, e.epicId, t, item, { rules, epicType, now, runner });
-    out.linked.push({ epicId: e.epicId, number: e.number, failed: back.failed });
+    try {
+      const { back } = linkAndWriteBack(root, e.epicId, t, item, { rules, epicType, now, runner });
+      out.linked.push({ epicId: e.epicId, number: e.number, failed: back.failed });
+    } catch (x) { out.notes.push(`${e.epicId}: it could not be linked (${forTerminal(x?.message ?? String(x))})`); }
   }
 
   if (out.failed.length) { out.ok = false; process.exitCode = 1; }
   if (json) return out;
   for (const x of out.created) log(`  ${x.priority} ${forTerminal(x.feature)} ${c.dim(`(${x.epicId}, ${forTerminal(x.phase)})`)} ${dryRun ? c.dim('would be created') : x.url ?? `#${x.number}`}`);
-  for (const x of out.recovered) info(`${x.epicId} was already on the Product repo as #${x.number}; recorded it`);
+  for (const x of out.recovered) info(`${x.epicId} was already on the Product repo as #${x.number}; ${dryRun ? 'it would be recorded' : 'recorded it'}`);
   for (const x of out.linked) info(`${x.epicId} ${x.wouldLink ? 'would be linked' : 'linked'} to #${x.number}`);
   for (const x of out.failed) warn(`${x.epicId}: ${forTerminal(x.why)}${x.url ? ` ${x.url}` : ''}`);
   for (const n of out.notes) info(n);
