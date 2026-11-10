@@ -265,5 +265,11 @@ test('E174 review 3: approvals with no fingerprint fall back to the closing fing
   try { await runFoundationStatus(T, { json: true }); } finally { process.stdout.write = orig; }
   const doc = JSON.parse(lines.join(''));
   assert.equal(doc.changed, true);
+  assert.ok(doc.warnings.some((w) => /changed after its review/.test(w)));
+  // An approval with a fingerprint beside one without: the old fingerprint still decides.
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: review.id, status: 'approved', by: 'bob' }, { step: review.id, status: 'approved', by: 'cy', artifactHash: 'sha256:old' }]));
+  const g = fake();
+  await P.runFoundationPublish(T, { env, runner: g.runner });
+  assert.equal(g.posts.length, 0); reset();
 });
 

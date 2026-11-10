@@ -490,8 +490,10 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   });
 
   // E174: whether the Foundation changed after its review, so a reader is told before `publish` refuses.
-  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { return true; } })() : false;
-  if (changed) warnings.push('the Foundation changed after its review, so `yad foundation publish` refuses until it is reviewed again (`yad gate reopen EP-foundation foundation`)');
+  let checkFailed = false;
+  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { checkFailed = true; return true; } })() : false;
+  if (checkFailed) warnings.push('whether the Foundation changed after its review could not be checked — run `yad doctor`');
+  else if (changed) warnings.push('the Foundation changed after its review, so `yad foundation publish` refuses until it is reviewed again (`yad gate reopen EP-foundation foundation`)');
   // E174: the item each row was published as, from the record only. Null when the record cannot be read.
   const items = productId === FOUNDATION_EPIC ? publishedItems(root) : new Map();
   for (const f of features) f.item = items ? (items.get(f.epicId) ?? null) : null;

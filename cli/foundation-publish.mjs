@@ -33,7 +33,8 @@ export function foundationChanged(dir, ledger) {
   if (!review) return false;
   const approved = (Array.isArray(ledger.approvals) ? ledger.approvals : []).filter((a) => a?.step === review.id && a.status === 'approved');
   // Approvals with no fingerprint make no claim, so the closing fingerprint decides for them too.
-  if (approved.some((a) => a.artifactHash)) return !!doneStepUnapproved(dir, review, ledger.approvals);
+  const hashed = approved.filter((a) => a.artifactHash);
+  if (hashed.length) return !!doneStepUnapproved(dir, review, hashed);
   const hash = review.closed?.hash;
   return !!hash && isStaleHash(hash, acceptedHashes(dir, review.artifact));
 }
