@@ -40,6 +40,7 @@ import {
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
+import { foundationChanged, publishedItems } from './foundation-publish.mjs';
 
 // `foo`, `EP-foo` and `epics/EP-foo` all name the same epic. Accepting only one spelling would make the
 // command reject the id the user just read out of `yad next`.
@@ -488,8 +489,17 @@ export async function runFoundationStatus(root, { json = false } = {}) {
     } catch { return false; }
   });
 
+  // E174: whether the Foundation changed after its review, so a reader is told before `publish` refuses.
+  let checkFailed = false;
+  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { checkFailed = true; return true; } })() : false;
+  if (checkFailed) warnings.push('whether the Foundation changed after its review could not be checked — run `yad doctor`');
+  else if (changed) warnings.push('the Foundation changed after its review, so `yad foundation publish` refuses until it is reviewed again (`yad gate reopen EP-foundation foundation`)');
+  // E174: the item each row was published as, from the record only. Null when the record cannot be read.
+  const items = productId === FOUNDATION_EPIC ? publishedItems(root) : new Map();
+  for (const f of features) f.item = items ? (items.get(f.epicId) ?? null) : null;
+  if (items === null) warnings.push('foundation/.sdlc/roadmap-items.json cannot be read, so no row shows its item');
   if (json) {
-    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, features, unlisted, ...(warnings.length ? { warnings } : {}) });
+    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, changed, features, unlisted, ...(warnings.length ? { warnings } : {}) });
   }
   for (const w of warnings) warn(w);
   log(`\n  ${c.bold(`${productId} roadmap`)}  ${c.dim(`${rel} — each status is read from the epic ledgers`)}`);
@@ -501,12 +511,13 @@ export async function runFoundationStatus(root, { json = false } = {}) {
     const name = `${f.feature || '(no name)'}  ${c.dim(f.epicId || '(no id)')}`;
     if (f.problem) { log(`    ${c.yellow('!')} ${name}  ${c.yellow(f.problem)}`); continue; }
     const mark = f.status === 'shipped' ? c.green('✓') : f.status === 'planned' ? c.dim('·') : c.cyan('•');
-    log(`    ${mark} ${name}  ${f.status}`);
+    log(`    ${mark} ${name}  ${f.status}${f.item ? c.dim(`  #${f.item.number}`) : ''}`);
     if (f.disagrees) log(`      ${c.dim(`the row says "${f.written}" — that column is no longer kept by hand; the ledger's answer is shown`)}`);
   }
   if (unlisted.length) {
     info(`not on the roadmap: ${unlisted.join(', ')} ${c.dim('(feature epics no row proposes — an epic may have been given a different id)')}`);
   }
   const next = features.find((f) => f.status === 'planned');
-  if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId})`);
+  if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId}${next.item ? `, from item #${next.item.number}` : ''})`);
+  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length && !changed) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
 }

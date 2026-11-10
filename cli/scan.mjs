@@ -144,7 +144,7 @@ function droppedFrom(stdout, confidential) {
 }
 
 // Map(title → id), across open and closed. Null if unread. GitHub assigns by number, GitLab by id.
-function readMilestones(t, runner) {
+export function readMilestones(t, runner) {
   const gh = t.platform === 'github';
   const at = gh ? `repos/${t.repo}/milestones?state=all&per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/milestones?per_page=${PAGE}`;
   const map = new Map();

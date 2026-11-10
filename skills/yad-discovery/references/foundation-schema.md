@@ -372,3 +372,14 @@ action happen before the risk would hurt?
 | Only one flatmate uses it | The ledger is useless if others do not log | Measure second-member activity from week 1; stop if under 20% |
 | People want it to move money | "Not a payment app" loses them | Ask the first 20 flats; revisit scope.md at 8 weeks |
 ```
+
+## `.sdlc/roadmap-items.json` (E174)
+
+Written by `yad foundation publish`, after the review has passed. It records which issue or work item each roadmap feature was published as. It is outside the Foundation's fingerprint, so writing it never makes the review stale. Commit it.
+
+```json
+{ "items": [{ "epicId": "EP-checkout", "platform": "github", "host": "github.com", "repo": "acme/product", "number": 12, "url": "https://github.com/acme/product/issues/12", "publishedAt": "2026-11-10T10:00:00.000Z" }] }
+```
+
+A file that cannot be parsed is refused, never overwritten.
+

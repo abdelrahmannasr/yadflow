@@ -20113,7 +20113,7 @@ test('yad foundation status: a draft Foundation, the old spelling, and the refus
     assert.match(yadRun(T, '--help').out, /yad foundation status \[--json\]/);
     const bad = yadRun(T, 'foundation', 'list');
     assert.equal(bad.code, 1);
-    assert.match(bad.out, /unknown foundation action: list \(new, status\)/);
+    assert.match(bad.out, /unknown foundation action: list \(new, status, publish\)/);
   } finally { cleanTmp(T); }
 });
 
