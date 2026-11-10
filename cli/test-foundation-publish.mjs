@@ -245,3 +245,25 @@ test('E174 review 2: a near-miss parked heading is published and said', () => {
   assert.deepEqual(near, ['Later']);
 });
 
+test('E174 review 3: approvals with no fingerprint fall back to the closing fingerprint; status says the Foundation changed', async () => {
+  const T = await product();
+  for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'stack.md', 'repos.md']) fs.writeFileSync(path.join(T, 'foundation', f), `# ${f}\n`);
+  const sp = path.join(T, 'foundation/.sdlc/state.json');
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  const review = st.steps.find((s) => s.type === 'review+approve');
+  review.status = 'done';
+  review.closed = { by: 'ann', date: '2026-11-10', hash: 'sha256:old', via: 'merged' };
+  fs.writeFileSync(sp, JSON.stringify(st));
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: review.id, status: 'approved', by: 'bob' }]));
+  const f = fake();
+  await P.runFoundationPublish(T, { env, runner: f.runner });
+  assert.equal(f.posts.length, 0); assert.equal(process.exitCode, 1); reset();
+  const { runFoundationStatus } = await import('./epic.mjs');
+  const lines = [];
+  const orig = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (x) => { lines.push(String(x)); return true; };
+  try { await runFoundationStatus(T, { json: true }); } finally { process.stdout.write = orig; }
+  const doc = JSON.parse(lines.join(''));
+  assert.equal(doc.changed, true);
+});
+

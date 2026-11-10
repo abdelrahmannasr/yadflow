@@ -32,7 +32,8 @@ export function foundationChanged(dir, ledger) {
   const review = ledger.state?.steps?.find((st) => st.type === 'review+approve');
   if (!review) return false;
   const approved = (Array.isArray(ledger.approvals) ? ledger.approvals : []).filter((a) => a?.step === review.id && a.status === 'approved');
-  if (approved.length) return !!doneStepUnapproved(dir, review, ledger.approvals);
+  // Approvals with no fingerprint make no claim, so the closing fingerprint decides for them too.
+  if (approved.some((a) => a.artifactHash)) return !!doneStepUnapproved(dir, review, ledger.approvals);
   const hash = review.closed?.hash;
   return !!hash && isStaleHash(hash, acceptedHashes(dir, review.artifact));
 }
@@ -124,7 +125,7 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   try { where = targetOf(root, null, { env, runner }); } catch (e) { return refuse(e.message, e.hint); }
   const { t, productConfig } = where;
   const rules = labelRules(productConfig);
-  const out = { ok: true, dryRun, created: [], recovered: [], alreadyPublished: 0, linked: [], failed: [], notes: [...skipped.map((p) => `the phase "${forTerminal(p)}" is parked, so its rows were left out`), ...nearMiss.map((p) => `the phase "${forTerminal(p)}" is published; only a heading of exactly "Later / parked" is left out`)] };
+  const out = { ok: true, dryRun, created: [], recovered: [], alreadyPublished: 0, linked: [], failed: [], notes: [...skipped.map((p) => `the phase "${forTerminal(p)}" is parked, so its rows were left out`), ...nearMiss.map((p) => `the phase "${forTerminal(p)}" is published; only a heading of "Parked" or "Later / parked" is left out`)] };
   const known = new Map(record.filter((e) => e.host === t.host && e.repo === t.repo).map((e) => [e.epicId, e]));
   const todo = rows.filter((r) => !known.has(r.epicId));
   out.alreadyPublished = rows.length - todo.length;

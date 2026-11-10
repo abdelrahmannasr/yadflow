@@ -489,12 +489,15 @@ export async function runFoundationStatus(root, { json = false } = {}) {
     } catch { return false; }
   });
 
+  // E174: whether the Foundation changed after its review, so a reader is told before `publish` refuses.
+  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { return true; } })() : false;
+  if (changed) warnings.push('the Foundation changed after its review, so `yad foundation publish` refuses until it is reviewed again (`yad gate reopen EP-foundation foundation`)');
   // E174: the item each row was published as, from the record only. Null when the record cannot be read.
   const items = productId === FOUNDATION_EPIC ? publishedItems(root) : new Map();
   for (const f of features) f.item = items ? (items.get(f.epicId) ?? null) : null;
   if (items === null) warnings.push('foundation/.sdlc/roadmap-items.json cannot be read, so no row shows its item');
   if (json) {
-    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, features, unlisted, ...(warnings.length ? { warnings } : {}) });
+    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, changed, features, unlisted, ...(warnings.length ? { warnings } : {}) });
   }
   for (const w of warnings) warn(w);
   log(`\n  ${c.bold(`${productId} roadmap`)}  ${c.dim(`${rel} — each status is read from the epic ledgers`)}`);
@@ -514,5 +517,5 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   }
   const next = features.find((f) => f.status === 'planned');
   if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId}${next.item ? `, from item #${next.item.number}` : ''})`);
-  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length && !(() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { return true; } })()) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
+  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length && !changed) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
 }
