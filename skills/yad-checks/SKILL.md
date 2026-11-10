@@ -41,6 +41,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    A missing token on a PR that is not from a fork is a `WARNING` in CI, and a token that expires within
    30 days is warned about there too (#345); `yad doctor` reports where each code repo's CI gets it.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
+   A Unity project (`ProjectSettings/ProjectVersion.txt` and `Assets/`, no `package.json`) is skipped with a
+   note: build and test it with Unity's own CI, such as GameCI (#496).
    CI installs and runs through the package manager declared by the repo's standard
    `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on
    npm with a warning when an npm lockfile is present, and fails closed otherwise); an npm repo

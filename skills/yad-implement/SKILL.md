@@ -131,6 +131,8 @@ paragraph (Step 6) as `design tool not reachable: continued from the frame links
 **In a Unity repo, check the build through Unity MCP (#321).** A Unity repo is one with
 `ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root (a Unity project in a subfolder is
 not read as one).
+The CI build/test/lint gate skips a Unity repo with a note (#496), so this check, and the team's own Unity CI
+(such as GameCI), is where the build is checked.
 
 - **Reach.** Run the yad commands from inside the folder you edit — the Unity repo, or its worktree
   (`<repo>--<epic>`) when there is one (`cd` there): `yad toolbox list --json`, then
