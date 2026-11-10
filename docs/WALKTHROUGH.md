@@ -132,6 +132,13 @@ Build by hand"** below.
    (a platform-Verified signature on every commit), and commit-message must pass. (The
    `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
    step 9.)
+   Then the **scan** (E172): `yad-run` runs `yad-scan` on the task's change, before the PR
+   opens. When you build by hand, `yad-implement` already ran it at step 7, right after its
+   commit. It files security vulnerabilities, technical debt and
+   suggestions on the repo's GitHub issues or GitLab work items, with a priority, a category label and one
+   milestone per category. It never blocks the PR. Security findings stay private: confidential on GitLab,
+   a normal issue on a private GitHub repo, a draft advisory on a public one, or printed and not filed
+   when none of these can be done.
 9. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or commit
     and open the PR in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR is based on the
     repo's **own default branch**, resolved the same way the gates resolve their trunk (the registry's
@@ -212,6 +219,12 @@ Build by hand"** below.
   nothing: `list` (every work item, newest first), `show <id>` (its steps and approvals), `search <text>`.
 - **`yad index`** — rebuilds `.sdlc/index.json`, one summary per work item, so a reader opens one file
   instead of walking every epic folder.
+- **`yad issues`** — the team's backlog on GitHub issues and GitLab work items, from the Product repo
+  and every registered repo, with priority, type, status and assignee; `--format html` writes a page to
+  sort and filter. `yad epic new <slug> --issue <ref>` starts an epic from an item (its label sets the
+  type), and `yad issues link <ref> <EP-id>` ties one to an existing epic. `yad issues sync` writes the
+  status back from the epic and closes the item once every linked epic has shipped. `yad standup` lists
+  each member's assigned items. A repo that cannot be read is said, never shown as having no items.
 - **`yad usage`** — read-only team-member adoption & behavior report for an EM/team-lead:
   per-member *authored / commented / approved / shipped* with factual workflow-hygiene flags, derived
   from git + the ledgers and written to a path you choose (`--out`, `--since/--until` or `--all`,

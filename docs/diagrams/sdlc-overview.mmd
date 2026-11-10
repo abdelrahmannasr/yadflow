@@ -50,8 +50,11 @@ flowchart LR
       prm["yad-pr-template route<br/>approval count + touched domains"]
       air["yad-engineer-review<br/>AI review (advisory)"]
       eng{{"engineer review<br/>human · never automated"}}:::locked
+      scn["yad-scan<br/>security · technical debt · suggestions<br/>files them on the tracker · never blocks"]:::earns
       merged(["merge → build-log.json"]):::sentinel
       sp --> im --> shp --> ck --> prm --> air --> eng --> merged
+      ck -. yad-run · after the checks, before the PR opens .-> scn
+      im -. yad-implement alone · after its commit .-> scn
     end
 
     subgraph AUTO["C · Automation — switched on & reversible"]
@@ -79,6 +82,10 @@ flowchart LR
       cepic -. drift / open debt .-> rec
     end
 
+    backlog[("GitHub issues · GitLab work items<br/>yad issues · HTML report · standup")]:::artifact
+    backlog -. seeds or links an epic · yad epic new --issue .-> ep
+    ep -. status labels after each gate advanced on this machine · yad issues sync closes once every epic shipped .-> backlog
+    scn -. files findings by priority and milestone .-> backlog
     prod --> disc
     prod --> an
     dd -. roadmap frames each epic .-> ep
