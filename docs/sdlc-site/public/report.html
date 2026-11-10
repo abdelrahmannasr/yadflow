@@ -800,6 +800,7 @@ each code repo/
     <tr><td><a href="#sk-spec"><code>yad-spec</code></a></td><td>Build A</td><td>Spec one ready story in one repo (Spec Kit ceremony).</td></tr>
     <tr><td><a href="#sk-impl"><code>yad-implement</code></a></td><td>Build B</td><td>Implement one atomic task as a small branch.</td></tr>
     <tr><td><a href="#sk-checks"><code>yad-checks</code></a></td><td>Build C</td><td>Wire / run the CI gates.</td></tr>
+    <tr><td><a href="#sk-scan"><code>yad-scan</code></a></td><td>Build C</td><td>Review each implementation and file security findings, technical debt and suggestions on the tracker.</td></tr>
     <tr><td><a href="#sk-prt"><code>yad-pr-template</code></a></td><td>Build D</td><td>Install the PR/MR template + risk routing.</td></tr>
     <tr><td><a href="#sk-commit"><code>yad-commit</code></a></td><td>Build helper</td><td>Commit one staged atomic change by the conventions.</td></tr>
     <tr><td><a href="#sk-openpr"><code>yad-open-pr</code></a></td><td>Build helper</td><td>Open a code-repo task PR/MR from the committed template.</td></tr>
@@ -816,7 +817,6 @@ each code repo/
     <tr><td><a href="#sk-reconcile"><code>yad-reconcile</code></a></td><td>Phase 6</td><td>Read-only drift/orphan/debt sweep across threads.</td></tr>
     <tr><td><a href="#sk-stub"><code>yad-stub</code></a></td><td>Phase 6</td><td>Make a stub epic for an already-built feature, so a defect can thread off it now.</td></tr>
     <tr><td><a href="#sk-issues"><code>yad-issues</code></a></td><td>Backlog</td><td>The team backlog on GitHub issues and GitLab work items: report, seed or link an epic, sync status.</td></tr>
-    <tr><td><a href="#sk-scan"><code>yad-scan</code></a></td><td>Build</td><td>Review each implementation and file security findings, technical debt and suggestions on the tracker.</td></tr>
     <tr><td><a href="#sk-docs"><code>yad-docs</code></a></td><td>Docs</td><td>Generate an epic's interactive documentation site.</td></tr>
     <tr><td><a href="#sk-docs-overview"><code>yad-docs-overview</code></a></td><td>Docs</td><td>Generate the project-level SDLC overview site.</td></tr>
     <tr><td><a href="#sk-docs-sync"><code>yad-docs-sync</code></a></td><td>Docs</td><td>Report which docs sites are stale, refresh them, or wire the CI build and deploy.</td></tr>
@@ -1026,6 +1026,13 @@ yad-checks repo: backend action: run    # before opening each PR
 yad-checks repo: product action: wire       # Product-flavored gates</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> <code>wire</code> once per repo at setup; <code>run</code> after implementing, before the PR — the same gates also run automatically in CI on every PR and must pass before merge.</div>
   </div>
+  <div class="skillcard" id="sk-scan">
+    <h4><code>yad-scan</code> <span class="badge b-build">Build C</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Reviews a task's change for security vulnerabilities, technical debt and suggestions, then files them on the repo's issues or work items with a priority, a category label and one milestone per category. Security findings stay private. It never blocks the PR. <code>yad-run</code> runs it after the checks, and <code>yad-implement</code> runs it when used alone.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>run yad-scan — repo: api task: T01</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Automatically, for every task. Run it by hand on any branch with "scan this branch".</div>
+  </div>
 
   <div class="skillcard" id="sk-prt">
     <h4><code>yad-pr-template</code> — Build Step D</h4>
@@ -1165,15 +1172,6 @@ YAD_NO_REPORT=1 yad …               # opt out of the auto-offer</code></pre>
 yad epic new checkout --issue 12
 yad issues sync --dry-run</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Your team keeps its work in issues or work items, and you want epics to start from them and report back to them.</div>
-  </div>
-
-  <div class="skillcard" id="sk-scan">
-    <h4><code>yad-scan</code> <span class="badge b-gate">Build</span></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Reviews a task's change for security vulnerabilities, technical debt and suggestions, then files them on the repo's issues or work items with a priority, a category label and one milestone per category. Security findings stay private. It never blocks the PR.</div>
-    <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad-run runs it after the checks, and yad-implement runs it when used alone.
-yad scan file findings.json --repo api</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Automatically, for every task. Run it by hand on any branch with "scan this branch".</div>
   </div>
 
   <h3>Documentation sites</h3>
