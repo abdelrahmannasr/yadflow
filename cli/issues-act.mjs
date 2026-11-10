@@ -70,7 +70,7 @@ function bodyOf({ body, bodyFile }) {
 }
 
 // The repo: the Product unless a registered one is named. `ref` resolution does the registry and login checks.
-function targetOf(root, repo, { env, runner }) {
+export function targetOf(root, repo, { env, runner }) {
   const r = resolveTarget(root, repo && repo !== 'Product' ? `${repo}#1` : '1', { env, runner });
   if (!r.ok) throw new Refused(r.why, r.hint);
   if (!r.t.ok) throw new Refused(`${forTerminal(r.label)}: ${r.t.why}`);

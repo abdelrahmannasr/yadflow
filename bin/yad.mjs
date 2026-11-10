@@ -196,6 +196,7 @@ ${c.bold('Where am I / what next')}
                                        per product, before any epic — then the yad-discovery skill
                                        authors its sections. Refuses a second one, and a product still
                                        on the old epics/EP-discovery/ (yad migrate converts that)
+  yad foundation publish [--dry-run]   After the Foundation review: one issue / work item per roadmap feature, a milestone per phase
   yad foundation status [--json]       Which roadmap features are started: reads each proposed epic id
                                        in roadmap.md and reports planned / in-shape / in-build /
                                        shipped from the epic ledgers. Read-only — the roadmap's Status
@@ -638,7 +639,7 @@ let runningCmd = null;
 // refusal of `yad gate frobnicate` names `gate`, not a command that does not exist.
 const ACTIONS = {
   epic: { known: ['new'] },
-  foundation: { known: ['new', 'status'] },
+  foundation: { known: ['new', 'status', 'publish'] },
   skill: { known: ['list', 'bind', 'unbind', 'recommend'], default: 'list' },
   gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'reopen', 'review', 'walkthrough', 'trailer', 'ci', 'approve', 'comment', 'advance'] },
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
@@ -1021,8 +1022,10 @@ async function main() {
     case 'foundation': {
       const [, action] = o._;
       if (action === 'status') { result = await commands.runFoundationStatus(o.dir, { json: o.json }); break; }
+      // E174: the approved roadmap becomes work items in the Product repo.
+      if (action === 'publish') { if (noProduct()) break; result = await commands.runFoundationPublish(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       if (action !== 'new') {
-        refuse(`unknown foundation action: ${action ?? '(none)'} (new, status)`, 'usage: yad foundation new [--json] | yad foundation status [--json]');
+        refuse(`unknown foundation action: ${action ?? '(none)'} (new, status, publish)`, 'usage: yad foundation new [--json] | yad foundation status [--json] | yad foundation publish [--dry-run] [--json]');
         break;
       }
       if (noProduct()) break;

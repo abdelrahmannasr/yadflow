@@ -163,7 +163,7 @@ function makeEntry(t, item, now) {
 }
 
 // Add the link (or find the one there) and write back. `{ entry, created, back }`.
-function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner }) {
+export function linkAndWriteBack(root, epic, t, item, { rules, epicType, now, runner }) {
   const items = readLinks(root, epic);
   const key = itemKey({ host: t.host, repo: t.repo, number: item.number });
   let entry = items.find((l) => itemKey(l) === key);

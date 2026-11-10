@@ -104,6 +104,8 @@ export const COMMAND_CLASS = {
   'epic new': { class: 'local-write', flags: { issue: 'on-request' } },
   'foundation new': { class: 'local-write' },
   'foundation status': { class: 'read' },
+  // E174: creates items on the platform; `--dry-run` only reads.
+  'foundation publish': { class: 'on-request' },
   status: { class: 'read' },
   next: { class: 'read' },
   // Skipping, deferring or clearing a blocker is a decision about the work: the person's.

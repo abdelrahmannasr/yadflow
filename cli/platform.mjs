@@ -790,12 +790,12 @@ export function createDraftAdvisory(t, { summary, description, severity, cwe }, 
 // ---- acting on an item when a person asks (E173) -------------------------------------------------------
 // Each returns the runner's result. A GitLab list field cannot be sent through `glab api` (it refuses a
 // bracketed field name), so GitLab takes one assignee by id.
-export function newItem(t, { title, body, labels, assignee = null, confidential = false }, { runner = run } = {}) {
+export function newItem(t, { title, body, labels, assignee = null, confidential = false, milestone = null }, { runner = run } = {}) {
   if (t.platform === 'github') {
-    const fields = ['-f', `title=${title}`, '-f', `body=${body}`, ...labels.flatMap((l) => ['-f', `labels[]=${l}`]), ...(assignee ? ['-f', `assignees[]=${assignee}`] : [])];
+    const fields = ['-f', `title=${title}`, '-f', `body=${body}`, ...labels.flatMap((l) => ['-f', `labels[]=${l}`]), ...(assignee ? ['-f', `assignees[]=${assignee}`] : []), ...(milestone !== null ? ['-F', `milestone=${milestone}`] : [])];
     return runner('gh', ['api', '--hostname', t.host, '-X', 'POST', `repos/${t.repo}/issues`, ...fields], { timeout: 30000 });
   }
-  const fields = ['-f', `title=${title}`, '-f', `description=${body}`, '-f', `labels=${labels.join(',')}`, ...(assignee ? ['-F', `assignee_id=${assignee}`] : []), ...(confidential ? ['-F', 'confidential=true'] : [])];
+  const fields = ['-f', `title=${title}`, '-f', `description=${body}`, '-f', `labels=${labels.join(',')}`, ...(assignee ? ['-F', `assignee_id=${assignee}`] : []), ...(confidential ? ['-F', 'confidential=true'] : []), ...(milestone !== null ? ['-F', `milestone_id=${milestone}`] : [])];
   return runner('glab', ['api', '--hostname', t.host, '-X', 'POST', `projects/${encodeURIComponent(t.repo)}/issues`, ...fields], { timeout: 30000 });
 }
 

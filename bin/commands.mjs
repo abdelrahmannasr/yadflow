@@ -37,6 +37,7 @@ export { runMemberAdd, runMemberList, runMemberRemove } from '../cli/members.mjs
 export { runWorktreeAdd, runWorktreeList, runWorktreeRemove } from '../cli/worktree.mjs';
 export { runStandup, foreignFlags as standupForeignFlags } from '../cli/standup.mjs';
 export { runIssuesNew, runIssuesAssign, runIssuesLabel, runIssuesEdit, runIssuesComment, runIssuesClose, runIssuesReopen, ACT_ACTIONS, actForeignFlags } from '../cli/issues-act.mjs';
+export { runFoundationPublish } from '../cli/foundation-publish.mjs';
 export { runScanFile } from '../cli/scan.mjs';
 export { runIssuesSync, syncAfterGate } from '../cli/issues-write.mjs';
 export { runIssuesShow, runIssuesLink, runIssuesUnlink, runEpicNewFromIssue, seedForeignFlags as seedForeign } from '../cli/issues-write.mjs';
