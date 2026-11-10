@@ -166,7 +166,8 @@ into the ledger; otherwise the review is recorded locally.
 person, then run `yad foundation publish --dry-run` to show what it would create, then `yad foundation publish`.
 It opens one issue or work item per roadmap feature in the Product repo: type feature, a priority by phase
 (the first phase, the MVP, is P1; the next P2; later ones P3), the label `epic: EP-x`, and the phase as its
-milestone. A parked phase is left out. Report the links, and remind the person to commit
+milestone. The `Later / parked` phase is left out. If the Foundation changed after its review, the command refuses:
+the changed roadmap needs a new review first. Report the links, and remind the person to commit
 `foundation/.sdlc/roadmap-items.json`.
 
 ## Reference
