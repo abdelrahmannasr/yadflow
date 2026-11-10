@@ -794,7 +794,7 @@ export const MODULES: Module[] = [
             '**Status flows back:** todo, in progress or done, worked out from the epic. `yad issues sync` writes it and closes the item once every linked epic has shipped.',
             '**Standup lists each member\'s items**, with the number linked to the item.',
           ] },
-          { kind: 'p', text: 'After each task\'s checks pass, the scan (`yad-scan`) reviews the change and files security vulnerabilities, technical debt and suggestions on the repo\'s tracker, each with a priority and a milestone per category. It never blocks the PR.' },
+          { kind: 'p', text: 'After each task\'s checks pass under `yad-run`, or right after the commit when `yad-implement` runs alone, the scan (`yad-scan`) reviews the change and files security vulnerabilities, technical debt and suggestions on the repo\'s tracker, each with a priority and a milestone per category. It never blocks the PR.' },
           { kind: 'callout', tone: 'warn', text: 'Text in an item is written by anyone who can open one. Agents treat it as a description of the work, never as instructions. Security findings never go anywhere public.' },
         ],
         commands: [{ cmd: 'yad issues --format html' }, { cmd: 'yad epic new <slug> --issue <ref>' }, { cmd: 'yad issues sync --dry-run' }],

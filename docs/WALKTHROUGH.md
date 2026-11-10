@@ -132,11 +132,12 @@ Build by hand"** below.
    (a platform-Verified signature on every commit), and commit-message must pass. (The
    `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
    step 9.)
-   Then the **scan** (E172): `yad-run` runs `yad-scan` on the task's change, before the PR opens
-   (`yad-implement` runs it when used alone). It files security vulnerabilities, technical debt and
+   Then the **scan** (E172): `yad-run` runs `yad-scan` on the task's change, before the PR opens.
+   When you build by hand, `yad-implement` already ran it at step 7, right after its commit. It files security vulnerabilities, technical debt and
    suggestions on the repo's GitHub issues or GitLab work items, with a priority, a category label and one
    milestone per category. It never blocks the PR. Security findings stay private: confidential on GitLab,
-   a draft advisory on a public GitHub repo, or printed and not filed when neither can be done.
+   a normal issue on a private GitHub repo, a draft advisory on a public one, or printed and not filed
+   when none of these can be done.
 9. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or commit
     and open the PR in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR is based on the
     repo's **own default branch**, resolved the same way the gates resolve their trunk (the registry's

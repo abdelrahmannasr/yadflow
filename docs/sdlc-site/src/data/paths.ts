@@ -178,7 +178,7 @@ const setupSteps: FlowStep[] = [
     id: "backlog",
     title: "Backlog: Issues and Work Items",
     description:
-      "The team's backlog lives on GitHub issues and GitLab issues, tasks and incidents, read from the Product repo and every registered repo. `yad issues` lists them with priority, type, status and assignee, or writes an HTML report to sort and filter. An item seeds an epic (`yad epic new --issue`, which sets the epic type and finds or stubs the parent) or is linked to one (`yad issues link`). Status is worked out from the epic and written back by `yad issues sync`. Standup lists each member's items. A repo that cannot be read is said, never shown as empty.",
+      "The team's backlog lives on GitHub issues and GitLab issues, tasks and incidents, read from the Product repo and every registered repo. `yad issues` lists them with priority, type, status and assignee, or writes an HTML report to sort and filter. An item seeds an epic (`yad epic new --issue`, which sets the epic type; a defect or change finds its parent or gets a stub one) or is linked to one (`yad issues link`). Status is worked out from the epic and written back by `yad issues sync`. Standup lists each member's items. A repo that cannot be read is said, never shown as empty.",
     actor: "pm",
     status: "linked",
     stepState: "epics/EP-<slug>/.sdlc/issue-links.json (where each item is, never its text)",
@@ -472,7 +472,7 @@ const buildSteps: FlowStep[] = [
     id: "scan",
     title: "Findings Scan (E172)",
     description:
-      "After the checks pass, and before the PR/MR opens, yad-run runs yad-scan on the task's change (yad-implement runs it when used alone). It looks for security vulnerabilities, technical debt and suggestions, then `yad scan file` files each one on the repo's own GitHub issues or GitLab work items: a priority label, a category label and one milestone per category. Duplicates are recognised. Security findings stay private: confidential on GitLab, a draft advisory on a public GitHub repo, or not filed when that cannot be done. It never blocks the PR.",
+      "After the checks pass, and before the PR/MR opens, yad-run runs yad-scan on the task's change (yad-implement runs it when used alone). It looks for security vulnerabilities, technical debt and suggestions, then `yad scan file` files each one on the repo's own GitHub issues or GitLab work items: a priority label, a category label and one milestone per category. Duplicates are recognised. Security findings stay private: confidential on GitLab, a normal issue on a private GitHub repo, a draft advisory on a public one, or not filed when none of these can be done. It never blocks the PR.",
     actor: "reviewer",
     status: "findings-filed",
     stepState: "the repo's issues / work items (no file in the repo)",
