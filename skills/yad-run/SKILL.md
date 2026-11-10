@@ -129,6 +129,11 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      each task's run and close are kept apart (the engineer review finalizes the right one).
    - `closed` is the step's **closing record** (E18): how the lane moved past it, and which run did it.
      Never write one over a `closed` already on the step. See `references/run-loop.md`.
+4a. **Scanning the change (E172).** Once `checks` has closed `done` for a task, and before the PR/MR opens, run the
+   `yad-scan` skill for that task and repo. It files security findings, technical debt and suggestions on the repo's
+   tracker. It never blocks: if it fails, say so and carry on to the next step. A task already scanned by a standalone
+   `yad-implement` is scanned again here; findings already filed are recognised and not filed twice.
+
 5. **Opening the task's PR/MR (#356).** Once `checks` has closed `done` for a task — by either dial, before
    you stop — ask
    `yad dial open-pr --json` and use its `advance`. **`auto`** — the project's standing approval: from the

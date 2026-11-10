@@ -140,6 +140,7 @@ ${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and Gi
                                        --format html writes a page you can sort and filter; titles are
                                        included, so check it before sharing it outside the team
   yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
+  yad scan file <f> --repo <r>         File a scan's findings on the repo's tracker, by category and priority (the yad-scan skill runs it)
   yad issues sync [--dry-run]          Update linked items: status and type labels, and close once every epic shipped
   yad issues show <ref>                One item in full. <ref> is 12 (Product repo) or <repo>#12
   yad issues link|unlink <ref> <EP>    Link an item to an epic: comments on it and sets its type and status labels
@@ -512,7 +513,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
-const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
+const ISSUES_USAGE = 'usage: yad issues show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement,security,tech-debt,suggestion] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -649,6 +650,7 @@ const ACTIONS = {
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
+  scan: { known: ['file'] },
   issues: { known: ['list', 'labels', 'show', 'link', 'unlink', 'sync'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
@@ -661,7 +663,7 @@ const PRODUCT_CMDS = new Set([
   'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
-  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'build', 'worktree', 'ci',
+  'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
   'story',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
@@ -1283,6 +1285,15 @@ async function main() {
         since: o.since ?? null, until: o.until ?? null, date: o.date ?? null, sort: o.sort ?? null, closedSince: o['closed-since'] ?? null,
         format: o.format ?? null, out: o.out ?? null, json: !!o.json,
       });
+      break;
+    }
+    case 'scan': {
+      // E172. The yad-scan skill judges; this files.
+      const action = o._[1];
+      if (action !== 'file') { refuse(`unknown scan action: ${action ?? '(none)'} (file)`, 'usage: yad scan file <findings.json> --repo <name> [--task <id>] [--dry-run] [--json]'); break; }
+      if (noProduct()) break;
+      if (o._[3]) { refuse(`yad scan file takes one file (got also: ${o._[3]})`); break; }
+      result = await commands.runScanFile(o.dir, { file: o._[2], repo: o.repo, task: o.task ?? null, dryRun: !!o.dryRun, json: !!o.json });
       break;
     }
     case 'standup': {

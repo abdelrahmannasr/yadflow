@@ -765,3 +765,24 @@ export function commentOnItem(t, number, body, { runner = run } = {}) {
 export function closeItem(t, number, { runner = run } = {}) {
   return itemWrite(t, t.platform === 'github' ? 'PATCH' : 'PUT', itemAt(t, number), [t.platform === 'github' ? 'state=closed' : 'state_event=close'], runner);
 }
+
+// ---- filing findings (E172) --------------------------------------------------------------------------
+// A number goes with `-F` so it is sent as a number. `confidential` exists on GitLab only.
+export function createFinding(t, { title, body, labels, milestone = null, confidential = false }, { runner = run } = {}) {
+  if (t.platform === 'github') {
+    const fields = ['-f', `title=${title}`, '-f', `body=${body}`, ...labels.flatMap((l) => ['-f', `labels[]=${l}`]), ...(milestone !== null ? ['-F', `milestone=${milestone}`] : [])];
+    return runner('gh', ['api', '--hostname', t.host, '-X', 'POST', `repos/${t.repo}/issues`, ...fields], { timeout: 30000 });
+  }
+  const fields = ['-f', `title=${title}`, '-f', `description=${body}`, '-f', `labels=${labels.join(',')}`, ...(milestone !== null ? ['-F', `milestone_id=${milestone}`] : []), ...(confidential ? ['-F', 'confidential=true'] : [])];
+  return runner('glab', ['api', '--hostname', t.host, '-X', 'POST', `projects/${encodeURIComponent(t.repo)}/issues`, ...fields], { timeout: 30000 });
+}
+
+export function createMilestone(t, title, { runner = run } = {}) {
+  const at = t.platform === 'github' ? `repos/${t.repo}/milestones` : `projects/${encodeURIComponent(t.repo)}/milestones`;
+  return runner(t.cli, ['api', '--hostname', t.host, '-X', 'POST', at, '-f', `title=${title}`], { timeout: 30000 });
+}
+
+// A draft a person publishes or discards. GitHub needs an affected package; `other` fits an application.
+export function createDraftAdvisory(t, { summary, description, severity, cwe }, { runner = run } = {}) {
+  return runner('gh', ['api', '--hostname', t.host, '-X', 'POST', `repos/${t.repo}/security-advisories`, '-f', `summary=${summary}`, '-f', `description=${description}`, '-f', `severity=${severity}`, '-f', `cwe_ids[]=${cwe}`, '-f', 'vulnerabilities[][package][ecosystem]=other'], { timeout: 30000 });
+}

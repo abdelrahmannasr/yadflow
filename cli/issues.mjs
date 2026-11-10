@@ -25,7 +25,7 @@ const DAY = 86_400_000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const DEFAULT_CLOSED_DAYS = 30;
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
-export const ITEM_TYPES = ['bug', 'feature', 'enhancement'];
+export const ITEM_TYPES = ['bug', 'feature', 'enhancement', 'security', 'tech-debt', 'suggestion'];
 export const STATUSES = ['todo', 'in progress', 'done'];
 const SORTS = ['priority', 'type', 'status', 'due', 'updated'];
 const DATE_FIELDS = ['created', 'updated', 'due'];
@@ -38,7 +38,7 @@ const LABEL_COLOR = { priority: 'b60205', type: '1d76db', status: '0e8a16' };
 export function labelRules(productConfig, notes = []) {
   const rules = {
     priority: Object.fromEntries(PRIORITIES.map((p) => [p, [`priority: ${p}`, p]])),
-    type: { bug: ['bug', 'type: bug'], feature: ['feature', 'type: feature'], enhancement: ['enhancement', 'type: enhancement'] },
+    type: { bug: ['bug', 'type: bug'], feature: ['feature', 'type: feature'], enhancement: ['enhancement', 'type: enhancement'], security: ['security', 'type: security'], 'tech-debt': ['tech-debt', 'type: tech-debt'], suggestion: ['suggestion', 'type: suggestion'] },
     status: Object.fromEntries(STATUSES.map((s) => [s, [`status: ${s}`]])),
   };
   const set = productConfig?.issues;
@@ -60,6 +60,15 @@ export function pick(labels, table) {
   const have = new Set(labels.map((l) => l.toLowerCase()));
   const found = Object.keys(table).filter((v) => table[v].some((l) => have.has(l.toLowerCase())));
   return { value: found[0] ?? null, more: found.length > 1 };
+}
+
+// An item's type. A finding's label sits beside an ordinary one (`bug` and `security` is common), and the ordinary one
+// decides: only two ordinary labels, or two finding labels with no ordinary one, are "more than one".
+const FINDING_TYPES = new Set(['security', 'tech-debt', 'suggestion']);
+export function pickType(labels, table) {
+  const part = (keep) => Object.fromEntries(Object.entries(table).filter(([k]) => keep(FINDING_TYPES.has(k))));
+  const ordinary = pick(labels, part((f) => !f));
+  return ordinary.value ? ordinary : pick(labels, part((f) => f));
 }
 
 // ---- reading ---------------------------------------------------------------------------------------
@@ -212,7 +221,7 @@ export function buildIssues(root, { now = Date.now(), closedSinceMs = now - DEFA
     if (res.partial) notes.push(`${s.label}: not every item was read${res.why ? ` — ${res.why}` : ` (the limit is ${MAX_ITEMS} of each state)`}, so the list is incomplete`);
     for (const it of res.items) {
       const p = pick(it.labels, rules.priority);
-      const ty = pick(it.labels, rules.type);
+      const ty = pickType(it.labels, rules.type);
       // Several epics can share an item. A linked epic whose ledger cannot be read still counts as started.
       const linked = links.byItem.get(itemKey({ host: target.host, repo: target.repo, number: it.number })) || [];
       const st = itemStatus(it.state, linked.length ? (combinedStage(linked.map(stageOf)) ?? 'in-shape') : null);
@@ -405,7 +414,7 @@ export async function runIssuesList(root, { priority = null, type = null, status
 }
 
 // Every label name on one repo, lower-cased, or `{ ok:false, why }`.
-function readLabels(t, runner) {
+export function readLabels(t, runner) {
   const gh = t.platform === 'github';
   const at = gh ? `repos/${t.repo}/labels?per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/labels?per_page=${PAGE}`;
   const names = new Set();
@@ -418,7 +427,7 @@ function readLabels(t, runner) {
   return { ok: false, why: `${shown(t.repo)} has more labels than yad reads` };
 }
 
-function createLabel(t, name, color, runner) {
+export function createLabel(t, name, color, runner) {
   const gh = t.platform === 'github';
   const at = gh ? `repos/${t.repo}/labels` : `projects/${encodeURIComponent(t.repo)}/labels`;
   return runner(t.cli, ['api', '--hostname', t.host, '-X', 'POST', at, '-f', `name=${name}`, '-f', `color=${gh ? color : `#${color}`}`], { timeout: TIMEOUT });

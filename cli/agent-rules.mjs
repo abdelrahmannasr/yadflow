@@ -32,7 +32,7 @@
 // A FLAG CAN RAISE THE CLASS. `yad check` reads; `yad check --fix` writes. `yad update` writes;
 // `yad update --push` pushes to the default branch. The highest class a given flag reaches wins.
 
-export const CLASSES = ['read', 'local-write', 'open-pr', 'task-pr', 'default-push', 'public-post', 'human-only', 'on-request', 'ci-only', 'internal', 'removed'];
+export const CLASSES = ['read', 'local-write', 'open-pr', 'task-pr', 'default-push', 'public-post', 'findings-post', 'human-only', 'on-request', 'ci-only', 'internal', 'removed'];
 
 // Whether the agent asks first, by class. `never`: it just runs it. `each-time`: it asks before every run.
 // `per-dial`: ask unless `yad dial open-pr` is `auto`. `person-runs`: the person runs it.
@@ -45,6 +45,8 @@ export const ASK = {
   'task-pr': 'per-dial',
   'default-push': 'each-time',
   'public-post': 'each-time',
+  // E172: filing is the point of the scan, and it goes only to the repo's own tracker.
+  'findings-post': 'never',
   'human-only': 'person-runs',
   'on-request': 'only-when-asked',
   'ci-only': 'not-by-agent',
@@ -180,6 +182,7 @@ export const COMMAND_CLASS = {
   'issues unlink': { class: 'on-request' },
   // E171: writes labels and closes items. `--dry-run` only reads.
   'issues sync': { class: 'on-request' },
+  'scan file': { class: 'findings-post' },
   claims: { class: 'read' },
   // `--force` replaces or removes another person's ownership.
   assign: { class: 'local-write', flags: { force: 'on-request' } },
