@@ -491,6 +491,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     "cat <<EOF\n$(echo $'a\\')'; gh pr merge 5\n)\nEOF", 'cat <<EOF\n$(case x in\nx) gh pr merge 5;; esac)\nEOF',
     // Row 6 through a here-string and a piped echo or printf.
     "bash <<< \"echo \\'; gh pr merge 5; echo \\'\"", "echo \"echo \\'; gh pr merge 5; echo \\'\" | bash", "printf '%s\\n' \"echo \\'; gh pr merge 5; echo \\'\" | sh",
+    // Review round 2: a `$(…)` in a heredoc's text that the shells end sooner hides nothing after it (zsh), and
+    // a chain of `case $(` that once took exponential time is refused at once (bash runs line 1 first).
+    "cat <<E\n$(echo $'\\''x) it's $(gh pr merge 5)\nE", `gh pr merge 5\necho $(${' case $('.repeat(40)}`,
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -606,7 +609,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'bash -c "echo \\"hi\\""', 'bash -c "echo \\$HOME"', "bash -c \"grep '\\d' f\"", "bash -c \"printf 'a\\nb'\"", "eval \"echo \\'quoted\\'\"", 'grep "\\d+" f',
     'echo "$(echo test case)"', "echo \"it\\'s\" | cat", 'echo "$(case y in x) echo esac;; esac)"', "cat <<EOF\n$(echo $'it\\'s')\nEOF",
     // The budget counts only a `$(…)` the shells end elsewhere, once per reading: 40 ordinary ones, with a CR too.
-    Array(40).fill("x=$(printf $'a\\tb')").join('; '), `${Array(40).fill("x=$(printf $'a\\tb')").join('; ')}\r`]) {
+    Array(40).fill("x=$(printf $'a\\tb')").join('; '), `${Array(40).fill("x=$(printf $'a\\tb')").join('; ')}\r`,
+    // Review round 2: a line read again with `$(:)` is judged at its own depth, and `a|esac)` is a pattern.
+    `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -664,7 +669,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   agentGuardDecision(`${inSub})`);
   assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
   // #498: the shells' own reading of `$(…)` is capped per line, and bash's brace rule scans each word once.
-  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `, 'echo "$(case $(']) {
+  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `, 'echo "$(case $(', ' case $(', ' case ${', '(case ${', " case '"]) {
     const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length)) + ' gh pr merge 5';
     const t8 = Date.now();
     agentGuardDecision(l);
