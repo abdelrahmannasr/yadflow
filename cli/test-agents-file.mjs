@@ -470,6 +470,17 @@ test('the agent guard refuses every human-only yad command and every force push,
     'sudo -E yad gate approve EP-x analysis',
     'yarn workspaces foreach -A run yad gate approve EP-x analysis',
     'yarn workspaces foreach --include web exec yad gate approve EP-x analysis',
+    // #498, rows 3–7, each run by a real shell (bash 3.2 and zsh 5.9 unless named). Row 3: `$'…'` inside `$(…)`.
+    "echo $(echo $'a\\')'; gh pr merge 5\n)", "echo \"$(echo $'a\\')'; gh pr merge 5\n)\"", "x=$(echo $'a\\')'; git push --force\n)",
+    // Row 4: a `case` in `"$(…)"` across a newline (zsh runs it).
+    'echo "$(case x in x)\ngh pr merge 5;; esac)"', 'x="$(case x in\nx) gh pr merge 5;; esac)"',
+    // Row 5: bash closes a list only after a comma (`{x},-n}` is `x}` and `-n`).
+    'git commit -m {x},-n}', 'git push origin {a},+main}', 'git commit -m {a}{b},-n}',
+    // Row 6: a backslash kept in double quotes, re-read by the shell `bash -c` and `eval` start.
+    "bash -c \"echo \\'; gh pr merge 5; echo \\'\"", "eval \"echo \\'; gh pr merge 5; echo \\'\"", 'bash -c "gh pr {merge,\\}} 5"',
+    "sh -c \"echo \\'; git push --force; echo \\'\"",
+    // Row 7: a brace list does not see into `$(…)`, backticks or `${…}`.
+    "git commit -m {$(echo '}'),-n}", "git push origin {$(echo '}'),+main}", "git commit -m {`echo '}'`,-n}", "git commit -m {${x:-\\}},-n}",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -578,7 +589,11 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'echo x || bash', 'docker ps --format {{.Names}}', 'gh pr view {1,2,3}', 'gh pr {merge\\,x,} 5',
     `gh api repos/x -f body='[${'{"a":1,"b":2},'.repeat(10)}{}]'`, "echo '{a,b}{a,b}{a,b}{a,b}{a,b}'", 'echo {a,b}{a,b}{a,b}{a,b}{a,b}', 'bash -euo pipefail ./x.sh', 'echo {a..z}',
     `curl -d '[${'{"a":1,"b":2},'.repeat(66000)}{}]' https://x`,
-    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
+    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`,
+    // #498: the ordinary forms around the new readings stay allowed.
+    "echo $(echo $'it\\'s')", "x=$(printf $'a\\tb')", 'echo "$(echo $\'\\\'\')"', 'echo "$(case $x in a) echo a;; esac)"', 'echo "$(echo case)"',
+    'echo {x}', 'gh pr view {x},5}', 'git log {x},y}', "echo {$(echo '}'),x}", 'git log {$(echo a),b}', 'gh api repos/{owner}/{repo}/pulls',
+    'bash -c "echo \\"hi\\""', 'bash -c "echo \\$HOME"', "bash -c \"grep '\\d' f\"", "bash -c \"printf 'a\\nb'\"", "eval \"echo \\'quoted\\'\"", 'grep "\\d+" f']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -635,6 +650,13 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t2 = Date.now();
   agentGuardDecision(`${inSub})`);
   assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
+  // #498: the shells' own reading of `$(…)` is capped per line, and bash's brace rule scans each word once.
+  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `]) {
+    const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length)) + ' gh pr merge 5';
+    const t8 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
+  }
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);

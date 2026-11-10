@@ -110,21 +110,35 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'braced', { value: [] });
   // Which parts read the previous part's output through a pipe (`|`, `|&`), by index.
   Object.defineProperty(parts, 'piped', { value: new Set() });
+  // Words whose backslashes in double quotes the shell keeps (#498), by part: their kept spelling.
+  Object.defineProperty(parts, 'posix', { value: [] });
+  let partPosix = null;
+  const wordKeep = [];
   let orAt = -1;
+  let realMarks = null;
   let wordBraced = false;
   let partBraced = null;
   const endWord = () => {
     if (inWord) {
       // A here-string is the command's input, not one of its words (`x=<<<1 git commit …` runs git).
       if (hereString) parts.herestrings.push({ part: parts.length, text: unshieldBraces(word) });
-      else if (!dropWord) { words.push(unshieldBraces(word)); if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word); }
+      else if (!dropWord) {
+        words.push(unshieldBraces(word));
+        if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word);
+        if (wordKeep.length) {
+          let kept = word;
+          for (let k = wordKeep.length - 1; k >= 0; k--) kept = `${kept.slice(0, wordKeep[k])}\\${kept.slice(wordKeep[k])}`;
+          (partPosix ??= new Map()).set(words.length - 1, unshieldBraces(kept));
+        }
+      }
     }
     wordBraced = false;
+    wordKeep.length = 0;
     // Reset only once the target (or the here-string) was read: a space before it ends no word.
     if (inWord) { dropWord = false; hereString = false; }
     word = ''; inWord = false;
   };
-  const endPart = () => { endWord(); dropWord = false; hereString = false; if (words.length) { parts.braced.push(partBraced); parts.push(words); } words = []; partBraced = null; };
+  const endPart = () => { endWord(); dropWord = false; hereString = false; if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.push(words); } words = []; partBraced = null; partPosix = null; };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
   // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
   // `$(…)` and backticks, so those go to `parts.subs`.
@@ -162,11 +176,29 @@ export function shellParts(rawLine, mode = {}) {
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
       // A `case` in it: its `x)` closes no `$(` to the shell (#495), so the text up to the line's last `)` is
       // judged too. Only refuses more.
-      if (ch === '$' && /\bcase\b/.test(line.slice(i + 2, end))) {
-        const eol = line.indexOf('\n', i);
+      // The marks are found once per line, so this costs no scan per `$(` (#498 review: it was quadratic).
+      if (ch === '$' && markWithin((realMarks ??= marksOf(line)).cases, i + 2, end)) {
+        const eol = firstAtOrAfter(realMarks.newlines, i);
         const stop = eol < 0 ? line.length : eol;
         const last = line.lastIndexOf(')', stop - 1);
-        if (last > end && /\bcase\b/.test(line.slice(i + 2, last))) parts.subs.push(line.slice(i + 2, last));
+        if (last > end) parts.subs.push(line.slice(i + 2, last));
+      }
+      // The shells' own end (#498), when it differs and closes: `$'a\')'` inside, or a `case` in `"$(…)"` across
+      // a newline. Its text, and what follows it, are judged too. Bounded: past 32 such scans, the rest of the line
+      // is judged once instead.
+      if (ch === '$' && (realMarks ??= marksOf(line)).any.length) {
+        if (markWithin(realMarks.any, i + 2, end)) {
+          // A budget per command, across every level: more than this many such readings is refused, not judged.
+          if (--realLeft.n < 0) parts.tooComplex = true;
+          else {
+            const realEnd = substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)), { ...mode, real: true });
+            if (realEnd !== end && realEnd < line.length) {
+              parts.subs.push(line.slice(i + 2, realEnd));
+              const rest = line.slice(realEnd + 1);
+              if (rest.trim()) parts.subs.push((quote === '"' ? '"' : '') + rest);
+            }
+          }
+        }
       }
       word += line.slice(i, end + 1); inWord = true;
       i = end;
@@ -175,7 +207,12 @@ export function shellParts(rawLine, mode = {}) {
     if (quote) {
       if (ch === quote) quote = null;
       else if (ch === '\\' && quote === '"' && line[i + 1] === '\n') i++;
-      else if (ch === '\\' && quote === '"' && i + 1 < line.length) word += shieldBrace(line[++i]);
+      else if (ch === '\\' && quote === '"' && i + 1 < line.length) {
+        // In double quotes the shell keeps the backslash unless `$`, a backtick, `"`, `\\` or a newline follows
+        // (#498): a line re-read by `bash -c` or `eval` sees it. Kept as an extra spelling of the word.
+        if (!'$`"\\\n'.includes(line[i + 1])) wordKeep.push(word.length);
+        word += shieldBrace(line[++i]);
+      }
       else word += shieldBrace(ch);
       continue;
     }
@@ -241,6 +278,27 @@ export function shellParts(rawLine, mode = {}) {
   return parts;
 }
 
+// Where `$'` and the word `case` stand in a line, in order (#498): found once per line, so each `$(` asks by a
+// binary search whether its text holds one, never by a scan (a scan per `$(` was quadratic).
+function marksOf(line) {
+  const any = [], cases = [], newlines = [];
+  for (const m of line.matchAll(/\$'|\bcase\b|\n/g)) {
+    if (m[0] === '\n') newlines.push(m.index);
+    else { any.push(m.index); if (m[0] === 'case') cases.push(m.index); }
+  }
+  return { any, cases, newlines };
+}
+// The first index in `sorted` at or after `from`, or -1.
+function firstAtOrAfter(sorted, from) {
+  let lo = 0, hi = sorted.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < from) lo = mid + 1; else hi = mid; }
+  return lo < sorted.length ? sorted[lo] : -1;
+}
+function markWithin(marks, from, to) {
+  const at = firstAtOrAfter(marks, from);
+  return at >= 0 && at < to;
+}
+
 // Where the `$(` whose text starts at `from` closes: the index of its `)`, or the end of the line when it never
 // closes. Quotes, nested `(…)` and a heredoc's text inside it are its own, so a `)` in them does not close it.
 // `getIndex` gives the line index of `line`, built once per text and shared by every `$(` in it (#492 review: one
@@ -249,6 +307,10 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
+  // `mode.real` (#498): read as the shells do where the default reading differs. `$'…'` is skipped with its
+  // escapes (`\'` does not end it), and a `case <word> in` makes its `x)` patterns close nothing. Only an extra
+  // reading: the default one stays, since main refuses lines this one would not.
+  const cases = [];
   for (let i = from; i < line.length; i++) {
     const ch = line[i];
     if (quote) {
@@ -257,6 +319,16 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
       continue;
     }
     if (ch === '\\') { i++; continue; }
+    if (mode.real && ch === '$' && line[i + 1] === '\'') {
+      let j = i + 2;
+      while (j < line.length && line[j] !== '\'') j += line[j] === '\\' ? 2 : 1;
+      i = j;
+      continue;
+    }
+    if (mode.real && /[a-z]/.test(ch) && (i === from || /[\s;&|(]/.test(line[i - 1]))) {
+      if (ch === 'c' && /^case\s+\S+\s+in\b/.test(line.slice(i, i + 256))) { cases.push(depth); i += 3; continue; }
+      if (ch === 'e' && /^esac\b/.test(line.slice(i, i + 5)) && cases.length) { cases.pop(); i += 3; continue; }
+    }
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
     if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
       const m = heredocAt(line, i);
@@ -277,6 +349,7 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
       continue;
     }
     if (ch === '(') depth++;
+    else if (ch === ')' && cases.length && depth === cases[cases.length - 1]) continue;
     else if (ch === ')' && --depth === 0) return i;
   }
   return line.length;
@@ -443,18 +516,27 @@ const unshieldBraces = (x) => (/[\uE000-\uE002]/.test(x) ? x.replace(/\uE000/g, 
 // keeps every scan here small, so nesting and long lists cannot make it slow (#495 review).
 const BRACE_CAP = 64;
 const BRACE_WORD = 4096;
-function braceExpand(x, budget = { left: BRACE_CAP }) {
+// `bash` (#498): bash closes a list only at a `}` after one of its commas, or where its body is a sequence; a
+// `}` before that is text (`{x},merge}` is `x}` and `merge`), and a `{` that never closes is passed over. zsh
+// reads the first `}` as the close, the default.
+const SEQUENCE = /^(-?\d+|.)\.\.(-?\d+|.)(?:\.\.-?\d+)?$/s;
+function braceExpand(x, budget = { left: BRACE_CAP }, opts = {}) {
   if (x.length > BRACE_WORD || Date.now() > deadline) return null;
   // Nothing to expand: no scan of its braces, whatever their nesting.
   if (!x.includes(',') && !x.includes('..')) return --budget.left < 0 ? null : [x];
-  for (let i = x.indexOf('{'); i >= 0; i = x.indexOf('{', i + 1)) {
+  const lastSep = Math.max(x.lastIndexOf(','), x.lastIndexOf('..'));
+  for (let i = x.indexOf('{'); i >= 0 && i < lastSep; i = x.indexOf('{', i + 1)) {
+    if (Date.now() > deadline) return null;
     let depth = 0, close = -1;
     const commas = [];
     for (let j = i; j < x.length; j++) {
       if (x[j] === '{') depth++;
-      else if (x[j] === '}') { depth--; if (depth === 0) { close = j; break; } } else if (x[j] === ',' && depth === 1) commas.push(j);
+      else if (x[j] === '}') {
+        if (opts.bash && depth === 1 && !commas.length && !(j - i - 1 <= 64 && SEQUENCE.test(x.slice(i + 1, j)))) continue;
+        depth--; if (depth === 0) { close = j; break; }
+      } else if (x[j] === ',' && depth === 1) commas.push(j);
     }
-    if (close < 0) break;
+    if (close < 0) { if (opts.bash) continue; break; }
     const body = x.slice(i + 1, close), pre = x.slice(0, i), post = x.slice(close + 1);
     let alts = null;
     if (commas.length) {
@@ -462,7 +544,7 @@ function braceExpand(x, budget = { left: BRACE_CAP }) {
       let from = i + 1;
       for (const c of [...commas, close]) { alts.push(x.slice(from, c)); from = c + 1; }
     } else {
-      const m = /^(-?\d+|.)\.\.(-?\d+|.)(?:\.\.-?\d+)?$/s.exec(body);
+      const m = SEQUENCE.exec(body);
       if (m) {
         const num = /^-?\d+$/.test(m[1]) && /^-?\d+$/.test(m[2]);
         if (num) alts = [m[1]];
@@ -477,7 +559,7 @@ function braceExpand(x, budget = { left: BRACE_CAP }) {
     if (!alts) continue;
     const out = [];
     for (const alt of alts) {
-      const more = braceExpand(pre + alt + post, budget);
+      const more = braceExpand(pre + alt + post, budget, opts);
       if (!more) return null;
       for (const y of more) out.push(y);
     }
@@ -485,6 +567,27 @@ function braceExpand(x, budget = { left: BRACE_CAP }) {
   }
   // A finished word: only these count against the cap.
   return --budget.left < 0 ? null : [x];
+}
+// A word's `$(…)`, backticks and `${…}` with their braces and commas shielded (#498): to bash and zsh a brace
+// list does not see into them (`{$(echo '}'),-n}` is `$(echo '}')` and `-n`).
+function shieldExpansions(raw) {
+  let out = '';
+  let index = null;
+  for (let k = 0; k < raw.length; k++) {
+    const ch = raw[k];
+    let end = -1;
+    if (ch === '$' && raw[k + 1] === '(') end = substitutionEnd(raw, k + 2, () => (index ??= lineIndex(raw)));
+    else if (ch === '`') end = backtickEnd(raw, k + 1);
+    else if (ch === '$' && raw[k + 1] === '{') {
+      let d = 0;
+      for (let j = k + 1; j < raw.length; j++) { if (raw[j] === '{') d++; else if (raw[j] === '}' && --d === 0) { end = j; break; } }
+      if (end < 0) end = raw.length;
+    }
+    if (end < 0) { out += ch; continue; }
+    out += [...raw.slice(k, end + 1)].map(shieldBrace).join('');
+    k = end;
+  }
+  return out;
 }
 // A word quoted for a shell line, so a carried command re-read as a line keeps its words (`find -exec sh -c '…'`).
 const shq = (x) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(x) ? x : `'${x.replace(/'/g, "'\\''")}'`);
@@ -755,6 +858,10 @@ export const MAX_JUDGED = 1_000_000;
 // under a harness's hook timeout. Each reading is linear, so a 1 MB line costs well under a second per reading.)
 export const JUDGE_BUDGET_MS = 5000;
 let deadline = Infinity;
+// How many times one command may be read by the shells' own `$(…)` end (#498), across every level.
+const REAL_SCANS = 32;
+const realLeft = { n: Infinity };
+const TOO_MANY_READINGS = { allow: false, message: 'yad agent guard: this command has too many `$(…)` holding `$\'…\'` or `case` to judge. Run it as separate commands.' };
 const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
 export function agentGuardDecision(line, depth = 0) {
   if (typeof line === 'string' && line.length > MAX_JUDGED) {
@@ -762,6 +869,7 @@ export function agentGuardDecision(line, depth = 0) {
   }
   if (depth > 0) return judgeReadings(line, depth);
   deadline = Date.now() + JUDGE_BUDGET_MS;
+  realLeft.n = REAL_SCANS;
   try {
     return judgeReadings(line, depth);
   } catch (e) {
@@ -769,6 +877,7 @@ export function agentGuardDecision(line, depth = 0) {
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
     deadline = Infinity;
+    realLeft.n = Infinity;
   }
 }
 // Where the first heredoc whose end word expands (`<<E$x`, `<<"E\`x\`"`) opens, or -1: read from the actual matches,
@@ -844,6 +953,7 @@ function judgeLine(line, depth, mode = {}) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
   if (Date.now() > deadline) return OUT_OF_TIME;
   const parts = shellParts(line, mode);
+  if (parts.tooComplex) return TOO_MANY_READINGS;
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
   for (const sub of parts.subs) {
@@ -862,19 +972,33 @@ function judgeLine(line, depth, mode = {}) {
     if (Date.now() > deadline) return OUT_OF_TIME;
     const w = stripPrefix(part);
     const variants = [part];
+    // The backslashes kept in double quotes (#498): what `bash -c` and `eval` re-read.
+    const posix = parts.posix[n];
+    if (posix) { const kept = part.slice(); for (const [k, v] of posix) kept[k] = v; variants.push(kept); }
     const braced = parts.braced[n];
     if (braced) {
-      const expanded = [], noEmpty = [];
-      let added = 0;
-      for (let k = 0; k < part.length; k++) {
-        if (!braced.has(k)) { expanded.push(part[k]); noEmpty.push(part[k]); continue; }
-        const e = braceExpand(braced.get(k));
-        if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return TOO_MANY_BRACES;
-        // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
-        for (const y of e) { const real = unshieldBraces(y); expanded.push(real); if (y !== '') noEmpty.push(real); }
+      // Four readings: the first-`}` rule with the empty words kept (zsh) and dropped (bash), as before; then with
+      // `$(…)`, backticks and `${…}` opaque, by the first-`}` rule with empty words kept (zsh) and by bash's own
+      // rule with them dropped (#498). Duplicates are judged once.
+      const readings = [{}, { drop: true }, { shield: true }, { shield: true, bash: true, drop: true }];
+      const seen = new Set();
+      for (const r of readings) {
+        const out = [];
+        let added = 0;
+        for (let k = 0; k < part.length; k++) {
+          if (!braced.has(k)) { out.push(part[k]); continue; }
+          const raw = r.shield ? shieldExpansions(braced.get(k)) : braced.get(k);
+          const e = braceExpand(raw, { left: BRACE_CAP }, { bash: r.bash });
+          if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return TOO_MANY_BRACES;
+          // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
+          for (const y of e) if (!(r.drop && y === '')) out.push(unshieldBraces(y));
+        }
+        const key = JSON.stringify(out);
+        if (!seen.has(key)) { seen.add(key); variants.push(out); }
       }
-      variants.push(expanded, noEmpty);
     }
+    // Every reading so far is one a real shell makes; the command-word guesses below are not.
+    const real = variants.length;
     for (const base of variants.slice()) {
       const bw = stripPrefix(base);
       const raw = base[base.length - bw.length] ?? '';
@@ -892,7 +1016,6 @@ function judgeLine(line, depth, mode = {}) {
     // A real shell (as written, or brace-expanded) takes all the text printed before it: through a pipe, a group
     // (`{ echo …; } | bash`), or a file it reads back. A command word only guessed to be a shell needs a real pipe:
     // otherwise any `$x` line after a docs heredoc would be judged as running it.
-    const real = braced ? 3 : 1;
     let realShell = false;
     variants.forEach((vw, k) => { if (bareShell(stripPrefix(vw))) { readsInput = true; if (k < real) realShell = true; } });
     if (readsInput) {
