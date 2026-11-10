@@ -69,6 +69,9 @@ export const fingerprint = (f) => createHash('sha256').update(JSON.stringify([f.
 // ---- making text safe to post ------------------------------------------------------------------------
 
 const SECRET = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|glpat-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?|-----BEGIN[^-]*-----|[A-Za-z0-9+_=-]{40,})/g;
+// Text a person wrote keeps its commit hashes and long names: only tokens with a known prefix are redacted.
+const PREFIXED = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|glpat-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?|-----BEGIN[^-]*-----)/g;
+export const redactTokens = (s) => String(s ?? '').replace(PREFIXED, '[redacted]');
 export const redact = (s) => String(s ?? '').replace(SECRET, '[redacted]');
 const plain = (s, max) => { const t = forTerminal(redact(s)).replace(/\s+/g, ' ').trim(); return t.length > max ? `${t.slice(0, max - 1)}…` : t; };
 // An invisible space after each trigger stops a mention or a reference. GitHub reads backslashes and HTML entities as
@@ -122,7 +125,7 @@ function draftAdvisories(t, runner) {
 
 // `vis` is public, private, internal, or null. `noPush` is true only when GitHub says so: it silently drops the labels
 // and milestone of an item made without push access, and the next run could not recognise that item.
-function repoFacts(t, runner) {
+export function repoFacts(t, runner) {
   const res = api(runner, t.cli, t.host, `repos/${t.repo}`);
   if (!res.ok || !res.body || typeof res.body !== 'object') return { vis: null, noPush: false };
   const b = res.body;

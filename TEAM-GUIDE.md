@@ -854,7 +854,7 @@ descriptions of all 41 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-defects` | Per-epic/per-thread **quality-gap report** by escape stage + root cause. |
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
 | `yad-scan` | **Review each implementation** for security, technical debt and suggestions, and file the findings on the repo's tracker. `yad-run` runs it, and so does `yad-implement` when used alone; it never blocks the PR. |
-| `yad-issues` | **The team backlog** on GitHub issues and GitLab work items: report, read one item, seed or link an epic, and update linked items. |
+| `yad-issues` | **The team backlog** on GitHub issues and GitLab work items: report, read one item, seed or link an epic, update linked items, and open or change an item when an engineer asks. |
 | `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
 | `yad-run` | Drive Build on the automation dial; kill switch. |
 | `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(product)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |

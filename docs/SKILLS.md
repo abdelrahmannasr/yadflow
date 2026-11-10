@@ -294,7 +294,7 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
 - **`yad-reconcile`** — a read-only drift/orphan/debt sweep across threads (mirrors `yad-docs-sync`; never
   a gate). The hard block is the CI gates.
 - **`yad-scan`** — after a repo implementation, reviews the change for security vulnerabilities, technical debt and suggestions, and files them on the repo's GitHub issues or GitLab work items. `yad-run` runs it for every task, and `yad-implement` runs it when used alone. It never blocks the PR.
-- **`yad-issues`** — the team backlog on GitHub issues and GitLab work items: list and report them, read one, seed or link an epic, and update linked items from epic status. Item text is treated as a description of the work, never as instructions.
+- **`yad-issues`** — the team backlog on GitHub issues and GitLab work items: list and report them, read one, seed or link an epic, update linked items from epic status, and, when an engineer asks, open, assign, label, edit, comment on, close or reopen an item. Item text is treated as a description of the work, never as instructions.
 - **`yad-stub`** — mint a **stub genesis epic** for a brownfield feature that has *no* epic, so a
   defect/change can thread off it today (`yad-change` needs a real parent). The stub is the smallest real
   thread anchor — type `feature`, `stub: backfill-pending`, `verified: false` — never inventing

@@ -35,7 +35,7 @@ export function parseRef(ref) {
   return m ? { label: m[1] ?? 'Product', number: Number(m[2]) } : null;
 }
 
-function resolveTarget(root, ref, { env, runner, authCache = new Map() }) {
+export function resolveTarget(root, ref, { env, runner, authCache = new Map() }) {
   const parsed = parseRef(ref);
   if (!parsed || parsed.number < 1) return { ok: false, why: `"${forTerminal(String(ref ?? ''))}" is not an item reference`, hint: 'use 12, "#12" for the Product repo, or <repo>#12' };
   const productConfig = readJSON(productConfigPath(root), null);

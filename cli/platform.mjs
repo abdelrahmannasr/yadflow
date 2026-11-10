@@ -786,3 +786,41 @@ export function createMilestone(t, title, { runner = run } = {}) {
 export function createDraftAdvisory(t, { summary, description, severity, cwe }, { runner = run } = {}) {
   return runner('gh', ['api', '--hostname', t.host, '-X', 'POST', `repos/${t.repo}/security-advisories`, '-f', `summary=${summary}`, '-f', `description=${description}`, '-f', `severity=${severity}`, '-f', `cwe_ids[]=${cwe}`, '-f', 'vulnerabilities[][package][ecosystem]=other'], { timeout: 30000 });
 }
+
+// ---- acting on an item when a person asks (E173) -------------------------------------------------------
+// Each returns the runner's result. A GitLab list field cannot be sent through `glab api` (it refuses a
+// bracketed field name), so GitLab takes one assignee by id.
+export function newItem(t, { title, body, labels, assignee = null, confidential = false }, { runner = run } = {}) {
+  if (t.platform === 'github') {
+    const fields = ['-f', `title=${title}`, '-f', `body=${body}`, ...labels.flatMap((l) => ['-f', `labels[]=${l}`]), ...(assignee ? ['-f', `assignees[]=${assignee}`] : [])];
+    return runner('gh', ['api', '--hostname', t.host, '-X', 'POST', `repos/${t.repo}/issues`, ...fields], { timeout: 30000 });
+  }
+  const fields = ['-f', `title=${title}`, '-f', `description=${body}`, '-f', `labels=${labels.join(',')}`, ...(assignee ? ['-F', `assignee_id=${assignee}`] : []), ...(confidential ? ['-F', 'confidential=true'] : [])];
+  return runner('glab', ['api', '--hostname', t.host, '-X', 'POST', `projects/${encodeURIComponent(t.repo)}/issues`, ...fields], { timeout: 30000 });
+}
+
+// `fields` is a map of plain-text fields. GitHub's body is `body`, GitLab's `description`.
+export function editItem(t, number, fields, { runner = run } = {}) {
+  const gh = t.platform === 'github';
+  return itemWrite(t, gh ? 'PATCH' : 'PUT', itemAt(t, number), Object.entries(fields).map(([k, v]) => `${k === 'body' && !gh ? 'description' : k}=${v}`), runner);
+}
+
+export function reopenItem(t, number, { runner = run } = {}) {
+  return itemWrite(t, t.platform === 'github' ? 'PATCH' : 'PUT', itemAt(t, number), [t.platform === 'github' ? 'state=open' : 'state_event=reopen'], runner);
+}
+
+// GitHub: PATCH with one login replaces every assignee; clearing removes the current ones by name.
+// GitLab: one user id, or 0 to clear.
+export function setAssignee(t, number, who, { current = [], runner = run } = {}) {
+  if (t.platform === 'github') {
+    if (who !== null) return itemWrite(t, 'PATCH', itemAt(t, number), [`assignees[]=${who}`], runner);
+    if (!current.length) return { ok: true, code: 0, stdout: '{}', stderr: '' };
+    return itemWrite(t, 'DELETE', `${itemAt(t, number)}/assignees`, current.map((l) => `assignees[]=${l}`), runner);
+  }
+  return runner('glab', ['api', '--hostname', t.host, '-X', 'PUT', itemAt(t, number), '-F', `assignee_id=${who ?? 0}`], { timeout: 30000 });
+}
+
+// GitLab only: make an item confidential before it is marked as a vulnerability.
+export function makeConfidential(t, number, { runner = run } = {}) {
+  return runner('glab', ['api', '--hostname', t.host, '-X', 'PUT', itemAt(t, number), '-F', 'confidential=true'], { timeout: 30000 });
+}
