@@ -227,8 +227,9 @@ jobs:
             ${{ env.COREPACK_HOME }}
           key: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'package.json') }}
           restore-keys: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-
-      - run: bash "$YAD_CHECKS/install-deps.sh"
-      - run: bash "$YAD_CHECKS/build-test-lint.sh"
+      # The base branch lets a Unity project skip these two, and stops a change from skipping them by deleting package.json (#496).
+      - run: bash "$YAD_CHECKS/install-deps.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/build-test-lint.sh" "origin/${{ github.base_ref }}"
 
   # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:
   # a sealed epic (all stories shipped) refuses new behaviour, forcing a change-epic. reconcile-debt:

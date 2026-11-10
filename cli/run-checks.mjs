@@ -450,8 +450,9 @@ export async function runChecks(dir, opts = {}) {
         { name: 'pr-title', script: 'pr-title.sh', args: ['--profile', profile, title], needs: titleNeeds },
         { name: 'pr-template', script: 'pr-template.sh', args: ['--profile', profile, bodyFile], needs: bodyNeeds },
         { name: 'risk-map', script: 'risk-map-check.sh', args: [base] },
-        { name: 'install-deps', script: 'install-deps.sh', args: [], build: true },
-        { name: 'build/test/lint', script: 'build-test-lint.sh', args: [], build: true, after: 'install-deps' },
+        // The base, as CI passes it: a Unity project skips both, unless its base has a package.json (#496).
+        { name: 'install-deps', script: 'install-deps.sh', args: [base], build: true },
+        { name: 'build/test/lint', script: 'build-test-lint.sh', args: [base], build: true, after: 'install-deps' },
         { name: 'contract-check', script: 'contract-check.sh', args: [base] },
         { name: 'lineage-check', script: 'lineage-check.sh', args: [base] },
         { name: 'epic-open', script: 'epic-open.sh', args: [base] },
@@ -539,6 +540,8 @@ export async function runChecks(dir, opts = {}) {
       } else {
         r.exit = p.status;
         r.status = p.status === 0 ? 'pass' : 'fail';
+        // A gate that passed by skipping says so (#496): a skipped gate is not a pass.
+        if (r.status === 'pass' && (g.name === 'install-deps' || g.name === 'build/test/lint') && /^SKIP \[(install-deps|build\/test\/lint)\]: a Unity project/m.test(r.output)) { r.status = 'skip'; r.reason = 'a Unity project: build and test it with Unity\'s own CI'; }
       }
       if (g.name === 'pr-title' && titleNote) info(titleNote);
       if (g.name === 'pr-template' && platform === 'gitlab') {

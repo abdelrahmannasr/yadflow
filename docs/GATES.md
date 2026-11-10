@@ -410,7 +410,23 @@ failure. Each one says why that story's slice could not pass as a quote:
 that order. The package manager is the one `package.json` names in `packageManager`, else the one the
 lockfile shows (npm or pnpm).
 
-**Exemptions:** none. `YAD_TEST_MAX_WORKERS` is passed on as `--maxWorkers` only to jest or vitest.
+**Exemptions:**
+
+- **A Unity project (#496).** The file `ProjectSettings/ProjectVersion.txt` and the folder `Assets/` at the
+  root, neither a link, and no `package.json`. The gate prints `SKIP [build/test/lint]: a Unity project
+  (ProjectSettings/ProjectVersion.txt and Assets/): not built by yad. Build and test it with Unity's own CI,
+  such as GameCI.` and passes; install-deps skips the same way. Build and test the project with Unity's own
+  CI. A Unity repo that has a `package.json` runs the Node gate as before.
+- **The skip needs the base branch to agree.** CI passes the base branch to both scripts. If the base has a
+  `package.json`, the skip is refused, so a change cannot skip the build of a Node repo by deleting it. If
+  the base cannot be read, the skip is refused too. With no base (an old CI file that a team edited, so
+  `yad update` left it alone, or a local run), the gate works the base out as the others do (`origin/HEAD`,
+  then `origin/main`); in CI, if none is found, the skip is refused. Only a local run with no remote at all
+  decides from its own files.
+- **The first upgrade pull request of a Unity repo still fails.** The gate scripts run from the base branch
+  (#426), and the base still has the old ones. Merge that one pull request with an override; the next ones skip.
+
+`YAD_TEST_MAX_WORKERS` is passed on as `--maxWorkers` only to jest or vitest.
 
 **Reads:** `package.json` (`scripts`, `packageManager`), the lockfile.
 
@@ -419,6 +435,8 @@ lockfile shows (npm or pnpm).
 | `FAIL [build/test/lint]: '<command> run <step>' failed — the output above says why. Run it on your machine, fix what it reports, and push again.` | As it says. The later steps do not run after a failure. |
 | `FAIL [build/test/lint]: package.json has no "<step>" script, or an empty one — add one; the gate runs lint, build and test, in that order.` | Add the script to `package.json`. An empty script fails too: npm would run it as a pass. |
 | `FAIL [package-manager]: …` | See [the package manager checks](#install-deps); the same checks run here. |
+| `note [unity]: <base> has a package.json, so removing it here does not skip the Node gate.` | The base branch is a Node repo. Keep `package.json`, or change the base first. |
+| `note [unity]: the base branch <base> could not be read, so the Unity project is not skipped.` | Check out the code with its full history (GitHub `fetch-depth: 0`, GitLab `GIT_DEPTH: "0"`). |
 
 ## lineage-check
 

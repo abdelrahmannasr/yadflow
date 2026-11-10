@@ -8,6 +8,12 @@ readonly YAD_CHECKS_DIR
 # shellcheck source=package-manager.sh
 source "$YAD_CHECKS_DIR/package-manager.sh"
 
+# The base branch, as the other gates take it: the first argument, or SDLC_BASE (#496).
+if yad_unity_skip "${1:-${SDLC_BASE:-}}"; then
+  echo "SKIP [install-deps]: a Unity project (ProjectSettings/ProjectVersion.txt and Assets/): no Node packages to install."
+  exit 0
+fi
+
 package_manager_spec="$(yad_package_manager_spec)"
 package_manager="$(yad_detect_package_manager "$package_manager_spec")"
 

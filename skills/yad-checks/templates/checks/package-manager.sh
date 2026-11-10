@@ -76,6 +76,48 @@ yad_validate_exact_package_manager_spec() {
   '
 }
 
+# #496 — a Unity project builds and tests with Unity's own CI (GameCI, for example), and has no package.json, so
+# the Node gate is skipped for it. A Unity project here is what `yad commit` reads as one: the file
+# ProjectSettings/ProjectVersion.txt and the folder Assets/ at the root, neither a link, and no package.json.
+# The base branch must have no package.json either: otherwise a change that deletes package.json and adds those
+# two paths would skip the build of a Node repo. CI passes the base. With none (an edited CI file, or a local run),
+# the base is worked out as the other gates do it (origin/HEAD, then origin/main); in CI, a base that cannot be
+# worked out refuses the skip. Only a local run with no remote at all decides from its own files. Returns 0 to skip.
+yad_unity_skip() {
+  local base="${1:-}" head c
+  [ ! -e "$YAD_PACKAGE_JSON" ] && [ ! -L "$YAD_PACKAGE_JSON" ] || return 1
+  [ -f ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings ] || return 1
+  [ -d Assets ] && [ ! -L Assets ] || return 1
+  if [ -z "$base" ]; then
+    head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || head=""
+    for c in "$head" origin/main; do
+      if [ -n "$c" ] && git rev-parse --verify --quiet "${c}^{commit}" >/dev/null 2>&1; then base="$c"; break; fi
+    done
+    if [ -z "$base" ] && [ -n "${CI:-}" ]; then
+      echo "note [unity]: no base branch was given or found, so the Unity project is not skipped. Pass the base branch to this script." >&2
+      return 1
+    fi
+  fi
+  if [ -n "$base" ]; then
+    if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1; then
+      echo "note [unity]: the base branch ${base} could not be read, so the Unity project is not skipped." >&2
+      return 1
+    fi
+    # The tree entry, not the file's contents: a partial clone may hold the tree without the file, and a read
+    # that fails must not look like "no package.json". A link or a submodule named package.json counts too.
+    local entry
+    if ! entry="$(git ls-tree "$base" -- package.json 2>/dev/null)"; then
+      echo "note [unity]: the base branch ${base} could not be read, so the Unity project is not skipped." >&2
+      return 1
+    fi
+    if [ -n "$entry" ]; then
+      echo "note [unity]: ${base} has a package.json, so removing it here does not skip the Node gate." >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 yad_package_manager_spec() {
   if [ ! -f "$YAD_PACKAGE_JSON" ]; then
     echo "FAIL [package-manager]: package.json is missing." >&2
