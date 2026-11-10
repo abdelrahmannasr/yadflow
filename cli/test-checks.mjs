@@ -4101,6 +4101,65 @@ const npmStub = (lint, build, test_) => JSON.stringify({
   scripts: { lint, build, test: test_ },
 });
 
+// #496: a Unity project is skipped with a note, and a change cannot skip a Node repo by deleting package.json.
+const UNITY = { 'ProjectSettings/ProjectVersion.txt': 'm_EditorVersion: 2022.3.20f1\n', 'Assets/.keep': '' };
+test('#496: a Unity project skips both scripts, with no base and with a base that has no package.json', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: unity', UNITY);
+  for (const [script, re] of [[INSTALL_DEPS, /SKIP \[install-deps\]: a Unity project/], [BTL, /SKIP \[build\/test\/lint\]: a Unity project .*GameCI/]]) {
+    for (const args of [[], ['main']]) {
+      const r = runGate(script, T, args);
+      assert.equal(r.code, 0, r.out);
+      assert.match(r.out, re);
+    }
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('#496: deleting package.json and adding Unity paths does not skip a Node repo; an unread base does not either', () => {
+  const T = scaffoldRepo();
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'chore: node', { 'package.json': npmStub('node -e ""', 'node -e ""', 'node -e ""') });
+  git(T, 'checkout', '-q', '-b', 'feat');
+  fs.rmSync(path.join(T, 'package.json'));
+  commit(T, 'chore: unity', UNITY);
+  for (const script of [INSTALL_DEPS, BTL]) {
+    const r = runGate(script, T, ['main']);
+    assert.notEqual(r.code, 0, r.out);
+    assert.match(r.out, /main has a package\.json, so removing it here does not skip/);
+    const u = runGate(script, T, ['origin/nowhere']);
+    assert.notEqual(u.code, 0, u.out);
+    assert.match(u.out, /could not be read, so the Unity project is not skipped/);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('#496: half a Unity project, or one with a package.json, is not skipped', () => {
+  for (const files of [{ 'ProjectSettings/ProjectVersion.txt': 'x' }, { 'Assets/.keep': '' }, { 'ProjectSettings/ProjectVersion.txt': 'x', Assets: 'a file' }]) {
+    const T = scaffoldRepo();
+    commit(T, 'chore: half', files);
+    const r = runGate(BTL, T, []);
+    assert.notEqual(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /SKIP/);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+  const T = scaffoldRepo();
+  commit(T, 'chore: unity with tooling', { ...UNITY, 'package.json': npmStub('node -e ""', 'node -e ""', 'node -e ""') });
+  const r = runGate(BTL, T, []);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS \[build\/test\/lint\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('#496: both CI files pass the base branch to install-deps and build-test-lint', () => {
+  const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  for (const s of ['install-deps.sh', 'build-test-lint.sh']) {
+    assert.ok(gh.includes(`bash "$YAD_CHECKS/${s}" "origin/\${{ github.base_ref }}"`), s);
+    assert.ok(gl.includes(`bash "$YAD_CHECKS/${s}" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"`), s);
+  }
+});
+
 test('build-test-lint gate: all green scripts pass', () => {
   const T = scaffoldRepo();
   commit(T, 'chore: wire scripts', {

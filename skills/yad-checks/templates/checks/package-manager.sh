@@ -76,6 +76,29 @@ yad_validate_exact_package_manager_spec() {
   '
 }
 
+# #496 — a Unity project builds and tests with Unity's own CI (GameCI, for example), and has no package.json, so
+# the Node gate is skipped for it. A Unity project here is what `yad commit` reads as one: the file
+# ProjectSettings/ProjectVersion.txt and the folder Assets/ at the root, neither a link, and no package.json.
+# With a base branch, the base must have no package.json either: otherwise a change that deletes package.json
+# and adds those two paths would skip the build of a Node repo. Returns 0 to skip.
+yad_unity_skip() {
+  local base="${1:-}"
+  [ ! -e "$YAD_PACKAGE_JSON" ] && [ ! -L "$YAD_PACKAGE_JSON" ] || return 1
+  [ -f ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings ] || return 1
+  [ -d Assets ] && [ ! -L Assets ] || return 1
+  if [ -n "$base" ]; then
+    if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1; then
+      echo "note [unity]: the base branch ${base} could not be read, so the Unity project is not skipped." >&2
+      return 1
+    fi
+    if git cat-file -e "${base}:package.json" 2>/dev/null; then
+      echo "note [unity]: ${base} has a package.json, so removing it here does not skip the Node gate." >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 yad_package_manager_spec() {
   if [ ! -f "$YAD_PACKAGE_JSON" ]; then
     echo "FAIL [package-manager]: package.json is missing." >&2

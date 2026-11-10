@@ -9,6 +9,12 @@ readonly YAD_CHECKS_DIR
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=package-manager.sh
 source "$YAD_CHECKS_DIR/package-manager.sh"
+
+# The base branch, as the other gates take it: the first argument, or SDLC_BASE (#496).
+if yad_unity_skip "${1:-${SDLC_BASE:-}}"; then
+  echo "SKIP [build/test/lint]: a Unity project (ProjectSettings/ProjectVersion.txt and Assets/): not built by yad. Build and test it with Unity's own CI, such as GameCI."
+  exit 0
+fi
 # Two assignments on purpose: nested inside another $(...), a failing yad_package_manager_spec would
 # be swallowed, and the gate would fall back to lockfile detection and PASS on a package.json it
 # had just rejected. Each step fails the gate on its own under `set -e`.
