@@ -40,7 +40,7 @@ import {
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
-import { publishedItems } from './foundation-publish.mjs';
+import { foundationChanged, publishedItems } from './foundation-publish.mjs';
 
 // `foo`, `EP-foo` and `epics/EP-foo` all name the same epic. Accepting only one spelling would make the
 // command reject the id the user just read out of `yad next`.
@@ -514,5 +514,5 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   }
   const next = features.find((f) => f.status === 'planned');
   if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId}${next.item ? `, from item #${next.item.number}` : ''})`);
-  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
+  if (productId === FOUNDATION_EPIC && approved && !items?.size && features.length && !(() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { return true; } })()) info('the roadmap is approved: `yad foundation publish` opens one issue / work item per feature in the Product repo');
 }

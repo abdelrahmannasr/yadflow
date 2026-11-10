@@ -218,3 +218,30 @@ test('E174 review: a phase heading cannot mention anyone in the body', async () 
   assert.doesNotMatch(body, /@acme|#12/);
 });
 
+test('E174 review 2: a solo Foundation changed after its review is refused, using the fingerprint it closed with', async () => {
+  const T = await product();
+  for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'stack.md', 'repos.md']) fs.writeFileSync(path.join(T, 'foundation', f), `# ${f}\n`);
+  const sp = path.join(T, 'foundation/.sdlc/state.json');
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  const review = st.steps.find((s) => s.type === 'review+approve');
+  review.status = 'done';
+  review.closed = { by: 'ann', date: '2026-11-10', hash: 'sha256:old', via: 'approved', waived: 'solo' };
+  fs.writeFileSync(sp, JSON.stringify(st));
+  const f = fake();
+  await P.runFoundationPublish(T, { env, runner: f.runner });
+  assert.equal(f.posts.length, 0); assert.equal(process.exitCode, 1); reset();
+  const { artifactHash } = await import('./epic-state.mjs');
+  review.closed.hash = artifactHash(path.join(T, 'foundation'), 'foundation/');
+  fs.writeFileSync(sp, JSON.stringify(st));
+  const g = fake();
+  await P.runFoundationPublish(T, { env, runner: g.runner });
+  assert.ok(g.created.length > 0); reset();
+});
+
+test('E174 review 2: a near-miss parked heading is published and said', () => {
+  const near = [];
+  const rows = P.roadmapRows('## Later\n| Feature | Proposed epic id |\n|---|---|\n| Y | EP-y |\n', [], near);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(near, ['Later']);
+});
+
