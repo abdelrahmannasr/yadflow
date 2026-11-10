@@ -480,7 +480,17 @@ test('the agent guard refuses every human-only yad command and every force push,
     "bash -c \"echo \\'; gh pr merge 5; echo \\'\"", "eval \"echo \\'; gh pr merge 5; echo \\'\"", 'bash -c "gh pr {merge,\\}} 5"',
     "sh -c \"echo \\'; git push --force; echo \\'\"",
     // Row 7: a brace list does not see into `$(…)`, backticks or `${…}`.
-    "git commit -m {$(echo '}'),-n}", "git push origin {$(echo '}'),+main}", "git commit -m {`echo '}'`,-n}", "git commit -m {${x:-\\}},-n}",
+    "git commit -m {$(echo '}'),-n}", "git push origin {$(echo '}'),+main}", "git commit -m {`echo '}'`,-n}", 'git commit -m {$(echo \\}),-n}',
+    // Rows 3 and 7 together, and row 4's `case` inside a list (zsh).
+    "git commit -m {$(echo $'\\')'),-n}", 'git commit -m {$(case x in x) echo a;; esac),-n}',
+    // Row 4 with the `case` word quoted, escaped, a `$(…)`, longer than 256 characters, or an `esac` that is only a word (zsh).
+    'echo "$(case "a b" in\n"a b") gh pr merge 5;; esac)"', "echo \"$(case 'a b' in\n*) gh pr merge 5;; esac)\"", 'echo "$(case a\\ b in\n*) gh pr merge 5;; esac)"',
+    'echo "$(case $(echo y) in\n*) gh pr merge 5;; esac)"', `echo "$(case \${y:-${'x'.repeat(300)}} in\n*) gh pr merge 5;; esac)"`,
+    'echo "$(case y in x) echo esac;;\n*) gh pr merge 5;; esac)"',
+    // Rows 3 and 4 in an unquoted heredoc's text (zsh).
+    "cat <<EOF\n$(echo $'a\\')'; gh pr merge 5\n)\nEOF", 'cat <<EOF\n$(case x in\nx) gh pr merge 5;; esac)\nEOF',
+    // Row 6 through a here-string and a piped echo or printf.
+    "bash <<< \"echo \\'; gh pr merge 5; echo \\'\"", "echo \"echo \\'; gh pr merge 5; echo \\'\" | bash", "printf '%s\\n' \"echo \\'; gh pr merge 5; echo \\'\" | sh",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -593,7 +603,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // #498: the ordinary forms around the new readings stay allowed.
     "echo $(echo $'it\\'s')", "x=$(printf $'a\\tb')", 'echo "$(echo $\'\\\'\')"', 'echo "$(case $x in a) echo a;; esac)"', 'echo "$(echo case)"',
     'echo {x}', 'gh pr view {x},5}', 'git log {x},y}', "echo {$(echo '}'),x}", 'git log {$(echo a),b}', 'gh api repos/{owner}/{repo}/pulls',
-    'bash -c "echo \\"hi\\""', 'bash -c "echo \\$HOME"', "bash -c \"grep '\\d' f\"", "bash -c \"printf 'a\\nb'\"", "eval \"echo \\'quoted\\'\"", 'grep "\\d+" f']) {
+    'bash -c "echo \\"hi\\""', 'bash -c "echo \\$HOME"', "bash -c \"grep '\\d' f\"", "bash -c \"printf 'a\\nb'\"", "eval \"echo \\'quoted\\'\"", 'grep "\\d+" f',
+    'echo "$(echo test case)"', "echo \"it\\'s\" | cat", 'echo "$(case y in x) echo esac;; esac)"', "cat <<EOF\n$(echo $'it\\'s')\nEOF",
+    // The budget counts only a `$(…)` the shells end elsewhere, once per reading: 40 ordinary ones, with a CR too.
+    Array(40).fill("x=$(printf $'a\\tb')").join('; '), `${Array(40).fill("x=$(printf $'a\\tb')").join('; ')}\r`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -651,11 +664,18 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   agentGuardDecision(`${inSub})`);
   assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
   // #498: the shells' own reading of `$(…)` is capped per line, and bash's brace rule scans each word once.
-  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `]) {
+  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `, 'echo "$(case $(']) {
     const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length)) + ' gh pr merge 5';
     const t8 = Date.now();
     agentGuardDecision(l);
     assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
+  }
+  // #498 review: the kept spelling of a long double-quoted word with many backslashes is built in one pass.
+  const n = Math.floor((MAX_JUDGED - 100) / 2);
+  for (const [l, allow] of [[`bash -c "${'\\x'.repeat(n)}; gh pr merge 5"`, false], [`echo "${'\\x'.repeat(n)}"`, true]]) {
+    const t9 = Date.now();
+    assert.equal(agentGuardDecision(l).allow, allow, l.slice(0, 20));
+    assert.ok(Date.now() - t9 < within(4500), `#498 kept backslashes took ${Date.now() - t9} ms`);
   }
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
