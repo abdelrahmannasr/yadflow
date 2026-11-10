@@ -112,12 +112,14 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'piped', { value: new Set() });
   // Words whose backslashes in double quotes the shell keeps (#498), by part: their kept spelling.
   Object.defineProperty(parts, 'posix', { value: [] });
-  // The line again with a `$(…)` read to the shells' own end and set to `$(:)` (#498).
+  // The line again with every `$(…)` the shells end elsewhere read to that end and set to `$(:)`, as a shell reads
+  // them all (#498). One copy, not one per `$(…)`: copies of copies grew factorially (#498 review round 3).
   Object.defineProperty(parts, 'again', { value: [] });
   let partPosix = null;
   const wordKeep = [];
   let orAt = -1;
   let realMarks = null;
+  const againAt = [];
   let wordBraced = false;
   let partBraced = null;
   const endWord = () => {
@@ -204,8 +206,8 @@ export function shellParts(rawLine, mode = {}) {
           parts.subs.push(line.slice(i + 2, realEnd));
           // The whole line again, that `$(…)` read to its real end and set to a neutral `$(:)`: the words around
           // it are read as the shells read them (`git commit -m {$(echo $'\')'),-n}` is `-n`, #498 review).
-          // Judged at the same depth: it is this line, not one inside it (#498 review round 2).
-          parts.again.push(`${line.slice(0, i)}$(:)${line.slice(realEnd + 1)}`);
+          // Noted here; the copy is built once, after the loop.
+          againAt.push([i, realEnd]);
         }
       }
       word += line.slice(i, end + 1); inWord = true;
@@ -283,6 +285,17 @@ export function shellParts(rawLine, mode = {}) {
     word += ch; inWord = true;
   }
   endPart();
+  // The one copy, judged at the same depth (it is this line, not one inside it). A `$(…)` that starts inside one
+  // already replaced is left to that copy's own reading.
+  if (againAt.length) {
+    let copy = '', from = 0;
+    for (const [at, realEnd] of againAt) {
+      if (at < from) continue;
+      copy += `${line.slice(from, at)}$(:)`;
+      from = realEnd + 1;
+    }
+    parts.again.push(copy + line.slice(from));
+  }
   return parts;
 }
 
@@ -1038,7 +1051,7 @@ function judgeLine(line, depth, mode = {}) {
   if (typeof line !== 'string' || !line.trim()) return { allow: true };
   if (Date.now() > deadline) return OUT_OF_TIME;
   const parts = shellParts(line, mode);
-  if (parts.tooComplex) return TOO_MANY_READINGS;
+  if (parts.tooComplex) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_READINGS;
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
   for (const sub of parts.subs) {
@@ -1078,7 +1091,7 @@ function judgeLine(line, depth, mode = {}) {
           if (!braced.has(k)) { out.push(part[k]); continue; }
           const raw = r.shield ? shieldExpansions(braced.get(k)) : braced.get(k);
           const e = raw === null ? null : braceExpand(raw, { left: BRACE_CAP }, { bash: r.bash });
-          if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return TOO_MANY_BRACES;
+          if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_BRACES;
           // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
           for (const y of e) if (!(r.drop && y === '')) out.push(unshieldBraces(y));
         }
