@@ -584,32 +584,34 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
 });
 
 test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
-  // A coverage run makes this work about seven times slower, which says nothing about the guard, so only the
-  // other runs time it. Their limits, but for nested tails, stay under the guard's own 5 s cut-off, because a line refused at the cut-off
-  // would otherwise pass this test and hide a slowdown.
+  // A coverage run makes this work about seven times slower, which says nothing about the guard, so it is not
+  // timed. The other runs are timed, but a shared CI machine has passed 3 s on work that takes 0.5 s here, so
+  // every limit is 4.5 s: still under the guard's own 5 s cut-off, because a line refused at the cut-off would
+  // otherwise pass this test and hide a slowdown. Nested tails keep 6 s; that case runs into the cut-off inside
+  // the brace expansion by design.
   const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
   const { MAX_JUDGED } = await import('./agent-guard.mjs');
   const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
   const t0 = Date.now();
   assert.equal(agentGuardDecision(line).allow, false);
-  assert.ok(Date.now() - t0 < within(2000), `took ${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < within(4500), `took ${Date.now() - t0} ms`);
   // Distinct end words, just under the cap: each end line is found by a lookup, not a scan.
   let distinct = '';
   for (let i = 0; distinct.length < MAX_JUDGED - 20; i++) distinct += `<<A${i}\n`;
   const t1 = Date.now();
   assert.equal(agentGuardDecision(`${distinct}gh pr merge 5`).allow, false);
-  assert.ok(Date.now() - t1 < within(3000), `distinct words took ${Date.now() - t1} ms`);
+  assert.ok(Date.now() - t1 < within(4500), `distinct words took ${Date.now() - t1} ms`);
   // Many `$(…)`, each holding a heredoc, near the cap: one line index per text, shared by every `$(` in it.
   for (const unit of ['$(cat <<E\nx\nE\n)', '$(cat <<E\n$(cat <<F\nx\nF\n)\nE\n)']) {
     const many = `${unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length))}\ngh pr merge 1`;
     const t3 = Date.now();
     assert.equal(agentGuardDecision(many).allow, false);
-    assert.ok(Date.now() - t3 < within(3000), `many $( took ${Date.now() - t3} ms`);
+    assert.ok(Date.now() - t3 < within(4500), `many $( took ${Date.now() - t3} ms`);
   }
   // A run of `<<` with no newline: the expanding-word check reads the matches one by one, never a backtracking regex.
   const t4 = Date.now();
   assert.equal(agentGuardDecision(`gh pr merge 1 # ${'<<'.repeat(125000)}`).allow, false);
-  assert.ok(Date.now() - t4 < within(2000), `a run of << took ${Date.now() - t4} ms`);
+  assert.ok(Date.now() - t4 < within(4500), `a run of << took ${Date.now() - t4} ms`);
   // #495 review: a `case` scan per `$(` and a loop over every body for every part were quadratic.
   // Many words under the length bound, each with lists and a nested tail: the budget is checked inside the expansion.
   const nestedTail = `x {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}${'{'.repeat(2000)}${'}'.repeat(2000)};`;
@@ -620,19 +622,19 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   for (const l of [`echo '{${','.repeat(250000)}'; gh pr merge 5`, `git status {${','.repeat(990000)}`]) {
     const t6 = Date.now();
     agentGuardDecision(l);
-    assert.ok(Date.now() - t6 < within(2000), `{ + commas took ${Date.now() - t6} ms`);
+    assert.ok(Date.now() - t6 < within(4500), `{ + commas took ${Date.now() - t6} ms`);
   }
   for (const [unit, tail] of [['$()', '$()'], ['$(a) ', '$(a) '], [':<<<x;', 'sh;'], [':<<E\nE\n', 'sh;']]) {
     const l = unit.repeat(Math.floor(495000 / unit.length)) + tail.repeat(Math.floor(495000 / tail.length));
     const t5 = Date.now();
     agentGuardDecision(l);
-    assert.ok(Date.now() - t5 < within(3000), `${JSON.stringify(unit)} took ${Date.now() - t5} ms`);
+    assert.ok(Date.now() - t5 < within(4500), `${JSON.stringify(unit)} took ${Date.now() - t5} ms`);
   }
   let inSub = 'echo $(';
   for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
   const t2 = Date.now();
   agentGuardDecision(`${inSub})`);
-  assert.ok(Date.now() - t2 < within(2000), `inside $( took ${Date.now() - t2} ms`);
+  assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);
