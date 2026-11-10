@@ -4108,7 +4108,8 @@ test('#496: a Unity project skips both scripts, with no base and with a base tha
   commit(T, 'chore: unity', UNITY);
   for (const [script, re] of [[INSTALL_DEPS, /SKIP \[install-deps\]: a Unity project/], [BTL, /SKIP \[build\/test\/lint\]: a Unity project .*GameCI/]]) {
     for (const args of [[], ['main']]) {
-      const r = runGate(script, T, args);
+      // No base in a local run with no remote: only the files decide. CI sets CI, which would refuse it.
+      const r = runGate(script, T, args, { CI: '' });
       assert.equal(r.code, 0, r.out);
       assert.match(r.out, re);
     }
@@ -4132,6 +4133,27 @@ test('#496: deleting package.json and adding Unity paths does not skip a Node re
     assert.match(u.out, /could not be read, so the Unity project is not skipped/);
   }
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('#496 review: with no base the gate finds origin/main, and in CI with none found it refuses', () => {
+  const T = scaffoldRepo();
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'chore: node', { 'package.json': npmStub('node -e ""', 'node -e ""', 'node -e ""') });
+  git(T, 'update-ref', 'refs/remotes/origin/main', 'main');
+  git(T, 'checkout', '-q', '-b', 'feat');
+  fs.rmSync(path.join(T, 'package.json'));
+  commit(T, 'chore: unity', UNITY);
+  const r = runGate(BTL, T, []);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /origin\/main has a package\.json/);
+  const U = scaffoldRepo();
+  commit(U, 'chore: unity', UNITY);
+  const ci = runGate(BTL, U, [], { CI: 'true' });
+  assert.notEqual(ci.code, 0, ci.out);
+  assert.match(ci.out, /no base branch was given or found/);
+  const local = runGate(BTL, U, [], { CI: '' });
+  assert.equal(local.code, 0, local.out);
+  for (const d of [T, U]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 test('#496: half a Unity project, or one with a package.json, is not skipped', () => {

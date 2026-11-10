@@ -420,7 +420,11 @@ lockfile shows (npm or pnpm).
 - **The skip needs the base branch to agree.** CI passes the base branch to both scripts. If the base has a
   `package.json`, the skip is refused, so a change cannot skip the build of a Node repo by deleting it. If
   the base cannot be read, the skip is refused too. With no base (an old CI file that a team edited, so
-  `yad update` left it alone), only the change's own files decide.
+  `yad update` left it alone, or a local run), the gate works the base out as the others do (`origin/HEAD`,
+  then `origin/main`); in CI, if none is found, the skip is refused. Only a local run with no remote at all
+  decides from its own files.
+- **The first upgrade pull request of a Unity repo still fails.** The gate scripts run from the base branch
+  (#426), and the base still has the old ones. Merge that one pull request with an override; the next ones skip.
 
 `YAD_TEST_MAX_WORKERS` is passed on as `--maxWorkers` only to jest or vitest.
 
