@@ -494,9 +494,13 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Review round 2: a `$(…)` in a heredoc's text that the shells end sooner hides nothing after it (zsh), and
     // a chain of `case $(` that once took exponential time is refused at once (bash runs line 1 first).
     "cat <<E\n$(echo $'\\''x) it's $(gh pr merge 5)\nE", `gh pr merge 5\necho $(${' case $('.repeat(40)}`,
-    // Round 3: the budget still refuses a 33rd such `$(…)`, and each in the copy is read to its own end.
-    Array.from({ length: 33 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), "echo $(echo $'\\')'; gh pr merge 5\n) $(echo $'\\')' x\n)",
-    // Round 4: past the first `$(…)` the shells end elsewhere, a later one may be text to the shell (bash and zsh run these).
+    // Each `$(…)` on the line is read to that reading's own end.
+    "echo $(echo $'\\')'; gh pr merge 5\n) $(echo $'\\')' x\n)",
+    // Review round 5: bash 3.2 honours `$'…'` but reads a `case` as text; zsh honours both. A reading per shell,
+    // never one mixed reading (bash runs the first, zsh the heredoc one).
+    "echo \"$(case x in x) echo ' ;; esac)\" $(echo $'\\')' ; git push -f) ' ;; esac)\"'", "echo $($'\\'' $(case x in x) esac) $(echo ')') ; git push -f ; ",
+    "cat <<E\n$(echo $'\\')' ' $(echo ' ) $(git push -f) ' )\nE\n",
+    // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
@@ -617,8 +621,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     Array(40).fill("x=$(printf $'a\\tb')").join('; '), `${Array(40).fill("x=$(printf $'a\\tb')").join('; ')}\r`,
     // Review round 2: a line read again with `$(:)` is judged at its own depth, and `a|esac)` is a pattern.
     `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"',
-    // Review round 3: one copy of the line, however many `$(…)` the shells end elsewhere (up to the budget of 32).
-    Array.from({ length: 32 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(32).fill("$(echo $'\\')')").join(' ')]) {
+    // Any number of `$(…)` that a shell ends elsewhere: each reading reads them all in one pass.
+    Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' ')]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -675,7 +679,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t2 = Date.now();
   agentGuardDecision(`${inSub})`);
   assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
-  // #498: the shells' own reading of `$(…)` is capped per line, and bash's brace rule scans each word once.
+  // #498: each shell's reading of `$(…)` is one pass, and bash's brace rule is bounded per word.
   for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `, 'echo "$(case $(', ' case $(', ' case ${', '(case ${', " case '"]) {
     const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length)) + ' gh pr merge 5';
     const t8 = Date.now();

@@ -112,13 +112,10 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'piped', { value: new Set() });
   // Words whose backslashes in double quotes the shell keeps (#498), by part: their kept spelling.
   Object.defineProperty(parts, 'posix', { value: [] });
-  // The line again with the first `$(…)` the shells end elsewhere read to that end and set to `$(:)` (#498).
-  Object.defineProperty(parts, 'again', { value: [] });
   let partPosix = null;
   const wordKeep = [];
   let orAt = -1;
   let realMarks = null;
-  const againAt = [];
   let wordBraced = false;
   let partBraced = null;
   const endWord = () => {
@@ -168,14 +165,14 @@ export function shellParts(rawLine, mode = {}) {
       if (next >= 0) parts.bodies.push({ part: h.part, text: line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start) });
       if (next < 0) {
         // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
-        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; const subs = substitutionsIn(line.slice(from)); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
+        if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; const subs = substitutionsIn(line.slice(from), mode); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
         return -1;
       }
       if (!h.quoted) bodies.push(line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start));
       at = next;
     }
     // A loop, not a spread: a body of 124,000 `$(` overflowed the stack with `push(...)` (#492 review).
-    for (const body of bodies) { const subs = substitutionsIn(body); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
+    for (const body of bodies) { const subs = substitutionsIn(body, mode); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
     return at;
   };
   for (let i = 0; i < line.length; i++) {
@@ -183,6 +180,8 @@ export function shellParts(rawLine, mode = {}) {
     // A command substitution, unquoted or in double quotes (single quotes keep it as text).
     if (quote !== '\'' && ((ch === '$' && line[i + 1] === '(') || ch === '`')) {
       const end = ch === '`' ? backtickEnd(line, i + 1) : substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)), mode);
+      // Past the budget for `case` words or the deadline (#498): refused, not read on.
+      if (end < 0) { parts.tooComplex = true; break; }
       parts.subs.push(ch === '`' ? line.slice(i + 1, end).replace(/\\`/g, '`') : line.slice(i + 2, end));
       // A `case` in it: its `x)` closes no `$(` to the shell (#495), so the text up to the line's last `)` is
       // judged too. Only refuses more.
@@ -192,23 +191,6 @@ export function shellParts(rawLine, mode = {}) {
         const stop = eol < 0 ? line.length : eol;
         const last = line.lastIndexOf(')', stop - 1);
         if (last > end) parts.subs.push(line.slice(i + 2, last));
-      }
-      // The shells' own end (#498), when it differs and closes: `$'a\')'` inside, or a `case` in `"$(…)"` across
-      // a newline. Its text, and what follows it, are judged too. A scan that ends where the first one did costs
-      // what that one cost; one that ends elsewhere may run to the end of the line, so past 32 of those in one
-      // reading of the command (every level counted), the command is refused.
-      // Only up to the first one that differs: past it, this reading's quote state may not be the shell's, so a later
-      // `$(…)` may be text to the shell. The copy reads on from there, one `$(…)` at a time (#498 review round 4).
-      if (ch === '$' && !againAt.length && (realMarks ??= marksOf(line)).any.length && markWithin(realMarks.any, i + 2, end)) {
-        const realEnd = substitutionEnd(line, i + 2, () => (index ??= lineIndex(line)), { ...mode, real: true, past: end });
-        // One that ends sooner was not charged by the scan; its readings are, here.
-        if (realEnd === -2 || (realEnd < end && --realLeft.n < 0)) parts.tooComplex = true;
-        else if (realEnd !== end && realEnd < line.length) {
-          parts.subs.push(line.slice(i + 2, realEnd));
-          // The whole line again, that `$(…)` read to its real end and set to a neutral `$(:)`: the words around
-          // it are read as the shells read them (`git commit -m {$(echo $'\')'),-n}` is `-n`, #498 review).
-          againAt.push([i, realEnd]);
-        }
       }
       word += line.slice(i, end + 1); inWord = true;
       i = end;
@@ -285,24 +267,15 @@ export function shellParts(rawLine, mode = {}) {
     word += ch; inWord = true;
   }
   endPart();
-  // The copy, judged at the same depth (it is this line, not one inside it). It finds the next such `$(…)` itself,
-  // so k of them make a chain of k copies, each charged once: never a copy per pair of them (#498 review round 3).
-  if (againAt.length) {
-    const [at, realEnd] = againAt[0];
-    parts.again.push(`${line.slice(0, at)}$(:)${line.slice(realEnd + 1)}`);
-  }
   return parts;
 }
 
-// Where `$'` and the word `case` stand in a line, in order (#498): found once per line, so each `$(` asks by a
-// binary search whether its text holds one, never by a scan (a scan per `$(` was quadratic).
+// Where the word `case` and each newline stand in a line, in order: found once per line, so each `$(` asks by a
+// binary search whether its text holds a `case`, never by a scan (a scan per `$(` was quadratic, #498 review).
 function marksOf(line) {
-  const any = [], cases = [], newlines = [];
-  for (const m of line.matchAll(/\$'|\bcase\b|\n/g)) {
-    if (m[0] === '\n') newlines.push(m.index);
-    else { any.push(m.index); if (m[0] === 'case') cases.push(m.index); }
-  }
-  return { any, cases, newlines };
+  const cases = [], newlines = [];
+  for (const m of line.matchAll(/\bcase\b|\n/g)) (m[0] === '\n' ? newlines : cases).push(m.index);
+  return { cases, newlines };
 }
 // The first index in `sorted` at or after `from`, or -1.
 function firstAtOrAfter(sorted, from) {
@@ -323,17 +296,14 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
   let depth = 1;
   let quote = null;
   const heredocs = [];
-  // `mode.real` (#498): read as the shells do where the default reading differs. `$'…'` is skipped with its
-  // escapes (`\'` does not end it), and a `case <word> in` makes its `x)` patterns close nothing. Only an extra
-  // reading: the default one stays, since main refuses lines this one would not.
+  // `mode.ends` (#498), the end rule of the whole reading. Unset: main's. `bash`: `$'…'` is skipped with its
+  // escapes (`\'` does not end it), as bash 3.2 does, and a `case` is text. `zsh`: that, and a `case <word> in`
+  // makes its `x)` patterns close nothing, as zsh does. Each is a reading of its own, never mixed in one.
+  const ansi = mode.ends === 'bash' || mode.ends === 'zsh';
   const cases = [];
-  // `mode.until`: scan no further (a bound on a `case` word). `mode.past`: the first reading's end; a scan that
-  // goes past it may run to the end of the line, so it is charged to the budget there, and past the budget it
-  // stops with -2 (#498 review: charging after the scan let 65,000 of them each run to the end).
+  // `mode.until`: scan no further (a bound on a `case` word).
   const stop = Math.min(line.length, mode.until ?? Infinity);
-  let charged = false;
   for (let i = from; i < stop; i++) {
-    if (mode.past !== undefined && !charged && i > mode.past) { charged = true; if (--realLeft.n < 0) return -2; }
     const ch = line[i];
     if (quote) {
       if (ch === quote) quote = null;
@@ -341,13 +311,13 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
       continue;
     }
     if (ch === '\\') { i++; continue; }
-    if (mode.real && ch === '$' && line[i + 1] === '\'') {
+    if (ansi && ch === '$' && line[i + 1] === '\'') {
       let j = i + 2;
       while (j < line.length && line[j] !== '\'') j += line[j] === '\\' ? 2 : 1;
       i = j;
       continue;
     }
-    if (mode.real && (ch === 'c' || ch === 'e') && (i === from || /[\s;&|(]/.test(line[i - 1]))) {
+    if (mode.ends === 'zsh' && (ch === 'c' || ch === 'e') && (i === from || /[\s;&|(]/.test(line[i - 1]))) {
       if (ch === 'c' && line.startsWith('case', i)) {
         const at = caseInEnd(line, i, getIndex);
         // What a `case` word costs is charged to one budget per reading: past it, the command is refused.
@@ -423,31 +393,17 @@ function commandStart(line, i, from) {
 
 // The commands of every `$(…)` and backticks in a heredoc's text, where quotes are plain characters and `\`
 // keeps the next one as text.
-function substitutionsIn(text) {
+function substitutionsIn(text, mode = {}) {
   const out = [];
   let index = null;
   const getIndex = () => (index ??= lineIndex(text));
-  let marks = null;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === '\\') { i++; continue; }
     if ((ch === '$' && text[i + 1] === '(') || ch === '`') {
-      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2, getIndex);
+      const end = ch === '`' ? backtickEnd(text, i + 1) : substitutionEnd(text, i + 2, getIndex, { ends: mode.ends });
+      if (end < 0) { out.tooComplex = true; break; }
       out.push(ch === '`' ? text.slice(i + 1, end).replace(/\\`/g, '`') : text.slice(i + 2, end));
-      // The shells' own end too, as on a command line (#498 review).
-      if (ch === '$' && (marks ??= marksOf(text)).any.length && markWithin(marks.any, i + 2, end)) {
-        const realEnd = substitutionEnd(text, i + 2, getIndex, { real: true, past: end });
-        if (realEnd === -2 || (realEnd < end && --realLeft.n < 0)) out.tooComplex = true;
-        else if (realEnd !== end && realEnd < text.length) {
-          out.push(text.slice(i + 2, realEnd));
-          // Ended sooner: the text after it is the heredoc's again, with its own `$(…)` (#498 review round 2).
-          if (realEnd < end) {
-            const more = substitutionsIn(text.slice(realEnd + 1));
-            if (more.tooComplex) out.tooComplex = true;
-            for (const x of more) out.push(x);
-          }
-        }
-      }
       i = end;
     }
   }
@@ -655,13 +611,13 @@ function braceExpand(x, budget = { left: BRACE_CAP }, opts = {}) {
 }
 // A word's `$(…)`, backticks and `${…}` with their braces and commas shielded (#498): to bash and zsh a brace
 // list does not see into them (`{$(echo '}'),-n}` is `$(echo '}')` and `-n`).
-function shieldExpansions(raw) {
+function shieldExpansions(raw, mode = {}) {
   let out = '';
   let index = null;
   for (let k = 0; k < raw.length; k++) {
     const ch = raw[k];
     let end = -1;
-    if (ch === '$' && raw[k + 1] === '(') { end = substitutionEnd(raw, k + 2, () => (index ??= lineIndex(raw)), { real: true }); if (end === -2) return null; }
+    if (ch === '$' && raw[k + 1] === '(') { end = substitutionEnd(raw, k + 2, () => (index ??= lineIndex(raw)), { ends: mode.ends }); if (end < 0) return null; }
     else if (ch === '`') end = backtickEnd(raw, k + 1);
     else if (ch === '$' && raw[k + 1] === '{') {
       let d = 0;
@@ -943,21 +899,19 @@ export const MAX_JUDGED = 1_000_000;
 // under a harness's hook timeout. Each reading is linear, so a 1 MB line costs well under a second per reading.)
 export const JUDGE_BUDGET_MS = 5000;
 let deadline = Infinity;
-// How many times one command may be read by the shells' own `$(…)` end (#498), across every level.
-const REAL_SCANS = 32;
-const realLeft = { n: Infinity };
 // How many characters of `case` words one reading may scan (#498 review round 2).
 const CASE_SCAN = 1 << 20;
 const caseLeft = { n: Infinity };
-const TOO_MANY_READINGS = { allow: false, message: 'yad agent guard: this command has too many `$(…)` holding `$\'…\'` or `case` to judge. Run it as separate commands.' };
+const TOO_MANY_READINGS = { allow: false, message: 'yad agent guard: this command has too many `case` words inside `$(…)` to judge. Run it as separate commands.' };
 const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
-export function agentGuardDecision(line, depth = 0) {
+// `ends`: the end rule the reading this line came from uses (#498); a `$(…)` inside a line is read by the same
+// shell. Unset for a line read afresh (the top line, or what `bash -c` or `eval` runs).
+export function agentGuardDecision(line, depth = 0, ends = undefined) {
   if (typeof line === 'string' && line.length > MAX_JUDGED) {
     return { allow: false, message: `yad agent guard: this command is too long to judge (${line.length} characters, more than ${MAX_JUDGED}). Write what it carries to a file with your editor, or run it as separate commands.` };
   }
-  if (depth > 0) return judgeReadings(line, depth);
+  if (depth > 0) return judgeReadings(line, depth, ends);
   deadline = Date.now() + JUDGE_BUDGET_MS;
-  realLeft.n = REAL_SCANS;
   caseLeft.n = CASE_SCAN;
   try {
     return judgeReadings(line, depth);
@@ -966,7 +920,6 @@ export function agentGuardDecision(line, depth = 0) {
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
     deadline = Infinity;
-    realLeft.n = Infinity;
     caseLeft.n = Infinity;
   }
 }
@@ -982,8 +935,15 @@ function firstExpandingHeredoc(text) {
 // Every reading the shells may make of the line: as written; with CRs dropped (a CR-dropping shell); with every
 // `\` + newline join made, CRs dropped first (a `$\<LF>(`, an end word split by a join: `EO\<LF>F`); and, where
 // the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
-function judgeReadings(line, depth) {
+function judgeReadings(line, depth, ends) {
   if (typeof line !== 'string') return { allow: true };
+  // The end rules of `$(…)` (#498): main's, bash 3.2's (`$'…'` honoured) and zsh's (`$'…'` and `case` honoured).
+  // A line inside a `$(…)` keeps its reading's rule; a fresh one gets each rule that can differ here.
+  const rules = ends !== undefined ? [ends] : [''];
+  if (ends === undefined && line.includes('$(')) {
+    if (line.includes('$\'')) rules.push('bash');
+    if (line.includes('$\'') || /\bcase\b/.test(line)) rules.push('zsh');
+  }
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
   if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
@@ -995,12 +955,14 @@ function judgeReadings(line, depth) {
   if (/\|#/.test(line)) flags.push('hashAfterBar');
   if (/<[0-9]*-[0-9]*>/.test(line)) flags.push('numericGlob');
   // Every combination of the readings that apply (at most 16).
-  const modes = [{}];
-  for (const f of flags) for (const m of modes.slice()) modes.push({ ...m, [f]: true });
+  const flagModes = [{}];
+  for (const f of flags) for (const m of flagModes.slice()) flagModes.push({ ...m, [f]: true });
+  const modes = [];
+  for (const rule of rules) for (const m of flagModes) modes.push({ ...m, ends: rule });
   for (const mode of modes) {
     for (const text of texts) {
-      // Each reading of the command gets its own budget of the shells' own `$(…)` ends (#498 review).
-      if (depth === 0) { realLeft.n = REAL_SCANS; caseLeft.n = CASE_SCAN; }
+      // Each reading of the command gets its own budget for `case` words (#498).
+      if (depth === 0) caseLeft.n = CASE_SCAN;
       const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
     }
@@ -1012,9 +974,11 @@ function judgeReadings(line, depth) {
     for (const text of texts) {
       const from = firstExpandingHeredoc(text);
       for (const one of text.slice(from < 0 ? 0 : from).split('\n')) {
-        if (depth === 0) { realLeft.n = REAL_SCANS; caseLeft.n = CASE_SCAN; }
-        const v = judgeLine(one, depth, {});
-        if (!v.allow) return v;
+        for (const rule of rules) {
+          if (depth === 0) caseLeft.n = CASE_SCAN;
+          const v = judgeLine(one, depth, { ends: rule });
+          if (!v.allow) return v;
+        }
       }
     }
   }
@@ -1050,11 +1014,7 @@ function judgeLine(line, depth, mode = {}) {
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
   for (const sub of parts.subs) {
-    const v = agentGuardDecision(sub, depth + 1);
-    if (!v.allow) return v;
-  }
-  for (const copy of parts.again) {
-    const v = judgeLine(copy, depth, mode);
+    const v = agentGuardDecision(sub, depth + 1, mode.ends ?? '');
     if (!v.allow) return v;
   }
   // The text each part is fed, grouped once by part (a loop over every body for every part was quadratic).
@@ -1084,7 +1044,7 @@ function judgeLine(line, depth, mode = {}) {
         let added = 0;
         for (let k = 0; k < part.length; k++) {
           if (!braced.has(k)) { out.push(part[k]); continue; }
-          const raw = r.shield ? shieldExpansions(braced.get(k)) : braced.get(k);
+          const raw = r.shield ? shieldExpansions(braced.get(k), mode) : braced.get(k);
           const e = raw === null ? null : braceExpand(raw, { left: BRACE_CAP }, { bash: r.bash });
           if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_BRACES;
           // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
