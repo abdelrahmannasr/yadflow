@@ -541,7 +541,7 @@ export async function runChecks(dir, opts = {}) {
         r.exit = p.status;
         r.status = p.status === 0 ? 'pass' : 'fail';
         // A gate that passed by skipping says so (#496): a skipped gate is not a pass.
-        if (r.status === 'pass' && /^SKIP \[/m.test(r.output)) { r.status = 'skip'; r.reason = 'a Unity project: build and test it with Unity\'s own CI'; }
+        if (r.status === 'pass' && (g.name === 'install-deps' || g.name === 'build/test/lint') && /^SKIP \[(install-deps|build\/test\/lint)\]: a Unity project/m.test(r.output)) { r.status = 'skip'; r.reason = 'a Unity project: build and test it with Unity\'s own CI'; }
       }
       if (g.name === 'pr-title' && titleNote) info(titleNote);
       if (g.name === 'pr-template' && platform === 'gitlab') {

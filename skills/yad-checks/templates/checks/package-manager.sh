@@ -84,7 +84,7 @@ yad_validate_exact_package_manager_spec() {
 # the base is worked out as the other gates do it (origin/HEAD, then origin/main); in CI, a base that cannot be
 # worked out refuses the skip. Only a local run with no remote at all decides from its own files. Returns 0 to skip.
 yad_unity_skip() {
-  local base="${1:-}" head
+  local base="${1:-}" head c
   [ ! -e "$YAD_PACKAGE_JSON" ] && [ ! -L "$YAD_PACKAGE_JSON" ] || return 1
   [ -f ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings/ProjectVersion.txt ] && [ ! -L ProjectSettings ] || return 1
   [ -d Assets ] && [ ! -L Assets ] || return 1
