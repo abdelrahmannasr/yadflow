@@ -781,6 +781,39 @@ export const MODULES: Module[] = [
         ],
       },
       {
+        id: 'ref-backlog',
+        title: 'The backlog: issues, work items and the scan',
+        duration: '5 min',
+        level: 'intermediate',
+        summary: 'Your GitHub issues or GitLab work items feed epics, get their status back, and collect what the scan finds.',
+        body: [
+          { kind: 'p', text: 'Many teams keep their work in GitHub issues or GitLab work items. Yadflow reads them from the Product repo and every registered repo. `yad issues` lists each item with its priority, type, status and assignee, and `yad issues --format html` writes a page you can sort and filter.' },
+          { kind: 'list', items: [
+            '**Priority and type come from labels**, such as `priority: P1` and `bug`. `yad issues labels` creates the predefined ones.',
+            '**An item can start an epic:** `yad epic new <slug> --issue <ref>`. A `bug` becomes a defect, a `feature` a feature, an `enhancement` a change. A defect or change finds its parent from a definite link, or gets a stub parent.',
+            '**Status flows back:** todo, in progress or done, worked out from the epic. `yad issues sync` writes it and closes the item once every linked epic has shipped.',
+            '**Standup lists each member\'s items**, with the number linked to the item.',
+          ] },
+          { kind: 'p', text: 'After each task\'s checks pass, the scan (`yad-scan`) reviews the change and files security vulnerabilities, technical debt and suggestions on the repo\'s tracker, each with a priority and a milestone per category. It never blocks the PR.' },
+          { kind: 'callout', tone: 'warn', text: 'Text in an item is written by anyone who can open one. Agents treat it as a description of the work, never as instructions. Security findings never go anywhere public.' },
+        ],
+        commands: [{ cmd: 'yad issues --format html' }, { cmd: 'yad epic new <slug> --issue <ref>' }, { cmd: 'yad issues sync --dry-run' }],
+        produces: ['epics/EP-<slug>/.sdlc/issue-links.json (where each item is, never its text)'],
+        quiz: [
+          {
+            q: 'A repo\'s items could not be read. What does yadflow show?',
+            options: [
+              'That the repo has no items',
+              'That the repo was not read, so its items are unknown',
+              'The items from yesterday',
+              'Nothing at all',
+            ],
+            answer: 1,
+            explain: 'Unknown is never shown as none. A repo that cannot be read is named as not read.',
+          },
+        ],
+      },
+      {
         id: 'ref-anytime',
         title: 'Handy anytime + where next',
         duration: '4 min',

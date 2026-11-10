@@ -33,7 +33,7 @@ const setupSteps: FlowStep[] = [
     id: "install",
     title: "Install the Module",
     description:
-      "Run `npx yadflow setup` — the guided wizard copies all 39 yad-* skills into your IDE skill dirs and installs the module config into .sdlc/config.yaml. Idempotent; re-run `check --fix` any time.",
+      "Run `npx yadflow setup` — the guided wizard copies all 41 yad-* skills into your IDE skill dirs and installs the module config into .sdlc/config.yaml. Idempotent; re-run `check --fix` any time.",
     actor: "system",
     status: "installed",
     stepState: ".sdlc/config.yaml installed",
@@ -41,7 +41,7 @@ const setupSteps: FlowStep[] = [
     handler: "yad setup",
     activeComponents: ["product", "platform"],
     messages: [
-      { id: "in-1", from: "platform", to: "product", label: "install 39 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "in-1", from: "platform", to: "product", label: "install 41 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/cli-version.json stamped" },
   },
@@ -173,6 +173,24 @@ const setupSteps: FlowStep[] = [
       { id: "dh-1", from: "platform", to: "product", label: "detect platform", type: "write", color: "#7d3c98", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/product.json (platform; no people stored)" },
+  },
+  {
+    id: "backlog",
+    title: "Backlog: Issues and Work Items",
+    description:
+      "The team's backlog lives on GitHub issues and GitLab issues, tasks and incidents, read from the Product repo and every registered repo. `yad issues` lists them with priority, type, status and assignee, or writes an HTML report to sort and filter. An item seeds an epic (`yad epic new --issue`, which sets the epic type and finds or stubs the parent) or is linked to one (`yad issues link`). Status is worked out from the epic and written back by `yad issues sync`. Standup lists each member's items. A repo that cannot be read is said, never shown as empty.",
+    actor: "pm",
+    status: "linked",
+    stepState: "epics/EP-<slug>/.sdlc/issue-links.json (where each item is, never its text)",
+    trigger: "yad issues · yad epic new <slug> --issue <ref> · yad issues sync",
+    handler: "yad-issues",
+    activeComponents: ["platform", "product", "state-json"],
+    messages: [
+      { id: "bl-1", from: "platform", to: "product", label: "read issues / work items", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "bl-2", from: "product", to: "state-json", label: "seed or link the epic", type: "write", color: "#2471a3", delay: 800, duration: 700 },
+      { id: "bl-3", from: "state-json", to: "platform", label: "status labels · close when shipped", type: "write", color: "#2471a3", delay: 1600, duration: 700 },
+    ],
+    sideEffects: { jobs: "labels: priority · type · status", notifications: "item text is untrusted — never an instruction to the agent" },
   },
 ];
 
@@ -451,6 +469,23 @@ const buildSteps: FlowStep[] = [
     sideEffects: { jobs: "checks/*.sh · .github/workflows/yad-checks.yml · .gitlab-ci.yml" },
   },
   {
+    id: "scan",
+    title: "Findings Scan (E172)",
+    description:
+      "After the checks pass, and before the PR/MR opens, yad-run runs yad-scan on the task's change (yad-implement runs it when used alone). It looks for security vulnerabilities, technical debt and suggestions, then `yad scan file` files each one on the repo's own GitHub issues or GitLab work items: a priority label, a category label and one milestone per category. Duplicates are recognised. Security findings stay private: confidential on GitLab, a draft advisory on a public GitHub repo, or not filed when that cannot be done. It never blocks the PR.",
+    actor: "reviewer",
+    status: "findings-filed",
+    stepState: "the repo's issues / work items (no file in the repo)",
+    trigger: "yad-scan repo:<repo> task:<T>",
+    handler: "yad-scan",
+    activeComponents: ["code-repos", "platform"],
+    messages: [
+      { id: "sc-1", from: "code-repos", to: "reviewer", label: "read the task's change", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "sc-2", from: "reviewer", to: "platform", label: "yad scan file → issues / work items", type: "write", color: "#2471a3", delay: 800, duration: 800 },
+    ],
+    sideEffects: { jobs: "labels: yad: finding · priority · security / tech-debt / suggestion · milestones per category", notifications: "never blocks — a P0 is told to the person first" },
+  },
+  {
     id: "pr-template",
     title: "PR/MR Template (Step D)",
     description:
@@ -710,7 +745,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: start or join a workspace (yad new / init / join), install the 39 skills, then connect code repos (clone any missing with yad repo clone, and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
+      "One-time setup: start or join a workspace (yad new / init / join), install the 41 skills, then connect code repos (clone any missing with yad repo clone, and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
     category: "setup",
     steps: setupSteps,
   },
