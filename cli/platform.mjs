@@ -819,3 +819,8 @@ export function setAssignee(t, number, who, { current = [], runner = run } = {})
   }
   return runner('glab', ['api', '--hostname', t.host, '-X', 'PUT', itemAt(t, number), '-F', `assignee_id=${who ?? 0}`], { timeout: 30000 });
 }
+
+// GitLab only: make an item confidential before it is marked as a vulnerability.
+export function makeConfidential(t, number, { runner = run } = {}) {
+  return runner('glab', ['api', '--hostname', t.host, '-X', 'PUT', itemAt(t, number), '-F', 'confidential=true'], { timeout: 30000 });
+}

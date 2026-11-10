@@ -1272,19 +1272,8 @@ async function main() {
       if (noProduct()) break;
       const action = o._[1] ?? 'list';
       if (!ACTIONS.issues.known.includes(action)) { refuse(`unknown issues action: ${action} (list, labels, show, link, unlink, sync, new, assign, label, edit, comment, close, reopen)`, ISSUES_USAGE); break; }
-      const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
-      if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
-      if (['show', 'link', 'unlink'].includes(action)) {
-        const words = o._.slice(2);
-        const want = action === 'show' ? 1 : 2;
-        if (words.length !== want) { refuse(`yad issues ${action} takes ${action === 'show' ? '<ref>' : '<ref> <EP-id>'}`, ISSUES_USAGE); break; }
-        result = action === 'show' ? await commands.runIssuesShow(o.dir, { ref: words[0], json: !!o.json })
-          : await (action === 'link' ? commands.runIssuesLink : commands.runIssuesUnlink)(o.dir, { ref: words[0], epic: words[1], json: !!o.json });
-        break;
-      }
-      if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
       if (commands.ACT_ACTIONS.includes(action)) {
-        // E173: the agent acts on an item when an engineer asks.
+        // E173: the agent acts on an item when an engineer asks. Before the older checks: these take a <ref> and their own flags.
         const foreign = commands.actForeignFlags(process.argv.slice(2), action);
         if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
         const words = o._.slice(2);
@@ -1299,6 +1288,17 @@ async function main() {
         else result = await (action === 'close' ? commands.runIssuesClose : commands.runIssuesReopen)(o.dir, { ...common, ref: words[0] });
         break;
       }
+      const foreign = commands.issuesForeignFlags(process.argv.slice(2), action);
+      if (foreign.length) { refuse(`yad issues ${action} does not take ${foreign.join(', ')}`, ISSUES_USAGE); break; }
+      if (['show', 'link', 'unlink'].includes(action)) {
+        const words = o._.slice(2);
+        const want = action === 'show' ? 1 : 2;
+        if (words.length !== want) { refuse(`yad issues ${action} takes ${action === 'show' ? '<ref>' : '<ref> <EP-id>'}`, ISSUES_USAGE); break; }
+        result = action === 'show' ? await commands.runIssuesShow(o.dir, { ref: words[0], json: !!o.json })
+          : await (action === 'link' ? commands.runIssuesLink : commands.runIssuesUnlink)(o.dir, { ref: words[0], epic: words[1], json: !!o.json });
+        break;
+      }
+      if (o._[2]) { refuse(`yad issues ${action} takes no more words (got: ${o._[2]})`, ISSUES_USAGE); break; }
       if (action === 'sync') { result = await commands.runIssuesSync(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       result = await commands.runIssuesList(o.dir, {

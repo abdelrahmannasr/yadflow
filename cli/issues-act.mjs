@@ -9,18 +9,25 @@
 // anything shaped like a token is redacted.
 import fs from 'node:fs';
 import { run, forTerminal, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
-import { addItemLabels, removeItemLabels, commentOnItem, closeItem, newItem, editItem, reopenItem, setAssignee, platformLogin } from './platform.mjs';
+import { addItemLabels, removeItemLabels, commentOnItem, closeItem, newItem, editItem, reopenItem, setAssignee, makeConfidential, platformLogin } from './platform.mjs';
 import { api, httpStatus } from './protection.mjs';
 import { labelRules, ITEM_TYPES, PRIORITIES } from './issues.mjs';
 import { readItem, resolveTarget } from './issues-write.mjs';
 import { allLinks, itemKey } from './issue-links.mjs';
-import { redact, repoFacts, routeFor } from './scan.mjs';
+import { redactTokens, repoFacts, routeFor } from './scan.mjs';
 
 const MAX_TITLE = 256;
 const MAX_BODY = 60000;
 const LOGIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-const oneLine = (v) => forTerminal(redact(String(v ?? ''))).replace(/\s+/g, ' ').trim();
-const lines = (v) => redact(String(v ?? '')).split(/\r?\n/).map((l) => forTerminal(l)).join('\n');
+// Only tokens with a known prefix are redacted, so commit hashes and long names in the engineer's text stay.
+const oneLine = (v) => forTerminal(redactTokens(String(v ?? ''))).replace(/\s+/g, ' ').trim();
+const lines = (v) => redactTokens(String(v ?? '')).split(/\r?\n/).map((l) => forTerminal(l)).join('\n');
+const REDACTED_NOTE = 'something shaped like a token was replaced with [redacted]';
+const redactedIn = (...texts) => texts.some((t) => typeof t === 'string' && t.includes('[redacted]'));
+// `p1` and `Feature` mean the same as `P1` and `feature`.
+const normPriority = (v) => (v == null ? null : String(v).toUpperCase());
+const normType = (v) => (v == null ? null : String(v).toLowerCase());
+const NOT_PRIVATE = 'is not known to be a private repo (it is public, internal, or its visibility could not be read)';
 
 class Refused extends Error {
   constructor(message, hint = null) { super(message); this.hint = hint; }
@@ -52,6 +59,7 @@ function bodyOf({ body, bodyFile }) {
     if (t.length > MAX_BODY) throw new Refused(`the body is longer than ${MAX_BODY} characters`);
     return t;
   }
+  if (body != null && String(body).length > MAX_BODY) throw new Refused(`the body is longer than ${MAX_BODY} characters`);
   return body != null ? lines(body) : null;
 }
 
@@ -105,7 +113,9 @@ const answer = (ref, url) => ({ ok: true, ref, url: url ?? null, changed: [], dr
 
 // ---- yad issues new --------------------------------------------------------------------------------
 
-export async function runIssuesNew(root, { title, body = null, bodyFile = null, type = null, priority = null, assignee = null, me = false, repo = null, json = false, env = process.env, runner = run } = {}) {
+export async function runIssuesNew(root, { title, body = null, bodyFile = null, type: rawType = null, priority: rawPriority = null, assignee = null, me = false, repo = null, json = false, env = process.env, runner = run } = {}) {
+  const type = normType(rawType);
+  const priority = normPriority(rawPriority);
   try {
     const t0 = titleOf(title);
     const text = bodyOf({ body, bodyFile }) ?? '';
@@ -119,12 +129,13 @@ export async function runIssuesNew(root, { title, body = null, bodyFile = null, 
     if (type === 'security') {
       if (t.platform === 'gitlab') confidential = true;
       else if (routeFor('security', 'github', repoFacts(t, runner).vis) !== 'issue') {
-        throw new Refused(`${forTerminal(label)} is not known to be a private repo, so a security item there would be public`, 'open a private security advisory on GitHub instead, or file it in a private repo');
+        throw new Refused(`${forTerminal(label)} ${NOT_PRIVATE}, so a security item there could be public`, 'open a private security advisory on GitHub instead, or file it in a private repo');
       }
     }
     const login = assignee !== null || me ? loginOf(root, t, { assignee, me, env, runner }) : null;
     const who = login && t.platform === 'gitlab' ? gitlabUserId(t, login, runner) : login;
     const labels = [...(type ? [rules.type[type][0]] : []), ...(priority ? [rules.priority[priority][0]] : [])];
+    if (t.platform === 'gitlab' && labels.some((l) => l.includes(','))) throw new Refused('a GitLab label name with a comma cannot be sent', 'rename that label in the issues settings of .sdlc/product.json');
     const r = newItem(t, { title: t0, body: text, labels, assignee: who, confidential }, { runner });
     if (!r.ok) throw new Refused(`the item was not created: ${why(t, r)}`);
     let b = {};
@@ -138,6 +149,7 @@ export async function runIssuesNew(root, { title, body = null, bodyFile = null, 
     if (login && !logins.includes(login.toLowerCase())) out.dropped.push(`${login} was not assigned`);
     if (confidential && b.confidential !== true) out.dropped.push('it was NOT made confidential: restrict it now');
     if (!Number.isInteger(number)) out.dropped.push('the answer named no item number');
+    if (redactedIn(t0, text)) out.notes.push(REDACTED_NOTE);
     return report(out, json);
   } catch (e) {
     if (e instanceof Refused) return refusedOut(json, e);
@@ -170,7 +182,8 @@ export async function runIssuesAssign(root, { ref, assignee = null, me = false, 
     const who = login && got.t.platform === 'gitlab' ? gitlabUserId(got.t, login, runner) : login;
     const r = setAssignee(got.t, got.number, who, { current: got.item.logins, runner });
     if (!r.ok) return r;
-    out.changed.push(login ? `assigned to ${login}` : 'unassigned');
+    const before = got.item.logins.filter((l) => !login || l.toLowerCase() !== login.toLowerCase());
+    out.changed.push(login ? `assigned to ${login}${before.length ? ` (replacing ${before.join(', ')})` : ''}` : `unassigned${before.length ? ` ${before.join(', ')}` : ''}`);
     const after = reread(got, runner);
     if (!after) out.notes.push('the item could not be read again to check the change');
     else if (login ? !after.logins.map((l) => l.toLowerCase()).includes(login.toLowerCase()) : after.logins.length) out.dropped.push(login ? `${login} was not assigned` : 'someone is still assigned');
@@ -178,13 +191,15 @@ export async function runIssuesAssign(root, { ref, assignee = null, me = false, 
   });
 }
 
-export async function runIssuesLabel(root, { ref, priority = null, type = null, json = false, env = process.env, runner = run } = {}) {
+export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, json = false, env = process.env, runner = run } = {}) {
+  const priority = normPriority(rawPriority);
+  const type = normType(rawType);
   return act(root, ref, { json, env, runner }, async (got, out) => {
     if (priority === null && type === null) throw new Refused('pass --priority, --type or both');
     if (priority !== null && !PRIORITIES.includes(priority)) throw new Refused(`unknown --priority ${forTerminal(String(priority))}`, `use one of ${PRIORITIES.join(', ')}`);
     if (type !== null && !ITEM_TYPES.includes(type)) throw new Refused(`unknown --type ${forTerminal(String(type))}`, `use one of ${ITEM_TYPES.join(', ')}`);
     if (type === 'security' && got.t.platform === 'github' && !got.item.confidential && routeFor('security', 'github', repoFacts(got.t, runner).vis) !== 'issue') {
-      throw new Refused('this repo is not known to be private, so a security label would mark a public item as a vulnerability', 'move the report to a private security advisory instead');
+      throw new Refused(`this repo ${NOT_PRIVATE}, so a security label could mark a public item as a vulnerability`, 'move the report to a private security advisory instead');
     }
     // A confidential item's labels are not read, so the old ones could not be removed.
     if (got.item.confidential) throw new Refused('a confidential item\'s labels are not read, so they cannot be replaced here', 'change them on GitLab');
@@ -201,6 +216,14 @@ export async function runIssuesLabel(root, { ref, priority = null, type = null, 
     const realNames = new Map(got.item.labels.map((l) => [l.toLowerCase(), l]));
     const stale = remove.map((l) => realNames.get(l.toLowerCase()) ?? l);
     if (!add.length && !stale.length) { out.notes.push('it already has those labels'); return null; }
+    // On GitLab a vulnerability is confidential first, so the label is never on a public item.
+    if (type === 'security' && got.t.platform === 'gitlab') {
+      const r = makeConfidential(got.t, got.number, { runner });
+      if (!r.ok) return r;
+      const after = reread(got, runner);
+      if (!after || !after.confidential) throw new Refused('the item could not be made confidential, so it was not marked as a vulnerability', 'make it confidential on GitLab first');
+      out.changed.push('made confidential');
+    }
     if (add.length) { const r = addItemLabels(got.t, got.number, add, { runner }); if (!r.ok) return r; out.changed.push(`labels +${add.join(', +')}`); }
     if (stale.length) { const r = removeItemLabels(got.t, got.number, stale, { runner }); if (r.ok) out.changed.push(`labels -${stale.join(', -')}`); else out.dropped.push(`the old labels ${stale.join(', ')} were not removed`); }
     const after = reread(got, runner);
@@ -223,6 +246,7 @@ export async function runIssuesEdit(root, { ref, title = null, body = null, body
     const r = editItem(got.t, got.number, fields, { runner });
     if (!r.ok) return r;
     out.changed.push(`edited the ${Object.keys(fields).join(' and ')}`);
+    if (redactedIn(fields.title, fields.body)) out.notes.push(REDACTED_NOTE);
     if (fields.title && !got.item.confidential) {
       const after = reread(got, runner);
       if (after && after.title !== fields.title) out.dropped.push('the title is not the one sent');
@@ -238,6 +262,7 @@ export async function runIssuesComment(root, { ref, body = null, bodyFile = null
     const r = commentOnItem(got.t, got.number, text, { runner });
     if (!r.ok) return r;
     out.changed.push('commented');
+    if (redactedIn(text)) out.notes.push(REDACTED_NOTE);
     return null;
   });
 }

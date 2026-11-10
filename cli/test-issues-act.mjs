@@ -73,6 +73,7 @@ function fake(platform = 'github', { item = {}, vis = 'private', users = { ann: 
       if (many(args, 'assignees').length && !drop.assignee) state.assignees = many(args, 'assignees');
       if (field(args, 'assignee_id') !== null && !drop.assignee) { const id = field(args, 'assignee_id'); state.assignees = id === '0' ? [] : Object.keys(users).filter((u) => String(users[u]) === id); }
       if (field(args, 'add_labels') !== null && !drop.labels) state.labels.push(...field(args, 'add_labels').split(','));
+      if (args.includes('confidential=true')) state.confidential = !drop.confidential;
       if (field(args, 'remove_labels') !== null) { const r = field(args, 'remove_labels').split(','); state.labels = state.labels.filter((l) => !r.includes(l)); }
       return done(view());
     }
@@ -234,3 +235,47 @@ test('the agent is told to act only when asked and to report what it chose', asy
   assert.match(skill, /yad issues new/);
   assert.match(skill, /say what you chose/i);
 });
+
+test('E173 review: the real yad command reaches every action', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const T = product();
+  const bin = new URL('../bin/yad.mjs', import.meta.url).pathname;
+  const runYad = (args) => { try { return execFileSync(process.execPath, [bin, ...args, '--dir', T, '--json'], { env: { ...process.env, YAD_PLATFORM_READ: '0', NO_COLOR: '1' }, encoding: 'utf8' }); } catch (e) { return String(e.stdout); } };
+  for (const args of [['issues', 'new', '--title', 'x', '--priority', 'P1'], ['issues', 'assign', '12', 'ann'], ['issues', 'assign', '12', '--me'], ['issues', 'close', '12'], ['issues', 'label', '12', '--priority', 'P1'], ['issues', 'comment', '12', '--body', 'hi']]) {
+    const out = runYad(args);
+    assert.doesNotMatch(out, /does not take|takes no more words|takes </, args.join(' '));
+    assert.match(out, /turned off/, args.join(' '));
+  }
+  assert.match(runYad(['issues', 'close', '12', '--priority', 'P1']), /does not take --priority/);
+});
+
+test('E173 review: GitLab makes an item confidential before a security label, and refuses if it cannot', async () => {
+  const G = product('gitlab');
+  const g = fake('gitlab');
+  await A.runIssuesLabel(G, { ref: '5', type: 'security', env, runner: g.runner });
+  const order = g.writes().map((w) => (w.includes('confidential=true') ? 'conf' : 'label'));
+  assert.deepEqual(order.slice(0, 2), ['conf', 'label']);
+  assert.ok(g.state.labels.includes('security'));
+  const h = fake('gitlab', { drop: { confidential: true } });
+  await A.runIssuesLabel(G, { ref: '5', type: 'security', env, runner: h.runner });
+  assert.equal(h.state.labels.includes('security'), false);
+  assert.equal(process.exitCode, 1); reset();
+});
+
+test('E173 review: a commit hash and a long name are kept; a real token is redacted and said', async () => {
+  const T = product(); const p = fake();
+  const sha = '3f2a9c1d4e5b6a7f8091a2b3c4d5e6f708192a3b';
+  const r = await A.runIssuesNew(T, { title: `Regressed in ${sha}`, body: 'key ghp_abcdefghijklmnopqrstuvwxyz0123', json: true, env, runner: p.runner });
+  assert.match(p.state.title, new RegExp(sha));
+  assert.match(r.notes.join(), /redacted/);
+});
+
+test('E173 review: assign says who it replaced; priority and type are read in any case', async () => {
+  const T = product(); const p = fake('github', { item: { assignees: ['alice'] } });
+  const r = await A.runIssuesAssign(T, { ref: '5', assignee: 'bob', json: true, env, runner: p.runner });
+  assert.match(r.changed.join(), /replacing alice/);
+  const q = fake();
+  await A.runIssuesNew(T, { title: 'x', priority: 'p1', type: 'Feature', env, runner: q.runner });
+  assert.deepEqual(q.state.labels, ['feature', 'priority: P1']);
+});
+
