@@ -252,7 +252,9 @@ test('E173 review: the real yad command reaches every action', async () => {
 test('E173 review: GitLab makes an item confidential before a security label, and refuses if it cannot', async () => {
   const G = product('gitlab');
   const g = fake('gitlab');
-  await A.runIssuesLabel(G, { ref: '5', type: 'security', env, runner: g.runner });
+  const ok = await A.runIssuesLabel(G, { ref: '5', type: 'security', json: true, env, runner: g.runner });
+  assert.equal(ok.ok, true, JSON.stringify(ok.dropped));
+  assert.ok(!process.exitCode);
   const order = g.writes().map((w) => (w.includes('confidential=true') ? 'conf' : 'label'));
   assert.deepEqual(order.slice(0, 2), ['conf', 'label']);
   assert.ok(g.state.labels.includes('security'));
@@ -277,5 +279,24 @@ test('E173 review: assign says who it replaced; priority and type are read in an
   const q = fake();
   await A.runIssuesNew(T, { title: 'x', priority: 'p1', type: 'Feature', env, runner: q.runner });
   assert.deepEqual(q.state.labels, ['feature', 'priority: P1']);
+});
+
+test('E173 review 2: a public GitLab item that already has the security label is made confidential', async () => {
+  const G = product('gitlab'); const g = fake('gitlab', { item: { labels: ['security'] } });
+  const r = await A.runIssuesLabel(G, { ref: '5', type: 'security', json: true, env, runner: g.runner });
+  assert.equal(g.state.confidential, true);
+  assert.match(r.changed.join(), /made confidential/);
+  assert.ok(!process.exitCode);
+});
+
+test('E173 review 2: a comma label on GitLab is refused before anything is changed; typing [redacted] is not a redaction', async () => {
+  const G = product('gitlab');
+  fs.writeFileSync(path.join(G, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab', git_url: 'git@gitlab.com:a/p.git', issues: { type: { security: ['sec, high'] } } }));
+  const g = fake('gitlab');
+  await A.runIssuesLabel(G, { ref: '5', type: 'security', env, runner: g.runner });
+  assert.equal(g.writes().length, 0); assert.equal(process.exitCode, 1); reset();
+  const T = product(); const p = fake();
+  const r = await A.runIssuesComment(T, { ref: '5', body: 'the log said [redacted]', json: true, env, runner: p.runner });
+  assert.doesNotMatch(r.notes.join(), /token/);
 });
 

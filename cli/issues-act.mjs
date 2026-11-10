@@ -23,7 +23,8 @@ const LOGIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const oneLine = (v) => forTerminal(redactTokens(String(v ?? ''))).replace(/\s+/g, ' ').trim();
 const lines = (v) => redactTokens(String(v ?? '')).split(/\r?\n/).map((l) => forTerminal(l)).join('\n');
 const REDACTED_NOTE = 'something shaped like a token was replaced with [redacted]';
-const redactedIn = (...texts) => texts.some((t) => typeof t === 'string' && t.includes('[redacted]'));
+// Only what redaction itself replaced: an engineer who typed `[redacted]` is not told something was removed.
+const tokenIn = (...raws) => raws.some((r) => typeof r === 'string' && redactTokens(r) !== r);
 // `p1` and `Feature` mean the same as `P1` and `feature`.
 const normPriority = (v) => (v == null ? null : String(v).toUpperCase());
 const normType = (v) => (v == null ? null : String(v).toLowerCase());
@@ -49,17 +50,22 @@ function titleOf(v) {
 }
 
 // The body from `--body` (one line) or `--body-file` (written by the agent outside the repo). Null if neither.
+// The raw body last read, so a redaction note compares what was written with what is sent.
+let lastRaw = null;
 function bodyOf({ body, bodyFile }) {
+  lastRaw = null;
   if (body != null && bodyFile != null) throw new Refused('pass --body or --body-file, not both');
   if (bodyFile != null) {
     let raw;
     try { raw = fs.readFileSync(bodyFile, 'utf8'); } catch { throw new Refused('the --body-file could not be read'); }
     if (raw.length > MAX_BODY) throw new Refused(`the body is longer than ${MAX_BODY} characters`);
+    lastRaw = raw;
     const t = lines(raw);
     if (t.length > MAX_BODY) throw new Refused(`the body is longer than ${MAX_BODY} characters`);
     return t;
   }
   if (body != null && String(body).length > MAX_BODY) throw new Refused(`the body is longer than ${MAX_BODY} characters`);
+  lastRaw = body ?? null;
   return body != null ? lines(body) : null;
 }
 
@@ -149,7 +155,7 @@ export async function runIssuesNew(root, { title, body = null, bodyFile = null, 
     if (login && !logins.includes(login.toLowerCase())) out.dropped.push(`${login} was not assigned`);
     if (confidential && b.confidential !== true) out.dropped.push('it was NOT made confidential: restrict it now');
     if (!Number.isInteger(number)) out.dropped.push('the answer named no item number');
-    if (redactedIn(t0, text)) out.notes.push(REDACTED_NOTE);
+    if (tokenIn(title, lastRaw)) out.notes.push(REDACTED_NOTE);
     return report(out, json);
   } catch (e) {
     if (e instanceof Refused) return refusedOut(json, e);
@@ -215,19 +221,29 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     }
     const realNames = new Map(got.item.labels.map((l) => [l.toLowerCase(), l]));
     const stale = remove.map((l) => realNames.get(l.toLowerCase()) ?? l);
-    if (!add.length && !stale.length) { out.notes.push('it already has those labels'); return null; }
-    // On GitLab a vulnerability is confidential first, so the label is never on a public item.
+    if (got.t.platform === 'gitlab' && [...add, ...stale].some((l) => l.includes(','))) throw new Refused('a GitLab label name with a comma cannot be sent', 'rename that label in the issues settings of .sdlc/product.json');
+    // On GitLab a vulnerability is confidential first, so the label is never on a public item. This runs even when
+    // the label is already there: a public item that carries it is exactly what must not stay.
+    let madeConfidential = false;
     if (type === 'security' && got.t.platform === 'gitlab') {
       const r = makeConfidential(got.t, got.number, { runner });
       if (!r.ok) return r;
       const after = reread(got, runner);
       if (!after || !after.confidential) throw new Refused('the item could not be made confidential, so it was not marked as a vulnerability', 'make it confidential on GitLab first');
       out.changed.push('made confidential');
+      madeConfidential = true;
     }
-    if (add.length) { const r = addItemLabels(got.t, got.number, add, { runner }); if (!r.ok) return r; out.changed.push(`labels +${add.join(', +')}`); }
+    if (!add.length && !stale.length) { out.notes.push('it already has those labels'); return null; }
+    if (add.length) {
+      const r = addItemLabels(got.t, got.number, add, { runner });
+      if (!r.ok && !madeConfidential) return r;
+      if (r.ok) out.changed.push(`labels +${add.join(', +')}`); else out.dropped.push(`the labels ${add.join(', ')} were not set`);
+    }
     if (stale.length) { const r = removeItemLabels(got.t, got.number, stale, { runner }); if (r.ok) out.changed.push(`labels -${stale.join(', -')}`); else out.dropped.push(`the old labels ${stale.join(', ')} were not removed`); }
-    const after = reread(got, runner);
-    if (!after) out.notes.push('the item could not be read again to check the change');
+    // A confidential item's labels are not read back, so they cannot be checked.
+    const after = madeConfidential ? null : reread(got, runner);
+    if (madeConfidential) out.notes.push('it is confidential now, so its labels could not be read back to check');
+    else if (!after) out.notes.push('the item could not be read again to check the change');
     else {
       const now = new Set(after.labels.map((l) => l.toLowerCase()));
       for (const l of add) if (!now.has(l.toLowerCase())) out.dropped.push(`the label ${l} was not set`);
@@ -246,7 +262,7 @@ export async function runIssuesEdit(root, { ref, title = null, body = null, body
     const r = editItem(got.t, got.number, fields, { runner });
     if (!r.ok) return r;
     out.changed.push(`edited the ${Object.keys(fields).join(' and ')}`);
-    if (redactedIn(fields.title, fields.body)) out.notes.push(REDACTED_NOTE);
+    if (tokenIn(title, lastRaw)) out.notes.push(REDACTED_NOTE);
     if (fields.title && !got.item.confidential) {
       const after = reread(got, runner);
       if (after && after.title !== fields.title) out.dropped.push('the title is not the one sent');
@@ -262,7 +278,7 @@ export async function runIssuesComment(root, { ref, body = null, bodyFile = null
     const r = commentOnItem(got.t, got.number, text, { runner });
     if (!r.ok) return r;
     out.changed.push('commented');
-    if (redactedIn(text)) out.notes.push(REDACTED_NOTE);
+    if (tokenIn(lastRaw)) out.notes.push(REDACTED_NOTE);
     return null;
   });
 }
