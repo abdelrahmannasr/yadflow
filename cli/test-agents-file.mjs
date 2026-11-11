@@ -561,7 +561,10 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Review round 7: main's reading is judged alone, so the joins still pair the shells' readings.
     `bash -c "$(printf -- 'git commit '; echo - -n)"`,
     // CI review: a `cat` whose file names come from a file read past its limits prints what is not known.
-    ...['cat $(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
+    // A file empty when it is read: the next text stands alone (`printf '' > a` after an open quote).
+    `printf '"' > a; printf '' > a; bash <(cat a; printf 'gh pr merge 5')`, `printf '"' > a; printf '' > a; bash -c "$(cat a; printf 'gh pr merge 5')"`,
+    `false && printf '"' > a; source <(cat a; printf 'gh pr merge 5')`, `printf 'echo "' "'" > b; source <(cat nofile b; printf 'gh pr merge 5')`,
+    ...['cat $(cat f) | bash', 'cat -$(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 

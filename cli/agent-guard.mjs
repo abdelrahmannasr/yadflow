@@ -1259,7 +1259,8 @@ function printedOf(fed, n, lists, input = []) {
       out.push(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
     }
     if (prog === 'cat' || prog === 'tee') {
-      const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-');
+      // A word read past its limits stays, even as an option (`cat -$(cat f)` may be `cat -- h`, #498 review).
+      const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-' || (prog === 'cat' && a.includes(OVER)));
       if (prog === 'tee' || !args.length || args.includes('-')) for (const x of input) out.push(x);
       if (prog === 'cat') {
         const per = [];
@@ -1271,8 +1272,10 @@ function printedOf(fed, n, lists, input = []) {
           const t = fileTexts(a);
           per.push(t === null ? [OVER] : t.length ? t : ['']);
         }
-        // An empty reading judges nothing on its own (each one was joined to every reading before it, #498 review).
-        for (const t of per) for (const x of t) if (x !== '') out.push(x);
+        // One empty reading at most: a file may be empty when read (`printf '' > a`), and the joins need that
+        // reading, but each one more was joined to every reading before it (#498 review: out of memory).
+        let empty = false;
+        for (const t of per) for (const x of t) if (x !== '') out.push(x); else if (!empty) { empty = true; out.push(x); }
         if (per.length > 1) for (const x of zipJoin(per)) out.push(x);
       }
     }
