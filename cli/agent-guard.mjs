@@ -1231,7 +1231,7 @@ function fedOf(parts, mode, deep) {
 // What part `n` prints, read from each of its spellings `lists` (words with the prefix stripped): the text it is
 // fed, `echo`'s words, `printf`'s two readings, and every text a `cat <file>` may hold (#498, row 8), with the
 // files of one `cat` also joined. `input` is what it reads from a pipe or a `<` file, which `cat` (with no file,
-// or `-`) and `tee` print. A file read past its limits gives OVER.
+// or `-`) and `tee` print. A file read past its limits gives OVER; null when its joins are too long (see zipJoin).
 function printedOf(fed, n, lists, input = []) {
   const out = [...(fed.get(n) ?? [])];
   for (const pw of lists) {
@@ -1271,7 +1271,7 @@ function printedOf(fed, n, lists, input = []) {
         // Every reading, empty ones too: the joins pair readings by their place, so dropping one moves the rest
         // (#498 review). Their memory is bounded by ZIP_CHARS.
         for (const t of per) for (const x of t) out.push(x);
-        if (per.length > 1) for (const x of zipJoin(per)) out.push(x);
+        if (per.length > 1) { const z = zipJoin(per); if (z === null) return null; for (const x of z) out.push(x); }
       }
     }
   }
@@ -1279,10 +1279,11 @@ function printedOf(fed, n, lists, input = []) {
 }
 // Readings side by side: the j-th joins each list's j-th reading (its last, once it has no more) by newlines, as
 // their output is, so every reading is in one of them and the count stays the longest list's. Built from pieces,
-// one join each, so a long `cat f f f …` stays linear (#498 review). Past ZIP_CHARS characters in all, the
-// joins are the text read past its limits instead: a shell that runs it is refused (#498 review: many readings
-// of a part, each joined to a long one, ran out of memory before the cut-off, and a crashed hook lets it run).
-const ZIP_CHARS = 2 * MAX_JUDGED;
+// one join each, so a long `cat f f f …` stays linear (#498 review). Past ZIP_CHARS characters in all, null:
+// the line is refused (#498 review: many readings of a part, each joined to a long one, ran out of memory
+// before the cut-off, and a crashed hook lets the command run). Never a text in place of the readings: a
+// check that does not look for it would let them through.
+const ZIP_CHARS = 4 * MAX_JUDGED;
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
@@ -1293,7 +1294,7 @@ function zipJoin(per) {
     for (let q = 0; q < per.length; q++) {
       if ((q & 4095) === 0 && Date.now() > deadline) return [OVER];
       const x = per[q][Math.min(j, per[q].length - 1)];
-      if ((size += x.length + 1) > ZIP_CHARS) return [OVER];
+      if ((size += x.length + 1) > ZIP_CHARS) return null;
       pieces.push(x);
     }
     out.push(pieces.join('\n'));
@@ -1315,10 +1316,13 @@ function subOutputs(text, mode) {
   for (let k = 0; k < sp.length; k++) {
     if (Date.now() > deadline) return [OVER];
     const t = printedOf(fed, k, spellingsOf(sp, k, null), sp.piped.has(k) ? prev : []);
+    if (t === null) return null;
     if (t.length) per.push(t);
     prev = t;
   }
-  const out = zipJoin(per).map((x) => x.replace(/\n+$/, ''));
+  const z = zipJoin(per);
+  if (z === null) return null;
+  const out = z.map((x) => x.replace(/\n+$/, ''));
   return out.length ? out : [''];
 }
 // A word with each `$(…)` replaced by a reading of what it prints, as the shell makes it: split on blanks into
@@ -1504,7 +1508,7 @@ function judgeParts(parts, depth, mode) {
       if (realShell || parts.piped.has(n)) {
         for (const t of printed) carried.push(t);
         // Also joined by newlines, as their output is: a quote one text opens, a later one closes.
-        if (printedPer.length > 1) for (const t of zipJoin(printedPer)) carried.push(t);
+        if (printedPer.length > 1) { const z = zipJoin(printedPer); if (z === null) return TOO_MUCH_WRITTEN; for (const t of z) carried.push(t); }
         printed.length = 0; printedPer.length = 0;
       }
     }
@@ -1528,10 +1532,13 @@ function judgeParts(parts, depth, mode) {
       for (let k = p.from; k < p.to; k++) {
         if (Date.now() > deadline) return OUT_OF_TIME;
         const t = printedOf(fed, k, spellingsOf(parts, k, null), parts.piped.has(k) ? prev : []);
+        if (t === null) return TOO_MUCH_WRITTEN;
         if (t.length) per.push(t);
         prev = t;
       }
-      for (const t of zipJoin(per)) carried.push(t);
+      const z = zipJoin(per);
+      if (z === null) return TOO_MUCH_WRITTEN;
+      for (const t of z) carried.push(t);
     }
     // A file written earlier on the line (#498, row 8), run as a shell's script, through `source` or `.`, as a
     // program by its path (`./f`), or read by a shell through `<`: each text it may hold.
