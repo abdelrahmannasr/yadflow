@@ -556,6 +556,9 @@ const PREFIX_OWN_VALUE_OPTIONS = {
   exec: new Set(['-a']),
 };
 const stripPrefix = (words) => {
+  // The common case, a plain first word, in one look (it is called many times per part).
+  const w0 = words[0];
+  if (w0 && !w0.includes('=') && w0 !== 'function' && w0 !== 'coproc' && w0 !== 'timeout' && !PREFIXES.has(w0) && w0[0] !== '(' && w0[0] !== '{') return words.slice();
   const w = words.slice();
   // A `(` or a `{` stuck to the first word (zsh reads `{gh pr merge 5;}` as a group).
   if (w.length && /^[({]/.test(w[0])) w[0] = w[0].replace(/^[({]+/, '');
@@ -578,7 +581,8 @@ const stripPrefix = (words) => {
     return w.slice(i);
   }
 };
-const programOf = (word) => word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, '');
+// A word with no path and no extension is its own program (the common case, without two regexes).
+const programOf = (word) => (typeof word === 'string' && !/[\\/.]/.test(word) ? word : word.split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i, ''));
 
 // How package runners start a program. `npx [-y] yadflow[@v] …` or `npx yad …` (and pnpx, bunx), `npx -p
 // yadflow yad …`, `npm [opts] exec|x yadflow|yad -- …`, `pnpm [opts] exec|dlx …`, `pnpm yad …`, `yarn [opts]
