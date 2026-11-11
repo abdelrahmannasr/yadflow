@@ -1264,7 +1264,7 @@ function printedOf(fed, n, lists, input = []) {
           if (a === '-') continue;
           // A file name read past its limits (`cat $(cat f)`): the file it names is unknown, so is what it prints
           // (#498 review: it read as no file, and `cat $(cat f) | bash` was let through).
-          if (a.includes(OVER)) { per.push([OVER]); continue; }
+          if (a.includes(OVER)) { fileTexts(a); per.push([OVER]); continue; }
           const t = fileTexts(a);
           per.push(t === null ? [OVER] : t.length ? t : ['']);
         }
@@ -1282,8 +1282,9 @@ function printedOf(fed, n, lists, input = []) {
 // one join each, so a long `cat f f f …` stays linear (#498 review). Past ZIP_CHARS characters in all, null:
 // the line is refused (#498 review: many readings of a part, each joined to a long one, ran out of memory
 // before the cut-off, and a crashed hook lets the command run). Never a text in place of the readings: a
-// check that does not look for it would let them through.
-const ZIP_CHARS = 4 * MAX_JUDGED;
+// check that does not look for it would let them through. Sixteen times the longest line: a large commit
+// message through `printf … | cat` joins about twelve times its length.
+const ZIP_CHARS = 16 * MAX_JUDGED;
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
