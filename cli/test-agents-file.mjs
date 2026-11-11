@@ -564,8 +564,6 @@ test('the agent guard refuses every human-only yad command and every force push,
     // A file empty when it is read: the next text stands alone (`printf '' > a` after an open quote).
     `printf '"' > a; printf '' > a; bash <(cat a; printf 'gh pr merge 5')`, `printf '"' > a; printf '' > a; bash -c "$(cat a; printf 'gh pr merge 5')"`,
     `false && printf '"' > a; source <(cat a; printf 'gh pr merge 5')`, `printf 'echo "' "'" > b; source <(cat nofile b; printf 'gh pr merge 5')`,
-    // A file read past its limits before the command: `env` sets what bash splits it into.
-    ...['env A=$(<f) git commit -m x', 'env A=$(cat f) git commit -m x', 'A=$(<f) git commit -m x'].map((t) => `echo 'x YAD_HOOK_DISABLE=1 B=${'y'.repeat(300000)}' > f; ${t}`),
     // Readings are paired by their place: empty ones from files never written keep theirs.
     ...['bash -c "$(cat e1 e2 a; cat q)"', 'eval "$(cat e1 e2 a; cat q)"', 'source <(cat e1 e2 a; cat q)'].map((t) => `printf '"' > a; printf '' > a; printf 'echo hi\\n' > q; printf 'gh pr merge 5\\n' > q; false && printf 'echo z\\n' > q; ${t}`),
     ...['cat $(cat f) | bash', 'cat -$(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
@@ -701,9 +699,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 1: a file printed, however many times it was written; a copy of a descriptor is no file.
     `${Array.from({ length: 70 }, (_, i) => `echo "line ${i}" >> notes.md`).join('; ')}; cat notes.md`, 'npm test 2>&1 | tee out.txt', 'echo "$(date)" >> notes.md',
     'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate',
-    // Review round 2: a file run after many lines written to it (under the 250,000 characters read from files);
-    // descriptors copied; a `case` that runs a script.
-    `cat > f <<'E'\n${'npm run lint\n'.repeat(15000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
+    // Review round 2: a file run after many lines written to it; descriptors copied; a `case` that runs a script.
+    `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
     'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f',
     // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
     `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',

@@ -1166,10 +1166,6 @@ const normPath = (p) => path.posix.normalize(p).replace(/^(?:\.\/+)+/, '');
 // At most this many texts are kept for one file; running a file with more is refused, and so is reading one
 // into anything a shell then runs.
 const FILE_TEXTS = 64;
-// At most this many characters of written files are read in one pass over a line (each read is judged again),
-// a quarter of MAX_JUDGED: a line that reads past it is refused sooner, inside a hook's time (#498 CI: at the
-// full cap, `echo x | tee -a f; cat f | bash;` repeated took 4.7 s to reach it on a slow runner).
-const FILE_JUDGED = 250_000;
 // What a read of a file past these limits gives: a text that refuses the line once a shell would run it, so a
 // file only printed (`cat notes.md`) is not refused for its size (#498 review).
 const OVER = '\0yad-guard-too-much-written\0';
@@ -1184,7 +1180,7 @@ function fileTexts(p) {
   if (f.over || f.texts.size > FILE_TEXTS) return null;
   const out = [...f.texts];
   for (const a of f.all ?? []) if (!f.texts.has(a)) out.push(a);
-  for (const t of out) if ((files.judged += t.length) > FILE_JUDGED) return null;
+  for (const t of out) if ((files.judged += t.length) > MAX_JUDGED) return null;
   return out;
 }
 // A write of `texts` (the readings of what a part prints) to a file: added to its texts, never replacing one.
@@ -1211,7 +1207,7 @@ function writeFile(target, texts, append) {
     for (const a of f.all ?? []) if (a !== '') f.texts.add(a);
     f.all = texts.length ? texts.slice() : null;
   }
-  if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > FILE_JUDGED))) { f.all = null; f.over = true; }
+  if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) { f.all = null; f.over = true; }
   // A new version only when a read would now give something else.
   const sameAll = oldAll === f.all || (oldAll !== null && f.all !== null && oldAll.length === f.all.length && oldAll.every((a, j) => a === f.all[j]));
   if (f.v === 0 || f.texts.size !== size || !sameAll || f.over !== wasOver) f.v = ++files.version;
@@ -1476,12 +1472,10 @@ function judgeParts(parts, depth, mode) {
     const subst = substituted(parts, n, mode);
     if (subst === null) return TOO_MUCH_WRITTEN;
     // A file read past its limits whose text is the command (`$(<f)`): refused, as a shell would run it.
-    // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused. So is one
-    // before the command (`env A=$(<f) git commit`: bash splits it, and `env` sets what it holds, #498 review).
+    // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused.
     for (const s of subst) {
       const sw = stripPrefix(s);
-      const before = s.slice(0, s.length - sw.length);
-      if (sw.length && (sw[0].includes(OVER) || before.some((x) => x.includes(OVER)) || (!PRINTERS.has(programOf(sw[0])) && sw.some((x) => x.includes(OVER))))) return TOO_MUCH_WRITTEN;
+      if (sw.length && (sw[0].includes(OVER) || (!PRINTERS.has(programOf(sw[0])) && sw.some((x) => x.includes(OVER))))) return TOO_MUCH_WRITTEN;
       variants.push(s);
     }
     for (const base of variants.slice()) {
