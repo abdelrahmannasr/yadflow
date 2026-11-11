@@ -500,6 +500,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     // never one mixed reading (bash runs the first, zsh the heredoc one).
     "echo \"$(case x in x) echo ' ;; esac)\" $(echo $'\\')' ; git push -f) ' ;; esac)\"'", "echo $($'\\'' $(case x in x) esac) $(echo ')') ; git push -f ; ",
     "cat <<E\n$(echo $'\\')' ' $(echo ' ) $(git push -f) ' )\nE\n",
+    // Round 6: a `#` comment inside `$(…)` (both shells; zsh only in double quotes), and backticks inside it (bash).
+    "echo $( # )'\ngit push -f\n)''", "echo \"$( # )\"'\ngit push -f\n)\"''", "echo $( echo hi # )'\ngit push -f\n)''", "echo $(echo $((1)) # )'\ngit push -f\n)''",
+    "echo $(echo `echo )'`\ngit push -f\n)''",
     // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
@@ -622,7 +625,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 2: a line read again with `$(:)` is judged at its own depth, and `a|esac)` is a pattern.
     `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"',
     // Any number of `$(…)` that a shell ends elsewhere: each reading reads them all in one pass.
-    Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' ')]) {
+    Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
+    // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
+    'x=$(echo a#b)', 'echo $(git log --format=%H#%s -1)', 'echo "$(date) # not a comment"', 'echo $(echo $#)', 'echo ${#x} $(echo ${#y})',
+    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });

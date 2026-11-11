@@ -297,8 +297,9 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
   let quote = null;
   const heredocs = [];
   // `mode.ends` (#498), the end rule of the whole reading. Unset: main's. `bash`: `$'…'` is skipped with its
-  // escapes (`\'` does not end it), as bash 3.2 does, and a `case` is text. `zsh`: that, and a `case <word> in`
-  // makes its `x)` patterns close nothing, as zsh does. Each is a reading of its own, never mixed in one.
+  // escapes (`\'` does not end it), a `#` comment and backticks are skipped, and a `case` is text, as bash 3.2
+  // reads them. `zsh`: `$'…'` and comments the same, and a `case <word> in` makes its `x)` patterns close
+  // nothing, as zsh reads them. Each is a reading of its own, never mixed in one.
   const ansi = mode.ends === 'bash' || mode.ends === 'zsh';
   const cases = [];
   // `mode.until`: scan no further (a bound on a `case` word).
@@ -313,10 +314,20 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
     if (ch === '\\') { i++; continue; }
     if (ansi && ch === '$' && line[i + 1] === '\'') {
       let j = i + 2;
-      while (j < line.length && line[j] !== '\'') j += line[j] === '\\' ? 2 : 1;
+      while (j < stop && line[j] !== '\'') j += line[j] === '\\' ? 2 : 1;
       i = j;
       continue;
     }
+    // Both shells read a `#` that starts a word as a comment to the end of the line: a `)` in it closes nothing
+    // (#498 review round 6). Not `$#`, `${#x}` or `16#ff`, where it starts no word.
+    if (ansi && ch === '#' && (i === from || /[\s;&|()]/.test(line[i - 1]))) {
+      const nl = line.indexOf('\n', i);
+      if (nl < 0 || nl >= stop) return line.length;
+      i = nl - 1;
+      continue;
+    }
+    // bash 3.2 reads backticks inside `$(…)` as nested: a `)` in them closes nothing (zsh does not).
+    if (mode.ends === 'bash' && ch === '`') { i = backtickEnd(line, i + 1); continue; }
     if (mode.ends === 'zsh' && (ch === 'c' || ch === 'e') && (i === from || /[\s;&|(]/.test(line[i - 1]))) {
       if (ch === 'c' && line.startsWith('case', i)) {
         const at = caseInEnd(line, i, getIndex);
@@ -937,12 +948,13 @@ function firstExpandingHeredoc(text) {
 // the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
 function judgeReadings(line, depth, ends) {
   if (typeof line !== 'string') return { allow: true };
-  // The end rules of `$(…)` (#498): main's, bash 3.2's (`$'…'` honoured) and zsh's (`$'…'` and `case` honoured).
+  // The end rules of `$(…)` (#498): main's, bash 3.2's and zsh's (see substitutionEnd).
   // A line inside a `$(…)` keeps its reading's rule; a fresh one gets each rule that can differ here.
   const rules = ends !== undefined ? [ends] : [''];
   if (ends === undefined && line.includes('$(')) {
-    if (line.includes('$\'')) rules.push('bash');
-    if (line.includes('$\'') || /\bcase\b/.test(line)) rules.push('zsh');
+    const ansi = line.includes('$\'') || line.includes('#');
+    if (ansi || line.includes('`')) rules.push('bash');
+    if (ansi || /\bcase\b/.test(line)) rules.push('zsh');
   }
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
