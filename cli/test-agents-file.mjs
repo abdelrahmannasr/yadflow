@@ -470,6 +470,45 @@ test('the agent guard refuses every human-only yad command and every force push,
     'sudo -E yad gate approve EP-x analysis',
     'yarn workspaces foreach -A run yad gate approve EP-x analysis',
     'yarn workspaces foreach --include web exec yad gate approve EP-x analysis',
+    // #498, rows 3–7, each run by a real shell (bash 3.2 and zsh 5.9 unless named). Row 3: `$'…'` inside `$(…)`.
+    "echo $(echo $'a\\')'; gh pr merge 5\n)", "echo \"$(echo $'a\\')'; gh pr merge 5\n)\"", "x=$(echo $'a\\')'; git push --force\n)",
+    // Row 4: a `case` in `"$(…)"` across a newline (zsh runs it).
+    'echo "$(case x in x)\ngh pr merge 5;; esac)"', 'x="$(case x in\nx) gh pr merge 5;; esac)"',
+    // Row 5: bash closes a list only after a comma (`{x},-n}` is `x}` and `-n`).
+    'git commit -m {x},-n}', 'git push origin {a},+main}', 'git commit -m {a}{b},-n}',
+    // Row 6: a backslash kept in double quotes, re-read by the shell `bash -c` and `eval` start.
+    "bash -c \"echo \\'; gh pr merge 5; echo \\'\"", "eval \"echo \\'; gh pr merge 5; echo \\'\"", 'bash -c "gh pr {merge,\\}} 5"',
+    "sh -c \"echo \\'; git push --force; echo \\'\"",
+    // Row 7: a brace list does not see into `$(…)`, backticks or `${…}`.
+    "git commit -m {$(echo '}'),-n}", "git push origin {$(echo '}'),+main}", "git commit -m {`echo '}'`,-n}", 'git commit -m {$(echo \\}),-n}',
+    // Rows 3 and 7 together, and row 4's `case` inside a list (zsh).
+    "git commit -m {$(echo $'\\')'),-n}", 'git commit -m {$(case x in x) echo a;; esac),-n}',
+    // Row 4 with the `case` word quoted, escaped, a `$(…)`, longer than 256 characters, or an `esac` that is only a word (zsh).
+    'echo "$(case "a b" in\n"a b") gh pr merge 5;; esac)"', "echo \"$(case 'a b' in\n*) gh pr merge 5;; esac)\"", 'echo "$(case a\\ b in\n*) gh pr merge 5;; esac)"',
+    'echo "$(case $(echo y) in\n*) gh pr merge 5;; esac)"', `echo "$(case \${y:-${'x'.repeat(300)}} in\n*) gh pr merge 5;; esac)"`,
+    'echo "$(case y in x) echo esac;;\n*) gh pr merge 5;; esac)"',
+    // Rows 3 and 4 in an unquoted heredoc's text (zsh).
+    "cat <<EOF\n$(echo $'a\\')'; gh pr merge 5\n)\nEOF", 'cat <<EOF\n$(case x in\nx) gh pr merge 5;; esac)\nEOF',
+    // Row 6 through a here-string and a piped echo or printf.
+    "bash <<< \"echo \\'; gh pr merge 5; echo \\'\"", "echo \"echo \\'; gh pr merge 5; echo \\'\" | bash", "printf '%s\\n' \"echo \\'; gh pr merge 5; echo \\'\" | sh",
+    // Review round 2: a `$(…)` in a heredoc's text that the shells end sooner hides nothing after it (zsh), and
+    // a chain of `case $(` that once took exponential time is refused at once (bash runs line 1 first).
+    "cat <<E\n$(echo $'\\''x) it's $(gh pr merge 5)\nE", `gh pr merge 5\necho $(${' case $('.repeat(40)}`,
+    // Each `$(…)` on the line is read to that reading's own end.
+    "echo $(echo $'\\')'; gh pr merge 5\n) $(echo $'\\')' x\n)",
+    // Review round 5: bash 3.2 honours `$'…'` but reads a `case` as text; zsh honours both. A reading per shell,
+    // never one mixed reading (bash runs the first, zsh the heredoc one).
+    "echo \"$(case x in x) echo ' ;; esac)\" $(echo $'\\')' ; git push -f) ' ;; esac)\"'", "echo $($'\\'' $(case x in x) esac) $(echo ')') ; git push -f ; ",
+    "cat <<E\n$(echo $'\\')' ' $(echo ' ) $(git push -f) ' )\nE\n",
+    // Round 6: a `#` comment inside `$(…)` (both shells; zsh only in double quotes), and backticks inside it (bash).
+    "echo $( # )'\ngit push -f\n)''", "echo \"$( # )\"'\ngit push -f\n)\"''", "echo $( echo hi # )'\ngit push -f\n)''", "echo $(echo $((1)) # )'\ngit push -f\n)''",
+    "echo $(echo `echo )'`\ngit push -f\n)''",
+    // Round 7: bash starts a comment only after a blank (`;#` is none to it); the brace shield; `${…}` as a `case` word.
+    "echo $(echo $'\\'' ;#) ; git push -f ; echo '\n)'", "echo $(echo $'\\''&#) ; git push -f ; echo '\n)'", "echo $(echo $'\\''&&#) ; gh pr merge 5 ; echo '\n)'",
+    "git commit -m {$(echo '{'),-n}", 'git commit -m {$(echo {),-n}', 'git commit -m {`echo {`,-n}', 'echo "$(case ${x:-a b} in\n*) git push -f ;; esac)"',
+    // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
+    "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
+    "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -578,7 +617,21 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'echo x || bash', 'docker ps --format {{.Names}}', 'gh pr view {1,2,3}', 'gh pr {merge\\,x,} 5',
     `gh api repos/x -f body='[${'{"a":1,"b":2},'.repeat(10)}{}]'`, "echo '{a,b}{a,b}{a,b}{a,b}{a,b}'", 'echo {a,b}{a,b}{a,b}{a,b}{a,b}', 'bash -euo pipefail ./x.sh', 'echo {a..z}',
     `curl -d '[${'{"a":1,"b":2},'.repeat(66000)}{}]' https://x`,
-    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`]) {
+    `git add ${'f.js '.repeat(2000)}src/{a,b}.js`,
+    // #498: the ordinary forms around the new readings stay allowed.
+    "echo $(echo $'it\\'s')", "x=$(printf $'a\\tb')", 'echo "$(echo $\'\\\'\')"', 'echo "$(case $x in a) echo a;; esac)"', 'echo "$(echo case)"',
+    'echo {x}', 'gh pr view {x},5}', 'git log {x},y}', "echo {$(echo '}'),x}", 'git log {$(echo a),b}', 'gh api repos/{owner}/{repo}/pulls',
+    'bash -c "echo \\"hi\\""', 'bash -c "echo \\$HOME"', "bash -c \"grep '\\d' f\"", "bash -c \"printf 'a\\nb'\"", "eval \"echo \\'quoted\\'\"", 'grep "\\d+" f',
+    'echo "$(echo test case)"', "echo \"it\\'s\" | cat", 'echo "$(case y in x) echo esac;; esac)"', "cat <<EOF\n$(echo $'it\\'s')\nEOF",
+    // The budget counts only a `$(…)` the shells end elsewhere, once per reading: 40 ordinary ones, with a CR too.
+    Array(40).fill("x=$(printf $'a\\tb')").join('; '), `${Array(40).fill("x=$(printf $'a\\tb')").join('; ')}\r`,
+    // Review round 2: a line read again with `$(:)` is judged at its own depth, and `a|esac)` is a pattern.
+    `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"',
+    // Any number of `$(…)` that a shell ends elsewhere: each reading reads them all in one pass.
+    Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
+    // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
+    'x=$(echo a#b)', 'echo $(git log --format=%H#%s -1)', 'echo "$(date) # not a comment"', 'echo $(echo $#)', 'echo ${#x} $(echo ${#y})',
+    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -635,6 +688,29 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const t2 = Date.now();
   agentGuardDecision(`${inSub})`);
   assert.ok(Date.now() - t2 < within(4500), `inside $( took ${Date.now() - t2} ms`);
+  // #498: each shell's reading of `$(…)` is one pass, and bash's brace rule is bounded per word.
+  for (const unit of ["$(echo $'a\\'", '$(case x in x) ', "\"$(case x in x)\n", `{x}${'{x}'.repeat(50)},y `, 'echo "$(case $(', ' case $(', ' case ${', '(case ${', " case '"]) {
+    const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length)) + ' gh pr merge 5';
+    const t8 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
+  }
+  // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
+  assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
+  // Near the limit: 240 `case` words of 4,000 characters read about 960,000 of the 1,048,576 allowed. The line
+  // must also stay under MAX_JUDGED, or it is refused as too long rather than for its words.
+  const nearCase = `echo $(${` case ${'x'.repeat(4000)} in x) :;; esac;`.repeat(240)})`;
+  assert.ok(nearCase.length < MAX_JUDGED, `the near-limit line is ${nearCase.length} characters`);
+  assert.equal(agentGuardDecision(nearCase).allow, true);
+  assert.match(agentGuardDecision(`echo ${'{x}'.repeat(1300)},y`).message, /brace lists expand to too many words/);
+  assert.equal(agentGuardDecision(`echo ${'{x}'.repeat(150)},y`).allow, true);
+  // #498 review: the kept spelling of a long double-quoted word with many backslashes is built in one pass.
+  const n = Math.floor((MAX_JUDGED - 100) / 2);
+  for (const [l, allow] of [[`bash -c "${'\\x'.repeat(n)}; gh pr merge 5"`, false], [`echo "${'\\x'.repeat(n)}"`, true]]) {
+    const t9 = Date.now();
+    assert.equal(agentGuardDecision(l).allow, allow, l.slice(0, 20));
+    assert.ok(Date.now() - t9 < within(4500), `#498 kept backslashes took ${Date.now() - t9} ms`);
+  }
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);
