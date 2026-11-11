@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { run, readJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON } from './lib.mjs';
-import { epicFiles, productConfigPath } from './manifest.mjs';
+import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { epicIds, epicRoot, isGenesisType, isValidEpicId, PRODUCT_EPICS, WORK_ITEM_TYPES } from './epic-state.mjs';
 import { addItemLabels, closeItem, commentOnItem, removeItemLabels } from './platform.mjs';
 import { productIdentity } from './members.mjs';
@@ -221,6 +221,16 @@ function registeredTargets(root, { env, runner }) {
 }
 
 // Bring each linked item up to date. `only` limits it to one epic's items. Returns the plan of what happened.
+// How a changed record reaches the team (#512): `commit <file>` and, on a verified Product, the PR route. The
+// Product's pr-title and pr-template checks let a PR of these records alone (issue-links files, the roadmap-items
+// file, step owner files) through from any branch, and a review/EP-* branch would advance a step. The gates run
+// the default branch's copy of the checks (#426), so that holds once a `yad update` carrying them has merged.
+// Like `yad assign` (owners.mjs): with no verified Product there are no Product checks to name.
+export function recordRoute(root, file) {
+  if (!isVerifiedLedger(readJSON(productConfigPath(root), null))) return `commit ${file}`;
+  return `commit ${file} on a branch of its own, not review/…, in a PR titled like \`chore: record tracker links\` — the Product checks let a PR of these records alone through, once a \`yad update\` that carries them has merged on the default branch`;
+}
+
 export function syncItems(root, { only = null, dryRun = false, close = true, env = process.env, runner = run, now = Date.now() } = {}) {
   const links = allLinks(root);
   const epicsOf = (key) => links.byItem.get(key) || [];
@@ -296,7 +306,7 @@ export async function runIssuesSync(root, { dryRun = false, json = false, env = 
   for (const s of r.skipped) warn(s);
   for (const e of r.unreadable) warn(`${e}: its .sdlc/issue-links.json could not be read, so status labels and closes were held back`);
   if (!r.items.length && !r.skipped.length && !r.unreadable.length) info('no items are linked to an epic');
-  else if (!dryRun) info(`commit any .sdlc/issue-links.json this changed, so the team keeps the record — ${LINKS_ROUTE}`);
+  else if (!dryRun) info(`${recordRoute(root, 'any .sdlc/issue-links.json this changed')}, so the team keeps the record`);
   return undefined;
 }
 
@@ -310,17 +320,13 @@ export function syncAfterGate(root, epic, { env = process.env, runner = run, now
     const r = syncItems(root, { only: epic, close: false, env, runner, now });
     const changed = r.items.filter((i) => i.commented || i.labelled.length || i.removed.length);
     for (const i of changed) info(`updated ${i.ref}: ${[i.commented && 'comment', ...i.labelled.map((l) => `+${forTerminal(l)}`), ...i.removed.map((l) => `-${forTerminal(l)}`)].filter(Boolean).join(', ')}`);
-    if (changed.some((i) => i.commented)) info(`commit .sdlc/issue-links.json so the team keeps the record — ${LINKS_ROUTE}`);
+    if (changed.some((i) => i.commented)) info(`${recordRoute(root, '.sdlc/issue-links.json')}, so the team keeps the record`);
     for (const i of r.items) for (const f of i.failed) warn(`${i.ref}: ${forTerminal(f)}. The gate still passed; \`yad issues sync\` catches up`);
     for (const s of r.skipped) warn(s);
   } catch (e) {
     warn(`the linked items were not updated (${forTerminal(e?.message ?? String(e))}). The gate still passed; \`yad issues sync\` catches up`);
   }
 }
-
-// Where a changed links file goes (#512). The Product's pr-title and pr-template checks let a PR of issue-links
-// files alone (with step owner files, or not) through from any branch; a review/EP-* branch would advance a step.
-const LINKS_ROUTE = 'on a branch of its own, not review/…, in a PR such as `chore(<epic, lowercase>): link issues`: the Product checks let a PR of issue-links files alone through';
 
 const epicTypeOf = (root, epic) => readJSON(epicFiles(epicRoot(root, epic)).state, null)?.type ?? null;
 const knownEpic = (root, epic) => isValidEpicId(epic) && !PRODUCT_EPICS.includes(epic) && fs.existsSync(epicFiles(epicRoot(root, epic)).state);
@@ -336,7 +342,7 @@ export async function runIssuesLink(root, { ref, epic: raw, json = false, now = 
   if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${created ? 'linked' : 'already linked:'} ${got.label === 'Product' ? '' : forTerminal(got.label)}#${entry.number} → ${epic}`);
   sayBack(back);
-  if (created) info(`commit .sdlc/issue-links.json so the team sees the link — ${LINKS_ROUTE}`);
+  if (created) info(`${recordRoute(root, '.sdlc/issue-links.json')}, so the team sees the link`);
   return undefined;
 }
 

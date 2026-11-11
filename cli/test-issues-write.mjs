@@ -337,8 +337,9 @@ test('E170 review 2: an unrelated broken sidecar is named; a closed item still g
   try { await W.runIssuesLink(T, { ref: '7', epic: 'EP-a1', env, runner: openItem.runner }); } finally { process.stderr.write = orig; console.log = origLog; console.error = origErr; }
   assert.equal(openItem.writes.some((a) => a.some((x) => x.startsWith('labels[]=status:'))), false);
   assert.match(lines.join('\n'), /EP-other/);
-  // #512: the hint names a route the Product checks let through, not "the epic's branch".
-  assert.match(lines.join('\n'), /commit \.sdlc\/issue-links\.json so the team sees the link — on a branch of its own, not review\/…, in a PR such as `chore\(<epic, lowercase>\): link issues`/);
+  // #512: with no verified Product there are no Product checks, so the hint only says to commit.
+  assert.match(lines.join('\n'), /commit \.sdlc\/issue-links\.json, so the team sees the link/);
+  assert.doesNotMatch(lines.join('\n'), /review\//);
   const closed = platform({ item: issue({ state: 'closed', labels: [{ name: 'feature' }] }) });
   await W.runIssuesLink(T, { ref: '8', epic: 'EP-a1', env, runner: closed.runner });
   assert.ok(closed.writes.some((a) => a.includes('labels[]=status: done')));
@@ -552,3 +553,28 @@ test('E171 review: unknown items are never "none", and items need the whole acco
   assert.notEqual(I.accountId({ platform: 'github', host: 'github.com', login: 'alice' }), I.accountId({ platform: 'gitlab', host: 'gitlab.com', login: 'alice' }));
 });
 
+// #512: on a verified Product every hint that asks for the links file to be committed names a route the
+// Product checks let through (a branch of its own, not review/…), and says when that holds.
+test('#512: link and sync name the PR route on a verified Product; a plain Product is told only to commit', async () => {
+  const T = product();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', git_url: 'git@github.com:a/b.git', ledger: 'verified' }));
+  await seed(T, 'a1');
+  const route = /commit \.sdlc\/issue-links\.json on a branch of its own, not review\/…, in a PR titled like `chore: record tracker links` — the Product checks let a PR of these records alone through, once a `yad update` that carries them has merged on the default branch/;
+  const capture = async (fn) => {
+    const lines = [];
+    const orig = process.stderr.write; const origLog = console.log; const origErr = console.error;
+    process.stderr.write = (x) => { lines.push(String(x)); return true; };
+    console.log = (...a) => lines.push(a.join(' ')); console.error = (...a) => lines.push(a.join(' '));
+    try { await fn(); } finally { process.stderr.write = orig; console.log = origLog; console.error = origErr; }
+    return lines.join('\n');
+  };
+  const item = issue({ labels: [{ name: 'feature' }] });
+  const linked = await capture(() => W.runIssuesLink(T, { ref: '7', epic: 'EP-a1', env, runner: platform({ item }).runner }));
+  assert.match(linked, route); assert.match(linked, /so the team sees the link/);
+  const synced = await capture(() => W.runIssuesSync(T, { env, runner: platform({ item }).runner }));
+  assert.match(synced, /commit any \.sdlc\/issue-links\.json this changed on a branch of its own, not review\/…/);
+  assert.equal(W.recordRoute(T, 'x.json').startsWith('commit x.json on a branch of its own'), true);
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', git_url: 'git@github.com:a/b.git' }));
+  assert.equal(W.recordRoute(T, 'x.json'), 'commit x.json', 'not verified: no Product checks to name');
+  reset();
+});

@@ -5074,8 +5074,9 @@ test('pr-title gate: product rejects an artifact change (epics/**) on a non-revi
   // A long list: the guard must read all of it (pipefail), and still fail.
   fs.writeFileSync(owners, `${Array.from({ length: 20000 }, (_, i) => `epics/EP-demo/notes/${i}.md`).join('\n')}\n`);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
-  // #512: an epic's issue-links file (`yad issues link`) is a record like an owner file, so it may come from any
-  // branch too — a feature epic's only, directly in its .sdlc/, and never beside a real artifact.
+  // #512: an epic's issue-links file (`yad issues link`) and the Foundation's roadmap-items file (`yad foundation
+  // publish`) are records like an owner file, so they may come from any branch too — each only where yad writes
+  // it, by exact name and case, and never beside a real artifact.
   for (const [list, code] of [
     ['epics/EP-demo/.sdlc/issue-links.json', 0],
     ['epics/EP-demo/.sdlc/issue-links.json\nepics/EP-other/.sdlc/issue-links.json\nepics/EP-demo/.sdlc/owners/architecture.json', 0],
@@ -5086,6 +5087,14 @@ test('pr-title gate: product rejects an artifact change (epics/**) on a non-revi
     ['epics/EP-demo/issue-links.json', 1],
     ['epics/EP-demo/.sdlc/issue-linksXjson', 1],
     ['"epics/EP-demo/.sdlc/issue-links.json"', 1],
+    ['epics/ep-demo/.sdlc/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/Issue-Links.json', 1],
+    ['foundation/.sdlc/roadmap-items.json', 0],
+    ['foundation/.sdlc/roadmap-items.json\nepics/EP-demo/.sdlc/issue-links.json\nfoundation/.sdlc/owners/foundation.json', 0],
+    ['foundation/.sdlc/roadmap-items.json\nfoundation/roadmap.md', 1],
+    ['epics/EP-demo/.sdlc/roadmap-items.json', 1],
+    ['foundation/.sdlc/sub/roadmap-items.json', 1],
+    ['foundation/roadmap-items.json', 1],
   ]) {
     fs.writeFileSync(owners, `${list}\n`);
     assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/link', '--changed', owners, 'chore(ep-demo): link issues']).code, code, list);
@@ -5175,9 +5184,45 @@ test('pr-template gate: product rejects an artifact change (epics/**) on a non-r
     ['epics/EP-demo/issue-links.json', 1],
     ['epics/EP-demo/.sdlc/issue-linksXjson', 1],
     ['"epics/EP-demo/.sdlc/issue-links.json"', 1],
+    ['epics/ep-demo/.sdlc/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/Issue-Links.json', 1],
+    ['foundation/.sdlc/roadmap-items.json', 0],
+    ['foundation/.sdlc/roadmap-items.json\nepics/EP-demo/.sdlc/issue-links.json\nfoundation/.sdlc/owners/foundation.json', 0],
+    ['foundation/.sdlc/roadmap-items.json\nfoundation/roadmap.md', 1],
+    ['epics/EP-demo/.sdlc/roadmap-items.json', 1],
+    ['foundation/.sdlc/sub/roadmap-items.json', 1],
+    ['foundation/roadmap-items.json', 1],
   ]) {
     fs.writeFileSync(owners, `${list}\n`);
     assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/link', '--changed', owners, CODE_TPL]).code, code, list);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// #512: a rename onto an exempt record still lists the artifact it removed, read the way the shipped Product
+// workflow reads a PR (its own `git diff` line), so moving an artifact onto a record never passes.
+test('pr-title / pr-template: an artifact moved onto issue-links.json or roadmap-items.json is still an artifact change (#512)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-512-'));
+  const wf = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-product-pr-text.yml'), 'utf8');
+  const line = wf.split('\n').find((l) => /changed="\$\(mktemp\)"; git .*diff .*--name-only/.test(l));
+  assert.ok(line, 'the workflow lists a PR\'s changes');
+  const diff = line.trim().replace(/^changed="\$\(mktemp\)"; /, '').replace(/ > "\$changed"$/, '').replace('"origin/${BASE_REF}...HEAD"', 'main...HEAD');
+  git(T, 'init', '-q', '-b', 'main');
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '# epic\n');
+  fs.writeFileSync(path.join(T, 'foundation/roadmap.md'), '# roadmap\n');
+  git(T, 'add', '-A'); git(T, 'commit', '-qm', 'base');
+  for (const [from, to] of [['epics/EP-demo/epic.md', 'epics/EP-demo/.sdlc/issue-links.json'], ['foundation/roadmap.md', 'foundation/.sdlc/roadmap-items.json']]) {
+    git(T, 'switch', '-q', '-C', 'chore/move', 'main');
+    git(T, 'mv', from, to); git(T, 'commit', '-qm', 'move');
+    const listed = execFileSync('bash', ['-c', diff], { cwd: T, env: GIT_ENV }).toString();
+    assert.match(listed, new RegExp(`^${from.replace(/[.]/g, '\\.')}$`, 'm'), `${diff} lists ${from}`);
+    const changed = path.join(T, '..', `yad-512-changed-${path.basename(T)}.txt`);
+    fs.writeFileSync(changed, listed);
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/move', '--changed', changed, 'chore: record tracker links']).code, 1, `${from} → ${to}`);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/move', '--changed', changed, CODE_TPL]).code, 1, `${from} → ${to}`);
+    fs.rmSync(changed, { force: true });
   }
   fs.rmSync(T, { recursive: true, force: true });
 });

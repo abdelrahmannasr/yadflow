@@ -13,7 +13,7 @@ import { err } from './errors.mjs';
 import { productConfigPath, epicFiles } from './manifest.mjs';
 import { acceptedHashes, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, roadmapFeatures } from './epic-state.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
-import { linkAndWriteBack, readItem } from './issues-write.mjs';
+import { linkAndWriteBack, readItem, recordRoute } from './issues-write.mjs';
 import { readLinks, itemKey } from './issue-links.mjs';
 import { targetOf } from './issues-act.mjs';
 import { readMilestones, safeTitle } from './scan.mjs';
@@ -213,7 +213,8 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   for (const x of out.failed) warn(`${x.epicId}: ${forTerminal(x.why)}${x.url ? ` ${x.url}` : ''}`);
   for (const n of out.notes) info(n);
   info(`${out.created.length} ${dryRun ? 'would be created' : 'created'}, ${out.alreadyPublished} already published`);
-  if (!dryRun && (out.created.length || out.recovered.length)) info('commit foundation/.sdlc/roadmap-items.json so the team keeps the record');
+  const records = [(out.created.length || out.recovered.length) && 'foundation/.sdlc/roadmap-items.json', out.linked.length && 'the epics\' .sdlc/issue-links.json'].filter(Boolean);
+  if (!dryRun && records.length) info(`${recordRoute(root, records.join(' and '))}, so the team keeps the record`);
   return undefined;
 }
 

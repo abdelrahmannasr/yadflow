@@ -2149,7 +2149,7 @@ export function productPathBlindGate(file) {
 }
 
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
-// through, and of issue-links files (#512: one pattern, found here by its owners half). That is safe only
+// through, and of the issue-links and roadmap-items records (#512: one pattern, found by its owners half). Safe only
 // while the product-checks workflow lists renames by BOTH paths (`--no-renames`).
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
@@ -2162,8 +2162,13 @@ export function ownerGuardChecks(checks, root) {
   // Line by line: one fixed diff line must not hide its blind twin in the other job.
   const blind = PRODUCT_CHECK_WORKFLOWS.filter((rel) => renameBlindText(read(rel) || ''));
   if (!blind.length) return;
+  // The records' half (#512) is named only when every exempting copy has it: an older copy the team edited
+  // exempts owner files alone, and the message must not claim more than the copy on disk lets through.
+  const records = exempting.every((rel) => read(rel)?.includes('issue-links\\.json$'));
   check(checks, 'owners:rename-blind', 'project', 'warn',
-    `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files or issue-links files alone through — so moving an artifact into .sdlc/owners/ or onto .sdlc/issue-links.json on a non-review branch passes both`,
+    records
+      ? `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files, issue-links files or the roadmap-items file alone through — so moving an artifact into .sdlc/owners/, or onto .sdlc/issue-links.json or .sdlc/roadmap-items.json, on a non-review branch passes both`
+      : `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
     'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
 }
 
