@@ -1046,6 +1046,13 @@ let deadline = Infinity;
 // How many characters of `case` words one reading may scan (#498 review round 2).
 const CASE_SCAN = 1 << 20;
 const caseLeft = { n: Infinity };
+// How many characters of readings one reading of the command may build: the joins of what parts print, and the
+// words a `$(…)` is read into (#498 review: each `$(…)` reading paired with a long one, or many joins each under
+// a per-join cap, ran the hook out of memory before the 5 s cut-off, and a crashed hook lets the command run).
+// Past it, the line is refused. A 900,000-character commit message through `printf … | cat | cat` builds about 40
+// times its length.
+const BUILT_CHARS = 64 * 1_000_000;
+const built = { n: 0 };
 const TOO_MANY_READINGS = { allow: false, message: 'yad agent guard: this command has too many `case` words inside `$(…)` to judge. Run it as separate commands.' };
 const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took too long to judge. Run it as separate commands.' };
 // The files a reading of the command writes (#498, row 8): each path's texts, every one ever written (a write
@@ -1065,6 +1072,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined) {
   if (depth > 0) return judgeReadings(line, depth, ends);
   deadline = Date.now() + JUDGE_BUDGET_MS;
   caseLeft.n = CASE_SCAN;
+  built.n = 0;
   resetFiles();
   try {
     return judgeReadings(line, depth);
@@ -1074,6 +1082,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined) {
   } finally {
     deadline = Infinity;
     caseLeft.n = Infinity;
+    built.n = 0;
     resetFiles();
   }
 }
@@ -1117,7 +1126,7 @@ function judgeReadings(line, depth, ends) {
   for (const mode of modes) {
     for (const text of texts) {
       // Each reading of the command gets its own budget for `case` words (#498).
-      if (depth === 0) { caseLeft.n = CASE_SCAN; resetFiles(); }
+      if (depth === 0) { caseLeft.n = CASE_SCAN; built.n = 0; resetFiles(); }
       const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
     }
@@ -1130,7 +1139,7 @@ function judgeReadings(line, depth, ends) {
       const from = firstExpandingHeredoc(text);
       for (const one of text.slice(from < 0 ? 0 : from).split('\n')) {
         for (const rule of rules) {
-          if (depth === 0) { caseLeft.n = CASE_SCAN; resetFiles(); }
+          if (depth === 0) { caseLeft.n = CASE_SCAN; built.n = 0; resetFiles(); }
           const v = judgeLine(one, depth, { ends: rule });
           if (!v.allow) return v;
         }
@@ -1269,7 +1278,7 @@ function printedOf(fed, n, lists, input = []) {
           per.push(t === null ? [OVER] : t.length ? t : ['']);
         }
         // Every reading, empty ones too: the joins pair readings by their place, so dropping one moves the rest
-        // (#498 review). Their memory is bounded by ZIP_CHARS.
+        // (#498 review). Their memory is bounded by BUILT_CHARS.
         for (const t of per) for (const x of t) out.push(x);
         if (per.length > 1) { const z = zipJoin(per); if (z === null) return null; for (const x of z) out.push(x); }
       }
@@ -1279,23 +1288,19 @@ function printedOf(fed, n, lists, input = []) {
 }
 // Readings side by side: the j-th joins each list's j-th reading (its last, once it has no more) by newlines, as
 // their output is, so every reading is in one of them and the count stays the longest list's. Built from pieces,
-// one join each, so a long `cat f f f …` stays linear (#498 review). Past ZIP_CHARS characters in all, null:
-// the line is refused (#498 review: many readings of a part, each joined to a long one, ran out of memory
-// before the cut-off, and a crashed hook lets the command run). Never a text in place of the readings: a
-// check that does not look for it would let them through. Sixteen times the longest line: a large commit
-// message through `printf … | cat` joins about twelve times its length.
-const ZIP_CHARS = 16 * MAX_JUDGED;
+// one join each, so a long `cat f f f …` stays linear (#498 review). Null once the line's BUILT_CHARS are
+// spent: the line is refused. Never a text in place of the readings: a check that does not look for it would
+// let them through.
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
   const out = [];
-  let size = 0;
   for (let j = 0; j < n; j++) {
     const pieces = [];
     for (let q = 0; q < per.length; q++) {
       if ((q & 4095) === 0 && Date.now() > deadline) return [OVER];
       const x = per[q][Math.min(j, per[q].length - 1)];
-      if ((size += x.length + 1) > ZIP_CHARS) return null;
+      if ((built.n += x.length + 1) > BUILT_CHARS) return null;
       pieces.push(x);
     }
     out.push(pieces.join('\n'));
@@ -1343,6 +1348,7 @@ function spellWord(entry, mode, noSplit = false) {
     entry.subs.forEach((s, q) => {
       cur += entry.word.slice(from, s.at);
       const text = outs[q][Math.min(j, outs[q].length - 1)];
+      built.n += text.length + s.at - from;
       if (s.quoted || noSplit) { cur += text; kept = true; } else {
         const toks = text.split(/[ \t\n]+/);
         cur += toks[0];
@@ -1352,6 +1358,7 @@ function spellWord(entry, mode, noSplit = false) {
     });
     cur += entry.word.slice(from);
     if (cur !== '' || kept) ws.push(cur);
+    if (built.n > BUILT_CHARS) return null;
     res.push(ws.map(unshieldBraces));
   }
   return res;
@@ -1385,8 +1392,9 @@ function substituted(parts, n, mode) {
     for (let k = 0; k < part.length; k++) {
       const a = alts.get(k);
       if (!a) { ws.push(part[k]); continue; }
-      for (const x of a[Math.min(j, a.length - 1)]) ws.push(x);
+      for (const x of a[Math.min(j, a.length - 1)]) { built.n += x.length + 1; ws.push(x); }
     }
+    if (built.n > BUILT_CHARS) return null;
     out.push(ws);
   }
   return out;
