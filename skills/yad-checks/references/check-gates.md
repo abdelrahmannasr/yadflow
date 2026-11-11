@@ -386,10 +386,12 @@ from the event payload):
     `--changed <file>` (computed from the diff against the base ref); without that list (a direct
     by-hand caller) the guard is inert and the branch split alone applies. A step owner file
     (`epics/<epic>/.sdlc/owners/<step>.json`, `foundation/.sdlc/owners/…`, written by `yad assign`,
-    E47) is not a Shape artifact: a PR that changes only owner files passes on any branch. The
-    workflow builds the list with `--no-renames` (and `core.quotePath=false`), so a rename INTO
-    `owners/` still lists the artifact it removed. A path git still C-quotes (a `"`, `\`, tab or
-    newline in its name) counts as an artifact change and never as an owner file. Both greps run with
+    E47) is not a Shape artifact, and neither is an epic's issue-links file
+    (`epics/<epic>/.sdlc/issue-links.json`, written by `yad issues link`, #512): a PR that changes
+    only these files passes on any branch. The workflow builds the list with `--no-renames` (and
+    `core.quotePath=false`), so a rename INTO `owners/` or onto `issue-links.json` still lists the
+    artifact it removed. A path git still C-quotes (a `"`, `\`, tab or newline in its name) counts as
+    an artifact change and never as an exempt file. Both greps run with
     `LC_ALL=C grep -a`, so a path with bytes that are not valid UTF-8 is never dropped from the list.
 
 ## 7. pr-template (`templates/checks/pr-template.sh`)
@@ -406,7 +408,7 @@ catches a free-form description that bypassed it:
     `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
   - **Anti-bypass guard** (same as pr-title): a non-review head that changes Shape artifacts
     (`epics/**` or `foundation/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
-    must go through a `review/EP-*` PR, and the message says how, as in pr-title. Step owner files alone do not count (E47).
+    must go through a `review/EP-*` PR, and the message says how, as in pr-title. Step owner files and issue-links files alone do not count (E47, #512).
 
 **GitLab truncates the description this gate reads.** `$CI_MERGE_REQUEST_DESCRIPTION` stops at **2700
 characters**, so a long but perfectly valid MR can lose a required section *before the gate sees it* —

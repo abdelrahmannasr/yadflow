@@ -296,7 +296,7 @@ export async function runIssuesSync(root, { dryRun = false, json = false, env = 
   for (const s of r.skipped) warn(s);
   for (const e of r.unreadable) warn(`${e}: its .sdlc/issue-links.json could not be read, so status labels and closes were held back`);
   if (!r.items.length && !r.skipped.length && !r.unreadable.length) info('no items are linked to an epic');
-  else if (!dryRun) info('commit any .sdlc/issue-links.json this changed, so the team keeps the record');
+  else if (!dryRun) info(`commit any .sdlc/issue-links.json this changed, so the team keeps the record — ${LINKS_ROUTE}`);
   return undefined;
 }
 
@@ -310,13 +310,17 @@ export function syncAfterGate(root, epic, { env = process.env, runner = run, now
     const r = syncItems(root, { only: epic, close: false, env, runner, now });
     const changed = r.items.filter((i) => i.commented || i.labelled.length || i.removed.length);
     for (const i of changed) info(`updated ${i.ref}: ${[i.commented && 'comment', ...i.labelled.map((l) => `+${forTerminal(l)}`), ...i.removed.map((l) => `-${forTerminal(l)}`)].filter(Boolean).join(', ')}`);
-    if (changed.some((i) => i.commented)) info('commit .sdlc/issue-links.json so the team keeps the record');
+    if (changed.some((i) => i.commented)) info(`commit .sdlc/issue-links.json so the team keeps the record — ${LINKS_ROUTE}`);
     for (const i of r.items) for (const f of i.failed) warn(`${i.ref}: ${forTerminal(f)}. The gate still passed; \`yad issues sync\` catches up`);
     for (const s of r.skipped) warn(s);
   } catch (e) {
     warn(`the linked items were not updated (${forTerminal(e?.message ?? String(e))}). The gate still passed; \`yad issues sync\` catches up`);
   }
 }
+
+// Where a changed links file goes (#512). The Product's pr-title and pr-template checks let a PR of issue-links
+// files alone (with step owner files, or not) through from any branch; a review/EP-* branch would advance a step.
+const LINKS_ROUTE = 'on a branch of its own, not review/…, in a PR such as `chore(<epic, lowercase>): link issues`: the Product checks let a PR of issue-links files alone through';
 
 const epicTypeOf = (root, epic) => readJSON(epicFiles(epicRoot(root, epic)).state, null)?.type ?? null;
 const knownEpic = (root, epic) => isValidEpicId(epic) && !PRODUCT_EPICS.includes(epic) && fs.existsSync(epicFiles(epicRoot(root, epic)).state);
@@ -332,7 +336,7 @@ export async function runIssuesLink(root, { ref, epic: raw, json = false, now = 
   if (json) return emitJSON({ ok: true, epic, url: entry.url, number: entry.number, created, commented: back.commented, labelled: back.labelled, failed: back.failed, notes: back.notes });
   said(`${created ? 'linked' : 'already linked:'} ${got.label === 'Product' ? '' : forTerminal(got.label)}#${entry.number} → ${epic}`);
   sayBack(back);
-  if (created) info('commit .sdlc/issue-links.json on the epic\'s branch so the team sees the link');
+  if (created) info(`commit .sdlc/issue-links.json so the team sees the link — ${LINKS_ROUTE}`);
   return undefined;
 }
 

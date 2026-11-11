@@ -337,6 +337,8 @@ test('E170 review 2: an unrelated broken sidecar is named; a closed item still g
   try { await W.runIssuesLink(T, { ref: '7', epic: 'EP-a1', env, runner: openItem.runner }); } finally { process.stderr.write = orig; console.log = origLog; console.error = origErr; }
   assert.equal(openItem.writes.some((a) => a.some((x) => x.startsWith('labels[]=status:'))), false);
   assert.match(lines.join('\n'), /EP-other/);
+  // #512: the hint names a route the Product checks let through, not "the epic's branch".
+  assert.match(lines.join('\n'), /commit \.sdlc\/issue-links\.json so the team sees the link — on a branch of its own, not review\/…, in a PR such as `chore\(<epic, lowercase>\): link issues`/);
   const closed = platform({ item: issue({ state: 'closed', labels: [{ name: 'feature' }] }) });
   await W.runIssuesLink(T, { ref: '8', epic: 'EP-a1', env, runner: closed.runner });
   assert.ok(closed.writes.some((a) => a.includes('labels[]=status: done')));

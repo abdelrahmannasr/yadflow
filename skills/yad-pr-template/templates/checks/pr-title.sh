@@ -54,14 +54,16 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
-# A step owner file (`yad assign`, E47) is not an artifact: an assignment is advice, reviewed by nobody, and
-# a review/EP-* PR would advance the step on merge. So a PR of owner files alone is not an artifact change.
+# Two records are not artifacts: a step owner file (`yad assign`, E47) and an epic's issue-links file (`yad issues
+# link`, E170, #512). Both are reviewed by nobody (an assignment is advice; a link names where a tracker item is),
+# and a review/EP-* PR would advance a step on merge. So a PR of these files alone is not an artifact change.
+# The issue-links file is a feature epic's only: `yad issues link` refuses the Foundation, so foundation/ has none.
 # No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
 # `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
-# line counts as an artifact, and the owner exemption never matches it — so it fails closed.
+# line counts as an artifact, and neither exemption matches it — so it fails closed.
 # `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
 # locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$|^epics/EP-[^/]+/\.sdlc/issue-links\.json$' >/dev/null; }
 
 TITLE="${ARGS[0]:-}"
 if [ -z "$TITLE" ]; then

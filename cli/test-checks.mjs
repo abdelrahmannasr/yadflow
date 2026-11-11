@@ -5074,6 +5074,22 @@ test('pr-title gate: product rejects an artifact change (epics/**) on a non-revi
   // A long list: the guard must read all of it (pipefail), and still fail.
   fs.writeFileSync(owners, `${Array.from({ length: 20000 }, (_, i) => `epics/EP-demo/notes/${i}.md`).join('\n')}\n`);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, 'chore: assign architecture']).code, 1);
+  // #512: an epic's issue-links file (`yad issues link`) is a record like an owner file, so it may come from any
+  // branch too — a feature epic's only, directly in its .sdlc/, and never beside a real artifact.
+  for (const [list, code] of [
+    ['epics/EP-demo/.sdlc/issue-links.json', 0],
+    ['epics/EP-demo/.sdlc/issue-links.json\nepics/EP-other/.sdlc/issue-links.json\nepics/EP-demo/.sdlc/owners/architecture.json', 0],
+    ['epics/EP-demo/.sdlc/issue-links.json\nepics/EP-demo/epic.md', 1],
+    ['foundation/.sdlc/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/sub/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/issue-links.json.bak', 1],
+    ['epics/EP-demo/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/issue-linksXjson', 1],
+    ['"epics/EP-demo/.sdlc/issue-links.json"', 1],
+  ]) {
+    fs.writeFileSync(owners, `${list}\n`);
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/link', '--changed', owners, 'chore(ep-demo): link issues']).code, code, list);
+  }
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5148,6 +5164,21 @@ test('pr-template gate: product rejects an artifact change (epics/**) on a non-r
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 0);
   fs.writeFileSync(owners, 'epics/EP-demo/.sdlc/owners/architecture.json\nepics/EP-demo/architecture.md\n');
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/assign', '--changed', owners, CODE_TPL]).code, 1);
+  // #512: the issue-links file, by the same rule as pr-title.
+  for (const [list, code] of [
+    ['epics/EP-demo/.sdlc/issue-links.json', 0],
+    ['epics/EP-demo/.sdlc/issue-links.json\nepics/EP-other/.sdlc/issue-links.json\nepics/EP-demo/.sdlc/owners/architecture.json', 0],
+    ['epics/EP-demo/.sdlc/issue-links.json\nepics/EP-demo/epic.md', 1],
+    ['foundation/.sdlc/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/sub/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/issue-links.json.bak', 1],
+    ['epics/EP-demo/issue-links.json', 1],
+    ['epics/EP-demo/.sdlc/issue-linksXjson', 1],
+    ['"epics/EP-demo/.sdlc/issue-links.json"', 1],
+  ]) {
+    fs.writeFileSync(owners, `${list}\n`);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/link', '--changed', owners, CODE_TPL]).code, code, list);
+  }
   fs.rmSync(T, { recursive: true, force: true });
 });
 

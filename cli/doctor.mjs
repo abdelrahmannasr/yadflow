@@ -2149,7 +2149,8 @@ export function productPathBlindGate(file) {
 }
 
 // `owners:rename-blind` (E47). The wired `pr-title` / `pr-template` checks let a PR of step owner files alone
-// through; that is safe only while the product-checks workflow lists renames by BOTH paths (`--no-renames`).
+// through, and of issue-links files (#512: one pattern, found here by its owners half). That is safe only
+// while the product-checks workflow lists renames by BOTH paths (`--no-renames`).
 // `yad update` keeps a workflow the team changed by hand, so a Product can hold the new checks and the old
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
 // The old names too (E123): an edited `yad-hub-checks.yml` is kept by `yad update`, and still runs.
@@ -2162,7 +2163,7 @@ export function ownerGuardChecks(checks, root) {
   const blind = PRODUCT_CHECK_WORKFLOWS.filter((rel) => renameBlindText(read(rel) || ''));
   if (!blind.length) return;
   check(checks, 'owners:rename-blind', 'project', 'warn',
-    `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files alone through — so moving an artifact into .sdlc/owners/ on a non-review branch passes both`,
+    `${blind.join(', ')} lists a PR's changes without \`--no-renames\`, while ${exempting.join(' and ')} let a PR of step owner files or issue-links files alone through — so moving an artifact into .sdlc/owners/ or onto .sdlc/issue-links.json on a non-review branch passes both`,
     'add `--no-renames` (and `-c core.quotePath=false`) to that workflow\'s `git diff --name-only` lines, as the shipped one has — `yad update` did not replace it because it was changed by hand');
 }
 

@@ -28010,6 +28010,7 @@ test('E47 doctor: new owner-exempting checks beside a Product workflow that list
     const hit = blind();
     assert.equal(hit.length, 1);
     assert.match(hit[0].message, /\.github\/workflows\/yad-product-pr-text\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
+    assert.match(hit[0].message, /step owner files or issue-links files alone through — so moving an artifact into \.sdlc\/owners\/ or onto \.sdlc\/issue-links\.json/, '#512');
     w('.github/workflows/yad-product-pr-text.yml', shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml'));
     assert.deepEqual(blind(), [], 'the shipped workflow is fine');
     // One line fixed and its twin not: still blind (a job the team does not require would let it through).
