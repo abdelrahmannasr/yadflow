@@ -599,7 +599,9 @@ const LEGACY_FORMS = [
 // file with those lines taken out. What an approval RECORDS is unchanged (`reviewedSha`), so no release
 // reads a new record differently. Only those exact values are taken out, and only from an epic with no
 // `parent:` (a change-epic's type and thread are part of what its review approved). Any other value
-// (`type: defect`, a thread naming another epic) still counts as an edit.
+// (`type: defect`, a thread naming another epic) still counts as an edit. Like the `status:` line, it is read
+// only in a frontmatter block that opens with `---\n`: a file with CRLF line ends throughout keeps its
+// whole-text fingerprint, so there the header still revokes (stale, never wrongly live).
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function withoutGenesisLineage(text, epicId) {
   const fm = String(text).match(FRONTMATTER_BLOCK);
@@ -608,7 +610,11 @@ export function withoutGenesisLineage(text, epicId) {
   if (lines.some((l) => /^parent:/.test(l))) return null;
   const genesis = [/^kind: feature[ \t]*\r?$/, /^type: feature[ \t]*\r?$/, new RegExp(`^thread: ${escapeRe(epicId)}[ \\t]*\\r?$`)];
   const kept = lines.filter((l) => !genesis.some((re) => re.test(l)));
-  if (kept.length === lines.length) return null;
+  // Only when they are the epic's ONLY lineage lines. Next to another `kind:`, `type:` or `thread:` they
+  // are not the default: the readers disagree on which copy of a key wins (Node the last, the bash gates
+  // the first) and read `kind` before `type`, so adding `kind: feature` to a `type: chore` epic changes
+  // what it is (review 1).
+  if (kept.length === lines.length || kept.some((l) => /^(?:kind|type|thread)\s*:/.test(l))) return null;
   return `---\n${kept.join('\n')}${text.slice(4 + fm[1].length)}`;
 }
 

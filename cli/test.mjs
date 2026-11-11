@@ -14115,6 +14115,17 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
         fs.writeFileSync(f, withHeader(fmFile('EP-x', 'approved'), lines));
         assert.equal(live(today), false, `${why} revokes`);
       }
+      // Next to a lineage key the epic already had, the same lines change what it is (review 1).
+      for (const [why, had, added] of [
+        ['kind: feature on a chore', 'type: chore\n', 'kind: feature\n'],
+        ['both names below a chore', 'kind: chore\ntype: chore\n', 'kind: feature\ntype: feature\n'],
+        ['its own thread over another', 'thread: EP-y\n', 'thread: EP-x\n'],
+      ]) {
+        fs.writeFileSync(f, withHeader(fmFile('EP-x', 'draft'), had));
+        const before = artifactHash(ep, 'epic.md');
+        fs.writeFileSync(f, withHeader(fmFile('EP-x', 'draft'), `${had}${added}`));
+        assert.equal(isStaleHash(before, acceptedHashes(ep, 'epic.md')), true, `${why} revokes`);
+      }
       fs.writeFileSync(f, withHeader(fmFile('EP-x', 'approved', '# body\nnew sentence\n')));
       assert.equal(live(today), false, 'a body edit with the header still revokes');
       // In the body the lines are content.
