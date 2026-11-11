@@ -905,9 +905,15 @@ test('#498: yad hook agent-guard judges in a worker; one that runs out of memory
   const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
   assert.equal(hook('gh pr merge 5').status, 2);
   assert.match(hook('git status').stdout, /pre-approved/);
+  // Out of time after the verdict: an allowed line stays allowed, only not pre-approved. This line's verdict
+  // takes about 0.2 s on a laptop, its pre-approval about 6.5 s. Under coverage the verdict may be late too.
+  const longRead = 'git status 2>&1; '.repeat(Math.floor(990_000 / 17));
+  const late = await judgeInWorker(longRead, { root: os.tmpdir(), cwd: os.tmpdir() }, { wallMs: 3000 });
+  assert.equal(late.pre, null, JSON.stringify(late.pre));
+  if (!process.env.NODE_V8_COVERAGE) assert.equal(late.verdict.allow, true, late.verdict.message);
 });
 
-test('#498: a named pipe where a shipped check should be is not read, so pre-approval never blocks the hook', { skip: process.platform === 'win32' }, async () => {
+test('#498: a named pipe where a shipped check should be is not read, so pre-approval never blocks the hook', { skip: process.platform === 'win32', timeout: 20_000 }, async () => {
   const { agentGuardPreapproval } = await import('./agent-guard.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fifo-'));
   try {

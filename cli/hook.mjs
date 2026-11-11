@@ -683,7 +683,8 @@ export async function runAgentGuardHook({ format = null } = {}) {
 }
 
 // The worker's limits: well above what the longest ordinary line takes (about 400 MB, under a second), and a
-// wall clock past two of the guard's own 5 s budgets (pre-approval judges the line again), with slack.
+// wall clock past two of the guard's own 5 s budgets (pre-approval judges the line again), with slack. Past it
+// with a verdict given, the verdict stands, not pre-approved; with none, the line is refused.
 export const GUARD_HEAP_MB = 1024;
 export const GUARD_WALL_MS = 2 * JUDGE_BUDGET_MS + 2000;
 const NOT_JUDGED = (why) => ({ allow: false, message: `yad agent guard: this command could not be judged (${why}). Run it as separate commands, shorter, or ask the person to run it.` });
@@ -693,6 +694,9 @@ export function judgeInWorker(command, preapproval, { heapMb = GUARD_HEAP_MB, wa
     let done = false;
     let worker = null;
     let timer = null;
+    // The verdict, once the worker has given it: after it, only pre-approval can be lost (it is then not given).
+    let verdict = null;
+    const lost = (why) => (verdict ? { verdict, pre: null } : { verdict: NOT_JUDGED(why), pre: null });
     const finish = (answer) => {
       if (done) return;
       done = true;
@@ -706,10 +710,18 @@ export function judgeInWorker(command, preapproval, { heapMb = GUARD_HEAP_MB, wa
       finish({ verdict: NOT_JUDGED(e?.message ?? String(e)), pre: null });
       return;
     }
-    timer = setTimeout(() => finish({ verdict: NOT_JUDGED(`no answer in ${wallMs / 1000} s`), pre: null }), wallMs);
-    worker.once('message', (m) => finish(m && m.verdict ? m : { verdict: NOT_JUDGED('no verdict'), pre: null }));
-    worker.once('error', (e) => finish({ verdict: NOT_JUDGED(e?.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'it ran out of memory' : (e?.message ?? String(e))), pre: null }));
-    worker.once('exit', (code) => finish({ verdict: NOT_JUDGED(`the judge stopped (${code})`), pre: null }));
+    timer = setTimeout(() => finish(lost(`no answer in ${wallMs / 1000} s`)), wallMs);
+    worker.on('message', (m) => {
+      if (!verdict) {
+        if (!m || typeof m.verdict?.allow !== 'boolean') { finish({ verdict: NOT_JUDGED('no verdict'), pre: null }); return; }
+        verdict = m.verdict;
+        if (!verdict.allow || !preapproval) finish({ verdict, pre: null });
+        return;
+      }
+      finish({ verdict, pre: m?.pre ?? null });
+    });
+    worker.once('error', (e) => finish(lost(e?.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'it ran out of memory' : (e?.message ?? String(e)))));
+    worker.once('exit', (code) => finish(lost(`the judge stopped (${code})`)));
   });
 }
 

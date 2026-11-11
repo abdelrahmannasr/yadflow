@@ -6,7 +6,8 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { agentGuardDecision, agentGuardPreapproval } from './agent-guard.mjs';
 
 const { command, preapproval } = workerData;
+// The verdict first: pre-approval (E167) reads the same line again, under the same limits, and when it runs out
+// of time the verdict stands, only not pre-approved.
 const verdict = agentGuardDecision(command);
-// Pre-approval (E167) reads the same line, so it runs here too, under the same limits.
-const pre = verdict.allow && preapproval ? agentGuardPreapproval(command, preapproval) : null;
-parentPort.postMessage({ verdict, pre });
+parentPort.postMessage({ verdict });
+if (verdict.allow && preapproval) parentPort.postMessage({ pre: agentGuardPreapproval(command, preapproval) });
