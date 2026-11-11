@@ -589,6 +589,49 @@ const LEGACY_FORMS = [
   }),
 ];
 
+// ---- the genesis lineage header (#499) -----------------------------------------------------------
+//
+// Before a change threads off a feature epic written before Phase 6, yad-change adds three lines to that
+// epic's frontmatter: `kind: feature`, `type: feature` and `thread: <its own id>`. They state what every
+// reader already assumes for an epic with no lineage (`workItemType` defaults to `feature`, and an epic
+// with no parent is its own thread root), so they change nothing the reviewers read. Yet they changed the
+// file, so every approval of its review read as stale. So a reader also accepts the fingerprint of the
+// file with those lines taken out. What an approval RECORDS is unchanged (`reviewedSha`), so no release
+// reads a new record differently. Only those exact values are taken out, and only from an epic with no
+// `parent:` (a change-epic's type and thread are part of what its review approved). Any other value
+// (`type: defect`, a thread naming another epic) still counts as an edit. Like the `status:` line, it is read
+// only in a frontmatter block that opens with `---\n`: a file with CRLF line ends throughout keeps its
+// whole-text fingerprint, so there the header still revokes (stale, never wrongly live).
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function withoutGenesisLineage(text, epicId) {
+  const fm = String(text).match(FRONTMATTER_BLOCK);
+  if (!fm || !epicId) return null;
+  const lines = fm[1].split('\n');
+  if (lines.some((l) => /^parent:/.test(l))) return null;
+  const genesis = [/^kind: feature[ \t]*\r?$/, /^type: feature[ \t]*\r?$/, new RegExp(`^thread: ${escapeRe(epicId)}[ \\t]*\\r?$`)];
+  const kept = lines.filter((l) => !genesis.some((re) => re.test(l)));
+  // Only when they are the epic's ONLY lineage lines. Next to another `kind:`, `type:` or `thread:` they
+  // are not the default: the readers disagree on which copy of a key wins (Node the last, the bash gates
+  // the first) and read `kind` before `type`, so adding `kind: feature` to a `type: chore` epic changes
+  // what it is (review 1).
+  if (kept.length === lines.length || kept.some((l) => /^(?:kind|type|thread)\s*:/.test(l))) return null;
+  return `---\n${kept.join('\n')}${text.slice(4 + fm[1].length)}`;
+}
+
+// Today's form and every legacy form, over the file's text with the genesis lines taken out. Empty when
+// the file has none of them, so nothing new is accepted for any other file.
+function genesisForms(p, epicId) {
+  if (!fs.existsSync(p)) return [];
+  const text = withoutGenesisLineage(fs.readFileSync(p).toString('utf8'), epicId);
+  if (text === null) return [];
+  const status = (edit) => { const t = withStatusLine(text, edit); return shaOf(t === null ? text : t); };
+  return [
+    status(''),
+    shaOf(text),
+    ...LEGACY_STATUSES.map((value) => status((line) => `status: ${value}${line.match(/\r?\n?$/)[0]}`)),
+  ];
+}
+
 // Deterministic fingerprint of the whole stories/ set: hash each story file, sort, combine. Lets an
 // edit to any story revoke prior stories-review approvals.
 // `sha` is how one file is fingerprinted — `reviewedSha` for the record, a legacy form for reading.
@@ -1045,7 +1088,10 @@ export function acceptedHashes(epicDir, artifact) {
   const hashWith = parts ? (sha) => uiDesignHash(epicDir, sha, parts) : (sha) => artifactHash(epicDir, artifact, sha);
   const current = hashWith(reviewedSha);
   if (current === null) return [];
-  return [...new Set([current, ...LEGACY_FORMS.map(hashWith)].filter(Boolean))];
+  // An epic's own file also matches with its genesis lineage lines taken out (#499).
+  const genesis = artifactBase(artifact) === 'epic' && !/\//.test(artifact.replace(/\/$/, ''))
+    ? genesisForms(path.join(epicDir, artifact), path.basename(epicDir)) : [];
+  return [...new Set([current, ...LEGACY_FORMS.map(hashWith), ...genesis].filter(Boolean))];
 }
 
 // Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual

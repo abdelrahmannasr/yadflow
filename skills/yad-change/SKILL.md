@@ -60,7 +60,9 @@ Confirm `parent` exists (`epics/<parent>/epic.md` + `.sdlc/state.json`). Read it
 the thread root (`yad thread <parent>` / `resolveThread`). **STOP** if the parent is missing, or its
 lineage is broken (a cycle, or a `thread` cache ≠ the computed root) — fix the parent first. If the
 parent is a **genesis epic not yet migrated** (no type at all), migrate it now: add `kind: feature`, `type: feature` and
-`thread: <its own id>` to its `epic.md` (a one-line, non-gated frontmatter add).
+`thread: <its own id>` to its `epic.md` (a one-line, non-gated frontmatter add). Use exactly those values: they
+keep the epic's approvals, and the change-epic's inherited bindings, live (#499) — any other value or key added at
+the same time is an edit and makes them stale.
 
 **Missing parent (brownfield) — never silent.** If the requested `parent` does **not exist at all**
 because the feature was built before it had an epic, do NOT dead-end: point the user at **`yad-stub`** to

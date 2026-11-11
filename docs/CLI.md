@@ -440,7 +440,10 @@ the review PR/MR is merged.
 The merge click is the human approval act, so Shape steps still never advance on their own. Approvals are
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. The
 frontmatter `status:` line is not part of that hash: the gate flips it to `approved` at merge and Build
-flips a story to `in-build`, and neither is an edit ([shape 9](migrations/shape-9.md)). With no
+flips a story to `in-build`, and neither is an edit ([shape 9](migrations/shape-9.md)). Nor is the genesis
+lineage header `yad-change` adds to an older feature epic before a change threads off it — exactly `kind: feature`,
+`type: feature` and `thread: <its own id>` on an epic with no `parent:` — since it states what yad already assumes
+(#499); any other value is an edit. With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
 
 **One approval rule, and no roles.** yadflow keeps no list of people (the roster was removed in E62):
