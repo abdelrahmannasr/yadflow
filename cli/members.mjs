@@ -46,7 +46,7 @@ import { spawnSync } from 'node:child_process';
 import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
-import { repoPathFromGitUrl, httpStatus } from './protection.mjs';
+import { repoPathFromGitUrl, repoGitUrl, httpStatus } from './protection.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
 
@@ -83,9 +83,11 @@ export const accountLabel = (a) => `${a.platform === 'github' ? 'GitHub' : 'GitL
 // clone's `origin`. `platform` is null on a Product with no platform: then nothing can be proven.
 export function productIdentity(root, { runner = run, productConfig = readJSON(productConfigPath(root), null) } = {}) {
   const platform = PLATFORMS.includes(productConfig?.platform) ? productConfig.platform : null;
-  let url = typeof productConfig?.git_url === 'string' ? productConfig.git_url : '';
-  if (!url) url = runner('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '';
-  const host = plainHost(hostFromGitUrl(url)) || (platform ? DEFAULT_HOST[platform] : null);
+  // A git_url that names only a host is no repo: origin then (#513), keeping the settings' host if origin
+  // names none.
+  const set = typeof productConfig?.git_url === 'string' ? productConfig.git_url : '';
+  const url = repoGitUrl(set) || runner('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '';
+  const host = plainHost(hostFromGitUrl(url)) || plainHost(hostFromGitUrl(set)) || (platform ? DEFAULT_HOST[platform] : null);
   return { platform, host, repo: repoPathFromGitUrl(url), defaultBranch: typeof productConfig?.default_branch === 'string' ? productConfig.default_branch : null, verified: isVerifiedLedger(productConfig) };
 }
 

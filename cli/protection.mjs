@@ -54,6 +54,11 @@ export function repoPathFromGitUrl(url = '') {
   return parts.length >= 2 ? parts.join('/') : null;
 }
 
+// A git_url that names a repo, as written (trimmed), else ''. A url that names only a host
+// (`https://gitlab.example.com`, `git@host:`) says where the platform is but not which repo, so a reader
+// that falls back to the clone's origin remote must fall back for it too (#513): `repoGitUrl(x) || origin`.
+export const repoGitUrl = (u) => (typeof u === 'string' && repoPathFromGitUrl(u) ? u.trim() : '');
+
 // The HTTP status of a failed `gh api` / `glab api` call, or null when there was none (offline, a timeout,
 // the host is down). gh ends with `gh: Not Found (HTTP 404)`; glab with `glab: 404 Not Found (HTTP 404)`
 // and prints the body `{"message":"401 Unauthorized"}` on stdout.

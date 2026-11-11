@@ -3929,6 +3929,24 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #513: a git_url that names only a host is replaced from an origin that names a repo — and only then.
+test('runSetup: re-run replaces a git_url that names no repo from origin; never a full one, never with no repo', async () => {
+  const run1 = async (hub, originUrl) => {
+    const { T } = scaffold();
+    if (originUrl) git(T, 'remote', 'add', 'origin', originUrl);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ...hub }));
+    process.env.SDLC_NONINTERACTIVE = '1';
+    try { await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); } finally { delete process.env.SDLC_NONINTERACTIVE; }
+    const got = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8')).git_url;
+    fs.rmSync(T, { recursive: true, force: true });
+    return got;
+  };
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com/acme/product.git'), 'https://gitlab.example.com/acme/product.git');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com/acme/product.git' }, 'git@gitlab.example.com:other/x.git'), 'https://gitlab.example.com/acme/product.git', 'a full git_url is kept');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com'), 'https://gitlab.example.com', 'an origin with no repo replaces nothing');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, null), 'https://gitlab.example.com', 'no origin: unchanged');
+});
+
 // Regression for #97: a reconfigure must never drop a key it does not collect. Since E62 that includes a
 // `roster` and `verified_authors` an older release wrote: nothing reads them, and nothing deletes them.
 test('buildReconfiguredProductConfig: overlays what this run collected and keeps every other key as it was', () => {
@@ -13017,6 +13035,20 @@ test('doctor E64: the roster warning says when it can go — counted with the sa
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #513: a git_url that names only a host warns, naming the host and never the value; reads use origin.
+test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the host only', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [], git_url: 'https://user:s3cret@gitlab.example.com/' }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  const w = r.checks.find((x) => x.id === 'product-git-url');
+  assert.equal(w?.status, 'warn');
+  assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad reads the Product from its origin remote instead \[YAD-CFG-005\]/);
+  assert.doesNotMatch(JSON.stringify(w), /s3cret|user:/, 'the value is never shown');
+  assert.match(w.hint, /re-run `yad setup` to set it from origin/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: Product settings with git_url present emit no product-git-url warning', async () => {
   const { T } = scaffold();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/product.git' }));
@@ -22101,7 +22133,7 @@ test('#426 doctor + yad codeowners check: the gate-file warning on a code repo a
 // 404 on classic branch protection to anyone who is not an admin, even on a branch it reports as
 // protected — so a failed call is "not known", with the reason, never "none" and never "fine".
 const {
-  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
+  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, repoGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
 } = await import('./protection.mjs');
 
 // A fake `gh`/`glab`: `calls` is [[regex on the API path, status, body]]; status null is "no answer"
@@ -22149,6 +22181,11 @@ test('E70 helpers: the repo path keeps a GitLab subgroup; the HTTP status of gh 
   assert.equal(repoPathFromGitUrl('ssh://git@git.corp.example:2222/group/sub/proj.git'), 'group/sub/proj', 'doctor\'s old repoSlug kept only sub/proj');
   assert.equal(repoPathFromGitUrl('https://gitlab.com/group/sub/proj/'), 'group/sub/proj');
   for (const bad of ['', '   ', null, 'https://github.com/only', 'not a url', 42]) assert.equal(repoPathFromGitUrl(bad), null, String(bad));
+  // #513: a git_url that names a repo, as written; a host alone is none, so readers fall back to origin.
+  assert.equal(repoGitUrl(' https://gitlab.com/group/sub/proj.git '), 'https://gitlab.com/group/sub/proj.git');
+  assert.equal(repoGitUrl('git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
+  assert.equal(repoGitUrl('ssh://git@git.corp.example:2222/group/proj.git'), 'ssh://git@git.corp.example:2222/group/proj.git');
+  for (const bad of ['https://gitlab.example.com', 'https://gitlab.example.com/', 'git@gitlab.example.com:', 'gitlab.example.com', '', null, 42]) assert.equal(repoGitUrl(bad), '', String(bad));
   assert.equal(httpStatus({ stderr: 'gh: Not Found (HTTP 404)' }), 404);
   assert.equal(httpStatus({ stderr: 'glab: 401 Unauthorized' }), 401);
   assert.equal(httpStatus({ stdout: '{"message":"403 Forbidden"}' }), 403);
