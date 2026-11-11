@@ -1273,6 +1273,8 @@ function printedOf(fed, n, lists, input = []) {
           if (a === '-') continue;
           // A file name read past its limits (`cat $(cat f)`): the file it names is unknown, so is what it prints
           // (#498 review: it read as no file, and `cat $(cat f) | bash` was let through).
+          // Each file word costs a lookup and a list, counted too (#498 review: many words, each read again per reading).
+          if ((built.n += 64 + a.length) > BUILT_CHARS) return null;
           if (a.includes(OVER)) { fileTexts(a); per.push([OVER]); continue; }
           const t = fileTexts(a);
           per.push(t === null ? [OVER] : t.length ? t : ['']);
@@ -1388,10 +1390,12 @@ function substituted(parts, n, mode) {
   }
   const out = [];
   for (let j = 0; j < m; j++) {
+    if (Date.now() > deadline) return null;
     const ws = [];
     for (let k = 0; k < part.length; k++) {
       const a = alts.get(k);
-      if (!a) { ws.push(part[k]); continue; }
+      // Every word is copied once per reading, so each is counted (#498 review).
+      if (!a) { built.n += part[k].length + 1; ws.push(part[k]); continue; }
       for (const x of a[Math.min(j, a.length - 1)]) { built.n += x.length + 1; ws.push(x); }
     }
     if (built.n > BUILT_CHARS) return null;
@@ -1496,6 +1500,10 @@ function judgeParts(parts, depth, mode) {
       const raw = base[base.length - bw.length] ?? '';
       if (bw.length && (/[$`]/.test(raw) || /^=[A-Za-z]/.test(raw))) {
         const bl = base.slice(0, base.length - bw.length);
+        // Six copies of the words, counted like every other reading built (#498 review).
+        let size = 0;
+        for (const x of base) size += x.length + 1;
+        if ((built.n += 6 * size) > BUILT_CHARS || Date.now() > deadline) return TOO_MUCH_WRITTEN;
         variants.push([...bl, ...bw.slice(1)], ...['gh', 'glab', 'git', 'yad', 'bash'].map((prog) => [...bl, prog, ...bw.slice(1)]));
       }
     }
