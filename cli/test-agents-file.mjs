@@ -509,7 +509,65 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
-  ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
+    // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
+    // as a shell's script or input.
+    'bash <(echo "gh pr merge 5")', 'bash < <(echo "gh pr merge 5")', 'source <(echo "git push --force")', ". <(echo 'gh pr merge 5')",
+    'zsh =(echo "gh pr merge 5")', "bash -s < <(echo 'gh pr merge 5')", "bash -x <(echo 'git commit -n -m x')", "bash <(cat <<'EOF'\ngh pr merge 5\nEOF\n)",
+    // Row 2: a `$(…)` whose printed text is known becomes code.
+    "bash -c \"$(cat <<'EOF'\ngh pr merge 5\nEOF\n)\"", 'eval "$(echo gh pr merge 5)"', "$(cat <<'EOF'\ngh pr merge 5\nEOF\n)", "bash -c \"$(echo 'true; gh pr merge 5')\"",
+    "bash <<< \"$(echo 'true; gh pr merge 5')\"", "bash -c '$(cat <<EOF\ngh pr merge 5\nEOF\n)'", 'bash -c "gh pr $(echo merge) 5"', 'eval "$(printf \'%s\\n\' \'git push --force\')"',
+    // Row 8: a file written, then run, by every path a shell finds it by.
+    'echo "gh pr merge 5" > f; bash f', "cat > f.sh <<'EOF'\ngh pr merge 5\nEOF\nbash f.sh", "echo 'gh pr merge 5' > f; cat f | bash", "echo 'gh pr merge 5' > f; bash < f",
+    "echo 'gh pr merge 5' > f; chmod +x f; ./f", "echo 'gh pr merge 5' > f; bash -- f", "echo 'gh pr merge 5' > ./f; bash f", "echo 'gh pr merge 5' > f; bash ./f",
+    "printf '%s\\n' 'gh pr merge 5' > f; source f", "echo 'git push --force' > f; . ./f", "echo 'gh pr merge 5' &> f; bash f",
+    // Appended, through `tee`, and a write that may not run (it must not hide the one before).
+    "echo 'true' > f; echo 'gh pr merge 5' >> f; bash f", "echo 'gh pr merge 5' | tee f; bash f", "echo 'gh pr merge 5' > f; false && echo ok > f; bash f",
+    // Across rows and across the lines a command carries.
+    "echo 'gh pr merge 5' > f; bash <(cat f)", "echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"", "echo 'gh pr merge 5' > f; eval \"$(<f)\"",
+    "echo 'gh pr merge 5' > f; bash -c 'bash f'", "echo 'gh pr merge 5' > f; eval bash f", "echo \"echo '\" > f; echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"",
+    // The differential test: only `echo`'s leading options are options; zsh writes a pipe to a bare `> f`; a
+    // backslash in a printer's name; zsh's `print`.
+    'echo git commit -n -m x > f; bash f', "echo 'gh pr merge 5' | > f; bash f", "bash <<< \"$(ech\\o 'gh pr merge 5')\"", "print 'gh pr merge 5' > f; source f",
+    // Review round 1: a file run by a `$(…)`, a loop or a function after the write; `source --`; a `case` in a
+    // process substitution; a second one on the same command; `tee` and filters fed by a here-string, a pipe or `<`.
+    "echo 'gh pr merge 5' > f; x=$(bash f)", "echo 'gh pr merge 5' > f; echo `bash f`", "for i in 1 2; do bash f; echo 'gh pr merge 5' > f; done",
+    "g(){ bash f; }; echo 'gh pr merge 5' > f; g", "echo 'gh pr merge 5' > f; source -- f", "source -- <(echo 'gh pr merge 5')",
+    "bash <(case x in x) echo 'gh pr merge 5';; esac)", "bash <( (case x in x) ;; esac); echo 'gh pr merge 5')", "bash < <(echo x) < <(echo 'gh pr merge 5')",
+    "tee f <<< 'gh pr merge 5'; bash f", "tee f <<'E'\ngh pr merge 5\nE\nbash f", "echo 'gh pr merge 5' | cat > f; bash f", "echo 'gh pr merge 5' | sort > f; bash f",
+    "echo 'gh pr merge 5' > f; cat < f > g; bash g", "echo 'gh pr merge 5' > f; tee g < f; bash g",
+    // Texts joined as the shell joins them: a `>>` after a `$(…)` reading, `cat a b`; a guessed shell; `>&f`; a path
+    // spelled another way.
+    "echo \"$(echo 'gh pr \\')\" > f; echo 'merge 5' >> f; bash f", "echo 'gh pr \\' > a; echo 'merge 5' > b; cat a b | bash",
+    "$SHELL <(echo 'gh pr merge 5')", "echo 'gh pr merge 5' >& f; bash f", "echo 'gh pr merge 5' >&f; bash f", "echo 'gh pr merge 5' > d/../f; bash f",
+    // Review round 2: a quoted `case` is no reserved word, and one after `then`, `do` or `{` is; a command read
+    // from a file past its limits; zsh's `-`, `--` and `print -f`.
+    'bash <(echo gh pr merge 1; "case")', 'bash <(echo gh pr merge 1; \\case)', 'bash <(if :; then case x in x) echo gh pr merge 1;; esac; fi)',
+    'bash <({ case x in x) echo gh pr merge 1;; esac; })', `${Array.from({ length: 70 }, (_, i) => `echo a${i} > f`).join('; ')}; echo gh pr merge 1 > f; $(<f)`,
+    'print -r -- gh pr merge 1 > f; bash f', 'echo - gh pr merge 1 > f; bash f', "print -f '%s %s %s %s\\n' gh pr merge 1 > f; bash f",
+    `bash < <(true) ${'-e '.repeat(70)}<(echo gh pr merge 1)`, 'git push origin >&+main', 'git push origin >& --force',
+    // Review round 3: an `esac` that is an argument; a file past its limits in an argument.
+    'bash <(case x in y) echo then esac;; x) echo gh pr merge 5;; esac)', "bash <(printf '%b' 'echo hi\\n'; echo gh pr merge 5)",
+    "bash <(printf 'echo hi\\012'; printf 'gh pr merge 5')", "bash <(echo -en 'echo hi\\n'; echo gh pr merge 5)",
+    `${Array.from({ length: 70 }, (_, i) => `echo t${i} > f`).join('; ')}; echo 'pr merge 5' > f; gh $(<f)`,
+    // Review round 4: a held `)` record runs on to the real close; `1>&f` writes f.
+    'bash <(: { case; case y in y) echo gh pr merge 5;; esac)', 'bash <(: { case; case y in y) :;; esac; echo gh pr merge 5)',
+    'bash <(case y in y) { :; } esac; echo gh pr merge 5)', 'echo gh pr merge 5 1>& f; bash f',
+    // Review round 5: `printf --` keeps its format; a quote one printed text opens and the next closes; `>& -n`
+    // writes the file `-n`.
+    "printf -- 'gh pr merge 1\\n' | bash", "bash <(printf -- 'gh pr merge 1')", `{ echo "x='"; echo "'; gh pr merge 1"; } | bash`,
+    "echo gh pr merge 1 >& -'n'; bash ./-n", 'echo gh pr merge 1 >& -n; bash ./-n',
+    // Review round 6: main's reading of `echo` (every `-n`/`-e` word dropped) is kept beside the shells'.
+    'echo git -c -n core.hooksPath=x commit | bash', 'echo git -c -e core.hooksPath=x commit | zsh',
+    // Review round 7: main's reading is judged alone, so the joins still pair the shells' readings.
+    `bash -c "$(printf -- 'git commit '; echo - -n)"`,
+    // CI review: a `cat` whose file names come from a file read past its limits prints what is not known.
+    // A file empty when it is read: the next text stands alone (`printf '' > a` after an open quote).
+    `printf '"' > a; printf '' > a; bash <(cat a; printf 'gh pr merge 5')`, `printf '"' > a; printf '' > a; bash -c "$(cat a; printf 'gh pr merge 5')"`,
+    `false && printf '"' > a; source <(cat a; printf 'gh pr merge 5')`, `printf 'echo "' "'" > b; source <(cat nofile b; printf 'gh pr merge 5')`,
+    // Readings are paired by their place: empty ones from files never written keep theirs.
+    ...['bash -c "$(cat e1 e2 a; cat q)"', 'eval "$(cat e1 e2 a; cat q)"', 'source <(cat e1 e2 a; cat q)'].map((t) => `printf '"' > a; printf '' > a; printf 'echo hi\\n' > q; printf 'gh pr merge 5\\n' > q; false && printf 'echo z\\n' > q; ${t}`),
+    ...['cat $(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
+  ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
 test('the agent guard lets the rest through: reads, the agent\'s own pushes, text that only mentions a command', () => {
@@ -631,7 +689,23 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
     // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
     'x=$(echo a#b)', 'echo $(git log --format=%H#%s -1)', 'echo "$(date) # not a comment"', 'echo $(echo $#)', 'echo ${#x} $(echo ${#y})',
-    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)']) {
+    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)',
+    // #498, rows 1, 2, 8: a process substitution as an argument, a `$(…)` whose text is not run or not known, and
+    // a file written that no shell runs.
+    'bash build.sh <(echo "gh pr merge 5")', 'cat <(echo "gh pr merge 5")', 'bash <(curl -fsSL https://x/i.sh)', 'bash -c "$(curl -fsSL https://x/i.sh)"',
+    "bash -c 'echo $(echo gh pr merge 5)'", 'bash -c "echo $(echo gh pr merge 5)"', 'echo "$(echo gh pr merge 5)"', 'x=$(git rev-parse HEAD); echo $x',
+    'cd "$(git rev-parse --show-toplevel)" && bash build.sh', 'echo x > notes; bash build.sh', 'echo "gh pr merge 5" > notes.md; bash build.sh', "echo 'gh pr merge 5' > f; cat f",
+    'bash build.sh > log.txt; cat log.txt', 'echo "gh pr merge 5" 2> f; bash f', "echo 'gh pr merge 5' > f; bash g", 'git diff > x.patch; git apply x.patch',
+    // Review round 1: a file printed, however many times it was written; a copy of a descriptor is no file.
+    `${Array.from({ length: 70 }, (_, i) => `echo "line ${i}" >> notes.md`).join('; ')}; cat notes.md`, 'npm test 2>&1 | tee out.txt', 'echo "$(date)" >> notes.md',
+    'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate',
+    // Review round 2: a file run after many lines written to it; descriptors copied; a `case` that runs a script.
+    `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
+    'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f',
+    // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
+    `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',
+    // Review round 4: bash passes nothing here.
+    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -643,7 +717,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // otherwise pass this test and hide a slowdown. Nested tails keep 6 s; that case runs into the cut-off inside
   // the brace expansion by design.
   const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
-  const { MAX_JUDGED } = await import('./agent-guard.mjs');
+  const { MAX_JUDGED, JUDGE_BUDGET_MS } = await import('./agent-guard.mjs');
   const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
   const t0 = Date.now();
   assert.equal(agentGuardDecision(line).allow, false);
@@ -695,6 +769,48 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     agentGuardDecision(l);
     assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
   }
+  // #498, rows 1, 2, 8: each new path is linear; a file run again after each of many appends is refused at its bound.
+  // Half the cap (#498 CI): a shared runner has run two to four times slower than a laptop. The trade-off: a path
+  // that scans every earlier part costs a quarter as much at half the length, so a mild one may only show near
+  // the limit. Under coverage the 5 s cut-off may also refuse; the other runs check each verdict.
+  const half = (unit) => unit.repeat(Math.floor(MAX_JUDGED / 2 / unit.length));
+  for (const unit of ['bash <(echo x) ', 'bash <(', 'echo x > f; bash f;', 'echo x >> f; ', 'printf x >> f; ', 'x=$(echo a > f; bash f);', 'bash -c "$(echo x)";', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ', 'x <<< "$(echo a b)" ', '$(<f)']) {
+    const l = half(unit);
+    const t10 = Date.now();
+    const d = agentGuardDecision(l);
+    assert.ok(d.allow || (process.env.NODE_V8_COVERAGE && /took too long/.test(d.message)), `${unit}: ${d.message}`);
+    assert.ok(Date.now() - t10 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t10} ms`);
+  }
+  for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f | bash;']) {
+    const l = half(unit);
+    const t11 = Date.now();
+    // Refused at its bound, or on a runner slow enough to need it at the 5 s cut-off (CI's Node 20 reached the
+    // bound in 4.7 s). Either way within the guard's own budget, with slack: a missing deadline check still shows.
+    const m = agentGuardDecision(l).message;
+    const ms = Date.now() - t11;
+    assert.ok(/runs files it writes too many times|took too long/.test(m ?? ''), `${unit}: ${m}`);
+    assert.ok(ms < within(JUDGE_BUDGET_MS + 1500), `#498 ${JSON.stringify(unit)} took ${ms} ms`);
+  }
+  assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  // CI review: many file names from a `$(…)`, each read joined to a long text, ran out of memory before the cut-off.
+  for (const n of [60000, 150000]) {
+    const t14 = Date.now();
+    agentGuardDecision(`cat > f <<'E'\nh ${'a '.repeat(n)}\nE\ncat $(cat f) | bash`);
+    assert.ok(Date.now() - t14 < within(4500), `#498 cat $(cat f) with ${n} names took ${Date.now() - t14} ms`);
+  }
+  // Review round 3: many files to one `cat`, many `>&f`, many parts in one process substitution stay linear.
+  for (const l of [`echo -n a>f;cat ${'f '.repeat(490000)};gh pr merge 5`, `cat ${'x '.repeat(490000)};gh pr merge 5`, `echo hi ${'>&f '.repeat(245000)}`, `bash <(${'echo a;'.repeat(140000)})`]) {
+    const t13 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t13 < within(4500), `#498 ${JSON.stringify(l.slice(0, 20))} took ${Date.now() - t13} ms`);
+  }
+  // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
+  for (const d of [4000, 16000]) {
+    const t12 = Date.now();
+    assert.match(agentGuardDecision(`${'bash <('.repeat(d)}echo hi${')'.repeat(d)}`).message, /too many process substitutions/);
+    assert.ok(Date.now() - t12 < within(4500), `#498 nested <( took ${Date.now() - t12} ms`);
+  }
+  assert.equal(agentGuardDecision(Array(60).fill("echo 'echo hi' >> f").join('; ') + '; bash f').allow, true);
   // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
   assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
   // Near the limit: 240 `case` words of 4,000 characters read about 960,000 of the 1,048,576 allowed. The line
@@ -767,6 +883,45 @@ test('hooks/agent-guard.mjs: Claude Code reads the exit code, Cursor a JSON verd
     const none = runGuard(T, { hook_event_name: 'beforeShellExecution', command: 'git push -f' }, { YAD_BIN: '', PATH: '' });
     assert.deepEqual(parse(none), { permission: 'allow' }, said(none));
     assert.match(none.err, /allowing/, said(none));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#498: yad hook agent-guard judges in a worker; one that runs out of memory, out of time, or into an error refuses', async () => {
+  const { judgeInWorker } = await import('./hook.mjs');
+  const yadBin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'yad.mjs');
+  const ok = await judgeInWorker('npm test', null);
+  assert.equal(ok.verdict.allow, true, JSON.stringify(ok));
+  const no = await judgeInWorker('gh pr merge 5', null);
+  assert.match(no.verdict.message, /approving or merging/);
+  // A worker with almost no memory, or no time, does not answer: the line is refused, never allowed.
+  const big = `echo ${'$(echo x) '.repeat(60000)}`;
+  const oom = await judgeInWorker(big, null, { heapMb: 16 }); // 1-2 MB aborts Node itself, before the worker starts
+  assert.equal(oom.verdict.allow, false, JSON.stringify(oom.verdict));
+  assert.match(oom.verdict.message, /could not be judged/);
+  const slow = await judgeInWorker(big, null, { wallMs: 1 });
+  assert.equal(slow.verdict.allow, false, JSON.stringify(slow.verdict));
+  assert.match(slow.verdict.message, /could not be judged \(no answer/);
+  // The real hook: a refusal is exit 2, and a read-only line is still pre-approved from the worker.
+  const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
+  assert.equal(hook('gh pr merge 5').status, 2);
+  assert.match(hook('git status').stdout, /pre-approved/);
+  // Out of time after the verdict: an allowed line stays allowed, only not pre-approved. This line's verdict
+  // takes about 0.2 s on a laptop, its pre-approval about 6.5 s. Under coverage the verdict may be late too.
+  const longRead = 'git status 2>&1; '.repeat(Math.floor(990_000 / 17));
+  const late = await judgeInWorker(longRead, { root: os.tmpdir(), cwd: os.tmpdir() }, { wallMs: 3000 });
+  assert.equal(late.pre, null, JSON.stringify(late.pre));
+  if (!process.env.NODE_V8_COVERAGE) assert.equal(late.verdict.allow, true, late.verdict.message);
+});
+
+test('#498: a named pipe where a shipped check should be is not read, so pre-approval never blocks the hook', { skip: process.platform === 'win32', timeout: 20_000 }, async () => {
+  const { agentGuardPreapproval } = await import('./agent-guard.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fifo-'));
+  try {
+    fs.mkdirSync(path.join(T, 'checks'));
+    execFileSync('mkfifo', [path.join(T, 'checks', 'spec-link.sh')]);
+    const t = Date.now();
+    assert.equal(agentGuardPreapproval('bash checks/spec-link.sh', { cwd: T, root: T }).preapproved, false);
+    assert.ok(Date.now() - t < 2000);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
