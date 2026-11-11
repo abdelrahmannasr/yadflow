@@ -13065,6 +13065,7 @@ test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the ho
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [], git_url: 'gitlab.example.com' }));
   const bare = (await doctorOn(T)).checks.find((x) => x.id === 'product-git-url');
   assert.match(bare.message, /git_url is not an address yad can read a host from \(it needs a scheme/);
+  assert.match(bare.hint, /^fix git_url in .* to the Product's full address, or re-run `yad setup` — it replaces it from origin when origin names a repo$/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

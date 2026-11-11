@@ -304,7 +304,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           check(checks, 'product-git-url', 'project', 'warn',
             set ? `${settingsRel}'s git_url is not an address yad can read a host from (it needs a scheme, such as https://, or the user@host:path form) [YAD-CFG-005]`
               : `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
-            `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
+            set ? `fix git_url in ${settingsEditHint(root)} to the Product's full address, or re-run \`yad setup\` — it replaces it from origin when origin names a repo`
+              : `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         } else if (!repoGitUrl(productConfig.git_url)) {
           // A host and no repo (#513): every platform read falls back to origin, but the record is still
           // wrong — and code repos' product-link records copy it. Only the host is shown, never the value.
