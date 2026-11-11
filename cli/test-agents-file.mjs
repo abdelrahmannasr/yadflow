@@ -539,6 +539,14 @@ test('the agent guard refuses every human-only yad command and every force push,
     // spelled another way.
     "echo \"$(echo 'gh pr \\')\" > f; echo 'merge 5' >> f; bash f", "echo 'gh pr \\' > a; echo 'merge 5' > b; cat a b | bash",
     "$SHELL <(echo 'gh pr merge 5')", "echo 'gh pr merge 5' >& f; bash f", "echo 'gh pr merge 5' >&f; bash f", "echo 'gh pr merge 5' > d/../f; bash f",
+    // Review round 2: a quoted `case` is no reserved word, and one after `then`, `do` or `{` is; a command read
+    // from a file past its limits; zsh's `-`, `--` and `print -f`; output with no newline; bash's `>&--n`.
+    'bash <(echo gh pr merge 1; "case")', 'bash <(echo gh pr merge 1; \\case)', 'bash <(if :; then case x in x) echo gh pr merge 1;; esac; fi)',
+    'bash <({ case x in x) echo gh pr merge 1;; esac; })', `${Array.from({ length: 70 }, (_, i) => `echo a${i} > f`).join('; ')}; echo gh pr merge 1 > f; $(<f)`,
+    'print -r -- gh pr merge 1 > f; bash f', 'echo - gh pr merge 1 > f; bash f', "print -f '%s %s %s %s\\n' gh pr merge 1 > f; bash f",
+    'printf "gh pr " > f; printf "merge 1" >> f; bash f', 'echo -n "gh pr " > f; echo "merge 1" >> f; bash f', 'printf "gh pr " > a; echo merge 1 > b; cat a b | bash',
+    'bash <(printf "gh pr "; echo merge 1)', 'git commit -m x >&--n', 'git commit -m x >& --n', 'git commit -m x <&--n', 'git push origin >& -+main',
+    `bash < <(true) ${'-e '.repeat(70)}<(echo gh pr merge 1)`, 'git push origin >&+main', 'git push origin >& --force',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -670,7 +678,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'bash build.sh > log.txt; cat log.txt', 'echo "gh pr merge 5" 2> f; bash f', "echo 'gh pr merge 5' > f; bash g", 'git diff > x.patch; git apply x.patch',
     // Review round 1: a file printed, however many times it was written; a copy of a descriptor is no file.
     `${Array.from({ length: 70 }, (_, i) => `echo "line ${i}" >> notes.md`).join('; ')}; cat notes.md`, 'npm test 2>&1 | tee out.txt', 'echo "$(date)" >> notes.md',
-    'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate']) {
+    'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate',
+    // Review round 2: a file run after many lines written to it; descriptors copied; a `case` that runs a script.
+    `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
+    'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -735,7 +746,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
   }
   // #498, rows 1, 2, 8: each new path is linear; a file run again after each of many appends is refused at its bound.
-  for (const unit of ['bash <(echo x) ', 'bash <(', 'echo x > f; bash f;', 'bash -c "$(echo x)";', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ', 'x <<< "$(echo a b)" ', '$(<f)']) {
+  for (const unit of ['bash <(echo x) ', 'bash <(', 'echo x > f; bash f;', 'echo x >> f; ', 'printf x >> f; ', 'x=$(echo a > f; bash f);', 'bash -c "$(echo x)";', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ', 'x <<< "$(echo a b)" ', '$(<f)']) {
     const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length));
     const t10 = Date.now();
     assert.equal(agentGuardDecision(l).allow, true, unit);
