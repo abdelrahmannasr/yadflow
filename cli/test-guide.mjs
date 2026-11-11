@@ -749,7 +749,7 @@ test('a repo newer than the yadflow running is refused, never rolled back; a fai
     git(A, ['config', 'core.excludesFile', excludes]);
     const hidden = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
     assert.deepEqual(hidden.commits.map((c) => [c.reason, c.committed]), [['add-failed', false]]);
-    assert.match(hidden.commits[0].hint, /^git would not stage \.claude\/\S+.* an ignore rule hides (it|them) — .*gitignore_global:2 \(`\.claude\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Remove or narrow that rule, or add `!\.claude\/` to this repo's \.gitignore; then run this again/);
+    assert.match(hidden.commits[0].hint, /^git would not stage the update's files under \.claude in \.: an ignore rule hides that folder — .*gitignore_global:2 \(`\.claude\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Remove or narrow that rule, or add `!\.claude\/` to this repo's \.gitignore; then run this again: .* \(git said: .+\)$/);
     assert.doesNotMatch(hidden.commits[0].hint, /index\.lock/);
     assert.equal(git(A, ['diff', '--cached', '--name-only']), '', 'nothing left staged');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
@@ -1326,3 +1326,40 @@ test('E167 (#353): yad guide --json hands agents what the agent guard pre-approv
   assert.deepEqual(g.preapproved, PREAPPROVED);
   assert.match(g.preapproved.never, /secrets, tokens/);
 });
+
+// #508 review 1: git refuses a tracked file only over an ignored FOLDER above it — so only folders are named.
+// A rule on the file itself, a negation, and a repo rule are told apart; `.git/info/exclude` is this clone's.
+test('#508: hiddenFolders names the ignored folder above a kept path, never a file rule or a negation', async () => {
+  const { hiddenFolders, hiddenFolderText } = await import('./update-commit.mjs');
+  const P = tmp();
+  try {
+    const A = path.join(P, 'a');
+    fs.mkdirSync(A);
+    git(A, ['init', '-q', '-b', 'main']);
+    const excludes = path.join(P, 'mine');
+    fs.writeFileSync(excludes, 'CLAUDE.md\n.claude/skills/\n');
+    git(A, ['config', 'core.excludesFile', excludes]);
+    put(path.join(A, '.gitignore'), '!.claude/settings.json\n');
+    for (const f of ['CLAUDE.md', '.claude/settings.json', '.claude/skills/x/SKILL.md', 'keep.md']) put(path.join(A, f), 'x\n');
+    const got = hiddenFolders(A, ['CLAUDE.md', '.claude/settings.json', '.claude/skills/x/SKILL.md', 'keep.md']);
+    assert.deepEqual(got.map((x) => [x.folder, x.paths, x.pattern, x.line, x.outside]), [['.claude/skills', ['.claude/skills/x/SKILL.md'], '.claude/skills/', 2, true]],
+      'no CLAUDE.md (a file rule never stops git add), no settings.json (a negation re-includes it)');
+    // A rule in .git/info/exclude is this clone's alone: outside, like a global one.
+    fs.writeFileSync(excludes, '');
+    fs.appendFileSync(path.join(A, '.git/info/exclude'), 'vendor/\n');
+    put(path.join(A, 'vendor/lib/a.js'), 'x\n');
+    const local = hiddenFolders(A, ['vendor/lib/a.js']);
+    assert.deepEqual(local.map((x) => [x.folder, x.source, x.outside]), [['vendor', '.git/info/exclude', true]]);
+    // The repo's own rule is not "outside", and no `!` way out is offered for it.
+    put(path.join(A, '.gitignore'), 'build/\n');
+    put(path.join(A, 'build/out.txt'), 'x\n');
+    const own = hiddenFolders(A, ['build/out.txt']);
+    assert.deepEqual(own.map((x) => [x.folder, x.source, x.outside]), [['build', '.gitignore', false]]);
+    assert.doesNotMatch(hiddenFolderText(own, '.', { staged: false }), /outside this repo|add `!/);
+    // The plain push path: git staged the tracked files; only a new file there is left out.
+    const pushed = hiddenFolderText(local, 'api', { staged: true });
+    assert.match(pushed, /^an ignore rule hides vendor in api — \.git\/info\/exclude:\d+ \(`vendor\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Its tracked files were staged, but a new file there is left out of the update: remove or narrow that rule, or add `!vendor\/` to this repo's \.gitignore$/);
+    assert.doesNotMatch(pushed, /would not stage|next run/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); }
+});
+

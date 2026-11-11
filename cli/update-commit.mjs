@@ -109,43 +109,85 @@ function stageAllowlist(git, root, paths) {
     : !diff.ok ? `could not read what was staged (${diff.error?.code || diff.stderr.split('\n')[0] || `exit ${diff.code}`})` : null;
   // Nothing of ours may stay staged when the list of it could not be read.
   if (!diff.ok) withPaths(root, ['reset', '-q'], keep);
-  // Why git refused (#508). A path that is TRACKED but sits under an ignore rule — a person's global ignore
-  // hiding `.claude/` or `CLAUDE.md`, say — passes the check-ignore filter above (it never reports tracked
-  // files), and `git add` then exits 1 over it. Asked of git with `--no-index`, which does report them, rather
-  // than read from git's message, which is translated. A lock is said as a lock.
-  const ignoredBy = !add.ok && !/index\.lock/.test(add.stderr) ? ignoreRules(root, keep) : [];
+  // Why git refused (#508). git refuses a TRACKED file only when an ignore rule hides one of its FOLDERS — a
+  // person's global ignore hiding `.claude/`, say (a rule on the file itself never stops `git add`). Such a
+  // file passes the check-ignore filter above, which never reports tracked files, and `git add` exits 1 over
+  // it, though it staged it. So the folders above each kept path are asked of git (`--no-index` reports
+  // ignored folders whatever is tracked in them) rather than git's message, which is translated. A lock is
+  // said as a lock, and git's own words are always kept beside this.
+  const ignoredBy = !add.ok && !/index\.lock/.test(add.stderr) ? hiddenFolders(root, keep) : [];
   return { staged, addError, ignoredBy };
 }
 
-// The ignore rule that hides each of `paths`, tracked or not: [{ path, source, line, pattern }]. The source
-// is shown with `~` for the home folder, and relative to the repo when it is the repo's own file.
-function ignoreRules(root, paths) {
-  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: paths.join('\0'), maxBuffer: 64 * 1024 * 1024 });
+// The ignored folders the kept paths sit in: [{ folder, paths, source, line, pattern, outside }], the highest
+// ignored folder per path (`.claude`, not `.claude/skills/x`). A negated pattern (`!x`) re-includes, so it is
+// never named as the rule that hides. The source is shown with `~` for the home folder, and relative to the
+// repo for the repo's own files; one inside the git folder (`.git/info/exclude`) is this clone's alone, like
+// a global ignore, so it counts as `outside` too.
+export function hiddenFolders(root, paths) {
+  const folderOf = new Map();
+  for (const p of paths) {
+    const parts = p.replace(/\/+$/, '').split('/');
+    const isDir = (() => { try { return fs.statSync(path.join(root, p)).isDirectory(); } catch { return false; } })();
+    for (let n = 1; n <= parts.length - (isDir ? 0 : 1); n++) {
+      const dir = parts.slice(0, n).join('/');
+      if (!folderOf.has(dir)) folderOf.set(dir, []);
+      folderOf.get(dir).push(p);
+    }
+  }
+  if (!folderOf.size) return [];
+  // Asked as the folder git sees: a folder on disk by its name, so `.claude/*` is not read as matching
+  // `.claude` itself (it does with a trailing slash); a folder that is gone (a deletion) with the slash, so a
+  // folder-only pattern (`build/`) still matches it.
+  const ask = (d) => (fs.existsSync(path.join(root, d)) ? d : `${d}/`);
+  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: [...folderOf.keys()].map(ask).join('\0'), maxBuffer: 64 * 1024 * 1024 });
   if (r.error || !r.stdout) return [];
+  const gitDirRun = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
+  // Compared by real path: git names a temp or linked folder by its real spelling (`/private/var`), the run by
+  // the one it was given (`/var`).
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const gitDir = real(gitDirRun.ok && gitDirRun.stdout ? gitDirRun.stdout : path.join(root, '.git'));
+  const inside = (child, parent) => { const rel = path.relative(real(parent), real(child)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
+  const home = os.homedir();
+  const rules = new Map();
   const f = r.stdout.split('\0');
-  const out = [];
   for (let i = 0; i + 3 < f.length; i += 4) {
-    const [source, line, pattern, p] = f.slice(i, i + 4);
-    if (!source || !pattern || !p) continue;
-    const abs = path.resolve(root, source);
-    const inRepo = !path.relative(root, abs).startsWith('..') && !path.isAbsolute(path.relative(root, abs));
-    const home = os.homedir();
-    const shown = inRepo ? path.relative(root, abs).split(path.sep).join('/')
-      : home && (abs === home || abs.startsWith(home + path.sep)) ? `~${abs.slice(home.length).split(path.sep).join('/')}` : abs;
-    out.push({ path: p, source: shown, line: Number(line) || null, pattern, outside: !inRepo });
+    const [source, line, pattern, dirSlash] = f.slice(i, i + 4);
+    if (!source || !pattern || !dirSlash || pattern.startsWith('!')) continue;
+    rules.set(dirSlash.replace(/\/+$/, ''), { source, line, pattern });
+  }
+  const seen = new Set();
+  const out = [];
+  for (const [dir, under] of folderOf) {
+    const rule = rules.get(dir);
+    if (!rule) continue;
+    const fresh = under.filter((p) => !seen.has(p));
+    if (!fresh.length) continue; // a higher folder already names these paths
+    fresh.forEach((p) => seen.add(p));
+    const abs = path.resolve(root, rule.source);
+    const local = inside(abs, gitDir) || real(abs) === gitDir;
+    const inRepo = !local && inside(abs, root);
+    const shown = inRepo ? path.relative(real(root), real(abs)).split(path.sep).join('/')
+      : local && inside(abs, root) ? path.relative(real(root), real(abs)).split(path.sep).join('/')
+      : home && inside(abs, home) ? `~/${path.relative(real(home), real(abs)).split(path.sep).join('/')}` : abs;
+    out.push({ folder: dir, paths: fresh, source: shown, line: Number(rule.line) || null, pattern: rule.pattern, outside: !inRepo });
   }
   return out;
 }
 
-// The hint for a `git add` an ignore rule refused (#508): which paths, which rule, and the two ways out.
-function ignoredAddHint(ignoredBy, where) {
-  const paths = [...new Set(ignoredBy.map((x) => x.path))];
-  const rules = [...new Map(ignoredBy.map((x) => [`${x.source}:${x.line}`, x])).values()];
-  const list = `${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ` and ${paths.length - 3} more` : ''}`;
-  const rule = rules.slice(0, 2).map((x) => `${x.source}:${x.line} (\`${x.pattern}\`)`).join(', ');
-  const outside = rules.some((x) => x.outside);
-  return `git would not stage ${list} in ${where}: an ignore rule hides ${paths.length === 1 ? 'it' : 'them'} — ${rule}${outside ? ', a rule outside this repo, which CI and the rest of the team do not have' : ''}. `
-    + `Remove or narrow that rule${outside ? `, or add \`!${rules[0].pattern}\` to this repo's .gitignore` : ''}; then run this again: the update is in the working tree, and the next run carries it`;
+// The words for an ignored folder that git would not stage from (#508): the folder, the rule, whether the rule
+// is the repo's or only this machine's, and the way out. `staged` is what happened to the tracked files
+// there: on `--open-pr` the run unstages and stops; on a plain push git staged them and the run goes on.
+export function hiddenFolderText(ignoredBy, where, { staged }) {
+  const folders = ignoredBy.map((x) => x.folder);
+  const list = `${folders.slice(0, 3).join(', ')}${folders.length > 3 ? ` and ${folders.length - 3} more` : ''}`;
+  const rule = ignoredBy.slice(0, 2).map((x) => `${x.source}:${x.line} (\`${x.pattern}\`)`).join(', ');
+  const outside = ignoredBy.find((x) => x.outside);
+  const way = `remove or narrow that rule${outside ? `, or add \`!${outside.pattern}\` to this repo's .gitignore` : ''}`;
+  const whose = outside ? ', a rule outside this repo, which CI and the rest of the team do not have' : '';
+  return staged
+    ? `an ignore rule hides ${list} in ${where} — ${rule}${whose}. Its tracked files were staged, but a new file there is left out of the update: ${way}`
+    : `git would not stage the update's files under ${list} in ${where}: an ignore rule hides ${folders.length === 1 ? 'that folder' : 'those folders'} — ${rule}${whose}. ${way[0].toUpperCase()}${way.slice(1)}; then run this again: the update is in the working tree, and the next run carries it`;
 }
 
 // `git <args>` over a list of literal paths read from stdin (NUL-separated), not the command line.
@@ -199,7 +241,7 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   }
 
   const { staged, addError, ignoredBy } = stageAllowlist(git, root, paths);
-  if (addError) warn(ignoredBy.length ? `${label}: ${ignoredAddHint(ignoredBy, label)} — staging may be incomplete` : `${label}: git add reported "${addError}" — staging may be incomplete`);
+  if (addError) warn(ignoredBy.length ? `${label}: git add reported "${addError}" — ${hiddenFolderText(ignoredBy, label, { staged: true })}` : `${label}: git add reported "${addError}" — staging may be incomplete`);
   if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: false }; }
 
   // Pushing HEAD lands any local commits ahead of the remote too. Warn before we add ours so the
@@ -430,7 +472,7 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     unstage();
     fail(`${label}: git add failed — ${addError}`);
     process.exitCode = 1;
-    const hint = ignoredBy.length ? ignoredAddHint(ignoredBy, where)
+    const hint = ignoredBy.length ? `${hiddenFolderText(ignoredBy, where, { staged: false })} (git said: ${oneLine(addError).slice(0, 160)})`
       : `git could not stage the update in ${where} (${oneLine(addError).slice(0, 160)}) — often a leftover index.lock or file permissions; fix it and run this again: the update is in the working tree, and the next run carries it`;
     return out({ error: true, reason: 'add-failed', hint });
   }
