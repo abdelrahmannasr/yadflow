@@ -558,6 +558,10 @@ test('the agent guard refuses every human-only yad command and every force push,
     'bash <(: { case; case y in y) echo gh pr merge 5;; esac)', 'bash <(: { case; case y in y) :;; esac; echo gh pr merge 5)',
     'bash <(case y in y) { :; } esac; echo gh pr merge 5)', 'echo gh pr merge 5 1>& f; bash f', "git commit -m x >& -'-n'", 'git commit -m x >& -\\-n',
     "{ printf -- '%s ' gh pr; echo merge 5; } | bash", "{ printf '%s\\t' gh pr; echo merge 5; } | bash",
+    // Review round 5: `printf --` keeps its format; a quote one printed text opens and the next closes; zsh writes
+    // the file the whole word after `>&` names.
+    "printf -- 'gh pr merge 1\\n' | bash", "bash <(printf -- 'gh pr merge 1')", `{ echo "x='"; echo "'; gh pr merge 1"; } | bash`,
+    "echo gh pr merge 1 >& -'n'; bash ./-n", 'echo gh pr merge 1 >& -n; bash ./-n', 'echo gh pr merge 1 >&--n; bash ./--n',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 

@@ -177,7 +177,9 @@ export function shellParts(rawLine, mode = {}) {
           // bash strips the dash only when the word's first character is an unquoted `-` (`>& -'-n'` passes `-n`).
           const alt = afterDup.prefix ? afterDup.prefix + wd : wordDash && wd.startsWith('-') ? wd.slice(1) : null;
           if (alt !== null) (partDashed ??= new Map()).set(words.length - 1, { alt, prefix: afterDup.prefix ?? null });
-          else if (afterDup.write && !/[$`]/.test(word) && !DEVICE.test(wd)) (partWrites ??= []).push({ target: wd, append: false });
+          // zsh writes the file the whole word names (`>& -n`, `>&--n` write `-n`, `--n`), whatever bash reads.
+          const target = (afterDup.zsh ?? '') + wd;
+          if (afterDup.write && !/[$`]/.test(word) && !DEVICE.test(target)) (partWrites ??= []).push({ target, append: false });
         }
         if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word);
         if (kept !== null) (partPosix ??= new Map()).set(words.length - 1, kept);
@@ -321,8 +323,12 @@ export function shellParts(rawLine, mode = {}) {
         while (j < line.length && /[0-9-]/.test(line[j])) j++;
         const took = line.slice(from, j);
         const dashes = /^(-+)$/.exec(took)?.[1].length ?? 0;
-        if (dashes > 1) afterDup = { prefix: '-'.repeat(dashes - 1) };
-        else if (!took) afterDup = { write: ch !== '<' && (fd === '' || fd === '1') };
+        const out = ch !== '<' && (fd === '' || fd === '1');
+        // A word right after the dashes (`>&-n`, `>&--n`) is also a file zsh writes, named with them.
+        const zsh = out && dashes && j < line.length && !/[\s;&|()<>]/.test(line[j]) ? took : null;
+        if (dashes > 1) afterDup = { prefix: '-'.repeat(dashes - 1), write: !!zsh, zsh };
+        else if (zsh) afterDup = { write: true, zsh };
+        else if (!took) afterDup = { write: out };
         i = j - 1;
         continue;
       }
@@ -1268,7 +1274,7 @@ function printedOf(fed, n, lists, input = []) {
     if (prog === 'printf') {
       const f = pw[1] === '--' ? 2 : 1;
       const end = /\\n$/.test(pw[f] ?? '') ? '' : NOEOL;
-      out.push(pw.slice(1).join(' ') + end, pw.slice(f + 1).join(' ') + end);
+      out.push(pw.slice(1).join(' ') + end, pw.slice(f).join(' ') + end, pw.slice(f + 1).join(' ') + end);
       // A blank at the format's end, written or escaped (`\t`, `\040`, `\x20`).
       if (pw.length > f + 1 && /( |\\t|\\040|\\x20)$/.test(pw[f])) out.push(`${pw.slice(f + 1).join(' ')} ${end}`);
     }
@@ -1533,9 +1539,9 @@ function judgeParts(parts, depth, mode) {
       // | bash`, #498 review).
       if (realShell || parts.piped.has(n)) {
         for (const t of printed) carried.push(t);
-        // Only when a text may run into the next (no newline, or a trailing `\`): each joined reading is judged
-        // again in full (#498 review).
-        if (printedPer.length > 1 && printedPer.some((o) => o.some((t) => t.endsWith(NOEOL) || t.endsWith('\\')))) for (const t of zipJoin(printedPer)) carried.push(t);
+        // Always joined by newlines (a quote one text opens, a later one closes); zipJoin adds the reading joined
+        // as printed when a text has no newline.
+        if (printedPer.length > 1) for (const t of zipJoin(printedPer)) carried.push(t);
         printed.length = 0; printedPer.length = 0;
       }
     }
