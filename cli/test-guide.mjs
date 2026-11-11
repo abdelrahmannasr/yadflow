@@ -1141,7 +1141,7 @@ test('#509: yad update --open-pr with glab warning about two config files says t
     process.env.PATH = `${bin}${path.delimiter}${before}`;
     const r = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'gitlab', creator: createPr, version: '4.7.0', checked: true });
     assert.deepEqual([r.pushed, r.opened, r.reason], [true, false, 'pr-not-opened']);
-    assert.match(r.hint, /did not open \(glab reads only one of its two config files, so a login saved in the other is not used \(see `yad doctor`, glab-config\) 401 Unauthorized\)/);
+    assert.match(r.hint, /did not open \(glab reads only one of its two config files, so a login saved in the other is not used \(see `yad doctor`, glab-config\) — 401 Unauthorized\)/);
     assert.doesNotMatch(r.hint, /Multiple config files/);
   } finally {
     process.env.PATH = before;

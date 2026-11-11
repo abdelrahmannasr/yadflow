@@ -155,8 +155,9 @@ test('#509: glab\'s two-config warning is dropped from what yad reads; a failed 
   assert.equal(withoutGlabConfigWarning(GLAB_401, { ok: false }), GLAB_401, 'no warning: unchanged, no hint');
   assert.equal(withoutGlabConfigWarning('Warning: something else'), 'Warning: something else', 'only that exact block');
   const failed = withoutGlabConfigWarning(`${GLAB_WARNING}\n${GLAB_401}`, { ok: false });
-  assert.match(failed.split('\n')[0], /^glab reads only one of its two config files, so a login saved in the other is not used \(see `yad doctor`, glab-config\)$/);
-  assert.ok(failed.endsWith(GLAB_401), 'then the real error, whole');
+  assert.equal(failed, `glab reads only one of its two config files, so a login saved in the other is not used (see \`yad doctor\`, glab-config) — ${GLAB_401}`,
+    'the real error, whole, on the hint\'s own line: a caller that shows only the first line still shows it');
+  assert.equal(withoutGlabConfigWarning(GLAB_WARNING, { ok: false }).includes('—'), false, 'nothing else: the hint alone');
   assert.ok(!/Multiple config files|Using:|Ignoring:|Consider consolidating/.test(failed));
   // Windows line ends: the same block is found.
   assert.equal(withoutGlabConfigWarning(`${GLAB_WARNING.replaceAll('\n', '\r\n')}\r\nsome note`), 'some note');

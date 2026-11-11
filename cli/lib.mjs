@@ -424,7 +424,8 @@ export function run(cmd, args = [], opts = {}) {
 // reason cuts that reason short, so the warning was all a person saw and the real error was cut off. So the
 // block is dropped from what yad reads. When the run FAILED, one short line goes BEFORE the real error
 // instead, because a login saved in the ignored file is not used — often the very reason the run failed — and
-// a line after glab's long error would be cut off. Only that exact block is removed; other stderr is kept.
+// a line after glab's long error would be cut off. It shares its line with the error's first line, so a caller
+// that shows only stderr's first line still shows the error. Only that exact block is removed.
 export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
   const lines = String(stderr).split('\n');
   const start = lines.findIndex((l) => /^Warning: Multiple config files found\b/i.test(l.trim()));
@@ -435,7 +436,7 @@ export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
   const rest = [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim();
   if (ok) return rest;
   const hint = 'glab reads only one of its two config files, so a login saved in the other is not used (see `yad doctor`, glab-config)';
-  return rest ? `${hint}\n${rest}` : hint;
+  return rest ? `${hint} — ${rest}` : hint;
 }
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
 
