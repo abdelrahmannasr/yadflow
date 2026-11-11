@@ -5223,7 +5223,7 @@ test('pr-title / pr-template: an artifact moved onto issue-links.json or roadmap
       for (const diff of diffs) {
         assert.match(diff, /^git -c core\.quotePath=false diff --no-renames --name-only main\.\.\.HEAD$/, diff);
         const listed = execFileSync('bash', ['-c', diff], { cwd: T, env: GIT_ENV }).toString();
-        assert.match(listed, new RegExp(`^${from.replace(/[.]/g, '\\.')}$`, 'm'), `${diff} lists ${from}`);
+        assert.ok(listed.split('\n').includes(from), `${diff} lists ${from}`);
         fs.writeFileSync(changed, listed);
         assert.equal(runGate(PR_TITLE, T, ['--profile', 'product', '--head', 'chore/move', '--changed', changed, 'chore: record tracker links']).code, 1, `${from} → ${to}`);
         assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'product', '--head', 'chore/move', '--changed', changed, CODE_TPL]).code, 1, `${from} → ${to}`);
