@@ -140,6 +140,8 @@ export function shellParts(rawLine, mode = {}) {
   let wordBraced = false;
   // A word with no quote or escape in it: only such a `case` or `esac` is the reserved word.
   let wordPlain = true;
+  // Whether the word's first character is an unquoted `-`.
+  let wordDash = false;
   // The word after `>&` or `<&` (#498 review): bash reads `>&--n` as a close and the word `-n` (the reader, as
   // main, reads `n`), and `>& -n` as a close and `-n`; `>& f` (no `-`) writes f. Kept as an extra spelling.
   let afterDup = null;
@@ -172,7 +174,8 @@ export function shellParts(rawLine, mode = {}) {
         }
         if (afterDup) {
           const wd = words[words.length - 1];
-          const alt = afterDup.prefix ? afterDup.prefix + wd : wordPlain && wd.startsWith('-') ? wd.slice(1) : null;
+          // bash strips the dash only when the word's first character is an unquoted `-` (`>& -'-n'` passes `-n`).
+          const alt = afterDup.prefix ? afterDup.prefix + wd : wordDash && wd.startsWith('-') ? wd.slice(1) : null;
           if (alt !== null) (partDashed ??= new Map()).set(words.length - 1, { alt, prefix: afterDup.prefix ?? null });
           else if (afterDup.write && !/[$`]/.test(word) && !DEVICE.test(wd)) (partWrites ??= []).push({ target: wd, append: false });
         }
@@ -192,6 +195,7 @@ export function shellParts(rawLine, mode = {}) {
     wordKeep.length = 0;
     wordSubs.length = 0;
     wordPlain = true;
+    wordDash = false;
     if (inWord) afterDup = null;
     // Reset only once the target (or the here-string) was read: a space before it ends no word.
     if (inWord) { dropWord = false; hereString = false; redirect = null; redirectBefore = null; }
@@ -318,7 +322,7 @@ export function shellParts(rawLine, mode = {}) {
         const took = line.slice(from, j);
         const dashes = /^(-+)$/.exec(took)?.[1].length ?? 0;
         if (dashes > 1) afterDup = { prefix: '-'.repeat(dashes - 1) };
-        else if (!took) afterDup = { write: ch !== '<' && fd === '' };
+        else if (!took) afterDup = { write: ch !== '<' && (fd === '' || fd === '1') };
         i = j - 1;
         continue;
       }
@@ -352,13 +356,20 @@ export function shellParts(rawLine, mode = {}) {
       }
       endPart();
       if (ch === ')' && !parens.at(-1)?.cases) {
-        const p = parens.pop()?.proc;
-        if (p) { parts.procsubs.push({ ...p, to: parts.length }); afterProc = p; }
-      } else if (ch === ')' && parens.at(-1)?.proc && !parens.at(-1).fellBack) {
-        parens.at(-1).fellBack = true;
+        const top = parens.pop();
+        const p = top?.proc;
+        // A held `)` before already recorded this substitution: its record now runs to this, the real close.
+        if (p && top.held) { top.held.to = parts.length; afterProc = p; } else if (p) { parts.procsubs.push({ ...p, to: parts.length }); afterProc = p; }
+      } else if (ch === ')' && parens.at(-1)?.held) {
+        // One record per substitution, run on to each later held `)` (#498 review: a `case` the reader took
+        // for the reserved word may hold every one).
+        parens.at(-1).held.to = parts.length;
+      } else if (ch === ')' && parens.at(-1)?.proc) {
         // A `)` read as a `case` pattern's: it may close the process substitution after all (a `case` the reader
         // took for the reserved word), so that reading is judged too.
-        parts.procsubs.push({ ...parens.at(-1).proc, to: parts.length });
+        const rec = { ...parens.at(-1).proc, to: parts.length };
+        parts.procsubs.push(rec);
+        parens.at(-1).held = rec;
       }
       if (ch === '|') {
         // The second `|` of `||` is known by where the first one was, not by the raw text before it (`\||bash`).
@@ -371,6 +382,7 @@ export function shellParts(rawLine, mode = {}) {
     // comment. A shell that drops CRs is the other reading, judged by agentGuardDecision.
     if (ch === ' ' || ch === '\t') { endWord(); continue; }
     if (ch === '{') wordBraced = true;
+    if (!inWord && ch === '-') wordDash = true;
     word += ch; inWord = true;
   }
   endPart();
@@ -1254,9 +1266,11 @@ function printedOf(fed, n, lists, input = []) {
     // `printf` prints its format (a newline only where it says `\n`), and its words after the format.
     // Its words also with the blank a `%s ` format puts after the last (`printf '%s ' gh pr`).
     if (prog === 'printf') {
-      const end = /\\n$/.test(pw[1] ?? '') ? '' : NOEOL;
-      out.push(pw.slice(1).join(' ') + end, pw.slice(2).join(' ') + end);
-      if (pw.length > 2 && / $/.test(pw[1])) out.push(`${pw.slice(2).join(' ')} ${end}`);
+      const f = pw[1] === '--' ? 2 : 1;
+      const end = /\\n$/.test(pw[f] ?? '') ? '' : NOEOL;
+      out.push(pw.slice(1).join(' ') + end, pw.slice(f + 1).join(' ') + end);
+      // A blank at the format's end, written or escaped (`\t`, `\040`, `\x20`).
+      if (pw.length > f + 1 && /( |\\t|\\040|\\x20)$/.test(pw[f])) out.push(`${pw.slice(f + 1).join(' ')} ${end}`);
     }
     if (prog === 'cat' || prog === 'tee') {
       const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-');
@@ -1519,7 +1533,9 @@ function judgeParts(parts, depth, mode) {
       // | bash`, #498 review).
       if (realShell || parts.piped.has(n)) {
         for (const t of printed) carried.push(t);
-        if (printedPer.length > 1) for (const t of zipJoin(printedPer)) carried.push(t);
+        // Only when a text may run into the next (no newline, or a trailing `\`): each joined reading is judged
+        // again in full (#498 review).
+        if (printedPer.length > 1 && printedPer.some((o) => o.some((t) => t.endsWith(NOEOL) || t.endsWith('\\')))) for (const t of zipJoin(printedPer)) carried.push(t);
         printed.length = 0; printedPer.length = 0;
       }
     }

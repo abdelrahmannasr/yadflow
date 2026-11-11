@@ -553,6 +553,11 @@ test('the agent guard refuses every human-only yad command and every force push,
     "bash <(printf 'echo hi\\012'; printf 'gh pr merge 5')", "bash <(echo -en 'echo hi\\n'; echo gh pr merge 5)", "bash <(echo $'echo hi \\x01yad-noeol\\x01'; echo gh pr merge 5)",
     `${Array.from({ length: 70 }, (_, i) => `echo t${i} > f`).join('; ')}; echo 'pr merge 5' > f; gh $(<f)`, 'git commit -m x >&--$(echo n)', 'git commit -m x >&--{n,}',
     "{ printf 'gh pr '; echo merge 5; } | bash", "(printf 'gh pr '; echo merge 5) | bash", "printf '%s ' gh pr > f; echo merge 5 >> f; bash f",
+    // Review round 4: a held `)` record runs on to the real close; `1>&f` writes f; bash strips one unquoted
+    // leading `-` after `>& `; `printf --` and an escaped blank at the format's end.
+    'bash <(: { case; case y in y) echo gh pr merge 5;; esac)', 'bash <(: { case; case y in y) :;; esac; echo gh pr merge 5)',
+    'bash <(case y in y) { :; } esac; echo gh pr merge 5)', 'echo gh pr merge 5 1>& f; bash f', "git commit -m x >& -'-n'", 'git commit -m x >& -\\-n',
+    "{ printf -- '%s ' gh pr; echo merge 5; } | bash", "{ printf '%s\\t' gh pr; echo merge 5; } | bash",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -689,7 +694,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
     'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f',
     // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
-    `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f']) {
+    `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',
+    // Review round 4: bash passes nothing here.
+    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
