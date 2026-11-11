@@ -20,6 +20,8 @@ import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
 import { readAllowList } from './agent-rules.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
+import { repoGitUrl } from './protection.mjs';
+import { hostFromGitUrl, plainHost } from './platform.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -626,15 +628,31 @@ export async function runSetup(root, opts = {}) {
     // Strict read for the same reason as the reconfigure write above: a corrupt Product must abort, never
     // fail-open to `{}` and get rewritten with everything else stripped on a plain re-run.
     const cur = readJSONStrict(productPath, {}) || {};
-    const backfillUrl = (cur.platform && !cur.git_url)
-      ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
-      : null;
+    // A git_url that names only a host is no repo (#513): replaced too — but only by an origin that names one
+    // on the SAME host. These settings are shared and committed: a person's own SSH alias (`gitlab-work`) or a
+    // fork on another host would send everyone, and CI, to the wrong place (#513 review 1).
+    const hostOnly = cur.platform && typeof cur.git_url === 'string' && cur.git_url.trim() && !repoGitUrl(cur.git_url);
+    const originUrl = (cur.platform && (!cur.git_url || hostOnly)) ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null) : null;
+    // A value with no readable host (`gitlab.example.com`, no scheme) has no host to protect: any origin that
+    // names a repo replaces it (#513 review 2).
+    // Only an origin on a real host: a `file://` or local-path origin is no platform address (review 3).
+    const setHost = hostOnly ? plainHost(hostFromGitUrl(cur.git_url)) : null;
+    const originHost = originUrl ? plainHost(hostFromGitUrl(originUrl)) : null;
+    const fits = !!originUrl && !!repoGitUrl(originUrl) && !!originHost && (!setHost || originHost === setHost);
+    const backfillUrl = originUrl && (!hostOnly || fits) ? originUrl : null;
+    if (hostOnly && !backfillUrl) {
+      const why = !originUrl ? 'this clone has no origin remote'
+        : !repoGitUrl(originUrl) ? 'origin names no repo either'
+        : !originHost ? 'origin is not on a platform host'
+        : 'origin is on another host';
+      info(`the Product's git_url names no repo, and ${why} — left as it is: set git_url to the Product's full address`);
+    }
     const mode = setupModeFields(root, cur, solo, opts);
     const modeMoved = Object.keys(mode).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(mode[k]));
     if (modeMoved || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
       writeProductConfig(root, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), ...mode, profile: { codebase, repo_layout, team_size } });
       if (mode.mode_set) info(`mode: ${mode.mode_set.from} → ${mode.mode_set.to} (recorded as mode_set)`);
-      if (backfillUrl) info(`backfilled the Product's git_url from origin: ${backfillUrl}`);
+      if (backfillUrl) info(hostOnly ? `replaced the Product's git_url, which named no repo, with origin: ${backfillUrl}` : `backfilled the Product's git_url from origin: ${backfillUrl}`);
       else info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
     }
   }

@@ -3929,6 +3929,39 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #513: a git_url that names only a host is replaced from an origin that names a repo — and only then.
+test('runSetup: re-run replaces a git_url that names no repo from origin; never a full one, never with no repo', async () => {
+  let said = '';
+  const run1 = async (settings, originUrl) => {
+    const { T } = scaffold();
+    if (originUrl) git(T, 'remote', 'add', 'origin', originUrl);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ...settings }));
+    process.env.SDLC_NONINTERACTIVE = '1';
+    try { said = (await captureConsole(() => runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }))).out; } finally { delete process.env.SDLC_NONINTERACTIVE; }
+    const got = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8')).git_url;
+    fs.rmSync(T, { recursive: true, force: true });
+    return got;
+  };
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com/acme/product.git'), 'https://gitlab.example.com/acme/product.git');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com/acme/product.git' }, 'git@gitlab.example.com:other/x.git'), 'https://gitlab.example.com/acme/product.git', 'a full git_url is kept');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com'), 'https://gitlab.example.com', 'an origin with no repo replaces nothing');
+  // Review 1: these settings are shared — a person's SSH alias or a fork on another host is never copied in.
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@gitlab-work:acme/product.git'), 'https://gitlab.example.com', 'an alias host is not the same host');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git'), 'https://gitlab.example.com', 'a fork on another host');
+  // Review 2: a bare name with no scheme has no host to protect — an origin that names a repo replaces it.
+  assert.equal(await run1({ git_url: 'gitlab.example.com' }, 'git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
+  // Review 3: each value left alone says why; a local origin never lands in the shared settings.
+  assert.equal(await run1({ git_url: 'gitlab.example.com' }, 'file:///srv/git/acme/product.git'), 'gitlab.example.com');
+  assert.match(said, /origin is not on a platform host — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, null);
+  assert.match(said, /this clone has no origin remote — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git');
+  assert.match(said, /origin is on another host — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com');
+  assert.match(said, /origin names no repo either — left as it is/);
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, null), 'https://gitlab.example.com', 'no origin: unchanged');
+});
+
 // Regression for #97: a reconfigure must never drop a key it does not collect. Since E62 that includes a
 // `roster` and `verified_authors` an older release wrote: nothing reads them, and nothing deletes them.
 test('buildReconfiguredProductConfig: overlays what this run collected and keeps every other key as it was', () => {
@@ -13017,6 +13050,25 @@ test('doctor E64: the roster warning says when it can go — counted with the sa
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #513: a git_url that names only a host warns, naming the host and never the value; reads use origin.
+test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the host only', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [], git_url: 'https://user:s3cret@gitlab.example.com/' }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  const w = r.checks.find((x) => x.id === 'product-git-url');
+  assert.equal(w?.status, 'warn');
+  assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad takes the Product's repo path from its origin remote instead \[YAD-CFG-005\]/);
+  assert.doesNotMatch(JSON.stringify(w), /s3cret|user:/, 'the value is never shown');
+  assert.match(w.hint, /re-run `yad setup` — it sets it from origin when origin is on the same host/);
+  // Review 3: a bare name is set, just not an address — doctor says that, not "has no git_url".
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [], git_url: 'gitlab.example.com' }));
+  const bare = (await doctorOn(T)).checks.find((x) => x.id === 'product-git-url');
+  assert.match(bare.message, /git_url is not an address yad can read a host from \(it needs a scheme/);
+  assert.match(bare.hint, /^fix git_url in .* to the Product's full address, or re-run `yad setup` — it replaces it from origin when origin names a repo$/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: Product settings with git_url present emit no product-git-url warning', async () => {
   const { T } = scaffold();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/product.git' }));
@@ -22101,7 +22153,7 @@ test('#426 doctor + yad codeowners check: the gate-file warning on a code repo a
 // 404 on classic branch protection to anyone who is not an admin, even on a branch it reports as
 // protected — so a failed call is "not known", with the reason, never "none" and never "fine".
 const {
-  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
+  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, repoGitUrl, configuredGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
 } = await import('./protection.mjs');
 
 // A fake `gh`/`glab`: `calls` is [[regex on the API path, status, body]]; status null is "no answer"
@@ -22149,6 +22201,25 @@ test('E70 helpers: the repo path keeps a GitLab subgroup; the HTTP status of gh 
   assert.equal(repoPathFromGitUrl('ssh://git@git.corp.example:2222/group/sub/proj.git'), 'group/sub/proj', 'doctor\'s old repoSlug kept only sub/proj');
   assert.equal(repoPathFromGitUrl('https://gitlab.com/group/sub/proj/'), 'group/sub/proj');
   for (const bad of ['', '   ', null, 'https://github.com/only', 'not a url', 42]) assert.equal(repoPathFromGitUrl(bad), null, String(bad));
+  // #513: a git_url that names a repo, as written; a host alone is none, so readers fall back to origin.
+  assert.equal(repoGitUrl(' https://gitlab.com/group/sub/proj.git '), 'https://gitlab.com/group/sub/proj.git');
+  assert.equal(repoGitUrl('git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
+  assert.equal(repoGitUrl('ssh://git@git.corp.example:2222/group/proj.git'), 'ssh://git@git.corp.example:2222/group/proj.git');
+  for (const bad of ['https://gitlab.example.com', 'https://gitlab.example.com/', 'git@gitlab.example.com:', 'gitlab.example.com', '', null, 42]) assert.equal(repoGitUrl(bad), '', String(bad));
+  // The address asked about: the settings' when it names a repo; else origin, with the settings' host kept —
+  // origin can be a person's SSH alias (review 1). Origin is read only when needed.
+  let asked = 0;
+  const o = (u) => () => { asked++; return u; };
+  assert.equal(configuredGitUrl('https://gitlab.example.com/acme/p.git', o('git@x:y/z.git')), 'https://gitlab.example.com/acme/p.git');
+  assert.equal(asked, 0, 'a full git_url never reads origin');
+  assert.equal(configuredGitUrl('', 'git@gitlab-work:acme/p.git'), 'git@gitlab-work:acme/p.git', 'no git_url: origin as it is');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'git@gitlab.example.com:acme/p.git'), 'git@gitlab.example.com:acme/p.git', 'same host: origin');
+  assert.equal(configuredGitUrl('https://u:tok@gitlab.example.com:8443/', 'git@gitlab-work:acme/sub/p.git'), 'https://gitlab.example.com:8443/acme/sub/p.git', 'an alias: the settings\' host (no login), origin\'s path');
+  assert.equal(configuredGitUrl('git@gitlab.example.com:', 'https://gitlab-work/acme/p'), 'git@gitlab.example.com:acme/p.git');
+  assert.equal(configuredGitUrl('gitlab.example.com', 'git@gitlab-work:acme/p.git'), 'git@gitlab-work:acme/p.git', 'a bare name is no url: no host to keep');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'git@gitlab-work:'), 'git@gitlab-work:', 'origin names no repo: origin as before');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', null), '');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'file:///srv/git/acme/p.git'), 'file:///srv/git/acme/p.git', 'a local origin is never rebuilt onto the host (review 2)');
   assert.equal(httpStatus({ stderr: 'gh: Not Found (HTTP 404)' }), 404);
   assert.equal(httpStatus({ stderr: 'glab: 401 Unauthorized' }), 401);
   assert.equal(httpStatus({ stdout: '{"message":"403 Forbidden"}' }), 403);

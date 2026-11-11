@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, warn, fail, info, hand, run, exists, readJSON, isPlainObject, forTerminal, asArg } from './lib.mjs';
 import { REQUIRED_CHECKS, REPO_WIRING, PRODUCT_WIRING, PROJECT_FILES, PRODUCT_LINK, productConfigPath, isVerifiedLedger } from './manifest.mjs';
-import { readCiSettings, protectionLine } from './protection.mjs';
+import { readCiSettings, protectionLine, configuredGitUrl } from './protection.mjs';
 import { repoActions, productActions } from './plan.mjs';
 import { judgeRepo, runnable } from './workspace.mjs';
 import { isSolo } from './gate.mjs';
@@ -474,7 +474,7 @@ export function ciTargets(root, { repo = null } = {}) {
     const onDisk = typeof entry.path === 'string' && entry.path && runnable(judgeRepo(root, entry));
     return {
       name: entry.name, kind: 'code', entry, ciRuns: true,
-      target: { platform: entry.platform || null, gitUrl: (typeof entry.git_url === 'string' && entry.git_url) || (onDisk ? origin(path.resolve(root, entry.path)) : null), branch: branchOf(entry) },
+      target: { platform: entry.platform || null, gitUrl: configuredGitUrl(entry.git_url, () => (onDisk ? origin(path.resolve(root, entry.path)) : null)) || null, branch: branchOf(entry) },
     };
   };
   if (repo !== null) {
@@ -486,7 +486,7 @@ export function ciTargets(root, { repo = null } = {}) {
     name: 'Product', kind: 'product', wired, ciRuns: wired,
     // The verified ledger asked for, by its name or its older spellings, whether or not a platform is set.
     wantsVerified: config.ledger === 'verified' || (typeof config.ledger !== 'string' && (config.bridge_enabled === true || config.bridge === true)),
-    target: { platform: config.platform || null, gitUrl: config.git_url || origin(root), branch: branchOf(config) },
+    target: { platform: config.platform || null, gitUrl: configuredGitUrl(config.git_url, () => origin(root)) || null, branch: branchOf(config) },
   };
   return { targets: [product, ...entries.map(code)] };
 }

@@ -21,7 +21,7 @@ import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
-import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, shown } from './protection.mjs';
+import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, repoGitUrl, configuredGitUrl, shown } from './protection.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
@@ -299,9 +299,20 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // resolved host), so it fires even when an origin remote can substitute: the field itself
         // is required regardless.
         if (!hostFromGitUrl(productConfig.git_url)) {
+          // Set, but not an address yad can read a host from (`gitlab.example.com`, no scheme) — not "missing".
+          const set = typeof productConfig.git_url === 'string' && productConfig.git_url.trim();
           check(checks, 'product-git-url', 'project', 'warn',
-            `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
-            `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
+            set ? `${settingsRel}'s git_url is not an address yad can read a host from (it needs a scheme, such as https://, or the user@host:path form) [YAD-CFG-005]`
+              : `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
+            set ? `fix git_url in ${settingsEditHint(root)} to the Product's full address, or re-run \`yad setup\` — it replaces it from origin when origin names a repo`
+              : `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
+        } else if (!repoGitUrl(productConfig.git_url)) {
+          // A host and no repo (#513): every platform read falls back to origin, but the record is still
+          // wrong — and code repos' product-link records copy it. Only the host is shown, never the value.
+          const where = plainHost(hostFromGitUrl(productConfig.git_url));
+          check(checks, 'product-git-url', 'project', 'warn',
+            `${settingsRel}'s git_url names no repo, only a host${where ? ` (${where})` : ''} — yad takes the Product's repo path from its origin remote instead [YAD-CFG-005]`,
+            `edit git_url in ${settingsEditHint(root)} to the Product's full address, or re-run \`yad setup\` — it sets it from origin when origin is on the same host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
@@ -2696,7 +2707,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     // `protection` alone, never `protection:product`: a connected repo may be named `product`.
     emit('protection', 'Product', {
       platform: productConfig.platform || null,
-      gitUrl: productConfig.git_url || origin(root),
+      gitUrl: configuredGitUrl(productConfig.git_url, () => origin(root)) || null,
       branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,
     });
   }
@@ -2710,7 +2721,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
     emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, forTerminal(repo.name), {
       platform: repo.platform || null,
-      gitUrl: (typeof repo.git_url === 'string' && repo.git_url) || (onDisk ? origin(repoRoot) : null),
+      gitUrl: configuredGitUrl(repo.git_url, () => (onDisk ? origin(repoRoot) : null)) || null,
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
     });
   }
@@ -2723,20 +2734,22 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
 export function productTokenChecks(checks, root, { runner, env, today } = {}) {
   const productConfig = readJSON(productConfigPath(root), null);
   if (!isPlainObject(productConfig) || typeof productConfig.git_url !== 'string' || !productConfig.git_url.trim()) return;
+  // The Product's address: its git_url when that names a repo, else the clone's origin (#513) — a git_url
+  // that names only a host would leave every comparison below, and the expiry read, with no repo.
+  const productUrl = configuredGitUrl(productConfig.git_url, () => run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout) || productConfig.git_url;
   const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}), authCache: new Map() };
   const where = (url) => {
     const host = plainHost(hostFromGitUrl(url || ''));
     const repo = repoPathFromGitUrl(url || '');
     return host && repo ? { host, repo: repo.toLowerCase() } : null;
   };
-  const product = where(productConfig.git_url);
+  const product = where(productUrl);
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const repos = (Array.isArray(registry?.repos) ? registry.repos : []).map((repo, i) => ({ repo, i }))
     .filter(({ repo }) => isPlainObject(repo) && typeof repo.name === 'string' && repo.name);
   const urlOf = (repo) => {
-    if (typeof repo.git_url === 'string' && repo.git_url) return repo.git_url;
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
-    return repoRoot && isCheckout(root, repo) && gitHead(repoRoot) ? (run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout || null) : null;
+    return configuredGitUrl(repo.git_url, () => (repoRoot && isCheckout(root, repo) && gitHead(repoRoot) ? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout : null)) || null;
   };
   const listed = repos.map(({ repo, i }) => ({ repo, i, url: urlOf(repo), at: where(urlOf(repo)) }));
   let checked = 0;
@@ -2771,10 +2784,10 @@ export function productTokenChecks(checks, root, { runner, env, today } = {}) {
     const id = hideAddresses(repo.name) === repo.name ? `product-token:${repo.name}` : `product-token:#${i + 1}`;
     check(checks, id, 'product-token', line.status, line.message, line.hint || '');
   }
-  const productPlatform = productConfig.platform || detectPlatform(productConfig.git_url) || null;
+  const productPlatform = productConfig.platform || detectPlatform(productUrl) || null;
   // Whatever platform the code repos are on (review 2): a GitHub repo can hold a GitLab Product's token.
   if (checked && productPlatform === 'gitlab') {
-    const r = readExpiringProductTokens({ gitUrl: productConfig.git_url }, { ...opts, ...(today ? { today } : {}) });
+    const r = readExpiringProductTokens({ gitUrl: productUrl }, { ...opts, ...(today ? { today } : {}) });
     if (!r.known) {
       check(checks, 'product-token-expiry', 'product-token', 'warn', `whether one of the Product's access tokens that can clone it expires soon is not known — ${r.why}`);
     } else {

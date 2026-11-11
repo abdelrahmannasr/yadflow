@@ -942,3 +942,33 @@ test('#349 follow-up: a git worktree of a registered repo is that repo, on the w
     assert.equal(St.buildStatus(T, { cwd: moved, fetch: false }).here.repo, 'api', 'a stale back-link: still api, for a read');
   } finally { fs.rmSync(P, { recursive: true, force: true }); }
 });
+
+// #513: a Product git_url that names only a host is no repo: the platform reads (issues, standup, members)
+// use the clone's origin instead.
+test('#513: a host-only Product git_url falls back to origin for the platform reads', async () => {
+  const { productIdentity } = await import('./members.mjs');
+  const T = product({ platform: 'gitlab', gitUrl: 'https://gitlab.example.com' });
+  try {
+    git(T, ['remote', 'add', 'origin', 'git@gitlab.example.com:acme/product.git']);
+    const cfg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'));
+    const id = productIdentity(T, { productConfig: cfg });
+    assert.deepEqual([id.host, id.repo], ['gitlab.example.com', 'acme/product']);
+    const [src] = S.repoSources(T, id, cfg, [], process.env, { localPaths: false });
+    assert.equal(src.gitUrl, 'git@gitlab.example.com:acme/product.git');
+    // A full git_url still wins over origin.
+    const full = { ...cfg, git_url: 'https://gitlab.example.com/team/real.git' };
+    assert.equal(S.repoSources(T, id, full, [], process.env, { localPaths: false })[0].gitUrl, 'https://gitlab.example.com/team/real.git');
+    assert.equal(productIdentity(T, { productConfig: full }).repo, 'team/real');
+    // Origin through a person's SSH alias: the host stays the settings' (as the CI member check reads it),
+    // and the repo path is origin's (review 1).
+    git(T, ['remote', 'set-url', 'origin', 'git@gitlab-work:acme/product.git']);
+    const alias = productIdentity(T, { productConfig: cfg });
+    assert.deepEqual([alias.host, alias.repo], ['gitlab.example.com', 'acme/product']);
+    assert.equal(S.repoSources(T, alias, cfg, [], process.env, { localPaths: false })[0].gitUrl, 'https://gitlab.example.com/acme/product.git');
+    // No origin: the settings' host is kept, and there is no repo.
+    git(T, ['remote', 'remove', 'origin']);
+    const none = productIdentity(T, { productConfig: cfg });
+    assert.deepEqual([none.host, none.repo], ['gitlab.example.com', null]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
