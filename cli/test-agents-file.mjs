@@ -564,6 +564,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     // A file empty when it is read: the next text stands alone (`printf '' > a` after an open quote).
     `printf '"' > a; printf '' > a; bash <(cat a; printf 'gh pr merge 5')`, `printf '"' > a; printf '' > a; bash -c "$(cat a; printf 'gh pr merge 5')"`,
     `false && printf '"' > a; source <(cat a; printf 'gh pr merge 5')`, `printf 'echo "' "'" > b; source <(cat nofile b; printf 'gh pr merge 5')`,
+    // Readings are paired by their place: empty ones from files never written keep theirs.
+    ...['bash -c "$(cat e1 e2 a; cat q)"', 'eval "$(cat e1 e2 a; cat q)"', 'source <(cat e1 e2 a; cat q)'].map((t) => `printf '"' > a; printf '' > a; printf 'echo hi\\n' > q; printf 'gh pr merge 5\\n' > q; false && printf 'echo z\\n' > q; ${t}`),
     ...['cat $(cat f) | bash', 'cat -$(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });

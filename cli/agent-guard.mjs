@@ -1272,10 +1272,9 @@ function printedOf(fed, n, lists, input = []) {
           const t = fileTexts(a);
           per.push(t === null ? [OVER] : t.length ? t : ['']);
         }
-        // One empty reading at most: a file may be empty when read (`printf '' > a`), and the joins need that
-        // reading, but each one more was joined to every reading before it (#498 review: out of memory).
-        let empty = false;
-        for (const t of per) for (const x of t) if (x !== '') out.push(x); else if (!empty) { empty = true; out.push(x); }
+        // Every reading, empty ones too: the joins pair readings by their place, so dropping one moves the rest
+        // (#498 review). Their memory is bounded by ZIP_CHARS.
+        for (const t of per) for (const x of t) out.push(x);
         if (per.length > 1) for (const x of zipJoin(per)) out.push(x);
       }
     }
