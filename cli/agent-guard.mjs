@@ -314,7 +314,7 @@ export function shellParts(rawLine, mode = {}) {
         continue;
       }
       redirectBefore = dropWord ? redirect : null;
-      redirect = { op: line.slice(i, j).replace('|', ''), fd: ch === '&' ? '1' : fd };
+      redirect = { op: line.slice(i, j).replace(/\|/g, ''), fd: ch === '&' ? '1' : fd };
       dropWord = true;
       i = j - 1;
       continue;
@@ -1047,8 +1047,10 @@ const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took
 // The files a reading of the command writes (#498, row 8): each path's texts, every one ever written (a write
 // that may not run must not hide an earlier one), plus the text a run of `>>` writes in all. One map per reading
 // of the top-level command, shared by every line it carries, so `echo … > f; bash -c 'bash f'` is seen.
-const files = { map: new Map(), judged: 0, writes: 0 };
-const resetFiles = () => { files.map = new Map(); files.judged = 0; files.writes = 0; };
+// `seen` logs each read as [path, the file's version then]; `appends` counts `>>` writes. A pass whose reads all
+// saw the final version, with no `>>`, would be judged the same again, so it is not (see judgeLine).
+const files = { map: new Map(), judged: 0, writes: 0, version: 0, seen: [], appends: 0 };
+const resetFiles = () => { files.map = new Map(); files.judged = 0; files.writes = 0; files.version = 0; files.seen = []; files.appends = 0; };
 const TOO_MUCH_WRITTEN = { allow: false, message: 'yad agent guard: this command runs files it writes too many times, or too much text, to judge. Run it as separate commands.' };
 // `ends`: the end rule the reading this line came from uses (#498); a `$(…)` inside a line is read by the same
 // shell. Unset for a line read afresh (the top line, or what `bash -c` or `eval` runs).
@@ -1167,7 +1169,9 @@ const OVER = '\0yad-guard-too-much-written\0';
 // when it holds too many, or too much text was read from files in all (each read is judged again, so this keeps
 // it linear).
 function fileTexts(p) {
-  const f = files.map.get(normPath(p));
+  const key = normPath(p);
+  const f = files.map.get(key);
+  files.seen.push([key, f ? f.v : 0]);
   if (!f) return [];
   if (f.over || f.texts.size > FILE_TEXTS) return null;
   const out = [...f.texts];
@@ -1182,10 +1186,13 @@ function writeFile(target, texts, append) {
   files.writes++;
   const key = normPath(target);
   let f = files.map.get(key);
-  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, over: false }));
+  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, over: false, v: 0 }));
+  if (append) files.appends++;
+  const size = f.texts.size;
+  const oldAll = f.all;
+  const wasOver = f.over;
   for (const t of texts) if (t !== '') f.texts.add(t);
   // Joined one by one, not through zipJoin's reduce, so a long run of `>>` stays linear (#498 review).
-  // Joined one by one (strings, not a flat join), so a long run of `>>` stays linear (#498 review).
   if (append) {
     if (texts.length) {
       const old = f.all;
@@ -1197,6 +1204,9 @@ function writeFile(target, texts, append) {
     f.all = texts.length ? texts.slice() : null;
   }
   if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) { f.all = null; f.over = true; }
+  // A new version only when a read would now give something else.
+  const sameAll = oldAll === f.all || (oldAll !== null && f.all !== null && oldAll.length === f.all.length && oldAll.every((a, j) => a === f.all[j]));
+  if (f.v === 0 || f.texts.size !== size || !sameAll || f.over !== wasOver) f.v = ++files.version;
 }
 // The text each part is fed (its heredocs and here-strings), grouped once by part. A here-string's `$(…)` is also
 // read with its printed text in place (#498, row 2), one level deep: `bash <<< "$(echo '…; gh pr merge 5')"`.
@@ -1367,16 +1377,22 @@ function judgeLine(line, depth, mode = {}) {
   if (parts.tooComplex) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_READINGS;
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
-  // Twice when the first pass writes a file (#498 review): a `$(…)` is judged before the parts that write, and a
+  // At most twice, when the first pass writes a file (#498 review): a `$(…)` is judged before the parts that write, and a
   // loop or a function may run a file a later part writes (`g(){ bash f; }; echo … > f; g`). The second pass
   // judges it all again with the files the first one saw. Only refuses more.
   // Each pass reads the files on its own budget (#498 review: the second read halved it).
+  // A second pass is needed only when a read in the first saw a file a later write changed, or a `>>` ran (a
+  // second append joins the text again); otherwise it would judge the same texts again (#498 CI: twice at every
+  // level made `x=$(echo a > f; bash f);` repeated pass the 5 s cut-off on a slower machine).
   const judgedBefore = files.judged;
   for (let pass = 0; pass < 2; pass++) {
     files.judged = judgedBefore;
     const writesBefore = files.writes;
+    const seenFrom = files.seen.length;
+    const appendsBefore = files.appends;
     const v = judgeParts(parts, depth, mode);
     if (!v.allow || files.writes === writesBefore) return v;
+    if (files.appends === appendsBefore && !files.seen.slice(seenFrom).some(([k, ver]) => (files.map.get(k)?.v ?? 0) !== ver)) return v;
   }
   return { allow: true };
 }
