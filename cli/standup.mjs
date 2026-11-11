@@ -46,7 +46,7 @@ import { readMembers, memberStatuses, memberMatches, productIdentity, ttlDays, a
 import { ledgerEvents, esc, mdText, writeReport } from './usage.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { listPrs, prTarget } from './pr-list.mjs';
-import { shown, repoGitUrl } from './protection.mjs';
+import { shown, configuredGitUrl } from './protection.mjs';
 import { platformLogin } from './platform.mjs';
 
 const DAY_MS = 86_400_000;
@@ -171,8 +171,7 @@ function wipSaves(root, env, startMs) {
 // (judged first, E81); `gitUrl` is what the platform is asked about.
 export function repoSources(root, identity, productConfig, notRead, env, { localPaths = true } = {}) {
   // A git_url that names only a host is no repo: origin then (#513).
-  const productUrl = repoGitUrl(productConfig?.git_url)
-    || (gitIn(root, env)(['remote', 'get-url', 'origin']).out.trim() || '');
+  const productUrl = configuredGitUrl(productConfig?.git_url, () => gitIn(root, env)(['remote', 'get-url', 'origin']).out);
   const out = [{ label: 'Product', dir: root, gitUrl: productUrl, platform: identity.platform }];
   const { registry, problem } = readRegistry(root);
   if (problem) notRead.push(`${safe(problem)} — the code repos are not read`);

@@ -3931,10 +3931,10 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
 
 // #513: a git_url that names only a host is replaced from an origin that names a repo — and only then.
 test('runSetup: re-run replaces a git_url that names no repo from origin; never a full one, never with no repo', async () => {
-  const run1 = async (hub, originUrl) => {
+  const run1 = async (settings, originUrl) => {
     const { T } = scaffold();
     if (originUrl) git(T, 'remote', 'add', 'origin', originUrl);
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ...hub }));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ...settings }));
     process.env.SDLC_NONINTERACTIVE = '1';
     try { await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); } finally { delete process.env.SDLC_NONINTERACTIVE; }
     const got = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8')).git_url;
@@ -3944,6 +3944,9 @@ test('runSetup: re-run replaces a git_url that names no repo from origin; never 
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com/acme/product.git'), 'https://gitlab.example.com/acme/product.git');
   assert.equal(await run1({ git_url: 'https://gitlab.example.com/acme/product.git' }, 'git@gitlab.example.com:other/x.git'), 'https://gitlab.example.com/acme/product.git', 'a full git_url is kept');
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com'), 'https://gitlab.example.com', 'an origin with no repo replaces nothing');
+  // Review 1: these settings are shared — a person's SSH alias or a fork on another host is never copied in.
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@gitlab-work:acme/product.git'), 'https://gitlab.example.com', 'an alias host is not the same host');
+  assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git'), 'https://gitlab.example.com', 'a fork on another host');
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, null), 'https://gitlab.example.com', 'no origin: unchanged');
 });
 
@@ -13045,7 +13048,7 @@ test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the ho
   assert.equal(w?.status, 'warn');
   assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad reads the Product from its origin remote instead \[YAD-CFG-005\]/);
   assert.doesNotMatch(JSON.stringify(w), /s3cret|user:/, 'the value is never shown');
-  assert.match(w.hint, /re-run `yad setup` to set it from origin/);
+  assert.match(w.hint, /re-run `yad setup` — it sets it from origin when origin is on the same host/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -22133,7 +22136,7 @@ test('#426 doctor + yad codeowners check: the gate-file warning on a code repo a
 // 404 on classic branch protection to anyone who is not an admin, even on a branch it reports as
 // protected — so a failed call is "not known", with the reason, never "none" and never "fine".
 const {
-  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, repoGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
+  readProtection, protectionLine, protectionJSON, repoPathFromGitUrl, repoGitUrl, configuredGitUrl, httpStatus, branchMatches, shown: protShown, hideAddresses: protHide, BANNER, PAGE,
 } = await import('./protection.mjs');
 
 // A fake `gh`/`glab`: `calls` is [[regex on the API path, status, body]]; status null is "no answer"
@@ -22186,6 +22189,19 @@ test('E70 helpers: the repo path keeps a GitLab subgroup; the HTTP status of gh 
   assert.equal(repoGitUrl('git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
   assert.equal(repoGitUrl('ssh://git@git.corp.example:2222/group/proj.git'), 'ssh://git@git.corp.example:2222/group/proj.git');
   for (const bad of ['https://gitlab.example.com', 'https://gitlab.example.com/', 'git@gitlab.example.com:', 'gitlab.example.com', '', null, 42]) assert.equal(repoGitUrl(bad), '', String(bad));
+  // The address asked about: the settings' when it names a repo; else origin, with the settings' host kept —
+  // origin can be a person's SSH alias (review 1). Origin is read only when needed.
+  let asked = 0;
+  const o = (u) => () => { asked++; return u; };
+  assert.equal(configuredGitUrl('https://gitlab.example.com/acme/p.git', o('git@x:y/z.git')), 'https://gitlab.example.com/acme/p.git');
+  assert.equal(asked, 0, 'a full git_url never reads origin');
+  assert.equal(configuredGitUrl('', 'git@gitlab-work:acme/p.git'), 'git@gitlab-work:acme/p.git', 'no git_url: origin as it is');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'git@gitlab.example.com:acme/p.git'), 'git@gitlab.example.com:acme/p.git', 'same host: origin');
+  assert.equal(configuredGitUrl('https://u:tok@gitlab.example.com:8443/', 'git@gitlab-work:acme/sub/p.git'), 'https://gitlab.example.com:8443/acme/sub/p.git', 'an alias: the settings\' host (no login), origin\'s path');
+  assert.equal(configuredGitUrl('git@gitlab.example.com:', 'https://gitlab-work/acme/p'), 'git@gitlab.example.com:acme/p.git');
+  assert.equal(configuredGitUrl('gitlab.example.com', 'git@gitlab-work:acme/p.git'), 'git@gitlab-work:acme/p.git', 'a bare name is no url: no host to keep');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'git@gitlab-work:'), 'git@gitlab-work:', 'origin names no repo: origin as before');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', null), '');
   assert.equal(httpStatus({ stderr: 'gh: Not Found (HTTP 404)' }), 404);
   assert.equal(httpStatus({ stderr: 'glab: 401 Unauthorized' }), 401);
   assert.equal(httpStatus({ stdout: '{"message":"403 Forbidden"}' }), 403);

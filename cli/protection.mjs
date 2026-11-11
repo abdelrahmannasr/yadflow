@@ -56,8 +56,31 @@ export function repoPathFromGitUrl(url = '') {
 
 // A git_url that names a repo, as written (trimmed), else ''. A url that names only a host
 // (`https://gitlab.example.com`, `git@host:`) says where the platform is but not which repo, so a reader
-// that falls back to the clone's origin remote must fall back for it too (#513): `repoGitUrl(x) || origin`.
+// that falls back to the clone's origin remote must fall back for it too (#513) — through `configuredGitUrl`.
 export const repoGitUrl = (u) => (typeof u === 'string' && repoPathFromGitUrl(u) ? u.trim() : '');
+
+// The address to ask the platform about, from a settings `git_url` and the clone's origin remote (#513):
+//   - the settings' url when it names a repo;
+//   - else origin — but the HOST stays the settings' when they name one: origin can be a person's own SSH
+//     alias (`git@gitlab-work:acme/product.git`), and the CI member check reads the host from the settings
+//     first. So a host-only url and origin on another host give the settings' host with origin's repo path.
+//   - else '' when neither names anything.
+// `origin` is the url, or a function that reads it — asked only when the settings name no repo.
+export function configuredGitUrl(set, origin) {
+  const own = repoGitUrl(set);
+  if (own) return own;
+  const read = typeof origin === 'function' ? origin() : origin;
+  const o = typeof read === 'string' ? read.trim() : '';
+  const repo = repoPathFromGitUrl(o);
+  const host = plainHost(hostFromGitUrl(typeof set === 'string' ? set : ''));
+  if (!repo || !host || plainHost(hostFromGitUrl(o)) === host) return o;
+  const s = set.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+    try { const u = new URL(s); u.username = ''; u.password = ''; u.search = ''; u.hash = ''; u.pathname = `/${repo}.git`; return u.toString(); } catch { /* below */ }
+  }
+  const scp = s.match(/^((?:[^@/]+@)?[^/:]+):/);
+  return scp ? `${scp[1]}:${repo}.git` : `https://${host}/${repo}.git`;
+}
 
 // The HTTP status of a failed `gh api` / `glab api` call, or null when there was none (offline, a timeout,
 // the host is down). gh ends with `gh: Not Found (HTTP 404)`; glab with `glab: 404 Not Found (HTTP 404)`

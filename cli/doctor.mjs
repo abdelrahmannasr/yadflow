@@ -21,7 +21,7 @@ import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
-import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, repoGitUrl, shown } from './protection.mjs';
+import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, repoGitUrl, configuredGitUrl, shown } from './protection.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
@@ -308,7 +308,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           const where = plainHost(hostFromGitUrl(productConfig.git_url));
           check(checks, 'product-git-url', 'project', 'warn',
             `${settingsRel}'s git_url names no repo, only a host${where ? ` (${where})` : ''} — yad reads the Product from its origin remote instead [YAD-CFG-005]`,
-            `re-run \`yad setup\` to set it from origin, or edit git_url in ${settingsEditHint(root)} to the Product's full address`);
+            `edit git_url in ${settingsEditHint(root)} to the Product's full address, or re-run \`yad setup\` — it sets it from origin when origin is on the same host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
@@ -2703,7 +2703,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     // `protection` alone, never `protection:product`: a connected repo may be named `product`.
     emit('protection', 'Product', {
       platform: productConfig.platform || null,
-      gitUrl: repoGitUrl(productConfig.git_url) || origin(root),
+      gitUrl: configuredGitUrl(productConfig.git_url, () => origin(root)) || null,
       branch: typeof productConfig.default_branch === 'string' && productConfig.default_branch ? productConfig.default_branch : null,
     });
   }
@@ -2717,7 +2717,7 @@ export function protectionChecks(checks, root, { runner, env } = {}) {
     // validates a repo's name, so a repo literally named `#1` could take the same id — it only labels a line.
     emit(hideAddresses(repo.name) === repo.name ? `protection:${repo.name}` : `protection:#${i + 1}`, forTerminal(repo.name), {
       platform: repo.platform || null,
-      gitUrl: repoGitUrl(repo.git_url) || (onDisk ? origin(repoRoot) : null),
+      gitUrl: configuredGitUrl(repo.git_url, () => (onDisk ? origin(repoRoot) : null)) || null,
       branch: typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null,
     });
   }
@@ -2732,7 +2732,7 @@ export function productTokenChecks(checks, root, { runner, env, today } = {}) {
   if (!isPlainObject(productConfig) || typeof productConfig.git_url !== 'string' || !productConfig.git_url.trim()) return;
   // The Product's address: its git_url when that names a repo, else the clone's origin (#513) — a git_url
   // that names only a host would leave every comparison below, and the expiry read, with no repo.
-  const productUrl = repoGitUrl(productConfig.git_url) || (run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || productConfig.git_url;
+  const productUrl = configuredGitUrl(productConfig.git_url, () => run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout) || productConfig.git_url;
   const opts = { ...(runner ? { runner } : {}), ...(env ? { env } : {}), authCache: new Map() };
   const where = (url) => {
     const host = plainHost(hostFromGitUrl(url || ''));
@@ -2744,9 +2744,8 @@ export function productTokenChecks(checks, root, { runner, env, today } = {}) {
   const repos = (Array.isArray(registry?.repos) ? registry.repos : []).map((repo, i) => ({ repo, i }))
     .filter(({ repo }) => isPlainObject(repo) && typeof repo.name === 'string' && repo.name);
   const urlOf = (repo) => {
-    if (repoGitUrl(repo.git_url)) return repoGitUrl(repo.git_url);
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
-    return repoRoot && isCheckout(root, repo) && gitHead(repoRoot) ? (run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout || null) : null;
+    return configuredGitUrl(repo.git_url, () => (repoRoot && isCheckout(root, repo) && gitHead(repoRoot) ? run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout : null)) || null;
   };
   const listed = repos.map(({ repo, i }) => ({ repo, i, url: urlOf(repo), at: where(urlOf(repo)) }));
   let checked = 0;

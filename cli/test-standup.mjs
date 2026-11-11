@@ -959,6 +959,12 @@ test('#513: a host-only Product git_url falls back to origin for the platform re
     const full = { ...cfg, git_url: 'https://gitlab.example.com/team/real.git' };
     assert.equal(S.repoSources(T, id, full, [], process.env, { localPaths: false })[0].gitUrl, 'https://gitlab.example.com/team/real.git');
     assert.equal(productIdentity(T, { productConfig: full }).repo, 'team/real');
+    // Origin through a person's SSH alias: the host stays the settings' (as the CI member check reads it),
+    // and the repo path is origin's (review 1).
+    git(T, ['remote', 'set-url', 'origin', 'git@gitlab-work:acme/product.git']);
+    const alias = productIdentity(T, { productConfig: cfg });
+    assert.deepEqual([alias.host, alias.repo], ['gitlab.example.com', 'acme/product']);
+    assert.equal(S.repoSources(T, alias, cfg, [], process.env, { localPaths: false })[0].gitUrl, 'https://gitlab.example.com/acme/product.git');
     // No origin: the settings' host is kept, and there is no repo.
     git(T, ['remote', 'remove', 'origin']);
     const none = productIdentity(T, { productConfig: cfg });

@@ -21,6 +21,7 @@ import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
 import { readAllowList } from './agent-rules.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
 import { repoGitUrl } from './protection.mjs';
+import { hostFromGitUrl, plainHost } from './platform.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -627,10 +628,16 @@ export async function runSetup(root, opts = {}) {
     // Strict read for the same reason as the reconfigure write above: a corrupt Product must abort, never
     // fail-open to `{}` and get rewritten with everything else stripped on a plain re-run.
     const cur = readJSONStrict(productPath, {}) || {};
-    // A git_url that names only a host is no repo (#513): replaced too — but only by an origin that names one.
+    // A git_url that names only a host is no repo (#513): replaced too — but only by an origin that names one
+    // on the SAME host. These settings are shared and committed: a person's own SSH alias (`gitlab-work`) or a
+    // fork on another host would send everyone, and CI, to the wrong place (#513 review 1).
     const hostOnly = cur.platform && typeof cur.git_url === 'string' && cur.git_url.trim() && !repoGitUrl(cur.git_url);
     const originUrl = (cur.platform && (!cur.git_url || hostOnly)) ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null) : null;
-    const backfillUrl = originUrl && (!hostOnly || repoGitUrl(originUrl)) ? originUrl : null;
+    const sameHost = (a, b) => { const x = plainHost(hostFromGitUrl(a)); return !!x && x === plainHost(hostFromGitUrl(b)); };
+    const backfillUrl = originUrl && (!hostOnly || (repoGitUrl(originUrl) && sameHost(originUrl, cur.git_url))) ? originUrl : null;
+    if (hostOnly && originUrl && !backfillUrl) {
+      info(`the Product's git_url names no repo, and origin ${repoGitUrl(originUrl) ? 'is on another host' : 'names none either'} — left as it is: set git_url to the Product's full address`);
+    }
     const mode = setupModeFields(root, cur, solo, opts);
     const modeMoved = Object.keys(mode).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(mode[k]));
     if (modeMoved || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
