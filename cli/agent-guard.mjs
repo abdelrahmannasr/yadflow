@@ -1230,6 +1230,8 @@ function printedOf(fed, n, lists, input = []) {
       let format = false;
       while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
       out.push(pw.slice(k).join(' '));
+      // And main's reading, every `-n`/`-e`/`-E` word dropped wherever it stands: only adds a reading.
+      if (prog === 'echo') out.push(pw.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
       if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) out.push(pw.slice(k + 1).join(' '));
     }
     // `printf` prints its format and its words; also its words after the format (`--` ends its options).
