@@ -547,6 +547,12 @@ test('the agent guard refuses every human-only yad command and every force push,
     'printf "gh pr " > f; printf "merge 1" >> f; bash f', 'echo -n "gh pr " > f; echo "merge 1" >> f; bash f', 'printf "gh pr " > a; echo merge 1 > b; cat a b | bash',
     'bash <(printf "gh pr "; echo merge 1)', 'git commit -m x >&--n', 'git commit -m x >& --n', 'git commit -m x <&--n', 'git push origin >& -+main',
     `bash < <(true) ${'-e '.repeat(70)}<(echo gh pr merge 1)`, 'git push origin >&+main', 'git push origin >& --force',
+    // Review round 3: an `esac` that is an argument; output read both joined and by lines (a `%b`, `\012` or typed
+    // marker); a file past its limits in an argument; `>&--` with a `$(…)` or brace; a piped group's output.
+    'bash <(case x in y) echo then esac;; x) echo gh pr merge 5;; esac)', "bash <(printf '%b' 'echo hi\\n'; echo gh pr merge 5)",
+    "bash <(printf 'echo hi\\012'; printf 'gh pr merge 5')", "bash <(echo -en 'echo hi\\n'; echo gh pr merge 5)", "bash <(echo $'echo hi \\x01yad-noeol\\x01'; echo gh pr merge 5)",
+    `${Array.from({ length: 70 }, (_, i) => `echo t${i} > f`).join('; ')}; echo 'pr merge 5' > f; gh $(<f)`, 'git commit -m x >&--$(echo n)', 'git commit -m x >&--{n,}',
+    "{ printf 'gh pr '; echo merge 5; } | bash", "(printf 'gh pr '; echo merge 5) | bash", "printf '%s ' gh pr > f; echo merge 5 >> f; bash f",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -681,7 +687,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate',
     // Review round 2: a file run after many lines written to it; descriptors copied; a `case` that runs a script.
     `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
-    'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f']) {
+    'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f',
+    // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
+    `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -759,6 +767,12 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.ok(Date.now() - t11 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t11} ms`);
   }
   assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  // Review round 3: many files to one `cat`, many `>&f`, many parts in one process substitution stay linear.
+  for (const l of [`echo -n a>f;cat ${'f '.repeat(490000)};gh pr merge 5`, `cat ${'x '.repeat(490000)};gh pr merge 5`, `echo hi ${'>&f '.repeat(245000)}`, `bash <(${'echo a;'.repeat(140000)})`]) {
+    const t13 = Date.now();
+    agentGuardDecision(l);
+    assert.ok(Date.now() - t13 < within(4500), `#498 ${JSON.stringify(l.slice(0, 20))} took ${Date.now() - t13} ms`);
+  }
   // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
   for (const d of [4000, 16000]) {
     const t12 = Date.now();
