@@ -23,13 +23,15 @@
 // brick an agent's ability to edit anything the moment a config went sideways. The asymmetry is the
 // design: `ledger-guard` in CI fails closed and is what actually protects the ledger.
 import { spawnSync } from 'node:child_process';
+import { setTimeout, clearTimeout } from 'node:timers';
+import { Worker } from 'node:worker_threads';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger, mirrorDrift, productConfigPath, HOOK_PROJECT_DIR_ENVS, PROJECT_FILES } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
-import { agentGuardDecision, agentGuardPreapproval, payloadCommand, isCursorPayload } from './agent-guard.mjs';
+import { payloadCommand, isCursorPayload } from './agent-guard.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -649,30 +651,63 @@ export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
 // a PreToolUse "allow" on stdout, so it runs with no permission prompt; any other allowed line gets no answer
 // (exit 0, nothing printed), which leaves the prompt to Claude Code as before. `YAD_NO_PREAPPROVE=1` keeps the
 // refusals and drops this half. Cursor's answer is unchanged.
-export function runAgentGuardHook({ format = null } = {}) {
+//
+// Fail-closed when judging fails (#498): the decision runs in a worker with a memory cap and a time limit
+// (cli/agent-guard-worker.mjs). A line that runs it out of memory, past the limit, or into an error is refused:
+// a hook that crashed would exit with a code the harness reads as no answer, and the command would run.
+export async function runAgentGuardHook({ format = null } = {}) {
   const payload = readPayload();
   const cursor = format ? format === 'cursor' : isCursorPayload(payload);
   if (format && !HOOK_FORMATS.includes(format)) {
     note(`yad hook: unknown --format '${format}' — using '${HOOK_FORMATS[0]}' (known: ${HOOK_FORMATS.join(', ')})`);
   }
-  const verdict = process.env.YAD_HOOK_DISABLE ? { allow: true } : agentGuardDecision(payloadCommand(payload));
+  // Claude Code names the project in CLAUDE_PROJECT_DIR and where the command runs in the payload's `cwd`.
+  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const preapproval = !cursor && !process.env.YAD_NO_PREAPPROVE ? { root, cwd: typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : root } : null;
+  const { verdict, pre } = process.env.YAD_HOOK_DISABLE ? { verdict: { allow: true }, pre: null } : await judgeInWorker(payloadCommand(payload), preapproval);
   if (cursor) {
     process.stdout.write(`${verdict.allow ? CURSOR_ALLOW : cursorDeny(verdict.message)}\n`);
     if (!verdict.allow) console.error(verdict.message);
     return 0;
   }
   if (verdict.allow) {
-    if (!process.env.YAD_HOOK_DISABLE && !process.env.YAD_NO_PREAPPROVE) {
-      // Claude Code names the project in CLAUDE_PROJECT_DIR and where the command runs in the payload's `cwd`.
-      const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-      const pre = agentGuardPreapproval(payloadCommand(payload), { root, cwd: typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : root });
-      if (pre.preapproved) process.stdout.write(`${claudePreapproval(pre.reason)}\n`);
-    }
+    if (pre?.preapproved) process.stdout.write(`${claudePreapproval(pre.reason)}\n`);
     return 0;
   }
   console.error(verdict.message);
   process.exitCode = 2;
   return 2;
+}
+
+// The worker's limits: well above what the longest ordinary line takes (about 400 MB, under a second), and a
+// wall clock past the guard's own 5 s cut-off, for any loop that does not check it.
+export const GUARD_HEAP_MB = 1024;
+export const GUARD_WALL_MS = 10_000;
+const NOT_JUDGED = (why) => ({ allow: false, message: `yad agent guard: this command could not be judged (${why}). Run it as separate commands, shorter, or ask the person to run it.` });
+// The verdict (and pre-approval) for `command`, judged in a worker; a refusal when the worker does not answer.
+export function judgeInWorker(command, preapproval, { heapMb = GUARD_HEAP_MB, wallMs = GUARD_WALL_MS } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    let worker = null;
+    let timer = null;
+    const finish = (answer) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (worker) worker.terminate().catch(() => {});
+      resolve(answer);
+    };
+    try {
+      worker = new Worker(new URL('./agent-guard-worker.mjs', import.meta.url), { workerData: { command, preapproval }, resourceLimits: { maxOldGenerationSizeMb: heapMb } });
+    } catch (e) {
+      finish({ verdict: NOT_JUDGED(e?.message ?? String(e)), pre: null });
+      return;
+    }
+    timer = setTimeout(() => finish({ verdict: NOT_JUDGED(`no answer in ${wallMs / 1000} s`), pre: null }), wallMs);
+    worker.once('message', (m) => finish(m && m.verdict ? m : { verdict: NOT_JUDGED('no verdict'), pre: null }));
+    worker.once('error', (e) => finish({ verdict: NOT_JUDGED(e?.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'it ran out of memory' : (e?.message ?? String(e))), pre: null }));
+    worker.once('exit', (code) => finish({ verdict: NOT_JUDGED(`the judge stopped (${code})`), pre: null }));
+  });
 }
 
 // Claude Code's PreToolUse answer that skips the permission prompt. A team's own `deny` or `ask` rule still wins.

@@ -744,7 +744,7 @@ async function main() {
     // so it takes no --json (E1).
     if (inJSON()) return refuse('yad hook takes no --json — its output is the protocol the agent reads', 'run it without --json');
     // E158: the agent guard, before an agent's shell command.
-    if (action === 'agent-guard') { runAgentGuardHook({ format: o.format ?? null }); return; }
+    if (action === 'agent-guard') { await runAgentGuardHook({ format: o.format ?? null }); return; }
     if (action !== 'ledger-guard') return refuse(`unknown hook: ${action ?? '(none)'} (ledger-guard, agent-guard)`);
     // `--staged` is the git pre-commit half (E48): the files come from the index, never from stdin.
     if (o.staged) { runStagedLedgerGuard(); return; }

@@ -717,7 +717,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // otherwise pass this test and hide a slowdown. Nested tails keep 6 s; that case runs into the cut-off inside
   // the brace expansion by design.
   const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
-  const { MAX_JUDGED } = await import('./agent-guard.mjs');
+  const { MAX_JUDGED, JUDGE_BUDGET_MS } = await import('./agent-guard.mjs');
   const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
   const t0 = Date.now();
   assert.equal(agentGuardDecision(line).allow, false);
@@ -784,12 +784,12 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f | bash;']) {
     const l = half(unit);
     const t11 = Date.now();
-    // Refused at the bound, or (a runner slow enough to need it: CI's Node 20 took 4.7 s here) at the 5 s cut-off.
-    // The time is checked when the bound refused it; the cut-off bounds it otherwise.
+    // Refused at its bound, or on a runner slow enough to need it at the 5 s cut-off (CI's Node 20 reached the
+    // bound in 4.7 s). Either way within the guard's own budget, with slack: a missing deadline check still shows.
     const m = agentGuardDecision(l).message;
     const ms = Date.now() - t11;
     assert.ok(/runs files it writes too many times|took too long/.test(m ?? ''), `${unit}: ${m}`);
-    if (/runs files/.test(m)) assert.ok(ms < within(4500), `#498 ${JSON.stringify(unit)} took ${ms} ms`);
+    assert.ok(ms < within(JUDGE_BUDGET_MS + 1500), `#498 ${JSON.stringify(unit)} took ${ms} ms`);
   }
   assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
   // CI review: many file names from a `$(…)`, each read joined to a long text, ran out of memory before the cut-off.
@@ -884,6 +884,27 @@ test('hooks/agent-guard.mjs: Claude Code reads the exit code, Cursor a JSON verd
     assert.deepEqual(parse(none), { permission: 'allow' }, said(none));
     assert.match(none.err, /allowing/, said(none));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#498: yad hook agent-guard judges in a worker; one that runs out of memory, out of time, or into an error refuses', async () => {
+  const { judgeInWorker } = await import('./hook.mjs');
+  const yadBin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'yad.mjs');
+  const ok = await judgeInWorker('npm test', null);
+  assert.equal(ok.verdict.allow, true, JSON.stringify(ok));
+  const no = await judgeInWorker('gh pr merge 5', null);
+  assert.match(no.verdict.message, /approving or merging/);
+  // A worker with almost no memory, or no time, does not answer: the line is refused, never allowed.
+  const big = `echo ${'$(echo x) '.repeat(60000)}`;
+  const oom = await judgeInWorker(big, null, { heapMb: 4 });
+  assert.equal(oom.verdict.allow, false, JSON.stringify(oom.verdict));
+  assert.match(oom.verdict.message, /could not be judged/);
+  const slow = await judgeInWorker(big, null, { wallMs: 1 });
+  assert.equal(slow.verdict.allow, false, JSON.stringify(slow.verdict));
+  assert.match(slow.verdict.message, /could not be judged \(no answer/);
+  // The real hook: a refusal is exit 2, and a read-only line is still pre-approved from the worker.
+  const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
+  assert.equal(hook('gh pr merge 5').status, 2);
+  assert.match(hook('git status').stdout, /pre-approved/);
 });
 
 test('the hooks read a payload that arrives late or in pieces, retry a pipe that is not ready (EAGAIN), and never lose a verdict at exit', async () => {
