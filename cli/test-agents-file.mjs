@@ -698,8 +698,10 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
   assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
   // Near the limit: 240 `case` words of 4,000 characters read about 960,000 of the 1,048,576 allowed. The line
-  // (965,288 characters) also sits just under MAX_JUDGED: lowering that refuses it as too long, not for its words.
-  assert.equal(agentGuardDecision(`echo $(${` case ${'x'.repeat(4000)} in x) :;; esac;`.repeat(240)})`).allow, true);
+  // must also stay under MAX_JUDGED, or it is refused as too long rather than for its words.
+  const nearCase = `echo $(${` case ${'x'.repeat(4000)} in x) :;; esac;`.repeat(240)})`;
+  assert.ok(nearCase.length < MAX_JUDGED, `the near-limit line is ${nearCase.length} characters`);
+  assert.equal(agentGuardDecision(nearCase).allow, true);
   assert.match(agentGuardDecision(`echo ${'{x}'.repeat(1300)},y`).message, /brace lists expand to too many words/);
   assert.equal(agentGuardDecision(`echo ${'{x}'.repeat(150)},y`).allow, true);
   // #498 review: the kept spelling of a long double-quoted word with many backslashes is built in one pass.
