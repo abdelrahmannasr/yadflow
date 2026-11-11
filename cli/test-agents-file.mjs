@@ -560,7 +560,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     'echo git -c -n core.hooksPath=x commit | bash', 'echo git -c -e core.hooksPath=x commit | zsh',
     // Review round 7: main's reading is judged alone, so the joins still pair the shells' readings.
     `bash -c "$(printf -- 'git commit '; echo - -n)"`,
-  ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
+    // CI review: a `cat` whose file names come from a file read past its limits prints what is not known.
+    ...['cat $(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
+  ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
 test('the agent guard lets the rest through: reads, the agent\'s own pushes, text that only mentions a command', () => {
@@ -783,6 +785,12 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.ok(Date.now() - t11 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t11} ms`);
   }
   assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  // CI review: many file names from a `$(…)`, each read joined to a long text, ran out of memory before the cut-off.
+  for (const n of [60000, 150000]) {
+    const t14 = Date.now();
+    agentGuardDecision(`cat > f <<'E'\nh ${'a '.repeat(n)}\nE\ncat $(cat f) | bash`);
+    assert.ok(Date.now() - t14 < within(4500), `#498 cat $(cat f) with ${n} names took ${Date.now() - t14} ms`);
+  }
   // Review round 3: many files to one `cat`, many `>&f`, many parts in one process substitution stay linear.
   for (const l of [`echo -n a>f;cat ${'f '.repeat(490000)};gh pr merge 5`, `cat ${'x '.repeat(490000)};gh pr merge 5`, `echo hi ${'>&f '.repeat(245000)}`, `bash <(${'echo a;'.repeat(140000)})`]) {
     const t13 = Date.now();

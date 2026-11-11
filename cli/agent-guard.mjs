@@ -1265,10 +1265,14 @@ function printedOf(fed, n, lists, input = []) {
         const per = [];
         for (const a of args) {
           if (a === '-') continue;
+          // A file name read past its limits (`cat $(cat f)`): the file it names is unknown, so is what it prints
+          // (#498 review: it read as no file, and `cat $(cat f) | bash` was let through).
+          if (a.includes(OVER)) { per.push([OVER]); continue; }
           const t = fileTexts(a);
           per.push(t === null ? [OVER] : t.length ? t : ['']);
         }
-        for (const t of per) for (const x of t) out.push(x);
+        // An empty reading judges nothing on its own (each one was joined to every reading before it, #498 review).
+        for (const t of per) for (const x of t) if (x !== '') out.push(x);
         if (per.length > 1) for (const x of zipJoin(per)) out.push(x);
       }
     }
@@ -1277,16 +1281,22 @@ function printedOf(fed, n, lists, input = []) {
 }
 // Readings side by side: the j-th joins each list's j-th reading (its last, once it has no more) by newlines, as
 // their output is, so every reading is in one of them and the count stays the longest list's. Built from pieces,
-// one join each, so a long `cat f f f …` stays linear (#498 review).
+// one join each, so a long `cat f f f …` stays linear (#498 review). Past ZIP_CHARS characters in all, the
+// joins are the text read past its limits instead: a shell that runs it is refused (#498 review: many readings
+// of a part, each joined to a long one, ran out of memory before the cut-off, and a crashed hook lets it run).
+const ZIP_CHARS = 2 * MAX_JUDGED;
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
   const out = [];
+  let size = 0;
   for (let j = 0; j < n; j++) {
     const pieces = [];
     for (let q = 0; q < per.length; q++) {
       if ((q & 4095) === 0 && Date.now() > deadline) return [OVER];
-      pieces.push(per[q][Math.min(j, per[q].length - 1)]);
+      const x = per[q][Math.min(j, per[q].length - 1)];
+      if ((size += x.length + 1) > ZIP_CHARS) return [OVER];
+      pieces.push(x);
     }
     out.push(pieces.join('\n'));
   }
