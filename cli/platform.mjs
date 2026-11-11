@@ -639,7 +639,7 @@ export function createPr(platform, opts = {}) {
   if (platform === 'github') {
     const r = run('gh', buildPrArgs('github', { ...opts, reviewers: [] }), { cwd: opts.cwd });
     if (!r.ok) return { ok: false, reason: r.stderr };
-    const url = r.stdout.split('\n').pop();
+    const url = urlFromStdout(r.stdout);
     const number = prNumberFromUrl(url);
     const added = []; const dropped = [];
     if (number) {
@@ -652,7 +652,7 @@ export function createPr(platform, opts = {}) {
   // gitlab
   const r = run('glab', buildPrArgs('gitlab', opts), { cwd: opts.cwd });
   if (!r.ok) return { ok: false, reason: r.stderr };
-  const url = r.stdout.split('\n').pop();
+  const url = urlFromStdout(r.stdout);
   const iid = prNumberFromUrl(url);
   const rest = reviewers.slice(1);
   // Only report a reviewer as `mentioned` if the @-mention note actually posted; otherwise they were

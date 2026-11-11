@@ -1110,6 +1110,45 @@ test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
 });
 
+test('#509: yad update --open-pr with glab warning about two config files says the real reason the MR did not open', { skip: process.platform === 'win32' }, async () => {
+  const { openUpdatePr } = await import('./update-commit.mjs');
+  const { createPr } = await import('./platform.mjs');
+  const T = tmp();
+  const R = tmp();
+  const bin = tmp();
+  fs.writeFileSync(path.join(bin, 'glab'), [
+    '#!/bin/sh',
+    "echo 'Warning: Multiple config files found. Only the first one will be used.' >&2",
+    "echo '  Using: /home/me/.config/glab-cli/config.yml' >&2",
+    "echo '  Ignoring: /home/me/Library/Application Support/glab-cli/config.yml' >&2",
+    "echo 'Consider consolidating to one location to avoid confusion.' >&2",
+    "echo '401 Unauthorized' >&2",
+    'exit 1',
+  ].join('\n') + '\n', { mode: 0o755 });
+  const before = process.env.PATH;
+  try {
+    git(R, ['init', '-q', '--bare', '-b', 'main']);
+    git(T, ['init', '-q', '-b', 'main']);
+    git(T, ['config', 'user.name', 'Alice Smith']);
+    git(T, ['config', 'user.email', 'alice@work.com']);
+    git(T, ['config', 'commit.gpgsign', 'false']); git(T, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(T, ['add', '.sdlc/cli-version.json']);
+    git(T, ['commit', '-q', '-m', 'chore: start']);
+    git(T, ['remote', 'add', 'origin', R]);
+    git(T, ['push', '-q', '-u', 'origin', 'main']);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.7.0' });
+    process.env.PATH = `${bin}${path.delimiter}${before}`;
+    const r = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'gitlab', creator: createPr, version: '4.7.0', checked: true });
+    assert.deepEqual([r.pushed, r.opened, r.reason], [true, false, 'pr-not-opened']);
+    assert.match(r.hint, /did not open \(glab reads only one of its two config files, so a login saved in the other is not used \(see `yad doctor`, glab-config\) — 401 Unauthorized\)/);
+    assert.doesNotMatch(r.hint, /Multiple config files/);
+  } finally {
+    process.env.PATH = before;
+    for (const d of [T, R, bin]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('yad update refuses --push and --open-pr together; --open-pr is the agent\'s without asking', async () => {
   assert.equal(classify(['update'], ['open-pr']), 'open-pr');
   assert.equal(askFor(classify(['update'], ['open-pr'])), 'never');

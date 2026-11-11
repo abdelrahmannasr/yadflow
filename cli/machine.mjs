@@ -8,7 +8,7 @@
 //           need no Docker, so a repo that names none is never asked about.
 //   glab    more than one glab config file. glab then reads only one and ignores the other (a login saved
 //           there is not used), and warns on every run, which breaks JSON for a tool that reads its output
-//           and its errors together.
+//           and its errors together. yad's own glab calls drop that warning (`run` in cli/lib.mjs, #509).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
