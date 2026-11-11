@@ -1230,8 +1230,9 @@ function printedOf(fed, n, lists, input = []) {
       let format = false;
       while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
       out.push(pw.slice(k).join(' '));
-      // And main's reading, every `-n`/`-e`/`-E` word dropped wherever it stands: only adds a reading.
-      if (prog === 'echo') out.push(pw.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
+      // And main's reading, every `-n`/`-e`/`-E` word dropped wherever it stands: judged on its own, as main
+      // judged it, and kept out of the joins (in the list, it moved the readings the joins pair, #498 review).
+      if (prog === 'echo') (out.alone ??= []).push(pw.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
       if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) out.push(pw.slice(k + 1).join(' '));
     }
     // `printf` prints its format and its words; also its words after the format (`--` ends its options).
@@ -1536,6 +1537,7 @@ function judgeParts(parts, depth, mode) {
     const outs = printedOf(fed, n, spellingsOf(parts, n, subst), input);
     if (outs === null) return TOO_MUCH_WRITTEN;
     for (const t of outs) printed.push(t);
+    for (const t of outs.alone ?? []) printed.push(t);
     if (outs.length) printedPer.push(outs);
     // The files it writes (#498, row 8): its output through `>` or `>>` (with what it is piped, which a filter
     // like `cat` or `sort` passes on), and, for `tee`, its file words.

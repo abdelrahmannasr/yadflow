@@ -558,6 +558,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     "echo gh pr merge 1 >& -'n'; bash ./-n", 'echo gh pr merge 1 >& -n; bash ./-n',
     // Review round 6: main's reading of `echo` (every `-n`/`-e` word dropped) is kept beside the shells'.
     'echo git -c -n core.hooksPath=x commit | bash', 'echo git -c -e core.hooksPath=x commit | zsh',
+    // Review round 7: main's reading is judged alone, so the joins still pair the shells' readings.
+    `bash -c "$(printf -- 'git commit '; echo - -n)"`,
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
