@@ -188,7 +188,7 @@ test('yad worktree: an epic that is not there, a repo not registered, and a repo
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
-test('from an epic\'s code worktree: the registry knows the repo, and Product commands go to the epic\'s Product worktree (#115)', () => {
+test('from an epic\'s code worktree: the registry knows the repo, and Product commands go to the epic\'s Product worktree (#115); a plain worktree is the repo too (#515)', () => {
   const { W, P, api, pwt, awt } = workspace();
   try {
     assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
@@ -199,9 +199,24 @@ test('from an epic\'s code worktree: the registry knows the repo, and Product co
     assert.deepEqual([found.root, found.worktree, found.repo?.name], [pwt, 'EP-x', 'api']);
     const r = yad(awt, 'worktree', 'list');
     assert.match(r.stderr, /Product: \.\.\/product--EP-x \(EP-x's worktree\)/);
-    // A worktree yad did not make maps nothing: E80 review 3 still holds for it.
+    // A plain worktree yad did not make is api too (#515), worked in its own folder (E80 review 3).
     git(api, 'worktree', 'add', '-q', '--detach', path.join(W, 'api-other'));
-    assert.equal(registryEntryFor(P, path.join(W, 'api-other')), null);
+    const plain = registryEntryFor(P, path.join(W, 'api-other', 'src'));
+    assert.deepEqual([plain?.meta?.name, plain && fs.realpathSync(plain.top)], ['api', fs.realpathSync(path.join(W, 'api-other'))]);
+    assert.equal(findProduct(path.join(W, 'api-other')).repo?.name, 'api', 'beside the Product, it finds it');
+    // A `.git` file written by hand that points at api's worktree folder is not that worktree: git's back-link
+    // names another folder.
+    const wtGit = fs.readFileSync(path.join(W, 'api-other', '.git'), 'utf8');
+    fs.mkdirSync(path.join(W, 'fake'));
+    fs.writeFileSync(path.join(W, 'fake', '.git'), wtGit.replace(/gitdir:\s*(.+)/, (_, p) => `gitdir: ${path.resolve(path.join(W, 'api-other'), p.trim())}`));
+    assert.equal(registryEntryFor(P, path.join(W, 'fake')), null, 'the back-link names api-other');
+    // A worktree of another clone of api is not the registered checkout.
+    git(W, 'clone', '-q', path.join(W, 'api.git'), 'api-clone');
+    git(path.join(W, 'api-clone'), 'worktree', 'add', '-q', '--detach', path.join(W, 'api-clone-wt'));
+    assert.equal(registryEntryFor(P, path.join(W, 'api-clone-wt')), null, 'another clone');
+    // Nor is a plain worktree of the Product a registered code repo.
+    git(P, 'worktree', 'add', '-q', '--detach', path.join(W, 'product-plain'));
+    assert.equal(registryEntryFor(P, path.join(W, 'product-plain')), null, 'never the Product\'s own entry');
     // Nor does a record copied into some other repo's worktree.
     const other = repoWithOrigin(W, 'other', { f: 'x\n' });
     git(other, 'worktree', 'add', '-q', '--detach', path.join(W, 'other--EP-x'));

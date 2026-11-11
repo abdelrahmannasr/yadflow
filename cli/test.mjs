@@ -28744,21 +28744,29 @@ test('E80 review 2: risk-map and codeowners run from a code repo work on that re
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E80 review 3: a worktree or a repo nested in a registered repo is its own checkout — never swapped for the repo\'s', () => {
+test('E80 review 3 / #515: a git worktree of a registered repo is that repo, worked in its own folder; a nested repo is its own', () => {
   const T = e79Tmp();
   try {
-    const { backend } = e80Workspace(T);
-    // A worktree inside the repo (the layout Claude Code uses) on its own branch, and a nested repo.
+    const { ws, backend } = e80Workspace(T);
+    // A worktree inside the repo (the layout Claude Code uses) and one beside it (`git worktree add`), each on
+    // its own branch: backend's entry (name, platform, default branch), but worked where it runs (#515).
     e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
-    const wt = path.join(backend, '.claude', 'worktrees', 'x');
+    e79Git(T, backend, 'worktree', 'add', '-q', path.join(ws, 'backend-wt'), '-b', 'feat/y');
+    for (const wt of [path.join(backend, '.claude', 'worktrees', 'x'), path.join(ws, 'backend-wt')]) {
+      const b = JSON.parse(e79Yad(T, wt, ['review', 'context']).stdout);
+      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(wt), `${wt}: works where it runs, never in backend's checkout`);
+      assert.deepEqual([b.repo, b.platform, b.base], ['backend', 'gitlab', 'trunk'], `${wt}: backend's registry entry`);
+      // open-pr takes the registry's default branch, not the platform's or 'main' (#515).
+      const pr = e79Yad(T, wt, ['open-pr', '--title', 'feat: x']);
+      assert.match(`${pr.stdout}${pr.stderr}`, /base trunk \(from registry\)/, `${wt}: ${pr.stdout}${pr.stderr}`);
+    }
+    // A repo nested inside backend is another repo: it gets nothing.
     const nested = path.join(backend, 'vendor', 'lib');
     fs.mkdirSync(nested, { recursive: true });
     e79Git(T, nested, 'init', '-q');
-    for (const dir of [wt, nested]) {
-      const b = JSON.parse(e79Yad(T, dir, ['review', 'context']).stdout);
-      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(dir), `${dir}: works where it runs`);
-      assert.equal(b.repo, null, 'not backend\'s registry entry');
-    }
+    const n = JSON.parse(e79Yad(T, nested, ['review', 'context']).stdout);
+    assert.equal(fs.realpathSync(n.repoRoot), fs.realpathSync(nested), 'works where it runs');
+    assert.equal(n.repo, null, 'not backend\'s registry entry');
     // From a plain folder inside backend itself, it is backend, worked at its top.
     fs.mkdirSync(path.join(backend, 'src'));
     const inRepo = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);
