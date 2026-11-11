@@ -3931,12 +3931,13 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
 
 // #513: a git_url that names only a host is replaced from an origin that names a repo — and only then.
 test('runSetup: re-run replaces a git_url that names no repo from origin; never a full one, never with no repo', async () => {
+  let said = '';
   const run1 = async (settings, originUrl) => {
     const { T } = scaffold();
     if (originUrl) git(T, 'remote', 'add', 'origin', originUrl);
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', ...settings }));
     process.env.SDLC_NONINTERACTIVE = '1';
-    try { await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); } finally { delete process.env.SDLC_NONINTERACTIVE; }
+    try { said = (await captureConsole(() => runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }))).out; } finally { delete process.env.SDLC_NONINTERACTIVE; }
     const got = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8')).git_url;
     fs.rmSync(T, { recursive: true, force: true });
     return got;
@@ -3949,6 +3950,15 @@ test('runSetup: re-run replaces a git_url that names no repo from origin; never 
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git'), 'https://gitlab.example.com', 'a fork on another host');
   // Review 2: a bare name with no scheme has no host to protect — an origin that names a repo replaces it.
   assert.equal(await run1({ git_url: 'gitlab.example.com' }, 'git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
+  // Review 3: each value left alone says why; a local origin never lands in the shared settings.
+  assert.equal(await run1({ git_url: 'gitlab.example.com' }, 'file:///srv/git/acme/product.git'), 'gitlab.example.com');
+  assert.match(said, /origin is not on a platform host — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, null);
+  assert.match(said, /this clone has no origin remote — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git');
+  assert.match(said, /origin is on another host — left as it is/);
+  await run1({ git_url: 'https://gitlab.example.com' }, 'https://gitlab.example.com');
+  assert.match(said, /origin names no repo either — left as it is/);
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, null), 'https://gitlab.example.com', 'no origin: unchanged');
 });
 
@@ -13051,6 +13061,10 @@ test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the ho
   assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad takes the Product's repo path from its origin remote instead \[YAD-CFG-005\]/);
   assert.doesNotMatch(JSON.stringify(w), /s3cret|user:/, 'the value is never shown');
   assert.match(w.hint, /re-run `yad setup` — it sets it from origin when origin is on the same host/);
+  // Review 3: a bare name is set, just not an address — doctor says that, not "has no git_url".
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [], git_url: 'gitlab.example.com' }));
+  const bare = (await doctorOn(T)).checks.find((x) => x.id === 'product-git-url');
+  assert.match(bare.message, /git_url is not an address yad can read a host from \(it needs a scheme/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

@@ -299,8 +299,11 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // resolved host), so it fires even when an origin remote can substitute: the field itself
         // is required regardless.
         if (!hostFromGitUrl(productConfig.git_url)) {
+          // Set, but not an address yad can read a host from (`gitlab.example.com`, no scheme) — not "missing".
+          const set = typeof productConfig.git_url === 'string' && productConfig.git_url.trim();
           check(checks, 'product-git-url', 'project', 'warn',
-            `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
+            set ? `${settingsRel}'s git_url is not an address yad can read a host from (it needs a scheme, such as https://, or the user@host:path form) [YAD-CFG-005]`
+              : `${settingsRel} sets platform '${productConfig.platform}' but has no git_url [YAD-CFG-005]`,
             `add git_url to ${settingsEditHint(root)} (or re-run \`yad setup\`) — auth/PR checks need the Product host`);
         } else if (!repoGitUrl(productConfig.git_url)) {
           // A host and no repo (#513): every platform read falls back to origin, but the record is still

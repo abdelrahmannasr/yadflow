@@ -635,11 +635,17 @@ export async function runSetup(root, opts = {}) {
     const originUrl = (cur.platform && (!cur.git_url || hostOnly)) ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null) : null;
     // A value with no readable host (`gitlab.example.com`, no scheme) has no host to protect: any origin that
     // names a repo replaces it (#513 review 2).
+    // Only an origin on a real host: a `file://` or local-path origin is no platform address (review 3).
     const setHost = hostOnly ? plainHost(hostFromGitUrl(cur.git_url)) : null;
-    const fits = (u) => !!repoGitUrl(u) && (!setHost || plainHost(hostFromGitUrl(u)) === setHost);
-    const backfillUrl = originUrl && (!hostOnly || fits(originUrl)) ? originUrl : null;
-    if (hostOnly && originUrl && !backfillUrl) {
-      info(`the Product's git_url names no repo, and origin ${repoGitUrl(originUrl) ? 'is on another host' : 'names none either'} — left as it is: set git_url to the Product's full address`);
+    const originHost = originUrl ? plainHost(hostFromGitUrl(originUrl)) : null;
+    const fits = !!originUrl && !!repoGitUrl(originUrl) && !!originHost && (!setHost || originHost === setHost);
+    const backfillUrl = originUrl && (!hostOnly || fits) ? originUrl : null;
+    if (hostOnly && !backfillUrl) {
+      const why = !originUrl ? 'this clone has no origin remote'
+        : !repoGitUrl(originUrl) ? 'origin names no repo either'
+        : !originHost ? 'origin is not on a platform host'
+        : 'origin is on another host';
+      info(`the Product's git_url names no repo, and ${why} — left as it is: set git_url to the Product's full address`);
     }
     const mode = setupModeFields(root, cur, solo, opts);
     const modeMoved = Object.keys(mode).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(mode[k]));
