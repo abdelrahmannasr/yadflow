@@ -737,6 +737,21 @@ test('a repo newer than the yadflow running is refused, never rolled back; a fai
     assert.match(ran.commits[0].hint, /index\.lock/);
     assert.notEqual(git(A, ['status', '--porcelain']), '', 'the update is in the working tree');
     assert.equal(git(A, ['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    // #508: a person's own ignore rule hides `.claude/`, whose files the repo tracks. git add refuses; the hint
+    // names the rule and the way out — never a lock that is not there.
+    process.exitCode = 0;
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'chore: the install, tracked']); git(A, ['push', '-q']);
+    const skillFile = git(A, ['ls-files', '.claude/skills']).split('\n').find((f) => f.endsWith('/SKILL.md'));
+    assert.ok(skillFile, 'the install tracks a skill');
+    fs.appendFileSync(path.join(A, skillFile), '\nedited by hand\n');
+    const excludes = path.join(P, 'gitignore_global');
+    fs.writeFileSync(excludes, '# mine\n.claude/\n');
+    git(A, ['config', 'core.excludesFile', excludes]);
+    const hidden = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.deepEqual(hidden.commits.map((c) => [c.reason, c.committed]), [['add-failed', false]]);
+    assert.match(hidden.commits[0].hint, /^git would not stage \.claude\/\S+.* an ignore rule hides (it|them) — .*gitignore_global:2 \(`\.claude\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Remove or narrow that rule, or add `!\.claude\/` to this repo's \.gitignore; then run this again/);
+    assert.doesNotMatch(hidden.commits[0].hint, /index\.lock/);
+    assert.equal(git(A, ['diff', '--cached', '--name-only']), '', 'nothing left staged');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
