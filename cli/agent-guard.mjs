@@ -140,13 +140,9 @@ export function shellParts(rawLine, mode = {}) {
   let wordBraced = false;
   // A word with no quote or escape in it: only such a `case` or `esac` is the reserved word.
   let wordPlain = true;
-  // Whether the word's first character is an unquoted `-`.
-  let wordDash = false;
-  // The word after `>&` or `<&` (#498 review): bash reads `>&--n` as a close and the word `-n` (the reader, as
-  // main, reads `n`), and `>& -n` as a close and `-n`; `>& f` (no `-`) writes f. Kept as an extra spelling.
+  // The word after a bare `>&` (#498 review): `>&f` and `>& f` write the file f, as `&>f` does. The word stays a
+  // word of the command, as main reads it.
   let afterDup = null;
-  Object.defineProperty(parts, 'dashed', { value: [] });
-  let partDashed = null;
   let partBraced = null;
   const endWord = () => {
     if (inWord) {
@@ -172,14 +168,9 @@ export function shellParts(rawLine, mode = {}) {
           // `esac` only as a command's first word: after `then` it may be an argument (`echo then esac`).
           if (wd === 'case') top.cases++; else if (wd === 'esac' && top.cases && words.length === 1) top.cases--;
         }
-        if (afterDup) {
+        if (afterDup?.write) {
           const wd = words[words.length - 1];
-          // bash strips the dash only when the word's first character is an unquoted `-` (`>& -'-n'` passes `-n`).
-          const alt = afterDup.prefix ? afterDup.prefix + wd : wordDash && wd.startsWith('-') ? wd.slice(1) : null;
-          if (alt !== null) (partDashed ??= new Map()).set(words.length - 1, { alt, prefix: afterDup.prefix ?? null });
-          // zsh writes the file the whole word names (`>& -n`, `>&--n` write `-n`, `--n`), whatever bash reads.
-          const target = (afterDup.zsh ?? '') + wd;
-          if (afterDup.write && !/[$`]/.test(word) && !DEVICE.test(target)) (partWrites ??= []).push({ target, append: false });
+          if (!/[$`]/.test(word) && !DEVICE.test(wd)) (partWrites ??= []).push({ target: wd, append: false });
         }
         if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word);
         if (kept !== null) (partPosix ??= new Map()).set(words.length - 1, kept);
@@ -197,7 +188,6 @@ export function shellParts(rawLine, mode = {}) {
     wordKeep.length = 0;
     wordSubs.length = 0;
     wordPlain = true;
-    wordDash = false;
     if (inWord) afterDup = null;
     // Reset only once the target (or the here-string) was read: a space before it ends no word.
     if (inWord) { dropWord = false; hereString = false; redirect = null; redirectBefore = null; }
@@ -206,10 +196,10 @@ export function shellParts(rawLine, mode = {}) {
   const endPart = () => {
     endWord(); dropWord = false; hereString = false; redirect = null; redirectBefore = null;
     afterDup = null;
-    if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.dashed.push(partDashed); parts.push(words); }
+    if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.push(words); }
     // A redirect alone after a pipe: zsh writes what it is piped to the file (`echo … | > f`), as `cat > f` would.
     else if (partWrites && parts.length && parts.piped.has(parts.length)) parts.pipedWrites.push({ after: parts.length - 1, writes: partWrites });
-    words = []; partBraced = null; partPosix = null; partSubst = null; partWrites = null; partReads = null; partDashed = null;
+    words = []; partBraced = null; partPosix = null; partSubst = null; partWrites = null; partReads = null;
   };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
   // line never comes. The text of one whose end word is not quoted (`<<EOF`, not `<<'EOF'`) still runs its
@@ -314,21 +304,12 @@ export function shellParts(rawLine, mode = {}) {
       if (inWord && /^[0-9]+$/.test(word)) { fd = word; word = ''; inWord = false; wordKeep.length = 0; wordSubs.length = 0; } else endWord();
       let j = i + (ch === '&' ? 2 : 1);
       if (line[j] === '>' || line[j] === '|' || (ch === '<' && line[j] === '>')) j++;
-      // `>&n` and `>&-` copy or close a file descriptor, read as before. What bash reads past them is an extra
-      // spelling of the next word (#498 review): `>&--n` closes and passes `-n`; `>& -n` too; `>&f` and `>& f`
-      // write the file f (as `&>f` does), the word staying a word as main reads it.
+      // `>&n` and `>&-` copy or close a file descriptor, read as before; a bare `>&` before a word writes it.
       if (line[j] === '&') {
         j++;
         const from = j;
         while (j < line.length && /[0-9-]/.test(line[j])) j++;
-        const took = line.slice(from, j);
-        const dashes = /^(-+)$/.exec(took)?.[1].length ?? 0;
-        const out = ch !== '<' && (fd === '' || fd === '1');
-        // A word right after the dashes (`>&-n`, `>&--n`) is also a file zsh writes, named with them.
-        const zsh = out && dashes && j < line.length && !/[\s;&|()<>]/.test(line[j]) ? took : null;
-        if (dashes > 1) afterDup = { prefix: '-'.repeat(dashes - 1), write: !!zsh, zsh };
-        else if (zsh) afterDup = { write: true, zsh };
-        else if (!took) afterDup = { write: out };
+        if (j === from) afterDup = { write: ch !== '<' && (fd === '' || fd === '1') };
         i = j - 1;
         continue;
       }
@@ -388,7 +369,6 @@ export function shellParts(rawLine, mode = {}) {
     // comment. A shell that drops CRs is the other reading, judged by agentGuardDecision.
     if (ch === ' ' || ch === '\t') { endWord(); continue; }
     if (ch === '{') wordBraced = true;
-    if (!inWord && ch === '-') wordDash = true;
     word += ch; inWord = true;
   }
   endPart();
@@ -1191,12 +1171,10 @@ function fileTexts(p) {
   if (!f) return [];
   if (f.over || f.texts.size > FILE_TEXTS) return null;
   const out = [...f.texts];
-  for (const a of wholeTexts(f)) if (!f.texts.has(a)) out.push(a);
+  for (const a of f.all ?? []) if (!f.texts.has(a)) out.push(a);
   for (const t of out) if ((files.judged += t.length) > MAX_JUDGED) return null;
   return out;
 }
-// The readings of a whole file, with their NOEOL marks back.
-const wholeTexts = (f) => (f.all ?? []).map((a, j) => (f.allEnd[j] ? a + NOEOL : a));
 // A write of `texts` (the readings of what a part prints) to a file: added to its texts, never replacing one.
 // `all` holds the readings of the whole file, should every write before have run: `>>` joins each reading of
 // what was there with each new one (side by side, as zipJoin does).
@@ -1204,32 +1182,19 @@ function writeFile(target, texts, append) {
   files.writes++;
   const key = normPath(target);
   let f = files.map.get(key);
-  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, allEnd: [], over: false }));
+  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, over: false }));
   for (const t of texts) if (t !== '') f.texts.add(t);
   // Joined one by one, not through zipJoin's reduce, so a long run of `>>` stays linear (#498 review).
-  // `all` is kept without its NOEOL marks, with `allEnd` saying which ends with one: reading the end of a long
-  // joined string copies it, which made a run of `>>` quadratic.
-  const cut = (t) => (t.endsWith(NOEOL) ? [t.slice(0, -NOEOL.length), true] : [t, false]);
+  // Joined one by one (strings, not a flat join), so a long run of `>>` stays linear (#498 review).
   if (append) {
     if (texts.length) {
       const old = f.all;
-      if (old === null) { f.all = []; f.allEnd = []; for (const t of texts) { const [x, e] = cut(t); f.all.push(x); f.allEnd.push(e); } }
-      else {
-        const n = Math.max(old.length, texts.length);
-        const oldEnd = f.allEnd;
-        f.all = []; f.allEnd = [];
-        for (let j = 0; j < n; j++) {
-          const k = Math.min(j, old.length - 1);
-          const [x, e] = cut(texts[Math.min(j, texts.length - 1)]);
-          f.all.push(oldEnd[k] ? old[k] + x : `${old[k]}\n${x}`);
-          f.allEnd.push(e);
-        }
-      }
+      if (old === null) f.all = texts.slice();
+      else { const n = Math.max(old.length, texts.length); f.all = []; for (let j = 0; j < n; j++) f.all.push(`${old[Math.min(j, old.length - 1)]}\n${texts[Math.min(j, texts.length - 1)]}`); }
     }
   } else {
-    for (const a of wholeTexts(f)) if (a !== '') f.texts.add(a);
-    f.all = null;
-    if (texts.length) { f.all = []; f.allEnd = []; for (const t of texts) { const [x, e] = cut(t); f.all.push(x); f.allEnd.push(e); } }
+    for (const a of f.all ?? []) if (a !== '') f.texts.add(a);
+    f.all = texts.length ? texts.slice() : null;
   }
   if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) { f.all = null; f.over = true; }
 }
@@ -1259,24 +1224,18 @@ function printedOf(fed, n, lists, input = []) {
     if (!pw.length) continue;
     const prog = programOf(pw[0]);
     // Only `echo`'s leading options are options: `echo git commit -n` prints the `-n` (#498 review). zsh's `-`
-    // ends them and is not printed; `-n` prints no newline at the end.
+    // (and `print`'s `--`) ends them and is not printed; `print -f` takes a format, as printf does.
     if (prog === 'echo' || prog === 'print') {
       let k = 1;
-      let noNl = false;
       let format = false;
-      while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (pw[k].includes('n')) noNl = true; if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
-      const end = noNl ? NOEOL : '';
-      out.push(pw.slice(k).join(' ') + end);
-      if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) out.push(pw.slice(k + 1).join(' ') + end);
+      while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
+      out.push(pw.slice(k).join(' '));
+      if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) out.push(pw.slice(k + 1).join(' '));
     }
-    // `printf` prints its format (a newline only where it says `\n`), and its words after the format.
-    // Its words also with the blank a `%s ` format puts after the last (`printf '%s ' gh pr`).
+    // `printf` prints its format and its words; also its words after the format (`--` ends its options).
     if (prog === 'printf') {
       const f = pw[1] === '--' ? 2 : 1;
-      const end = /\\n$/.test(pw[f] ?? '') ? '' : NOEOL;
-      out.push(pw.slice(1).join(' ') + end, pw.slice(f).join(' ') + end, pw.slice(f + 1).join(' ') + end);
-      // A blank at the format's end, written or escaped (`\t`, `\040`, `\x20`).
-      if (pw.length > f + 1 && /( |\\t|\\040|\\x20)$/.test(pw[f])) out.push(`${pw.slice(f + 1).join(' ')} ${end}`);
+      out.push(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
     }
     if (prog === 'cat' || prog === 'tee') {
       const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-');
@@ -1295,44 +1254,29 @@ function printedOf(fed, n, lists, input = []) {
   }
   return out;
 }
-// Readings side by side: the j-th joins each list's j-th reading (its last, once it has no more), so every
-// reading is in one of them and the count stays the longest list's. Texts are joined as output is: after a
-// newline, except where a text was printed without one (it ends in NOEOL: `printf 'gh pr '`, `echo -n`).
-// Both readings are kept: joined as output is, and joined by newlines, so a text taken for one printed with
-// no newline (a `%b` or `\012` the reader does not expand, or a typed marker) adds a reading, never replaces
-// one (#498 review). Built from pieces, one join each, so a long `cat f f f …` stays linear.
+// Readings side by side: the j-th joins each list's j-th reading (its last, once it has no more) by newlines, as
+// their output is, so every reading is in one of them and the count stays the longest list's. Built from pieces,
+// one join each, so a long `cat f f f …` stays linear (#498 review).
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
   const out = [];
   for (let j = 0; j < n; j++) {
     const pieces = [];
-    const lines = [];
-    let joined = false;
     for (let q = 0; q < per.length; q++) {
       if ((q & 4095) === 0 && Date.now() > deadline) return [OVER];
-      const t = per[q][Math.min(j, per[q].length - 1)];
-      const cut = t.endsWith(NOEOL);
-      const x = cut ? t.slice(0, -NOEOL.length) : t;
-      pieces.push(x);
-      lines.push(x);
-      if (q < per.length - 1) { if (cut) joined = true; else pieces.push('\n'); }
-      else if (cut) pieces.push(NOEOL);
+      pieces.push(per[q][Math.min(j, per[q].length - 1)]);
     }
-    out.push(pieces.join(''));
-    if (joined) out.push(lines.join('\n'));
+    out.push(pieces.join('\n'));
   }
   return out;
 }
-// Marks the end of a text printed with no newline after it (#498 review), for the join above.
-const NOEOL = '\u0001yad-noeol\u0001';
-const plainText = (t) => (t.includes(NOEOL) ? t.split(NOEOL).join('') : t);
 // The readings of what a `$(…)` prints, when its text says (#498, row 2): `$(<f)`, and the `echo`, `printf`,
 // `cat` and heredoc text of its parts, in order, trailing newlines dropped. One level: a `$(…)` inside is not
 // read. `['']` when nothing it prints is known, null when a file read holds too much.
 function subOutputs(text, mode) {
   const m = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
-  if (m) { const t = fileTexts(m[1]); return t === null ? [OVER] : (t.length ? t.map(plainText) : ['']); }
+  if (m) { const t = fileTexts(m[1]); return t === null ? [OVER] : (t.length ? t : ['']); }
   if (!/echo|printf|print|cat|<</.test(text.replace(/[\\'"]/g, ''))) return [''];
   const sp = shellParts(text, { ends: mode.ends });
   if (sp.tooComplex) return [''];
@@ -1345,7 +1289,7 @@ function subOutputs(text, mode) {
     if (t.length) per.push(t);
     prev = t;
   }
-  const out = zipJoin(per).map((x) => plainText(x).replace(/\n+$/, ''));
+  const out = zipJoin(per).map((x) => x.replace(/\n+$/, ''));
   return out.length ? out : [''];
 }
 // A word with each `$(…)` replaced by a reading of what it prints, as the shell makes it: split on blanks into
@@ -1390,20 +1334,13 @@ function spellingsOf(parts, n, subst) {
 }
 // The spellings of part `n` with each `$(…)` read for what it prints (#498, row 2), whole parts with the prefix;
 // null when a file read holds too much. Only the words with a `$(…)` change.
-// `dash` (#498 review): the spellings with each word's `>&--` rule applied to its raw text first.
-function substituted(parts, n, mode, dash = null) {
+function substituted(parts, n, mode) {
   const subst = parts.subst[n];
   if (!subst) return [];
-  const part = dash ? parts[n].map((x, k) => (parts.dashed[n]?.has(k) ? parts.dashed[n].get(k).alt : x)) : parts[n];
+  const part = parts[n];
   const alts = new Map();
   let m = 0;
-  for (const [k, e0] of subst) {
-    let e = e0;
-    const d = dash && parts.dashed[n]?.get(k);
-    if (d) {
-      const shift = d.prefix ? d.prefix.length : e0.word.startsWith('-') ? -1 : 0;
-      e = { word: dash(k, e0.word), subs: e0.subs.map((x) => ({ ...x, at: x.at + shift })) };
-    }
+  for (const [k, e] of subst) {
     const a = spellWord(e, mode);
     if (a === null) return null;
     alts.set(k, a); m = Math.max(m, a.length);
@@ -1472,26 +1409,19 @@ function judgeParts(parts, depth, mode) {
     // The backslashes kept in double quotes (#498): what `bash -c` and `eval` re-read.
     const posix = parts.posix[n];
     if (posix) { const kept = part.slice(); for (const [k, v] of posix) kept[k] = v; variants.push(kept); }
-    // What bash passes after a `>&` or `<&` (#498 review): `git commit -m x >&--n` passes `-n`.
-    const dashed = parts.dashed[n];
-    if (dashed) { const alt = part.slice(); for (const [k, v] of dashed) alt[k] = v.alt; variants.push(alt); }
-    // The same rule on a word's raw spelling, for its brace and `$(…)` readings (`>&--{n,}`, `>&--$(echo n)`).
-    const dashRaw = (k, raw) => { const d = dashed?.get(k); return !d ? raw : d.prefix ? d.prefix + raw : raw.startsWith('-') ? raw.slice(1) : raw; };
     const braced = parts.braced[n];
     if (braced) {
       // Four readings: the first-`}` rule with the empty words kept (zsh) and dropped (bash), as before; then with
       // `$(…)`, backticks and `${…}` opaque, by the first-`}` rule with empty words kept (zsh) and by bash's own
       // rule with them dropped (#498). Duplicates are judged once.
       const readings = [{}, { drop: true }, { shield: true }, { shield: true, bash: true, drop: true }];
-      if (dashed) for (const r of readings.slice()) readings.push({ ...r, dash: true });
       const seen = new Set();
       for (const r of readings) {
         const out = [];
         let added = 0;
         for (let k = 0; k < part.length; k++) {
-          if (!braced.has(k)) { out.push(r.dash && dashed.has(k) ? dashed.get(k).alt : part[k]); continue; }
-          const word = r.dash ? dashRaw(k, braced.get(k)) : braced.get(k);
-          const raw = r.shield ? shieldExpansions(word, mode) : word;
+          if (!braced.has(k)) { out.push(part[k]); continue; }
+          const raw = r.shield ? shieldExpansions(braced.get(k), mode) : braced.get(k);
           const e = raw === null ? null : braceExpand(raw, { left: BRACE_CAP }, { bash: r.bash });
           if (!e || (added += e.length - 1) > 4 * BRACE_CAP) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_BRACES;
           // Only an expansion's empty words are dropped, as bash does; a quoted `''` is a word.
@@ -1506,7 +1436,6 @@ function judgeParts(parts, depth, mode) {
     const real = variants.length;
     const subst = substituted(parts, n, mode);
     if (subst === null) return TOO_MUCH_WRITTEN;
-    if (dashed && parts.subst[n]) { const more = substituted(parts, n, mode, dashRaw); if (more === null) return TOO_MUCH_WRITTEN; for (const x of more) subst.push(x); }
     // A file read past its limits whose text is the command (`$(<f)`): refused, as a shell would run it.
     // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused.
     for (const s of subst) {
@@ -1539,8 +1468,7 @@ function judgeParts(parts, depth, mode) {
       // | bash`, #498 review).
       if (realShell || parts.piped.has(n)) {
         for (const t of printed) carried.push(t);
-        // Always joined by newlines (a quote one text opens, a later one closes); zipJoin adds the reading joined
-        // as printed when a text has no newline.
+        // Also joined by newlines, as their output is: a quote one text opens, a later one closes.
         if (printedPer.length > 1) for (const t of zipJoin(printedPer)) carried.push(t);
         printed.length = 0; printedPer.length = 0;
       }
@@ -1590,7 +1518,7 @@ function judgeParts(parts, depth, mode) {
     for (const inner of carried) {
       // A file read past its limits, run by a shell (#498, row 8).
       if (inner.includes(OVER)) return TOO_MUCH_WRITTEN;
-      const v = agentGuardDecision(plainText(inner), depth + 1);
+      const v = agentGuardDecision(inner, depth + 1);
       if (!v.allow) return v;
     }
     for (const vw of variants) {

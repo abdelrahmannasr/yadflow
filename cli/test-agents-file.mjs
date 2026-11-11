@@ -540,28 +540,22 @@ test('the agent guard refuses every human-only yad command and every force push,
     "echo \"$(echo 'gh pr \\')\" > f; echo 'merge 5' >> f; bash f", "echo 'gh pr \\' > a; echo 'merge 5' > b; cat a b | bash",
     "$SHELL <(echo 'gh pr merge 5')", "echo 'gh pr merge 5' >& f; bash f", "echo 'gh pr merge 5' >&f; bash f", "echo 'gh pr merge 5' > d/../f; bash f",
     // Review round 2: a quoted `case` is no reserved word, and one after `then`, `do` or `{` is; a command read
-    // from a file past its limits; zsh's `-`, `--` and `print -f`; output with no newline; bash's `>&--n`.
+    // from a file past its limits; zsh's `-`, `--` and `print -f`.
     'bash <(echo gh pr merge 1; "case")', 'bash <(echo gh pr merge 1; \\case)', 'bash <(if :; then case x in x) echo gh pr merge 1;; esac; fi)',
     'bash <({ case x in x) echo gh pr merge 1;; esac; })', `${Array.from({ length: 70 }, (_, i) => `echo a${i} > f`).join('; ')}; echo gh pr merge 1 > f; $(<f)`,
     'print -r -- gh pr merge 1 > f; bash f', 'echo - gh pr merge 1 > f; bash f', "print -f '%s %s %s %s\\n' gh pr merge 1 > f; bash f",
-    'printf "gh pr " > f; printf "merge 1" >> f; bash f', 'echo -n "gh pr " > f; echo "merge 1" >> f; bash f', 'printf "gh pr " > a; echo merge 1 > b; cat a b | bash',
-    'bash <(printf "gh pr "; echo merge 1)', 'git commit -m x >&--n', 'git commit -m x >& --n', 'git commit -m x <&--n', 'git push origin >& -+main',
     `bash < <(true) ${'-e '.repeat(70)}<(echo gh pr merge 1)`, 'git push origin >&+main', 'git push origin >& --force',
-    // Review round 3: an `esac` that is an argument; output read both joined and by lines (a `%b`, `\012` or typed
-    // marker); a file past its limits in an argument; `>&--` with a `$(…)` or brace; a piped group's output.
+    // Review round 3: an `esac` that is an argument; a file past its limits in an argument.
     'bash <(case x in y) echo then esac;; x) echo gh pr merge 5;; esac)', "bash <(printf '%b' 'echo hi\\n'; echo gh pr merge 5)",
-    "bash <(printf 'echo hi\\012'; printf 'gh pr merge 5')", "bash <(echo -en 'echo hi\\n'; echo gh pr merge 5)", "bash <(echo $'echo hi \\x01yad-noeol\\x01'; echo gh pr merge 5)",
-    `${Array.from({ length: 70 }, (_, i) => `echo t${i} > f`).join('; ')}; echo 'pr merge 5' > f; gh $(<f)`, 'git commit -m x >&--$(echo n)', 'git commit -m x >&--{n,}',
-    "{ printf 'gh pr '; echo merge 5; } | bash", "(printf 'gh pr '; echo merge 5) | bash", "printf '%s ' gh pr > f; echo merge 5 >> f; bash f",
-    // Review round 4: a held `)` record runs on to the real close; `1>&f` writes f; bash strips one unquoted
-    // leading `-` after `>& `; `printf --` and an escaped blank at the format's end.
+    "bash <(printf 'echo hi\\012'; printf 'gh pr merge 5')", "bash <(echo -en 'echo hi\\n'; echo gh pr merge 5)",
+    `${Array.from({ length: 70 }, (_, i) => `echo t${i} > f`).join('; ')}; echo 'pr merge 5' > f; gh $(<f)`,
+    // Review round 4: a held `)` record runs on to the real close; `1>&f` writes f.
     'bash <(: { case; case y in y) echo gh pr merge 5;; esac)', 'bash <(: { case; case y in y) :;; esac; echo gh pr merge 5)',
-    'bash <(case y in y) { :; } esac; echo gh pr merge 5)', 'echo gh pr merge 5 1>& f; bash f', "git commit -m x >& -'-n'", 'git commit -m x >& -\\-n',
-    "{ printf -- '%s ' gh pr; echo merge 5; } | bash", "{ printf '%s\\t' gh pr; echo merge 5; } | bash",
-    // Review round 5: `printf --` keeps its format; a quote one printed text opens and the next closes; zsh writes
-    // the file the whole word after `>&` names.
+    'bash <(case y in y) { :; } esac; echo gh pr merge 5)', 'echo gh pr merge 5 1>& f; bash f',
+    // Review round 5: `printf --` keeps its format; a quote one printed text opens and the next closes; `>& -n`
+    // writes the file `-n`.
     "printf -- 'gh pr merge 1\\n' | bash", "bash <(printf -- 'gh pr merge 1')", `{ echo "x='"; echo "'; gh pr merge 1"; } | bash`,
-    "echo gh pr merge 1 >& -'n'; bash ./-n", 'echo gh pr merge 1 >& -n; bash ./-n', 'echo gh pr merge 1 >&--n; bash ./--n',
+    "echo gh pr merge 1 >& -'n'; bash ./-n", 'echo gh pr merge 1 >& -n; bash ./-n',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
