@@ -403,13 +403,39 @@ export function run(cmd, args = [], opts = {}) {
   // --json run its stdout is our stderr instead (E1).
   const stdio = jsonRun && opts.stdio === 'inherit' ? ['inherit', 2, 'inherit'] : opts.stdio;
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts, ...(stdio === undefined ? {} : { stdio }) });
+  const ok = r.status === 0;
+  let stderr = (r.stderr || '').trim();
+  if (/^glab(?:\.exe)?$/i.test(path.basename(String(cmd)))) stderr = withoutGlabConfigWarning(stderr, { ok });
   return {
-    ok: r.status === 0,
+    ok,
     code: r.status,
     stdout: (r.stdout || '').trim(),
-    stderr: (r.stderr || '').trim(),
+    stderr,
     error: r.error,
   };
+}
+
+// #509 — glab with more than one config file prints a warning block on EVERY run, before its own output:
+//   Warning: Multiple config files found. Only the first one will be used.
+//     Using: <file>
+//     Ignoring: <file>
+//   Consider consolidating to one location to avoid confusion.
+// It is not an error (the run still exits 0 when it works), but every caller that shows stderr as the
+// reason cuts that reason short, so the warning was all a person saw and the real error was cut off. So the
+// block is dropped from what yad reads. When the run FAILED, one short line goes BEFORE the real error
+// instead, because a login saved in the ignored file is not used — often the very reason the run failed — and
+// a line after glab's long error would be cut off. Only that exact block is removed; other stderr is kept.
+export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
+  const lines = String(stderr).split('\n');
+  const start = lines.findIndex((l) => /^Warning: Multiple config files found\b/i.test(l.trim()));
+  if (start < 0) return stderr;
+  let end = start + 1;
+  while (end < lines.length && /^\s+(?:Using|Ignoring):/.test(lines[end])) end += 1;
+  if (end < lines.length && /^Consider consolidating\b/i.test(lines[end].trim())) end += 1;
+  const rest = [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim();
+  if (ok) return rest;
+  const hint = 'glab reads only one of its two config files, so a login saved in the other is not used (see `yad doctor`, glab-config)';
+  return rest ? `${hint}\n${rest}` : hint;
 }
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
 

@@ -138,3 +138,61 @@ test('#352: a repo that names no pin and no Docker adds no rows, and Docker is n
     assert.equal(asked, 0, 'docker is not asked about');
   } finally { done(T); }
 });
+
+// #509 — glab's own words with two config files, as glab 1.125.0 prints them on stderr.
+const GLAB_WARNING = [
+  'Warning: Multiple config files found. Only the first one will be used.',
+  '  Using: /home/me/.config/glab-cli/config.yml',
+  '  Ignoring: /home/me/Library/Application Support/glab-cli/config.yml',
+  'Consider consolidating to one location to avoid confusion.',
+].join('\n');
+const GLAB_401 = 'ERROR\n  1 error occurred:\n      * g/p: GET https://gitlab.example/api/v4/projects/g%2Fp: 401\n  {message: 401 Unauthorized}';
+
+test('#509: glab\'s two-config warning is dropped from what yad reads; a failed run is led by one line that names it', async () => {
+  const { withoutGlabConfigWarning } = await import('./lib.mjs');
+  assert.equal(withoutGlabConfigWarning(GLAB_WARNING), '', 'a run that worked: nothing left');
+  assert.equal(withoutGlabConfigWarning(`${GLAB_WARNING}\nsome note`), 'some note', 'other stderr is kept');
+  assert.equal(withoutGlabConfigWarning(GLAB_401, { ok: false }), GLAB_401, 'no warning: unchanged, no hint');
+  assert.equal(withoutGlabConfigWarning('Warning: something else'), 'Warning: something else', 'only that exact block');
+  const failed = withoutGlabConfigWarning(`${GLAB_WARNING}\n${GLAB_401}`, { ok: false });
+  assert.match(failed.split('\n')[0], /^glab reads only one of its two config files, so a login saved in the other is not used \(see `yad doctor`, glab-config\)$/);
+  assert.ok(failed.endsWith(GLAB_401), 'then the real error, whole');
+  assert.ok(!/Multiple config files|Using:|Ignoring:|Consider consolidating/.test(failed));
+  // Windows line ends: the same block is found.
+  assert.equal(withoutGlabConfigWarning(`${GLAB_WARNING.replaceAll('\n', '\r\n')}\r\nsome note`), 'some note');
+});
+
+// A fake glab on PATH: the warning on stderr, then `body` (shell). Not on Windows (a shell script).
+const withFakeGlab = async (body, fn) => {
+  const T = tmp();
+  const bin = path.join(T, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'glab'), `#!/bin/sh\ncat >&2 <<'W'\n${GLAB_WARNING}\nW\n${body}\n`, { mode: 0o755 });
+  const before = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${before}`;
+  try { return await fn(T); } finally { process.env.PATH = before; done(T); }
+};
+
+test('#509: an MR glab opened with the warning on stderr is opened, and its address is read past any trailing notice', { skip: process.platform === 'win32' }, async () => {
+  const { run } = await import('./lib.mjs');
+  const { createPr } = await import('./platform.mjs');
+  await withFakeGlab("echo 'Creating merge request for x into main in g/p'\necho\necho 'https://gitlab.example/g/p/-/merge_requests/7'\necho 'A newer glab is available'\nexit 0", () => {
+    const r = run('glab', ['version']);
+    assert.equal(r.ok, true);
+    assert.equal(r.stderr, '', 'the warning is not read');
+    const pr = createPr('gitlab', { title: 't', body: 'b', base: 'main', head: 'x' });
+    assert.equal(pr.ok, true);
+    assert.equal(pr.url, 'https://gitlab.example/g/p/-/merge_requests/7');
+  });
+});
+
+test('#509: an MR glab could not open says glab\'s real error, led by the two-config line', { skip: process.platform === 'win32' }, async () => {
+  const { createPr } = await import('./platform.mjs');
+  await withFakeGlab(`cat >&2 <<'E'\n${GLAB_401}\nE\nexit 1`, () => {
+    const pr = createPr('gitlab', { title: 't', body: 'b', base: 'main', head: 'x' });
+    assert.equal(pr.ok, false);
+    assert.match(pr.reason, /^glab reads only one of its two config files/);
+    assert.match(pr.reason, /401 Unauthorized/);
+    assert.doesNotMatch(pr.reason, /Multiple config files/);
+  });
+});
