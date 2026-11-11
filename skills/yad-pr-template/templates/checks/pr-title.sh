@@ -54,14 +54,18 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-title]: unknown --prof
 
 # True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
-# A step owner file (`yad assign`, E47) is not an artifact: an assignment is advice, reviewed by nobody, and
-# a review/EP-* PR would advance the step on merge. So a PR of owner files alone is not an artifact change.
+# Three records are not artifacts: a step owner file (`yad assign`, E47), an epic's issue-links file (`yad issues
+# link`, E170) and the Foundation's roadmap-items file (`yad foundation publish`, E174) (#512). All are reviewed
+# by nobody (an assignment is advice; the other two name where a tracker item is, and sit outside any fingerprint),
+# and a review/EP-* PR would advance a step on merge. So a PR of these files alone is not an artifact change.
+# Each is matched only where yad writes it: `yad issues link` refuses the Foundation, so foundation/ has no
+# issue-links file, and roadmap-items lives in foundation/.sdlc/ only.
 # No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
 # `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
-# line counts as an artifact, and the owner exemption never matches it — so it fails closed.
+# line counts as an artifact, and neither exemption matches it — so it fails closed.
 # `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
 # locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$' >/dev/null; }
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$|^epics/EP-[^/]+/\.sdlc/issue-links\.json$|^foundation/\.sdlc/roadmap-items\.json$' >/dev/null; }
 
 TITLE="${ARGS[0]:-}"
 if [ -z "$TITLE" ]; then

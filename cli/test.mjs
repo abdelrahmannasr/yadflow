@@ -28010,6 +28010,16 @@ test('E47 doctor: new owner-exempting checks beside a Product workflow that list
     const hit = blind();
     assert.equal(hit.length, 1);
     assert.match(hit[0].message, /\.github\/workflows\/yad-product-pr-text\.yml lists a PR's changes without `--no-renames`, while checks\/pr-title\.sh let/);
+    assert.match(hit[0].message, /step owner files, issue-links files or the roadmap-items file alone through — so moving an artifact into \.sdlc\/owners\/, or onto \.sdlc\/issue-links\.json or \.sdlc\/roadmap-items\.json, on a non-review branch/, '#512');
+    // #512: an older copy the team edited exempts owner files only, and the message claims no more than that.
+    const ownersOnly = shipped('skills/yad-pr-template/templates/checks/pr-title.sh').replace('|^epics/EP-[^/]+/\\.sdlc/issue-links\\.json$|^foundation/\\.sdlc/roadmap-items\\.json$', '');
+    assert.notEqual(ownersOnly, shipped('skills/yad-pr-template/templates/checks/pr-title.sh'), 'the records half was removed');
+    w('checks/pr-title.sh', ownersOnly);
+    assert.match(blind()[0].message, /let a PR of step owner files alone through — so moving an artifact into \.sdlc\/owners\/ on a non-review branch passes both$/);
+    w('checks/pr-template.sh', shipped('skills/yad-pr-template/templates/checks/pr-template.sh'));
+    assert.match(blind()[0].message, /checks\/pr-title\.sh and checks\/pr-template\.sh let a PR of step owner files alone through/, 'one old copy: only what both let through');
+    fs.rmSync(path.join(T, 'checks/pr-template.sh'));
+    w('checks/pr-title.sh', shipped('skills/yad-pr-template/templates/checks/pr-title.sh'));
     w('.github/workflows/yad-product-pr-text.yml', shipped('skills/yad-checks/templates/github/yad-product-pr-text.yml'));
     assert.deepEqual(blind(), [], 'the shipped workflow is fine');
     // One line fixed and its twin not: still blind (a job the team does not require would let it through).

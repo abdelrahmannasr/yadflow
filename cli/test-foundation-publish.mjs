@@ -132,6 +132,21 @@ test('an existing milestone is reused; dropped labels are a failure', async () =
   assert.equal(r.ok, false); reset();
 });
 
+// #512 review 2: every new item lost its labels, so none is `created` — but each was recorded, so the record
+// changed and the commit hint still shows. On a verified Product it names the PR route.
+test('#512: the commit hint shows whenever the record was written, with the PR route on a verified Product', async () => {
+  const T = await product();
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', git_url: 'git@github.com:a/p.git', ledger: 'verified' }));
+  const lines = [];
+  const orig = process.stderr.write; const origLog = console.log; const origErr = console.error;
+  process.stderr.write = (x) => { lines.push(String(x)); return true; };
+  console.log = (...a) => lines.push(a.join(' ')); console.error = (...a) => lines.push(a.join(' '));
+  try { await P.runFoundationPublish(T, { env, runner: fake('github', { dropLabels: true }).runner }); } finally { process.stderr.write = orig; console.log = origLog; console.error = origErr; }
+  assert.ok(fs.existsSync(path.join(T, 'foundation/.sdlc/roadmap-items.json')));
+  assert.match(lines.join('\n'), /commit foundation\/\.sdlc\/roadmap-items\.json on a branch of its own, not review\/…, in a PR titled like `chore: record tracker links`/);
+  reset();
+});
+
 test('GitLab: labels as one field and milestone_id', async () => {
   const T = await product('gitlab'); const f = fake('gitlab');
   await P.runFoundationPublish(T, { env, runner: f.runner });

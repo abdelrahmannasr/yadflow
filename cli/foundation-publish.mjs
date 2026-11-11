@@ -13,7 +13,7 @@ import { err } from './errors.mjs';
 import { productConfigPath, epicFiles } from './manifest.mjs';
 import { acceptedHashes, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, roadmapFeatures } from './epic-state.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
-import { linkAndWriteBack, readItem } from './issues-write.mjs';
+import { linkAndWriteBack, readItem, recordRoute } from './issues-write.mjs';
 import { readLinks, itemKey } from './issue-links.mjs';
 import { targetOf } from './issues-act.mjs';
 import { readMilestones, safeTitle } from './scan.mjs';
@@ -127,6 +127,9 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   const { t, productConfig } = where;
   const rules = labelRules(productConfig);
   const out = { ok: true, dryRun, created: [], recovered: [], alreadyPublished: 0, linked: [], failed: [], notes: [...skipped.map((p) => `the phase "${forTerminal(p)}" is parked, so its rows were left out`), ...nearMiss.map((p) => `the phase "${forTerminal(p)}" is published; only a heading of "Parked" or "Later / parked" is left out`)] };
+  // Whether the record file changed (#512 review 2): an item is recorded before its labels are checked, so a row
+  // in `failed` may still have been written. Not in `out`: the --json envelope keeps its keys.
+  let wroteRecord = false;
   const known = new Map(record.filter((e) => e.host === t.host && e.repo === t.repo).map((e) => [e.epicId, e]));
   const todo = rows.filter((r) => !known.has(r.epicId));
   out.alreadyPublished = rows.length - todo.length;
@@ -145,7 +148,7 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
       if (m) { out.recovered.push({ epicId: r.epicId, number: m.number, url: m.url }); if (!dryRun) record.push({ epicId: r.epicId, platform: t.platform, host: t.host, repo: t.repo, number: m.number, url: m.url, publishedAt: new Date(now).toISOString() }); }
       else fresh.push(r);
     }
-    if (out.recovered.length && !dryRun) writeRecord(root, record);
+    if (out.recovered.length && !dryRun) { writeRecord(root, record); wroteRecord = true; }
     const labelsOf = (r) => [rules.type.feature[0], rules.priority[r.priority][0], `epic: ${r.epicId}`];
     if (t.platform === 'gitlab' && fresh.some((r) => labelsOf(r).some((l) => l.includes(',')))) return refuse('a GitLab label name with a comma cannot be sent', 'rename that label in the issues settings of .sdlc/product.json');
     if (dryRun) for (const r of fresh) out.created.push({ epicId: r.epicId, feature: r.feature, phase: r.phase, priority: r.priority, number: null, url: null, wouldCreate: true });
@@ -179,6 +182,7 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
         const url = b.html_url ?? b.web_url ?? null;
         record.push({ epicId: r.epicId, platform: t.platform, host: t.host, repo: t.repo, number, url, publishedAt: new Date(now).toISOString() });
         writeRecord(root, record);
+        wroteRecord = true;
         const got = (Array.isArray(b.labels) ? b.labels : []).map((l) => String(typeof l === 'string' ? l : l?.name).toLowerCase());
         const missing = labels.filter((l) => !got.includes(l.toLowerCase()));
         const row = { epicId: r.epicId, feature: r.feature, phase: r.phase, priority: r.priority, number, url };
@@ -213,7 +217,8 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   for (const x of out.failed) warn(`${x.epicId}: ${forTerminal(x.why)}${x.url ? ` ${x.url}` : ''}`);
   for (const n of out.notes) info(n);
   info(`${out.created.length} ${dryRun ? 'would be created' : 'created'}, ${out.alreadyPublished} already published`);
-  if (!dryRun && (out.created.length || out.recovered.length)) info('commit foundation/.sdlc/roadmap-items.json so the team keeps the record');
+  const records = [wroteRecord && 'foundation/.sdlc/roadmap-items.json', out.linked.length && 'the epics\' .sdlc/issue-links.json'].filter(Boolean);
+  if (!dryRun && records.length) info(`${recordRoute(root, records.join(' and '))}, so the team keeps the record`);
   return undefined;
 }
 
