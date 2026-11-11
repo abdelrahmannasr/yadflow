@@ -84,7 +84,9 @@ export function findProduct(start) {
   for (let d = from; ; d = path.dirname(d)) {
     if (exists(productConfigPath(d))) {
       if (d === from) return { root: d, via: 'here' };
-      const repo = registeredRepoHolding(d, from);
+      // A worktree of a registered repo is that repo (#115, #515 review 1), wherever it sits: a repo inside
+      // the Product's folder can have one beside it (`product/backend-wt`), past which the walk crossed.
+      const repo = registeredRepoHolding(d, from) ?? (codeWorktreeOf(d, from) || linkedRepoWorktreeOf(d, from))?.meta ?? null;
       if (crossedRepo && !repo) return null;
       return { root: d, via: 'above', ...(repo ? { repo } : {}) };
     }
@@ -261,6 +263,21 @@ export function toolsFolder(found, from) {
   return best ?? from;
 }
 
+// The registered repo whose OWN checkout `dir` is in — never a worktree of it, never a nested repo. For the
+// commands that work on the repo's files from its registered folder (`risk-map`, `codeowners`, `ci check`,
+// which resolve `<Product>/<path>`): from a worktree they would act on the main checkout, on another
+// branch, so they keep covering every repo there (E80 review 3, #515 review 1). → { meta, top } or null.
+export function registeredCheckoutFor(productRoot, dir) {
+  if (!productRoot) return null;
+  const top = gitTopOf(dir);
+  if (!top) return null;
+  const meta = registeredRepoHolding(productRoot, top);
+  if (!meta) return null;
+  const at = real(path.resolve(productRoot, meta.path));
+  const topAt = real(top);
+  return at && topAt && fold(at) === fold(topAt) ? { meta, top } : null;
+}
+
 // The registry entry for the code repo a code-repo command runs in (E80), with the folder to work in.
 // It is the CHECKOUT that must be the registered repo — not merely a folder inside it: a repo nested in
 // `backend/` is another repo, and gets nothing. A git worktree of backend is backend on another branch: it
@@ -271,12 +288,8 @@ export function registryEntryFor(productRoot, dir) {
   if (!productRoot) return null;
   const top = gitTopOf(dir);
   if (!top) return null;
-  const meta = registeredRepoHolding(productRoot, top);
-  if (meta) {
-    const at = real(path.resolve(productRoot, meta.path));
-    const topAt = real(top);
-    if (at && topAt && fold(at) === fold(topAt)) return { meta, top };
-  }
+  const own = registeredCheckoutFor(productRoot, dir);
+  if (own) return own;
   // Not the registered checkout itself — a folder inside one, or beside it. Only a worktree of it counts: an
   // epic worktree yad made (#115), or a plain git worktree, wherever it sits (#515), inside the repo
   // (`.claude/worktrees/x`) or beside it. A repo nested inside one is neither, and gets nothing.

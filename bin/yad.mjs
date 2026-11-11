@@ -791,14 +791,15 @@ async function main() {
       process.stderr.write(c.dim(`Product: ${shown(found.root)} (${found.worktree ? `${found.worktree}'s worktree` : found.via === 'workspace' ? `from ${commands.WORKSPACE_FILE}` : 'above this folder'})\n`));
       // Run from inside one code repo, the per-repo commands work on THAT repo, not on every one the
       // Product registers (they take the repo's name as their second word).
-      // The CHECKOUT must be the registered repo (a worktree or nested repo inside it is another one).
+      // The CHECKOUT must be the registered repo's own: these commands work on `<Product>/<path>`, so from a
+      // worktree (on another branch) or a nested repo they cover every repo instead (E80 review 3, #515).
       if ((cmd === 'risk-map' || cmd === 'codeowners') && o._[2] === undefined) {
-        const hit = commands.registryEntryFor(found.root, dirGiven ? o.dir : shellCwd());
+        const hit = commands.registeredCheckoutFor(found.root, dirGiven ? o.dir : shellCwd());
         if (typeof hit?.meta?.name === 'string') o._[2] = hit.meta.name;
       }
       // `yad ci check` the same way: that repo, unless --repo or --all says otherwise.
       if (cmd === 'ci' && o.repo === undefined && !o.all) {
-        const hit = commands.registryEntryFor(found.root, dirGiven ? o.dir : shellCwd());
+        const hit = commands.registeredCheckoutFor(found.root, dirGiven ? o.dir : shellCwd());
         if (typeof hit?.meta?.name === 'string') o.repo = hit.meta.name;
       }
     }

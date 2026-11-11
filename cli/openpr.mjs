@@ -35,8 +35,8 @@ function resolveRepo(root, { repo, dir, product }) {
     if (found) return { repoRoot: path.resolve(productRoot, found.path), meta: found };
   }
   const here = path.resolve(root, dir || '.');
-  // The checkout it runs in, when that checkout is a registered repo: worked at its top, from any
-  // folder inside it. Anything else (a worktree, a nested repo) stays exactly where it is.
+  // The checkout it runs in, when that checkout is a registered repo or a git worktree of one (#515): worked
+  // at its own top, from any folder inside it. A nested repo stays exactly where it is, with no entry.
   const hit = registryEntryFor(product, here);
   return { repoRoot: hit ? hit.top : here, meta: hit ? hit.meta : null };
 }

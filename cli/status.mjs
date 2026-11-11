@@ -61,12 +61,20 @@ const laneSteps = (lane) => (Array.isArray(lane?.steps) ? lane.steps.filter((s) 
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 
 // The registered repo this checkout is. A git worktree of a registered repo (agents often work in one) is
-// that repo, and `registryEntryFor` answers it (#515); the branch reported is the worktree's own. A monorepo
-// registers the Product's own folder (`path: "."`), which `registryEntryFor` never answers (it is a
-// code-repo command's guard), so that one case is matched here.
+// that repo, and `registryEntryFor` answers it (#515); the branch reported is the worktree's own. This view
+// only reads, so it is more lenient than a command that writes: a worktree moved by hand, whose git
+// back-link is stale (`git worktree repair` not yet run), still names its repo by git's common folder. A
+// monorepo registers the Product's own folder (`path: "."`), which `registryEntryFor` never answers (it is
+// a code-repo command's guard), so that one case is matched here.
 function repoHere(root, cwd, top) {
   const hit = registryEntryFor(root, cwd)?.meta?.name;
   if (typeof hit === 'string') return hit;
+  const common = run('git', ['rev-parse', '--git-common-dir'], { cwd });
+  const gitDir = common.ok && common.stdout ? path.resolve(cwd, common.stdout) : null;
+  if (gitDir && path.basename(gitDir) === '.git' && real(path.dirname(gitDir)) !== real(top)) {
+    const main = registryEntryFor(root, path.dirname(gitDir))?.meta?.name;
+    if (typeof main === 'string') return main;
+  }
   if (real(top) !== real(root)) return null;
   const own = readRegistry(root).registry.repos.find((r) => typeof r?.path === 'string' && typeof r.name === 'string' && real(path.resolve(root, r.path)) === real(root));
   return own?.name ?? null;

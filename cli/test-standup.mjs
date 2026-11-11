@@ -932,5 +932,13 @@ test('#349 follow-up: a git worktree of a registered repo is that repo, on the w
     const r = spawnSync(process.execPath, [YAD, 'status', '--no-fetch', '--json'], { cwd: wt, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(JSON.parse(r.stdout).here.repo, 'api');
+    // A worktree beside the repo, then moved by hand: git still works there, but its back-link is stale.
+    // A command that acts refuses such a folder; this view only reads, and still names the repo (#515 review 1).
+    const beside = path.join(path.dirname(api), 'api-wt');
+    git(api, ['worktree', 'add', '-q', '-b', 'feat/EP-pay-S01-T01-y', beside]);
+    assert.equal(St.buildStatus(T, { cwd: beside, fetch: false }).here.repo, 'api');
+    const moved = path.join(path.dirname(api), 'api-wt-moved');
+    fs.renameSync(beside, moved);
+    assert.equal(St.buildStatus(T, { cwd: moved, fetch: false }).here.repo, 'api', 'a stale back-link: still api, for a read');
   } finally { fs.rmSync(P, { recursive: true, force: true }); }
 });

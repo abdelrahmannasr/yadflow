@@ -28741,6 +28741,40 @@ test('E80 review 2: risk-map and codeowners run from a code repo work on that re
     assert.deepEqual(here.repos.map((r) => r.name), ['backend']);
     const all = JSON.parse(e79Yad(T, product, ['risk-map', '--json']).stdout);
     assert.deepEqual(all.repos.map((r) => r.name).sort(), ['backend', 'web'], 'from the Product: every repo, as before');
+    // From a git worktree of backend (inside it, or beside it), these work on `<Product>/<path>` — backend's
+    // main checkout, on another branch — so they never pick backend there: every repo, as before (#515).
+    e79Git(T, backend, 'commit', '-q', '--allow-empty', '-m', 'second');
+    e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
+    e79Git(T, backend, 'worktree', 'add', '-q', path.join(path.dirname(backend), 'backend-wt'), '-b', 'feat/y');
+    for (const wt of [path.join(backend, '.claude', 'worktrees', 'x'), path.join(path.dirname(backend), 'backend-wt')]) {
+      const fromWt = JSON.parse(e79Yad(T, wt, ['risk-map', '--json']).stdout);
+      assert.deepEqual(fromWt.repos.map((r) => r.name).sort(), ['backend', 'web'], `${wt}: not backend's main checkout`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#515 review 1: with the repos inside the Product\'s folder, a worktree beside one finds the Product and is that repo', async () => {
+  const { findProduct, registryEntryFor } = await import('./find-product.mjs');
+  const T = e79Tmp();
+  try {
+    const product = path.join(T, 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(product, '.sdlc', 'product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'backend', default_branch: 'trunk' }] }));
+    const backend = path.join(product, 'backend');
+    fs.mkdirSync(backend);
+    e79Git(T, backend, 'init', '-q', '-b', 'trunk');
+    e79Git(T, backend, 'commit', '-q', '--allow-empty', '-m', 'init');
+    const wt = path.join(product, 'backend-wt');
+    e79Git(T, backend, 'worktree', 'add', '-q', wt, '-b', 'feat/x');
+    const found = findProduct(wt);
+    assert.deepEqual([found?.root && fs.realpathSync(found.root), found?.via, found?.repo?.name], [fs.realpathSync(product), 'above', 'backend']);
+    assert.equal(registryEntryFor(product, wt)?.meta?.default_branch, 'trunk');
+    // A plain repo there that the Product does not register still finds no Product (E80 review 2).
+    const other = path.join(product, 'other');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    assert.equal(findProduct(other), null);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
