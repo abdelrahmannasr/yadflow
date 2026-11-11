@@ -65,7 +65,10 @@ export const repoGitUrl = (u) => (typeof u === 'string' && repoPathFromGitUrl(u)
 //     alias (`git@gitlab-work:acme/product.git`), and the CI member check reads the host from the settings
 //     first. So a host-only url and origin on another host give the settings' host with origin's repo path.
 //   - else '' when neither names anything.
-// `origin` is the url, or a function that reads it — asked only when the settings name no repo.
+// `origin` is the url, or a function that reads it — asked only when the settings name no repo. A rebuilt url
+// is for asking the platform (host + repo path) only, never for git to clone: the login name is dropped, and
+// a GitLab installed under a sub-path (`https://example.com/gitlab`) is not kept. An origin with no plain host
+// (`file://`, a local path) is never rebuilt onto the platform's host: it names no repo there.
 export function configuredGitUrl(set, origin) {
   const own = repoGitUrl(set);
   if (own) return own;
@@ -73,7 +76,8 @@ export function configuredGitUrl(set, origin) {
   const o = typeof read === 'string' ? read.trim() : '';
   const repo = repoPathFromGitUrl(o);
   const host = plainHost(hostFromGitUrl(typeof set === 'string' ? set : ''));
-  if (!repo || !host || plainHost(hostFromGitUrl(o)) === host) return o;
+  const originHost = plainHost(hostFromGitUrl(o));
+  if (!repo || !host || !originHost || originHost === host) return o;
   const s = set.trim();
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
     try { const u = new URL(s); u.username = ''; u.password = ''; u.search = ''; u.hash = ''; u.pathname = `/${repo}.git`; return u.toString(); } catch { /* below */ }

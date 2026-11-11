@@ -633,8 +633,11 @@ export async function runSetup(root, opts = {}) {
     // fork on another host would send everyone, and CI, to the wrong place (#513 review 1).
     const hostOnly = cur.platform && typeof cur.git_url === 'string' && cur.git_url.trim() && !repoGitUrl(cur.git_url);
     const originUrl = (cur.platform && (!cur.git_url || hostOnly)) ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null) : null;
-    const sameHost = (a, b) => { const x = plainHost(hostFromGitUrl(a)); return !!x && x === plainHost(hostFromGitUrl(b)); };
-    const backfillUrl = originUrl && (!hostOnly || (repoGitUrl(originUrl) && sameHost(originUrl, cur.git_url))) ? originUrl : null;
+    // A value with no readable host (`gitlab.example.com`, no scheme) has no host to protect: any origin that
+    // names a repo replaces it (#513 review 2).
+    const setHost = hostOnly ? plainHost(hostFromGitUrl(cur.git_url)) : null;
+    const fits = (u) => !!repoGitUrl(u) && (!setHost || plainHost(hostFromGitUrl(u)) === setHost);
+    const backfillUrl = originUrl && (!hostOnly || fits(originUrl)) ? originUrl : null;
     if (hostOnly && originUrl && !backfillUrl) {
       info(`the Product's git_url names no repo, and origin ${repoGitUrl(originUrl) ? 'is on another host' : 'names none either'} — left as it is: set git_url to the Product's full address`);
     }

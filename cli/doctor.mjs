@@ -307,7 +307,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
           // wrong — and code repos' product-link records copy it. Only the host is shown, never the value.
           const where = plainHost(hostFromGitUrl(productConfig.git_url));
           check(checks, 'product-git-url', 'project', 'warn',
-            `${settingsRel}'s git_url names no repo, only a host${where ? ` (${where})` : ''} — yad reads the Product from its origin remote instead [YAD-CFG-005]`,
+            `${settingsRel}'s git_url names no repo, only a host${where ? ` (${where})` : ''} — yad takes the Product's repo path from its origin remote instead [YAD-CFG-005]`,
             `edit git_url in ${settingsEditHint(root)} to the Product's full address, or re-run \`yad setup\` — it sets it from origin when origin is on the same host`);
         }
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the

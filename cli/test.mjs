@@ -3947,6 +3947,8 @@ test('runSetup: re-run replaces a git_url that names no repo from origin; never 
   // Review 1: these settings are shared — a person's SSH alias or a fork on another host is never copied in.
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@gitlab-work:acme/product.git'), 'https://gitlab.example.com', 'an alias host is not the same host');
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, 'git@github.com:me/fork.git'), 'https://gitlab.example.com', 'a fork on another host');
+  // Review 2: a bare name with no scheme has no host to protect — an origin that names a repo replaces it.
+  assert.equal(await run1({ git_url: 'gitlab.example.com' }, 'git@gitlab.example.com:acme/product.git'), 'git@gitlab.example.com:acme/product.git');
   assert.equal(await run1({ git_url: 'https://gitlab.example.com' }, null), 'https://gitlab.example.com', 'no origin: unchanged');
 });
 
@@ -13046,7 +13048,7 @@ test('doctor: a Product git_url that names no repo warns YAD-CFG-005 with the ho
   const r = await doctorOn(T);
   const w = r.checks.find((x) => x.id === 'product-git-url');
   assert.equal(w?.status, 'warn');
-  assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad reads the Product from its origin remote instead \[YAD-CFG-005\]/);
+  assert.match(w.message, /git_url names no repo, only a host \(gitlab\.example\.com\) — yad takes the Product's repo path from its origin remote instead \[YAD-CFG-005\]/);
   assert.doesNotMatch(JSON.stringify(w), /s3cret|user:/, 'the value is never shown');
   assert.match(w.hint, /re-run `yad setup` — it sets it from origin when origin is on the same host/);
   fs.rmSync(T, { recursive: true, force: true });
@@ -22202,6 +22204,7 @@ test('E70 helpers: the repo path keeps a GitLab subgroup; the HTTP status of gh 
   assert.equal(configuredGitUrl('gitlab.example.com', 'git@gitlab-work:acme/p.git'), 'git@gitlab-work:acme/p.git', 'a bare name is no url: no host to keep');
   assert.equal(configuredGitUrl('https://gitlab.example.com', 'git@gitlab-work:'), 'git@gitlab-work:', 'origin names no repo: origin as before');
   assert.equal(configuredGitUrl('https://gitlab.example.com', null), '');
+  assert.equal(configuredGitUrl('https://gitlab.example.com', 'file:///srv/git/acme/p.git'), 'file:///srv/git/acme/p.git', 'a local origin is never rebuilt onto the host (review 2)');
   assert.equal(httpStatus({ stderr: 'gh: Not Found (HTTP 404)' }), 404);
   assert.equal(httpStatus({ stderr: 'glab: 401 Unauthorized' }), 401);
   assert.equal(httpStatus({ stdout: '{"message":"403 Forbidden"}' }), 403);
