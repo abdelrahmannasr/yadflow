@@ -14076,6 +14076,101 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
       assert.match(sweep, /the rule still holds/);
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   });
+
+  // #499 — yad-change adds `kind: feature`, `type: feature`, `thread: <own id>` to an older genesis epic
+  // before a change threads off it. Those lines state what every reader already assumes, so they must not
+  // revoke the epic's approvals. Only those exact values, and only on an epic with no parent.
+  const GENESIS = 'kind: feature\ntype: feature\nthread: EP-x\n';
+  const withHeader = (text, lines = GENESIS) => text.replace('owner: al\n', `owner: al\n${lines}`);
+
+  test('#499: the exact genesis lineage header added after the approval keeps it live; any other value or a real edit does not', async () => {
+    const { withoutGenesisLineage } = await import('./epic-state.mjs');
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-499-'));
+    try {
+      const ep = path.join(T, 'EP-x');
+      fs.mkdirSync(ep);
+      const f = path.join(ep, 'epic.md');
+      const live = (recorded) => !isStaleHash(recorded, acceptedHashes(ep, 'epic.md'));
+      fs.writeFileSync(f, fmFile('EP-x', 'draft'));
+      const today = artifactHash(ep, 'epic.md');
+      const whole = artifactHash(ep, 'epic.md', fileSha); // the form releases before shape 9 recorded
+      setFrontmatterStatus(f, 'approved');
+      fs.writeFileSync(f, withHeader(fs.readFileSync(f, 'utf8')));
+      assert.notEqual(artifactHash(ep, 'epic.md'), today, 'the header does change the file');
+      assert.equal(live(today), true, 'an approval from before the header is live');
+      assert.equal(live(whole), true, 'and an older whole-file one, through the status flip too');
+      const after = artifactHash(ep, 'epic.md');
+      assert.equal(live(after), true, 'an approval recorded after the header is live');
+      // In any order, among other keys, with a CR before the newline.
+      fs.writeFileSync(f, `---\nthread: EP-x\r\nid: EP-x\nstatus: approved\ntype: feature  \nowner: al\nkind: feature\n---\n# body\n`);
+      assert.equal(live(today), true, 'order, trailing spaces and a CR do not matter');
+      // Anything else is an edit.
+      for (const [why, lines] of [
+        ['a defect type', 'kind: feature\ntype: defect\nthread: EP-x\n'],
+        ['a thread naming another epic', 'kind: feature\ntype: feature\nthread: EP-other\n'],
+        ['a thread naming a longer id', 'kind: feature\ntype: feature\nthread: EP-x2\n'],
+        ['another key with them', `${GENESIS}theme: billing\n`],
+        ['a parent: not a genesis', `${GENESIS}parent: EP-root\n`],
+      ]) {
+        fs.writeFileSync(f, withHeader(fmFile('EP-x', 'approved'), lines));
+        assert.equal(live(today), false, `${why} revokes`);
+      }
+      fs.writeFileSync(f, withHeader(fmFile('EP-x', 'approved', '# body\nnew sentence\n')));
+      assert.equal(live(today), false, 'a body edit with the header still revokes');
+      // In the body the lines are content.
+      fs.writeFileSync(f, fmFile('EP-x', 'approved', `# body\n${GENESIS}`));
+      assert.equal(live(today), false, 'the same lines in the body are an edit');
+      // Only an epic's own file: another artifact with the lines gets nothing new.
+      fs.writeFileSync(path.join(ep, 'analysis.md'), fmFile('EP-x', 'draft'));
+      const analysis = artifactHash(ep, 'analysis.md');
+      fs.writeFileSync(path.join(ep, 'analysis.md'), withHeader(fmFile('EP-x', 'draft')));
+      assert.equal(isStaleHash(analysis, acceptedHashes(ep, 'analysis.md')), true, 'analysis.md is not an epic header');
+      assert.equal(withoutGenesisLineage(fmFile('EP-x', 'draft'), 'EP-x'), null, 'nothing to take out: no extra form');
+      assert.equal(withoutGenesisLineage(withHeader(fmFile('EP-x', 'draft')), 'EP-x'), fmFile('EP-x', 'draft'));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('#499: gate status, doctor, the sweep and an inherited binding all read approvals live after the genesis header is added', async () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-499r-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+        platform: 'github', default_branch: 'main',
+        roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+      }));
+      fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+      const ep = path.join(T, 'epics/EP-x');
+      fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+      const f = path.join(ep, 'epic.md');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft'));
+      const hash = artifactHash(ep, 'epic.md');
+      const steps = [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] }];
+      const approvals = [['alice', 'owner'], ['bob', 'reviewer']].map(([approver, role]) => ({ artifact: 'epic.md', step: 'epic-review', approver, role,
+        status: 'approved', date: '2026-06-09', source: 'bridge', artifactHash: hash, approvedAt: '2026-06-09T00:00:00Z', pr: 10, engagement: 'none' }));
+      fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', currentStep: 'epic-review', steps }));
+      fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
+      writePrLedger(path.join(ep, '.sdlc'), JSON.stringify([{ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 10, url: 'http://x/10', branch: 'review/EP-x/epic', lastSyncedAt: '2026-06-09' }]));
+      setFrontmatterStatus(f, 'approved');
+      fs.writeFileSync(f, withHeader(fs.readFileSync(f, 'utf8')));
+
+      const status = await grab(() => gateStatus(T, { epic: 'EP-x' }));
+      const line = status.split('\n').find((l) => l.includes('epic-review —'));
+      assert.match(line, /2 approval\(s\) from 2 people/);
+      assert.doesNotMatch(line, /stale/, 'gate status');
+      const { collectDoctor } = await import('./doctor.mjs');
+      assert.deepEqual(collectDoctor(T).checks.filter((c) => /:stale$/.test(c.id)).map((c) => c.id), [], 'doctor');
+      // The sweep of the merged review: it approved the epic before the header, and the default branch now
+      // has the header — the same content, never "another merge changed it".
+      const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'a'.repeat(40), threads: [],
+        reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }] };
+      const sweep = await grab(() => gateSync(T, { epic: 'EP-x', artifact: 'epic.md', today: '2026-06-10', reader: () => merged, contentAt: () => ({ ok: true, hash, copied: 1 }) }));
+      assert.doesNotMatch(sweep, /approved a different epic\.md/, 'the sweep');
+      // A change-epic carrying epic-review, bound before the parent's header was added.
+      const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'satisfied', inherited: true, boundHash: hash, risk_tags: [] };
+      assert.equal(gatePredicate({ step, approvals: [], currentHash: artifactHash(ep, 'epic.md'), acceptedHashes: acceptedHashes(ep, 'epic.md') }).passed, true, 'no drift');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
 }
 
 // ---- yad report (self issue reporter) ----------------------------------------------------------

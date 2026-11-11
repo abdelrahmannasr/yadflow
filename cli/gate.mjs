@@ -837,7 +837,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const approvedHash = at.hash ?? (curHash ? NOTHING_AT_HEAD : null);
     // Merged, and the default branch holds something else: another merge changed it after this review.
     // Solo mode counts no approvals, so there is nothing to say there.
-    const differs = !!pull.merged && approvedHash !== curHash;
+    // Judged against every form that still means the same content (#499: an epic's genesis lineage lines
+    // added after the merge are not "something else"), never against today's form alone.
+    const differs = !!pull.merged && approvedHash !== curHash && !acceptedHashes(epicDir, pr.artifact).includes(approvedHash);
     // Not on a step already done: the gate decided it, and a re-sync only records what arrives.
     if (differs && !solo && !alreadyDone) {
       const trunk = resolveDefaultBranch(productGit(root), productConfig);

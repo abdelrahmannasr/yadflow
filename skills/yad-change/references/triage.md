@@ -103,6 +103,8 @@ thread: <its own id>
 Both names, same value: `kind:` is the one every reader still uses, `type:` is the name from shape 5 on.
 
 This is a non-gated, idempotent frontmatter add (no `parent`, since a genesis epic is the thread root).
+It keeps the epic's approvals live: the gate accepts the fingerprint of `epic.md` with exactly these three lines
+taken out (#499). Add nothing else in the same edit — any other value or key still counts as an edit.
 `workItemType` already defaults an absent type to `feature`, so an un-migrated genesis still behaves as
 a root — migration just makes the `thread` cache explicit and lets `yad thread` group it.
 
