@@ -1476,10 +1476,12 @@ function judgeParts(parts, depth, mode) {
     const subst = substituted(parts, n, mode);
     if (subst === null) return TOO_MUCH_WRITTEN;
     // A file read past its limits whose text is the command (`$(<f)`): refused, as a shell would run it.
-    // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused.
+    // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused. So is one
+    // before the command (`env A=$(<f) git commit`: bash splits it, and `env` sets what it holds, #498 review).
     for (const s of subst) {
       const sw = stripPrefix(s);
-      if (sw.length && (sw[0].includes(OVER) || (!PRINTERS.has(programOf(sw[0])) && sw.some((x) => x.includes(OVER))))) return TOO_MUCH_WRITTEN;
+      const before = s.slice(0, s.length - sw.length);
+      if (sw.length && (sw[0].includes(OVER) || before.some((x) => x.includes(OVER)) || (!PRINTERS.has(programOf(sw[0])) && sw.some((x) => x.includes(OVER))))) return TOO_MUCH_WRITTEN;
       variants.push(s);
     }
     for (const base of variants.slice()) {
