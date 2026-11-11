@@ -692,8 +692,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 1: a file printed, however many times it was written; a copy of a descriptor is no file.
     `${Array.from({ length: 70 }, (_, i) => `echo "line ${i}" >> notes.md`).join('; ')}; cat notes.md`, 'npm test 2>&1 | tee out.txt', 'echo "$(date)" >> notes.md',
     'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate',
-    // Review round 2: a file run after many lines written to it; descriptors copied; a `case` that runs a script.
-    `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
+    // Review round 2: a file run after many lines written to it (under the 250,000 characters read from files);
+    // descriptors copied; a `case` that runs a script.
+    `cat > f <<'E'\n${'npm run lint\n'.repeat(15000)}E\nbash f`, 'npm run build >&build.log', 'exec 3>&1; npm test >&3', 'make 2>&1 >&2 | tee make.log',
     'case "$1" in start) bash run.sh;; esac', 'printf "%s\\n" a > f; bash f',
     // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
     `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',
