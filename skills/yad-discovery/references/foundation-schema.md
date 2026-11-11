@@ -375,7 +375,7 @@ action happen before the risk would hurt?
 
 ## `.sdlc/roadmap-items.json` (E174)
 
-Written by `yad foundation publish`, after the review has passed. It records which issue or work item each roadmap feature was published as. It is outside the Foundation's fingerprint, so writing it never makes the review stale. Commit it.
+Written by `yad foundation publish`, after the review has passed. It records which issue or work item each roadmap feature was published as. It is outside the Foundation's fingerprint, so writing it never makes the review stale. Commit it on a branch of its own, not a `review/…` one: the Product checks let a pull request of this file (with the epics' `.sdlc/issue-links.json` files and step owner files, or alone) through from any branch (#512).
 
 ```json
 { "items": [{ "epicId": "EP-checkout", "platform": "github", "host": "github.com", "repo": "acme/product", "number": 12, "url": "https://github.com/acme/product/issues/12", "publishedAt": "2026-11-10T10:00:00.000Z" }] }

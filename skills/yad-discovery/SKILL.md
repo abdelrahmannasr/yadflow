@@ -168,7 +168,10 @@ It opens one issue or work item per roadmap feature in the Product repo: type fe
 (the first phase, the MVP, is P1; the next P2; later ones P3), the label `epic: EP-x`, and the phase as its
 milestone. The `Later / parked` phase is left out. If the Foundation changed after its review, the command refuses:
 the changed roadmap needs a new review first. Report the links, and remind the person to commit
-`foundation/.sdlc/roadmap-items.json`.
+`foundation/.sdlc/roadmap-items.json` on a branch of its own, not a `review/…` one, and open a pull request
+(`chore: record tracker links`): the Product checks let a pull request of that file, the epics'
+`.sdlc/issue-links.json` files and step owner files alone through from any branch (#512), and a review branch
+would advance a step.
 
 ## Reference
 - Foundation section templates: `references/foundation-schema.md`.
