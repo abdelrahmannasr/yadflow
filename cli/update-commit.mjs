@@ -78,7 +78,7 @@ export function buildUpdateMessage({ version = VERSION, items = [] } = {}) {
 //     legacy rename's old file — stages) — this also drops a no-match pathspec (the root
 //     .gitlab-ci.yml a github repo never has) that would otherwise abort `git add`.
 // Returns the pathspecs actually staged.
-function stageAllowlist(git, root, paths) {
+export function stageAllowlist(git, root, paths) {
   // Every path list goes to git on stdin, never as arguments: `--open-pr` hands over every file of every skill
   // folder, hundreds of paths, which overflowed Windows' 32K command line (E157 update review 7); and one
   // spawn per path took minutes (review 6).
@@ -115,7 +115,9 @@ function stageAllowlist(git, root, paths) {
   // it, though it staged it. So the folders above each kept path are asked of git (`--no-index` reports
   // ignored folders whatever is tracked in them) rather than git's message, which is translated. A lock is
   // said as a lock, and git's own words are always kept beside this.
-  const ignoredBy = !add.ok && !/index\.lock/.test(add.stderr) ? hiddenFolders(root, keep) : [];
+  // Exit 1 only: git refuses an ignored path with 1, and a fatal error (a file it cannot read) with 128 —
+  // then nothing was staged, and an ignore rule beside it is not why (review 2).
+  const ignoredBy = add.code === 1 && !/index\.lock/.test(add.stderr) ? hiddenFolders(root, keep) : [];
   return { staged, addError, ignoredBy };
 }
 
@@ -127,8 +129,12 @@ function stageAllowlist(git, root, paths) {
 export function hiddenFolders(root, paths) {
   const folderOf = new Map();
   for (const p of paths) {
+    // A deletion stages whatever rule hides its folder, so only paths on disk can be refused. A link is a
+    // file to git, whatever it points at (lstat).
+    let st;
+    try { st = fs.lstatSync(path.join(root, p)); } catch { continue; }
     const parts = p.replace(/\/+$/, '').split('/');
-    const isDir = (() => { try { return fs.statSync(path.join(root, p)).isDirectory(); } catch { return false; } })();
+    const isDir = st.isDirectory();
     for (let n = 1; n <= parts.length - (isDir ? 0 : 1); n++) {
       const dir = parts.slice(0, n).join('/');
       if (!folderOf.has(dir)) folderOf.set(dir, []);
@@ -183,7 +189,9 @@ export function hiddenFolderText(ignoredBy, where, { staged }) {
   const list = `${folders.slice(0, 3).join(', ')}${folders.length > 3 ? ` and ${folders.length - 3} more` : ''}`;
   const rule = ignoredBy.slice(0, 2).map((x) => `${x.source}:${x.line} (\`${x.pattern}\`)`).join(', ');
   const outside = ignoredBy.find((x) => x.outside);
-  const way = `remove or narrow that rule${outside ? `, or add \`!${outside.pattern}\` to this repo's .gitignore` : ''}`;
+  // The exact folder, not the rule's own pattern: `!.*` from a global `.*` would let every dotfile in for the
+  // whole team (review 2).
+  const way = `remove or narrow that rule${outside ? `, or add \`!/${outside.folder}/\` to this repo's .gitignore` : ''}`;
   const whose = outside ? ', a rule outside this repo, which CI and the rest of the team do not have' : '';
   return staged
     ? `an ignore rule hides ${list} in ${where} — ${rule}${whose}. Its tracked files were staged, but a new file there is left out of the update: ${way}`

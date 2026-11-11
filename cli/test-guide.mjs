@@ -749,7 +749,7 @@ test('a repo newer than the yadflow running is refused, never rolled back; a fai
     git(A, ['config', 'core.excludesFile', excludes]);
     const hidden = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
     assert.deepEqual(hidden.commits.map((c) => [c.reason, c.committed]), [['add-failed', false]]);
-    assert.match(hidden.commits[0].hint, /^git would not stage the update's files under \.claude in \.: an ignore rule hides that folder — .*gitignore_global:2 \(`\.claude\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Remove or narrow that rule, or add `!\.claude\/` to this repo's \.gitignore; then run this again: .* \(git said: .+\)$/);
+    assert.match(hidden.commits[0].hint, /^git would not stage the update's files under \.claude in \.: an ignore rule hides that folder — .*gitignore_global:2 \(`\.claude\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Remove or narrow that rule, or add `!\/\.claude\/` to this repo's \.gitignore; then run this again: .* \(git said: .+\)$/);
     assert.doesNotMatch(hidden.commits[0].hint, /index\.lock/);
     assert.equal(git(A, ['diff', '--cached', '--name-only']), '', 'nothing left staged');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
@@ -1358,8 +1358,47 @@ test('#508: hiddenFolders names the ignored folder above a kept path, never a fi
     assert.doesNotMatch(hiddenFolderText(own, '.', { staged: false }), /outside this repo|add `!/);
     // The plain push path: git staged the tracked files; only a new file there is left out.
     const pushed = hiddenFolderText(local, 'api', { staged: true });
-    assert.match(pushed, /^an ignore rule hides vendor in api — \.git\/info\/exclude:\d+ \(`vendor\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Its tracked files were staged, but a new file there is left out of the update: remove or narrow that rule, or add `!vendor\/` to this repo's \.gitignore$/);
+    assert.match(pushed, /^an ignore rule hides vendor in api — \.git\/info\/exclude:\d+ \(`vendor\/`\), a rule outside this repo, which CI and the rest of the team do not have\. Its tracked files were staged, but a new file there is left out of the update: remove or narrow that rule, or add `!\/vendor\/` to this repo's \.gitignore$/);
     assert.doesNotMatch(pushed, /would not stage|next run/);
+    // Review 2: a folder on disk is asked by its name — a repo `.claude/*` hides the files in `.claude`, not the
+    // folder, so a kept `.claude/settings.json` names nothing; and a deletion names nothing either.
+    put(path.join(A, '.gitignore'), '.claude/*\n!.claude/settings.json\n');
+    assert.deepEqual(hiddenFolders(A, ['.claude/settings.json']), []);
+    assert.deepEqual(hiddenFolders(A, ['vendor/gone.js']), [], 'not on disk: a deletion git stages anyway');
   } finally { fs.rmSync(P, { recursive: true, force: true }); }
+});
+
+// #508 review 2: a fatal `git add` (exit 128 — a file git cannot read) is said in git's words, even beside an
+// ignored folder: then nothing was staged, and the rule is not why. Root reads any file, so it is skipped there.
+test('#508: a git add that fails fatally beside an ignored folder names no ignore rule', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'needs a file the user cannot read' }, async () => {
+  const { stageAllowlist } = await import('./update-commit.mjs');
+  const P = tmp();
+  const A = path.join(P, 'a');
+  try {
+    fs.mkdirSync(A);
+    git(A, ['init', '-q', '-b', 'main']);
+    git(A, ['config', 'user.name', 'Alice Smith']); git(A, ['config', 'user.email', 'alice@work.com']); git(A, ['config', 'commit.gpgsign', 'false']);
+    git(A, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+    put(path.join(A, '.claude/skills/x/SKILL.md'), 'x\n');
+    put(path.join(A, 'keep.md'), 'k\n');
+    git(A, ['add', '-A']); git(A, ['commit', '-q', '-m', 'start']);
+    const excludes = path.join(P, 'mine');
+    fs.writeFileSync(excludes, '.claude/skills/\n');
+    git(A, ['config', 'core.excludesFile', excludes]);
+    fs.appendFileSync(path.join(A, '.claude/skills/x/SKILL.md'), 'y\n');
+    fs.appendFileSync(path.join(A, 'keep.md'), 'y\n');
+    // An ignored folder alone: exit 1, the folder is named.
+    const refused = stageAllowlist(null, A, ['.claude/skills/x/SKILL.md']);
+    assert.deepEqual(refused.ignoredBy.map((x) => x.folder), ['.claude/skills']);
+    git(A, ['reset', '-q']);
+    // Beside a file git cannot read: exit 128, no rule named, git's words kept.
+    fs.chmodSync(path.join(A, 'keep.md'), 0o000);
+    const fatal = stageAllowlist(null, A, ['.claude/skills/x/SKILL.md', 'keep.md']);
+    assert.match(fatal.addError, /Permission denied|keep\.md/);
+    assert.deepEqual(fatal.ignoredBy, []);
+  } finally {
+    try { fs.chmodSync(path.join(A, 'keep.md'), 0o644); } catch { /* gone */ }
+    fs.rmSync(P, { recursive: true, force: true });
+  }
 });
 
