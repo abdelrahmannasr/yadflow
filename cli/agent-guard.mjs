@@ -129,7 +129,11 @@ export function shellParts(rawLine, mode = {}) {
   // still to come (`bash < <(…)`: the process substitution is the target of a `<`).
   let redirect = null;
   let redirectBefore = null;
+  // One entry per open `(`: `{proc, cases}`, `proc` set for a process substitution; `cases` counts the `case`
+  // commands open inside it, whose pattern `)` closes nothing (#498 review: `bash <(case x in x) …;; esac)`).
   const parens = [];
+  // The process substitution just closed, while the command it belongs to goes on (`bash < <(a) < <(b)`).
+  let afterProc = null;
   const wordKeep = [];
   let orAt = -1;
   let realMarks = null;
@@ -153,13 +157,15 @@ export function shellParts(rawLine, mode = {}) {
         if (kept !== null) parts.herestrings.push({ part: parts.length, text: kept });
       } else if (!dropWord) {
         words.push(unshieldBraces(word));
+        const top = parens.at(-1);
+        if (top && words.length === 1) { if (words[0] === 'case') top.cases++; else if (words[0] === 'esac' && top.cases) top.cases--; }
         if (wordBraced) (partBraced ??= new Map()).set(words.length - 1, word);
         if (kept !== null) (partPosix ??= new Map()).set(words.length - 1, kept);
         if (subs) (partSubst ??= new Map()).set(words.length - 1, subs);
       } else if (redirect && !/[$`]/.test(word)) {
         // A redirect's target (#498, row 8): a file written (only by the output a shell would write, fd 1) or read.
         const target = unshieldBraces(word);
-        if (!target.startsWith('/dev/')) {
+        if (!DEVICE.test(target)) {
           if (redirect.op === '<') (partReads ??= []).push(target);
           else if (redirect.op !== '<>' && (redirect.fd === '' || redirect.fd === '1')) (partWrites ??= []).push({ target, append: redirect.op.endsWith('>>') });
         }
@@ -282,30 +288,43 @@ export function shellParts(rawLine, mode = {}) {
       if (inWord && /^[0-9]+$/.test(word)) { fd = word; word = ''; inWord = false; wordKeep.length = 0; wordSubs.length = 0; } else endWord();
       let j = i + (ch === '&' ? 2 : 1);
       if (line[j] === '>' || line[j] === '|' || (ch === '<' && line[j] === '>')) j++;
-      if (line[j] === '&') { j++; while (j < line.length && /[0-9-]/.test(line[j])) j++; i = j - 1; continue; }
+      // `>&n` and `>&-` copy or close a file descriptor; `>&f` writes to the file `f`, as `&>f` does (#498 review).
+      let both = false;
+      if (line[j] === '&') {
+        j++;
+        if (ch === '<' || /[0-9-]/.test(line[j] ?? '')) { while (j < line.length && /[0-9-]/.test(line[j])) j++; i = j - 1; continue; }
+        both = true;
+      }
       redirectBefore = dropWord ? redirect : null;
-      redirect = { op: line.slice(i, j).replace('|', ''), fd: ch === '&' ? '1' : fd };
+      redirect = both ? { op: '>', fd: '1' } : { op: line.slice(i, j).replace('|', ''), fd: ch === '&' ? '1' : fd };
       dropWord = true;
       i = j - 1;
       continue;
     }
     // `(` and `)` end a part too (#492): `<(cmd)`, `>(cmd)`, `f(){ cmd; }` and `case x in x) cmd;;` run `cmd`.
     if (ch === '\n' || ch === ';' || ch === '&' || ch === '|' || ch === '(' || ch === ')') {
+      const prevProc = afterProc;
+      afterProc = null;
       if (ch === '(') {
         // A process substitution (#498, row 1): `<(…)` or `>(…)` (the `<` read as a redirect just before), or
-        // zsh's `=(…)` (a word that is just `=`). The words before it are its owner's, and the word it makes
-        // stands at `position` (the `=` word itself, which stays a word of the part as written).
+        // zsh's `=(…)` (a word that is just `=`). The words before it are its owner's (with those before an
+        // earlier one the same command holds), and the word it makes stands at `position` (the `=` word
+        // itself, which stays a word of the part as written).
         const zshEq = inWord && word === '=' && !wordSubs.length;
-        const owner = zshEq ? words.slice() : (dropWord && redirect && (line[i - 1] === '<' || line[i - 1] === '>') ? words.slice() : null);
+        const isProc = zshEq || (dropWord && redirect && (line[i - 1] === '<' || line[i - 1] === '>'));
+        // Carried only while short: a shell's script word comes before its first few words end (a carry with no
+        // bound grew with every `<(…)` on a long line, #498 review).
+        const carry = prevProc && prevProc.owner.length + words.length < 64;
+        const owner = !isProc ? null : carry ? [...prevProc.owner, ...(prevProc.viaStdin ? [] : ['\0']), ...words] : words.slice();
         const viaStdin = !zshEq && redirectBefore?.op === '<';
         endPart();
-        parens.push(owner && owner.length ? { owner, position: owner.length, viaStdin, from: parts.length } : null);
+        parens.push({ proc: owner && owner.length ? { owner, position: owner.length, viaStdin, from: parts.length } : null, cases: 0 });
         continue;
       }
       endPart();
-      if (ch === ')') {
-        const p = parens.pop();
-        if (p) parts.procsubs.push({ ...p, to: parts.length });
+      if (ch === ')' && !parens.at(-1)?.cases) {
+        const p = parens.pop()?.proc;
+        if (p) { parts.procsubs.push({ ...p, to: parts.length }); afterProc = p; }
       }
       if (ch === '|') {
         // The second `|` of `||` is known by where the first one was, not by the raw text before it (`\||bash`).
@@ -585,6 +604,8 @@ function runnerOf(w) {
 // runner's `-c`/`--call` before its program is one too (`npx -c '<line>'`, `npm exec -c '<line>'`), and
 // `pnpm exec|dlx -c` runs the rest of its words as a shell line. A program's own `-c` (`vitest -c x`) is not.
 const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh'];
+// The device files a redirect writes to or reads from that are not files the line can run (#498, row 8).
+const DEVICE = /^\/dev\/(null|stdin|stdout|stderr|tty|zero|fd\/[0-9]+)$/;
 // A shell reading its script from its input, not from a file: no `-c`, and either no plain word, or `-s` among its
 // options (the words after are `$1…`), or the first plain word is the input itself (`-`, `/dev/stdin`,
 // `/dev/fd/0`, `/proc/self/fd/0`); `source` / `.` of the input too. `--rcfile` / `--init-file` take a value.
@@ -612,7 +633,7 @@ function bareShell(w) {
 function scriptAt(w) {
   if (!w.length) return -1;
   const prog = programOf(w[0]);
-  if (prog === 'source' || prog === '.') return w.length > 1 ? 1 : -1;
+  if (prog === 'source' || prog === '.') { const k = w[1] === '--' ? 2 : 1; return w.length > k ? k : -1; }
   if (!SHELLS.includes(prog) || shellC(w) !== null) return -1;
   for (let k = 1; k < w.length; k++) {
     if (w[k] === '--') return k + 1 < w.length ? k + 1 : -1;
@@ -990,8 +1011,8 @@ const OUT_OF_TIME = { allow: false, message: 'yad agent guard: this command took
 // The files a reading of the command writes (#498, row 8): each path's texts, every one ever written (a write
 // that may not run must not hide an earlier one), plus the text a run of `>>` writes in all. One map per reading
 // of the top-level command, shared by every line it carries, so `echo … > f; bash -c 'bash f'` is seen.
-const files = { map: new Map(), judged: 0 };
-const resetFiles = () => { files.map = new Map(); files.judged = 0; };
+const files = { map: new Map(), judged: 0, writes: 0 };
+const resetFiles = () => { files.map = new Map(); files.judged = 0; files.writes = 0; };
 const TOO_MUCH_WRITTEN = { allow: false, message: 'yad agent guard: this command runs files it writes too many times, or too much text, to judge. Run it as separate commands.' };
 // `ends`: the end rule the reading this line came from uses (#498); a `$(…)` inside a line is read by the same
 // shell. Unset for a line read afresh (the top line, or what `bash -c` or `eval` runs).
@@ -1098,30 +1119,38 @@ function partVerdict(part) {
 }
 const TOO_MANY_BRACES = { allow: false, message: 'yad agent guard: this command\'s brace lists expand to too many words, or a word with them is too long, to judge. Write the words out, quote them, or run it as separate commands.' };
 const TOO_DEEP = { allow: false, message: 'yad agent guard: this command nests `$(…)`, backticks or `bash -c` too deep to judge. Run it as separate commands.' };
-// Text that reaches a shell (#498, rows 1, 2, 8). A path as the shell finds it again: `./f` is `f`.
-const normPath = (p) => p.replace(/^(?:\.\/+)+/, '');
-// At most this many texts are kept for one file; a run or read of a file with more is refused.
+// Text that reaches a shell (#498, rows 1, 2, 8). A path as the shell finds it again: `./f` and `d/../f` are `f`.
+const normPath = (p) => path.posix.normalize(p).replace(/^(?:\.\/+)+/, '');
+// At most this many texts are kept for one file; running a file with more is refused, and so is reading one
+// into anything a shell then runs.
 const FILE_TEXTS = 64;
-// Every text a file may hold when it is read (each write, and the whole run of `>>`), or null when it holds too
-// many, or too much text was read from files in all (each read is judged again, so this keeps it linear).
+// What a read of a file past these limits gives: a text that refuses the line once a shell would run it, so a
+// file only printed (`cat notes.md`) is not refused for its size (#498 review).
+const OVER = '\0yad-guard: too much written\0';
+// Every text a file may hold when it is read (each write, and each reading of the whole run of `>>`), or null
+// when it holds too many, or too much text was read from files in all (each read is judged again, so this keeps
+// it linear).
 function fileTexts(p) {
   const f = files.map.get(normPath(p));
   if (!f) return [];
-  if (f.over || f.texts.size >= FILE_TEXTS) return null;
+  if (f.over || f.texts.size > FILE_TEXTS) return null;
   const out = [...f.texts];
-  if (f.all !== null && !f.texts.has(f.all)) out.push(f.all);
+  for (const a of f.all ?? []) if (!f.texts.has(a)) out.push(a);
   for (const t of out) if ((files.judged += t.length) > MAX_JUDGED) return null;
   return out;
 }
 // A write of `texts` (the readings of what a part prints) to a file: added to its texts, never replacing one.
+// `all` holds the readings of the whole file, should every write before have run: `>>` joins each reading of
+// what was there with each new one (side by side, as zipJoin does).
 function writeFile(target, texts, append) {
+  files.writes++;
   const key = normPath(target);
   let f = files.map.get(key);
   if (!f) files.map.set(key, (f = { texts: new Set(), all: null, over: false }));
   for (const t of texts) if (t !== '') f.texts.add(t);
-  if (append) { if (texts.length) f.all = f.all === null ? texts[0] : `${f.all}\n${texts[0]}`; }
-  else { if (f.all !== null && f.all !== '') f.texts.add(f.all); f.all = texts.length ? texts[0] : null; }
-  if (f.all !== null && f.all.length > MAX_JUDGED) { f.all = null; f.over = true; }
+  if (append) { if (texts.length) f.all = f.all === null ? texts.slice() : zipJoin([f.all, texts], '\n'); }
+  else { for (const a of f.all ?? []) if (a !== '') f.texts.add(a); f.all = texts.length ? texts.slice() : null; }
+  if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) { f.all = null; f.over = true; }
 }
 // The text each part is fed (its heredocs and here-strings), grouped once by part. A here-string's `$(…)` is also
 // read with its printed text in place (#498, row 2), one level deep: `bash <<< "$(echo '…; gh pr merge 5')"`.
@@ -1140,9 +1169,10 @@ function fedOf(parts, mode, deep) {
   return fed;
 }
 // What part `n` prints, read from each of its spellings `lists` (words with the prefix stripped): the text it is
-// fed, `echo`'s words, `printf`'s two readings, and every text a `cat <file>` may hold (#498, row 8). Null when a
-// file read holds too much to judge.
-function printedOf(fed, n, lists) {
+// fed, `echo`'s words, `printf`'s two readings, and every text a `cat <file>` may hold (#498, row 8), with the
+// files of one `cat` also joined. `input` is what it reads from a pipe or a `<` file, which `cat` (with no file,
+// or `-`) and `tee` print. A file read past its limits gives OVER.
+function printedOf(fed, n, lists, input = []) {
   const out = [...(fed.get(n) ?? [])];
   for (const pw of lists) {
     if (!pw.length) continue;
@@ -1152,12 +1182,18 @@ function printedOf(fed, n, lists) {
     // zsh's `print` prints its words too.
     if (prog === 'print') { let k = 1; while (k < pw.length && /^-[A-Za-z]+$/.test(pw[k])) k++; out.push(pw.slice(k).join(' ')); }
     if (prog === 'printf') out.push(pw.slice(1).join(' '), pw.slice(2).join(' '));
-    if (prog === 'cat') {
-      for (const a of pw.slice(1)) {
-        if (a.startsWith('-')) continue;
-        const t = fileTexts(a);
-        if (t === null) return null;
-        for (const x of t) out.push(x);
+    if (prog === 'cat' || prog === 'tee') {
+      const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-');
+      if (prog === 'tee' || !args.length || args.includes('-')) for (const x of input) out.push(x);
+      if (prog === 'cat') {
+        const per = [];
+        for (const a of args) {
+          if (a === '-') continue;
+          const t = fileTexts(a);
+          per.push(t === null ? [OVER] : t.length ? t : ['']);
+        }
+        for (const t of per) for (const x of t) out.push(x);
+        if (per.length > 1) for (const x of zipJoin(per, '\n')) out.push(x);
       }
     }
   }
@@ -1177,17 +1213,18 @@ function zipJoin(per, sep) {
 // read. `['']` when nothing it prints is known, null when a file read holds too much.
 function subOutputs(text, mode) {
   const m = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
-  if (m) { const t = fileTexts(m[1]); return t === null ? null : (t.length ? t : ['']); }
+  if (m) { const t = fileTexts(m[1]); return t === null ? [OVER] : (t.length ? t : ['']); }
   if (!/echo|printf|print|cat|<</.test(text.replace(/[\\'"]/g, ''))) return [''];
   const sp = shellParts(text, { ends: mode.ends });
   if (sp.tooComplex) return [''];
   const fed = fedOf(sp, mode, false);
   const per = [];
+  let prev = [];
   for (let k = 0; k < sp.length; k++) {
-    if (Date.now() > deadline) return [''];
-    const t = printedOf(fed, k, spellingsOf(sp, k, null));
-    if (t === null) return null;
+    if (Date.now() > deadline) return [OVER];
+    const t = printedOf(fed, k, spellingsOf(sp, k, null), sp.piped.has(k) ? prev : []);
     if (t.length) per.push(t);
+    prev = t;
   }
   const out = zipJoin(per, '\n').map((x) => x.replace(/\n+$/, ''));
   return out.length ? out : [''];
@@ -1260,6 +1297,21 @@ function judgeLine(line, depth, mode = {}) {
   if (parts.tooComplex) return Date.now() > deadline ? OUT_OF_TIME : TOO_MANY_READINGS;
   // The commands a `$(…)` or backticks run are judged too, three levels deep; one deeper is refused (#492).
   if (parts.subs.length && depth >= 3) return TOO_DEEP;
+  // Twice when the first pass writes a file (#498 review): a `$(…)` is judged before the parts that write, and a
+  // loop or a function may run a file a later part writes (`g(){ bash f; }; echo … > f; g`). The second pass
+  // judges it all again with the files the first one saw. Only refuses more.
+  for (let pass = 0; pass < 2; pass++) {
+    const writesBefore = files.writes;
+    const v = judgeParts(parts, depth, mode);
+    if (!v.allow || files.writes === writesBefore) return v;
+  }
+  return { allow: true };
+}
+// Each process substitution's inner parts are walked once per owner; nested ones walk them again, so past this
+// many in all for one line the line is refused, not read on (#498 review: nested `bash <(` was quadratic).
+const PROCSUB_WALK = 200000;
+const TOO_MANY_PROCSUBS = { allow: false, message: 'yad agent guard: this command nests too many process substitutions (`<(…)`) to judge. Run it as separate commands.' };
+function judgeParts(parts, depth, mode) {
   for (const sub of parts.subs) {
     const v = agentGuardDecision(sub, depth + 1, mode.ends ?? '');
     if (!v.allow) return v;
@@ -1274,6 +1326,7 @@ function judgeLine(line, depth, mode = {}) {
   const pipedWrites = new Map();
   for (const p of parts.pipedWrites) { if (!pipedWrites.has(p.after)) pipedWrites.set(p.after, []); for (const wr of p.writes) pipedWrites.get(p.after).push(wr); }
   let before = [];
+  let walked = 0;
   for (let n = 0; n < parts.length; n++) {
     const part = parts[n];
     // Every way the shell may read this part's words (#495): as written; with a command word that expands
@@ -1338,15 +1391,25 @@ function judgeLine(line, depth, mode = {}) {
     }
     // A process substitution this part runs as its script, or reads as its input (#498, row 1): what its parts
     // print, in order (`bash <(echo …)`, `source <(…)`, `bash < <(…)`, zsh's `=(…)`).
+    // A command word that expands is also read as a shell (`$SHELL <(…)`), as for the part's own words.
     for (const p of procsubs.get(n) ?? []) {
-      const ow = [...p.owner, '\0'];
-      const sw = stripPrefix(ow);
-      if (scriptAt(sw) !== p.position - (ow.length - sw.length) && !(p.viaStdin && bareShell(stripPrefix(p.owner)))) continue;
+      const owners = [p.owner];
+      const ow0 = stripPrefix(p.owner);
+      if (ow0.length && (/[$`]/.test(ow0[0]) || /^=[A-Za-z]/.test(ow0[0]))) owners.push([...p.owner.slice(0, p.owner.length - ow0.length), 'bash', ...ow0.slice(1)]);
+      const runs = owners.some((o) => {
+        const ow = [...o, '\0'];
+        const sw = stripPrefix(ow);
+        return scriptAt(sw) === p.position - (ow.length - sw.length) || (p.viaStdin && bareShell(stripPrefix(o)));
+      });
+      if (!runs) continue;
+      if ((walked += p.to - p.from) > PROCSUB_WALK) return TOO_MANY_PROCSUBS;
       const per = [];
+      let prev = [];
       for (let k = p.from; k < p.to; k++) {
-        const t = printedOf(fed, k, spellingsOf(parts, k, null));
-        if (t === null) return TOO_MUCH_WRITTEN;
+        if (Date.now() > deadline) return OUT_OF_TIME;
+        const t = printedOf(fed, k, spellingsOf(parts, k, null), parts.piped.has(k) ? prev : []);
         if (t.length) per.push(t);
+        prev = t;
       }
       for (const t of zipJoin(per, '\n')) carried.push(t);
     }
@@ -1368,6 +1431,8 @@ function judgeLine(line, depth, mode = {}) {
     }
     if (carried.length && depth >= 3) return TOO_DEEP;
     for (const inner of carried) {
+      // A file read past its limits, run by a shell (#498, row 8).
+      if (inner.includes(OVER)) return TOO_MUCH_WRITTEN;
       const v = agentGuardDecision(inner, depth + 1);
       if (!v.allow) return v;
     }
@@ -1377,15 +1442,21 @@ function judgeLine(line, depth, mode = {}) {
     }
     // What this part prints or is fed, for a shell later on the line: as written, with the backslashes double
     // quotes keep (#498 review: `echo "\\'; …" | bash`), and with each `$(…)` read for what it prints.
-    const outs = printedOf(fed, n, spellingsOf(parts, n, subst));
+    // `cat` and `tee` print what they read from a pipe or a `<` file too.
+    const prog = w.length ? programOf(w[0]) : '';
+    const input = parts.piped.has(n) ? before.slice() : [];
+    if (prog === 'cat' || prog === 'tee') for (const r of parts.reads[n] ?? []) { const t = fileTexts(r); if (t === null) input.push(OVER); else for (const x of t) input.push(x); }
+    const outs = printedOf(fed, n, spellingsOf(parts, n, subst), input);
     if (outs === null) return TOO_MUCH_WRITTEN;
     for (const t of outs) printed.push(t);
-    // The files it writes (#498, row 8): its output through `>` or `>>`, or, for `tee`, what it is piped.
-    for (const wr of parts.writes[n] ?? []) writeFile(wr.target, outs, wr.append);
+    // The files it writes (#498, row 8): its output through `>` or `>>` (with what it is piped, which a filter
+    // like `cat` or `sort` passes on), and, for `tee`, its file words.
+    const written = parts.piped.has(n) && prog !== 'cat' && prog !== 'tee' ? [...outs, ...before] : outs;
+    for (const wr of parts.writes[n] ?? []) writeFile(wr.target, written, wr.append);
     for (const wr of pipedWrites.get(n) ?? []) writeFile(wr.target, outs, wr.append);
-    if (w.length && programOf(w[0]) === 'tee' && parts.piped.has(n)) {
+    if (prog === 'tee') {
       const append = w.slice(1).some((x) => x === '--append' || /^-[A-Za-z]*a/.test(x));
-      for (const a of w.slice(1)) if (!a.startsWith('-')) writeFile(a, before, append);
+      for (const a of w.slice(1)) if (!a.startsWith('-')) writeFile(a, outs, append);
     }
     before = outs;
   }

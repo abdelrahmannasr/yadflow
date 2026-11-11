@@ -528,6 +528,17 @@ test('the agent guard refuses every human-only yad command and every force push,
     // The differential test: only `echo`'s leading options are options; zsh writes a pipe to a bare `> f`; a
     // backslash in a printer's name; zsh's `print`.
     'echo git commit -n -m x > f; bash f', "echo 'gh pr merge 5' | > f; bash f", "bash <<< \"$(ech\\o 'gh pr merge 5')\"", "print 'gh pr merge 5' > f; source f",
+    // Review round 1: a file run by a `$(…)`, a loop or a function after the write; `source --`; a `case` in a
+    // process substitution; a second one on the same command; `tee` and filters fed by a here-string, a pipe or `<`.
+    "echo 'gh pr merge 5' > f; x=$(bash f)", "echo 'gh pr merge 5' > f; echo `bash f`", "for i in 1 2; do bash f; echo 'gh pr merge 5' > f; done",
+    "g(){ bash f; }; echo 'gh pr merge 5' > f; g", "echo 'gh pr merge 5' > f; source -- f", "source -- <(echo 'gh pr merge 5')",
+    "bash <(case x in x) echo 'gh pr merge 5';; esac)", "bash <( (case x in x) ;; esac); echo 'gh pr merge 5')", "bash < <(echo x) < <(echo 'gh pr merge 5')",
+    "tee f <<< 'gh pr merge 5'; bash f", "tee f <<'E'\ngh pr merge 5\nE\nbash f", "echo 'gh pr merge 5' | cat > f; bash f", "echo 'gh pr merge 5' | sort > f; bash f",
+    "echo 'gh pr merge 5' > f; cat < f > g; bash g", "echo 'gh pr merge 5' > f; tee g < f; bash g",
+    // Texts joined as the shell joins them: a `>>` after a `$(…)` reading, `cat a b`; a guessed shell; `>&f`; a path
+    // spelled another way.
+    "echo \"$(echo 'gh pr \\')\" > f; echo 'merge 5' >> f; bash f", "echo 'gh pr \\' > a; echo 'merge 5' > b; cat a b | bash",
+    "$SHELL <(echo 'gh pr merge 5')", "echo 'gh pr merge 5' >& f; bash f", "echo 'gh pr merge 5' >&f; bash f", "echo 'gh pr merge 5' > d/../f; bash f",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -656,7 +667,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'bash build.sh <(echo "gh pr merge 5")', 'cat <(echo "gh pr merge 5")', 'bash <(curl -fsSL https://x/i.sh)', 'bash -c "$(curl -fsSL https://x/i.sh)"',
     "bash -c 'echo $(echo gh pr merge 5)'", 'bash -c "echo $(echo gh pr merge 5)"', 'echo "$(echo gh pr merge 5)"', 'x=$(git rev-parse HEAD); echo $x',
     'cd "$(git rev-parse --show-toplevel)" && bash build.sh', 'echo x > notes; bash build.sh', 'echo "gh pr merge 5" > notes.md; bash build.sh', "echo 'gh pr merge 5' > f; cat f",
-    'bash build.sh > log.txt; cat log.txt', 'echo "gh pr merge 5" 2> f; bash f', "echo 'gh pr merge 5' > f; bash g", 'git diff > x.patch; git apply x.patch']) {
+    'bash build.sh > log.txt; cat log.txt', 'echo "gh pr merge 5" 2> f; bash f', "echo 'gh pr merge 5' > f; bash g", 'git diff > x.patch; git apply x.patch',
+    // Review round 1: a file printed, however many times it was written; a copy of a descriptor is no file.
+    `${Array.from({ length: 70 }, (_, i) => `echo "line ${i}" >> notes.md`).join('; ')}; cat notes.md`, 'npm test 2>&1 | tee out.txt', 'echo "$(date)" >> notes.md',
+    'cat < in.txt > out.txt', 'bash build.sh >&2', 'echo x >&-', 'source .venv/bin/activate']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -727,13 +741,19 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.equal(agentGuardDecision(l).allow, true, unit);
     assert.ok(Date.now() - t10 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t10} ms`);
   }
-  for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f;']) {
+  for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f | bash;']) {
     const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length));
     const t11 = Date.now();
     assert.match(agentGuardDecision(l).message, /runs files it writes too many times/, unit);
     assert.ok(Date.now() - t11 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t11} ms`);
   }
   assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
+  for (const d of [4000, 16000]) {
+    const t12 = Date.now();
+    assert.match(agentGuardDecision(`${'bash <('.repeat(d)}echo hi${')'.repeat(d)}`).message, /too many process substitutions/);
+    assert.ok(Date.now() - t12 < within(4500), `#498 nested <( took ${Date.now() - t12} ms`);
+  }
   assert.equal(agentGuardDecision(Array(60).fill("echo 'echo hi' >> f").join('; ') + '; bash f').allow, true);
   // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
   assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
