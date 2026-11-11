@@ -11,7 +11,8 @@
 //   - a folder that is a Product (it has `.sdlc/hub.json` or `.sdlc/product.json`) — so any subfolder of
 //     the Product finds it;
 //   - a folder holding `.yad-workspace.json` — its `product` names the Product folder beside the repos.
-//     It is used ONLY when `start` is inside a repo that Product registers in its `repos.json`. A
+//     It is used ONLY when `start` is inside a repo that Product registers in its `repos.json`, or in a git
+//     worktree of one (yad's own, #115, or a plain one, #515). A
 //     workspace can be a shared folder (`~/Projects`, holding many teams' repos — setup always allowed
 //     that), and a file there must not send an unrelated repo's `yad epic new` or `yad kill` to this
 //     Product (E80 review 1). Anywhere else in the workspace there is no Product.
@@ -26,7 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { exists, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { worktreeAt, sameDir } from './worktree-record.mjs';
+import { worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
 
 export const WORKSPACE_FILE = '.yad-workspace.json';
 export const WORKSPACE_VERSION = 1;
@@ -83,7 +84,11 @@ export function findProduct(start) {
   for (let d = from; ; d = path.dirname(d)) {
     if (exists(productConfigPath(d))) {
       if (d === from) return { root: d, via: 'here' };
-      const repo = registeredRepoHolding(d, from);
+      // A worktree of a registered repo is that repo (#115, #515 review 1), wherever it sits: a repo inside
+      // the Product's folder can have one beside it (`product/backend-wt`), past which the walk crossed.
+      // No epic routing here, unlike the workspace branch below: `yad worktree add` refuses a repo kept
+      // inside the Product's folder, so no epic worktree of one exists to route to.
+      const repo = registeredRepoHolding(d, from) ?? (codeWorktreeOf(d, from) || linkedRepoWorktreeOf(d, from))?.meta ?? null;
       if (crossedRepo && !repo) return null;
       return { root: d, via: 'above', ...(repo ? { repo } : {}) };
     }
@@ -103,6 +108,9 @@ export function findProduct(start) {
         const epicTree = epicProductWorktree(ws.product, wt.epic);
         return { root: epicTree ?? ws.product, via: 'workspace', workspace: d, repo: wt.meta, ...(epicTree ? { worktree: wt.epic } : {}) };
       }
+      // A plain git worktree of a registered repo (#515): that repo. It has no epic, so the main Product.
+      const plain = linkedRepoWorktreeOf(ws.product, from);
+      if (plain) return { root: ws.product, via: 'workspace', workspace: d, repo: plain.meta };
       return { elsewhere: ws.product };
     }
     if (fs.existsSync(path.join(d, '.git'))) crossedRepo = true;
@@ -130,17 +138,47 @@ export function registeredRepoHolding(productRoot, dir) {
   return best;
 }
 
+// Is `top` the worktree git knows by `gitDir`? Git keeps a back-link (`<gitDir>/gitdir`, absolute, or
+// relative under `worktree.useRelativePaths`) to the worktree's `.git` file. A `.git` file written by hand
+// that points at another worktree's git folder fails it, and so borrows nothing (#515).
+function backLinked(top, gitDir) {
+  let back;
+  try { back = fs.readFileSync(path.join(gitDir, 'gitdir'), 'utf8').trim(); } catch { return false; }
+  return !!back && sameDir(path.resolve(gitDir, back), path.join(top, '.git'));
+}
+
 // The registered repo whose epic worktree (#115) holds `dir`: yad made it (its record names the repo), and
-// its common git folder IS that repo's — a record copied into some other clone maps nothing.
+// its common git folder IS that repo's — a record copied into some other clone maps nothing, and a `.git`
+// file pointing at the worktree from another folder is not it (`backLinked`, #515 review 2).
 // → { meta, epic, top } or null.
 export function codeWorktreeOf(productRoot, dir) {
   const top = gitTopOf(dir);
   const rec = worktreeAt(top);
-  if (!rec || typeof rec.repo !== 'string') return null;
+  if (!rec || typeof rec.repo !== 'string' || !backLinked(top, rec.gitDir)) return null;
   const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), null);
   const meta = (Array.isArray(reg?.repos) ? reg.repos : []).find((r) => r?.name === rec.repo && typeof r.path === 'string');
   if (!meta || !sameDir(rec.main, path.resolve(productRoot, meta.path))) return null;
   return { meta, epic: rec.epic, top };
+}
+
+// The registered repo a plain git worktree belongs to (#515): one made by `git worktree add` or by an agent
+// tool (Claude Code's `.claude/worktrees/<name>`), with no yad record. Its main checkout — the folder holding
+// the common `.git` — must BE the registered repo, not a folder inside it or another clone. And git's own
+// back-link (`<common>/.git/worktrees/<id>/gitdir`) must name this worktree's `.git` file: a `.git` file
+// written by hand could otherwise point at a registered repo's worktree folder and borrow its entry.
+// → { meta, top } with `top` the worktree's own top (worked there, never swapped for the repo's), or null.
+// Never the Product's own entry (`registeredRepoHolding` refuses it).
+export function linkedRepoWorktreeOf(productRoot, dir) {
+  if (!productRoot) return null;
+  const top = gitTopOf(dir);
+  const gitDir = top && linkedGitDir(top);
+  if (!gitDir) return null;
+  if (!backLinked(top, gitDir)) return null;
+  const common = commonDirOf(gitDir);
+  if (!common || path.basename(common) !== '.git') return null;
+  const main = path.dirname(common);
+  const meta = registeredRepoHolding(productRoot, main);
+  return meta && sameDir(main, path.resolve(productRoot, meta.path)) ? { meta, top } : null;
 }
 
 // The epic's Product worktree beside the Product, when yad made one; else null.
@@ -235,21 +273,37 @@ export function toolsFolder(found, from) {
   return best ?? from;
 }
 
-// The registry entry for the code repo a code-repo command runs in (E80), with the folder to work in.
-// It is the CHECKOUT that must be the registered repo — not merely a folder inside it: a worktree or a
-// repo nested in `backend/` is another checkout, on another branch, and must never be swapped for
-// backend's own (E80 review 3). → { meta, top } or null. Never the Product's own entry.
-export function registryEntryFor(productRoot, dir) {
+// The registered repo whose OWN checkout `dir` is in — never a worktree of it, never a nested repo. For the
+// commands that work on the repo's files from its registered folder (`risk-map`, `codeowners`, `ci check`,
+// which resolve `<Product>/<path>`): from a worktree they would act on the main checkout, on another
+// branch, so they keep covering every repo there (E80 review 3, #515 review 1). → { meta, top } or null.
+export function registeredCheckoutFor(productRoot, dir) {
   if (!productRoot) return null;
   const top = gitTopOf(dir);
   if (!top) return null;
   const meta = registeredRepoHolding(productRoot, top);
-  if (!meta) {
-    // The one worktree that IS the registered repo's: an epic worktree yad made of it (#115).
-    const wt = codeWorktreeOf(productRoot, dir);
-    return wt && sameDir(wt.top, top) ? { meta: wt.meta, top } : null;
-  }
+  if (!meta) return null;
   const at = real(path.resolve(productRoot, meta.path));
   const topAt = real(top);
   return at && topAt && fold(at) === fold(topAt) ? { meta, top } : null;
+}
+
+// The registry entry for the code repo a code-repo command runs in (E80), with the folder to work in.
+// It is the CHECKOUT that must be the registered repo — not merely a folder inside it: a repo nested in
+// `backend/` is another repo, and gets nothing. A git worktree of backend is backend on another branch: it
+// gets backend's entry (its name, platform and default branch, #515), and `top` stays the worktree's own,
+// so a command works where it runs and is never swapped for backend's checkout (E80 review 3).
+// → { meta, top } or null. Never the Product's own entry.
+export function registryEntryFor(productRoot, dir) {
+  if (!productRoot) return null;
+  const top = gitTopOf(dir);
+  if (!top) return null;
+  const own = registeredCheckoutFor(productRoot, dir);
+  if (own) return own;
+  // Not the registered checkout itself — a folder inside one, or beside it. Only a worktree of it counts: an
+  // epic worktree yad made (#115), or a plain git worktree, wherever it sits (#515), inside the repo
+  // (`.claude/worktrees/x`) or beside it. A repo nested inside one is neither, and gets nothing.
+  const wt = codeWorktreeOf(productRoot, dir);
+  if (wt && sameDir(wt.top, top)) return { meta: wt.meta, top };
+  return linkedRepoWorktreeOf(productRoot, dir);
 }

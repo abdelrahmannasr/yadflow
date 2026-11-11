@@ -28741,24 +28741,68 @@ test('E80 review 2: risk-map and codeowners run from a code repo work on that re
     assert.deepEqual(here.repos.map((r) => r.name), ['backend']);
     const all = JSON.parse(e79Yad(T, product, ['risk-map', '--json']).stdout);
     assert.deepEqual(all.repos.map((r) => r.name).sort(), ['backend', 'web'], 'from the Product: every repo, as before');
+    // From a git worktree of backend (inside it, or beside it), these work on `<Product>/<path>` — backend's
+    // main checkout, on another branch — so they never pick backend there: every repo, as before (#515).
+    e79Git(T, backend, 'commit', '-q', '--allow-empty', '-m', 'second');
+    e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
+    e79Git(T, backend, 'worktree', 'add', '-q', path.join(path.dirname(backend), 'backend-wt'), '-b', 'feat/y');
+    for (const wt of [path.join(backend, '.claude', 'worktrees', 'x'), path.join(path.dirname(backend), 'backend-wt')]) {
+      const fromWt = JSON.parse(e79Yad(T, wt, ['risk-map', '--json']).stdout);
+      assert.deepEqual(fromWt.repos.map((r) => r.name).sort(), ['backend', 'web'], `${wt}: not backend's main checkout`);
+      const owners = JSON.parse(e79Yad(T, wt, ['codeowners', 'check', '--json']).stdout);
+      assert.deepEqual(owners.repos.map((r) => r.name).sort(), ['backend', 'web'], `${wt}: codeowners the same way`);
+    }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E80 review 3: a worktree or a repo nested in a registered repo is its own checkout — never swapped for the repo\'s', () => {
+test('#515 review 1: with the repos inside the Product\'s folder, a worktree beside one finds the Product and is that repo', async () => {
+  const { findProduct, registryEntryFor } = await import('./find-product.mjs');
   const T = e79Tmp();
   try {
-    const { backend } = e80Workspace(T);
-    // A worktree inside the repo (the layout Claude Code uses) on its own branch, and a nested repo.
+    const product = path.join(T, 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(product, '.sdlc', 'product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'backend', default_branch: 'trunk' }] }));
+    const backend = path.join(product, 'backend');
+    fs.mkdirSync(backend);
+    e79Git(T, backend, 'init', '-q', '-b', 'trunk');
+    e79Git(T, backend, 'commit', '-q', '--allow-empty', '-m', 'init');
+    const wt = path.join(product, 'backend-wt');
+    e79Git(T, backend, 'worktree', 'add', '-q', wt, '-b', 'feat/x');
+    const found = findProduct(wt);
+    assert.deepEqual([found?.root && fs.realpathSync(found.root), found?.via, found?.repo?.name], [fs.realpathSync(product), 'above', 'backend']);
+    assert.equal(registryEntryFor(product, wt)?.meta?.default_branch, 'trunk');
+    // A plain repo there that the Product does not register still finds no Product (E80 review 2).
+    const other = path.join(product, 'other');
+    fs.mkdirSync(other);
+    e79Git(T, other, 'init', '-q');
+    assert.equal(findProduct(other), null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E80 review 3 / #515: a git worktree of a registered repo is that repo, worked in its own folder; a nested repo is its own', () => {
+  const T = e79Tmp();
+  try {
+    const { ws, backend } = e80Workspace(T);
+    // A worktree inside the repo (the layout Claude Code uses) and one beside it (`git worktree add`), each on
+    // its own branch: backend's entry (name, platform, default branch), but worked where it runs (#515).
     e79Git(T, backend, 'worktree', 'add', '-q', '.claude/worktrees/x', '-b', 'feat/x');
-    const wt = path.join(backend, '.claude', 'worktrees', 'x');
+    e79Git(T, backend, 'worktree', 'add', '-q', path.join(ws, 'backend-wt'), '-b', 'feat/y');
+    for (const wt of [path.join(backend, '.claude', 'worktrees', 'x'), path.join(ws, 'backend-wt')]) {
+      const b = JSON.parse(e79Yad(T, wt, ['review', 'context']).stdout);
+      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(wt), `${wt}: works where it runs, never in backend's checkout`);
+      assert.deepEqual([b.repo, b.platform, b.base], ['backend', 'gitlab', 'trunk'], `${wt}: backend's registry entry`);
+      // open-pr takes the registry's default branch, not the platform's or 'main' (#515).
+      const pr = e79Yad(T, wt, ['open-pr', '--title', 'feat: x']);
+      assert.match(`${pr.stdout}${pr.stderr}`, /base trunk \(from registry\)/, `${wt}: ${pr.stdout}${pr.stderr}`);
+    }
+    // A repo nested inside backend is another repo: it gets nothing.
     const nested = path.join(backend, 'vendor', 'lib');
     fs.mkdirSync(nested, { recursive: true });
     e79Git(T, nested, 'init', '-q');
-    for (const dir of [wt, nested]) {
-      const b = JSON.parse(e79Yad(T, dir, ['review', 'context']).stdout);
-      assert.equal(fs.realpathSync(b.repoRoot), fs.realpathSync(dir), `${dir}: works where it runs`);
-      assert.equal(b.repo, null, 'not backend\'s registry entry');
-    }
+    const n = JSON.parse(e79Yad(T, nested, ['review', 'context']).stdout);
+    assert.equal(fs.realpathSync(n.repoRoot), fs.realpathSync(nested), 'works where it runs');
+    assert.equal(n.repo, null, 'not backend\'s registry entry');
     // From a plain folder inside backend itself, it is backend, worked at its top.
     fs.mkdirSync(path.join(backend, 'src'));
     const inRepo = JSON.parse(e79Yad(T, path.join(backend, 'src'), ['review', 'context']).stdout);

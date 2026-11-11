@@ -460,6 +460,10 @@ test('yad run checks: the base follows the registry like yad open-pr, and GitLab
     const r = yad(backend, ['run', 'checks', '--no-build', '--body', body]);
     assert.match(r.out, /base origin\/develop/);
     assert.match(r.out, /the description is \d+ characters; GitLab hands CI only the first 2700/);
+    // From a plain git worktree of backend, beside it, too: it is backend, so the registry's base (#515).
+    git(backend, 'worktree', 'add', '-q', path.join(W, 'backend-wt'), '-b', 'feat/wt');
+    const wt = yad(path.join(W, 'backend-wt'), ['run', 'checks', '--no-build', '--body', body]);
+    assert.match(wt.out, /base origin\/develop/, wt.out);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

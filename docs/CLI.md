@@ -46,16 +46,20 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
   such as `~/Projects`, holding other teams' repos, and those must never reach this Product. yad names
   where the Product is instead (`the Product is product: cd there`), and `yad setup` refuses to make the
   workspace folder a second Product. The same rule holds for a git repo nested inside the Product's own
-  folder (`vendor/lib`): it reaches the Product only if the Product registers it.
-- **`risk-map` and `codeowners`** run inside a registered repo's own checkout work on that repo; run from
+  folder (`vendor/lib`): it reaches the Product only if the Product registers it (or it is a git worktree
+  of a repo the Product registers, #515).
+- **`risk-map`, `codeowners` and `ci check`** run inside a registered repo's own checkout work on that repo; run from
   the Product (as before), or from a worktree or repo nested inside a registered one, on every registered
   repo.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in.
   `open-pr`, `review` and `ship`'s PR step also read the Product beside it: run in a registered repo
   without `--repo`, they take that repo's recorded name, platform and default branch. `open-pr` and
   `review` do so from any folder inside the repo, and work at its top; `commit` and `ship` run from the
-  repo's top, as before. A worktree or a repo nested inside a registered repo is another checkout: the
-  command works there, as it did before E80.
+  repo's top, as before. A git worktree of a registered repo — one yad made, one made with `git worktree
+  add`, or an agent tool's (such as `.claude/worktrees/<name>`), inside the repo or beside it — is that
+  repo on another branch: it gets the recorded name, platform and default branch, and the command works in
+  the worktree's own folder, never in the repo's checkout (#515). A repo nested inside a registered repo is
+  another repo: the command works there, as it did before E80.
 - **`--dir` always wins.**
 - **A command that writes the Product** (`update`, `check --fix`, `epic new`, `foundation new`,
   `skill bind`/`unbind`, `dial … --to`, `kill`/`unkill`, `docs sync --wire`) refuses a
@@ -1000,8 +1004,9 @@ acme/
   workspace file mean the same from either.
 - **Commands find the epic's own trees.** Run from `api--EP-cart/`, a code-repo command knows it is api,
   and a Product command (`yad build step`, `yad checkpoint`) goes to `product--EP-cart/` when it exists,
-  so that epic's Build records stay out of the shared tree. Only a worktree yad made counts: one made by
-  hand is still not swapped for the repo (E80).
+  so that epic's Build records stay out of the shared tree. Only a worktree yad made goes to an epic's
+  Product worktree. One made by hand is still the repo for a code-repo command (its name, platform and
+  default branch, #515), works in its own folder, and uses the main Product.
 - **Back to the trunk:** `git fetch origin <default>`, then `git switch --detach origin/<default>`. The
   default-branch commands work from that detached HEAD while it holds nothing the default branch lacks
   but yad's own `[skip ci]` commits.
