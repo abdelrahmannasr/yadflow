@@ -210,6 +210,12 @@ test('from an epic\'s code worktree: the registry knows the repo, and Product co
     fs.mkdirSync(path.join(W, 'fake'));
     fs.writeFileSync(path.join(W, 'fake', '.git'), wtGit.replace(/gitdir:\s*(.+)/, (_, p) => `gitdir: ${path.resolve(path.join(W, 'api-other'), p.trim())}`));
     assert.equal(registryEntryFor(P, path.join(W, 'fake')), null, 'the back-link names api-other');
+    // Nor a `.git` file pointing at yad's own epic worktree of api, with its record (#515 review 2).
+    const awtGit = fs.readFileSync(path.join(awt, '.git'), 'utf8');
+    fs.mkdirSync(path.join(W, 'fake-epic'));
+    fs.writeFileSync(path.join(W, 'fake-epic', '.git'), awtGit.replace(/gitdir:\s*(.+)/, (_, p) => `gitdir: ${path.resolve(awt, p.trim())}`));
+    assert.equal(registryEntryFor(P, path.join(W, 'fake-epic')), null, 'the back-link names api--EP-x');
+    assert.equal(findProduct(path.join(W, 'fake-epic')).repo, undefined, 'and it borrows no repo from the workspace file');
     // A worktree of another clone of api is not the registered checkout.
     git(W, 'clone', '-q', path.join(W, 'api.git'), 'api-clone');
     git(path.join(W, 'api-clone'), 'worktree', 'add', '-q', '--detach', path.join(W, 'api-clone-wt'));

@@ -28749,6 +28749,8 @@ test('E80 review 2: risk-map and codeowners run from a code repo work on that re
     for (const wt of [path.join(backend, '.claude', 'worktrees', 'x'), path.join(path.dirname(backend), 'backend-wt')]) {
       const fromWt = JSON.parse(e79Yad(T, wt, ['risk-map', '--json']).stdout);
       assert.deepEqual(fromWt.repos.map((r) => r.name).sort(), ['backend', 'web'], `${wt}: not backend's main checkout`);
+      const owners = JSON.parse(e79Yad(T, wt, ['codeowners', 'check', '--json']).stdout);
+      assert.deepEqual(owners.repos.map((r) => r.name).sort(), ['backend', 'web'], `${wt}: codeowners the same way`);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

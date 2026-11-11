@@ -86,6 +86,8 @@ export function findProduct(start) {
       if (d === from) return { root: d, via: 'here' };
       // A worktree of a registered repo is that repo (#115, #515 review 1), wherever it sits: a repo inside
       // the Product's folder can have one beside it (`product/backend-wt`), past which the walk crossed.
+      // No epic routing here, unlike the workspace branch below: `yad worktree add` refuses a repo kept
+      // inside the Product's folder, so no epic worktree of one exists to route to.
       const repo = registeredRepoHolding(d, from) ?? (codeWorktreeOf(d, from) || linkedRepoWorktreeOf(d, from))?.meta ?? null;
       if (crossedRepo && !repo) return null;
       return { root: d, via: 'above', ...(repo ? { repo } : {}) };
@@ -136,13 +138,23 @@ export function registeredRepoHolding(productRoot, dir) {
   return best;
 }
 
+// Is `top` the worktree git knows by `gitDir`? Git keeps a back-link (`<gitDir>/gitdir`, absolute, or
+// relative under `worktree.useRelativePaths`) to the worktree's `.git` file. A `.git` file written by hand
+// that points at another worktree's git folder fails it, and so borrows nothing (#515).
+function backLinked(top, gitDir) {
+  let back;
+  try { back = fs.readFileSync(path.join(gitDir, 'gitdir'), 'utf8').trim(); } catch { return false; }
+  return !!back && sameDir(path.resolve(gitDir, back), path.join(top, '.git'));
+}
+
 // The registered repo whose epic worktree (#115) holds `dir`: yad made it (its record names the repo), and
-// its common git folder IS that repo's — a record copied into some other clone maps nothing.
+// its common git folder IS that repo's — a record copied into some other clone maps nothing, and a `.git`
+// file pointing at the worktree from another folder is not it (`backLinked`, #515 review 2).
 // → { meta, epic, top } or null.
 export function codeWorktreeOf(productRoot, dir) {
   const top = gitTopOf(dir);
   const rec = worktreeAt(top);
-  if (!rec || typeof rec.repo !== 'string') return null;
+  if (!rec || typeof rec.repo !== 'string' || !backLinked(top, rec.gitDir)) return null;
   const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), null);
   const meta = (Array.isArray(reg?.repos) ? reg.repos : []).find((r) => r?.name === rec.repo && typeof r.path === 'string');
   if (!meta || !sameDir(rec.main, path.resolve(productRoot, meta.path))) return null;
@@ -161,9 +173,7 @@ export function linkedRepoWorktreeOf(productRoot, dir) {
   const top = gitTopOf(dir);
   const gitDir = top && linkedGitDir(top);
   if (!gitDir) return null;
-  let back;
-  try { back = fs.readFileSync(path.join(gitDir, 'gitdir'), 'utf8').trim(); } catch { return null; }
-  if (!back || !sameDir(path.resolve(gitDir, back), path.join(top, '.git'))) return null;
+  if (!backLinked(top, gitDir)) return null;
   const common = commonDirOf(gitDir);
   if (!common || path.basename(common) !== '.git') return null;
   const main = path.dirname(common);

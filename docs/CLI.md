@@ -46,8 +46,9 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
   such as `~/Projects`, holding other teams' repos, and those must never reach this Product. yad names
   where the Product is instead (`the Product is product: cd there`), and `yad setup` refuses to make the
   workspace folder a second Product. The same rule holds for a git repo nested inside the Product's own
-  folder (`vendor/lib`): it reaches the Product only if the Product registers it.
-- **`risk-map` and `codeowners`** run inside a registered repo's own checkout work on that repo; run from
+  folder (`vendor/lib`): it reaches the Product only if the Product registers it (or it is a git worktree
+  of a repo the Product registers, #515).
+- **`risk-map`, `codeowners` and `ci check`** run inside a registered repo's own checkout work on that repo; run from
   the Product (as before), or from a worktree or repo nested inside a registered one, on every registered
   repo.
 - **A code-repo command** (`commit`, `open-pr`, `ship`, `review`) works on the repo you are in.
