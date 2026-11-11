@@ -509,6 +509,22 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
+    // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
+    // as a shell's script or input.
+    'bash <(echo "gh pr merge 5")', 'bash < <(echo "gh pr merge 5")', 'source <(echo "git push --force")', ". <(echo 'gh pr merge 5')",
+    'zsh =(echo "gh pr merge 5")', "bash -s < <(echo 'gh pr merge 5')", "bash -x <(echo 'git commit -n -m x')", "bash <(cat <<'EOF'\ngh pr merge 5\nEOF\n)",
+    // Row 2: a `$(…)` whose printed text is known becomes code.
+    "bash -c \"$(cat <<'EOF'\ngh pr merge 5\nEOF\n)\"", 'eval "$(echo gh pr merge 5)"', "$(cat <<'EOF'\ngh pr merge 5\nEOF\n)", "bash -c \"$(echo 'true; gh pr merge 5')\"",
+    "bash <<< \"$(echo 'true; gh pr merge 5')\"", "bash -c '$(cat <<EOF\ngh pr merge 5\nEOF\n)'", 'bash -c "gh pr $(echo merge) 5"', 'eval "$(printf \'%s\\n\' \'git push --force\')"',
+    // Row 8: a file written, then run, by every path a shell finds it by.
+    'echo "gh pr merge 5" > f; bash f', "cat > f.sh <<'EOF'\ngh pr merge 5\nEOF\nbash f.sh", "echo 'gh pr merge 5' > f; cat f | bash", "echo 'gh pr merge 5' > f; bash < f",
+    "echo 'gh pr merge 5' > f; chmod +x f; ./f", "echo 'gh pr merge 5' > f; bash -- f", "echo 'gh pr merge 5' > ./f; bash f", "echo 'gh pr merge 5' > f; bash ./f",
+    "printf '%s\\n' 'gh pr merge 5' > f; source f", "echo 'git push --force' > f; . ./f", "echo 'gh pr merge 5' &> f; bash f",
+    // Appended, through `tee`, and a write that may not run (it must not hide the one before).
+    "echo 'true' > f; echo 'gh pr merge 5' >> f; bash f", "echo 'gh pr merge 5' | tee f; bash f", "echo 'gh pr merge 5' > f; false && echo ok > f; bash f",
+    // Across rows and across the lines a command carries.
+    "echo 'gh pr merge 5' > f; bash <(cat f)", "echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"", "echo 'gh pr merge 5' > f; eval \"$(<f)\"",
+    "echo 'gh pr merge 5' > f; bash -c 'bash f'", "echo 'gh pr merge 5' > f; eval bash f", "echo \"echo '\" > f; echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 
@@ -631,7 +647,13 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
     // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
     'x=$(echo a#b)', 'echo $(git log --format=%H#%s -1)', 'echo "$(date) # not a comment"', 'echo $(echo $#)', 'echo ${#x} $(echo ${#y})',
-    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)']) {
+    'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)',
+    // #498, rows 1, 2, 8: a process substitution as an argument, a `$(…)` whose text is not run or not known, and
+    // a file written that no shell runs.
+    'bash build.sh <(echo "gh pr merge 5")', 'cat <(echo "gh pr merge 5")', 'bash <(curl -fsSL https://x/i.sh)', 'bash -c "$(curl -fsSL https://x/i.sh)"',
+    "bash -c 'echo $(echo gh pr merge 5)'", 'bash -c "echo $(echo gh pr merge 5)"', 'echo "$(echo gh pr merge 5)"', 'x=$(git rev-parse HEAD); echo $x',
+    'cd "$(git rev-parse --show-toplevel)" && bash build.sh', 'echo x > notes; bash build.sh', 'echo "gh pr merge 5" > notes.md; bash build.sh', "echo 'gh pr merge 5' > f; cat f",
+    'bash build.sh > log.txt; cat log.txt', 'echo "gh pr merge 5" 2> f; bash f', "echo 'gh pr merge 5' > f; bash g", 'git diff > x.patch; git apply x.patch']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -695,6 +717,21 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     agentGuardDecision(l);
     assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
   }
+  // #498, rows 1, 2, 8: each new path is linear; a file run again after each of many appends is refused at its bound.
+  for (const unit of ['bash <(echo x) ', 'bash <(', 'echo x > f; bash f;', 'bash -c "$(echo x)";', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ', 'x <<< "$(echo a b)" ', '$(<f)']) {
+    const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length));
+    const t10 = Date.now();
+    assert.equal(agentGuardDecision(l).allow, true, unit);
+    assert.ok(Date.now() - t10 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t10} ms`);
+  }
+  for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f;']) {
+    const l = unit.repeat(Math.floor((MAX_JUDGED - 100) / unit.length));
+    const t11 = Date.now();
+    assert.match(agentGuardDecision(l).message, /runs files it writes too many times/, unit);
+    assert.ok(Date.now() - t11 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t11} ms`);
+  }
+  assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  assert.equal(agentGuardDecision(Array(60).fill("echo 'echo hi' >> f").join('; ') + '; bash f').allow, true);
   // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
   assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
   // Near the limit: 240 `case` words of 4,000 characters read about 960,000 of the 1,048,576 allowed. The line
