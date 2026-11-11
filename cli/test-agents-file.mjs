@@ -503,6 +503,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Round 6: a `#` comment inside `$(…)` (both shells; zsh only in double quotes), and backticks inside it (bash).
     "echo $( # )'\ngit push -f\n)''", "echo \"$( # )\"'\ngit push -f\n)\"''", "echo $( echo hi # )'\ngit push -f\n)''", "echo $(echo $((1)) # )'\ngit push -f\n)''",
     "echo $(echo `echo )'`\ngit push -f\n)''",
+    // Round 7: bash starts a comment only after a blank (`;#` is none to it); the brace shield; `${…}` as a `case` word.
+    "echo $(echo $'\\'' ;#) ; git push -f ; echo '\n)'", "echo $(echo $'\\''&#) ; git push -f ; echo '\n)'", "echo $(echo $'\\''&&#) ; gh pr merge 5 ; echo '\n)'",
+    "git commit -m {$(echo '{'),-n}", 'git commit -m {$(echo {),-n}', 'git commit -m {`echo {`,-n}', 'echo "$(case ${x:-a b} in\n*) git push -f ;; esac)"',
     // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
@@ -692,6 +695,11 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     agentGuardDecision(l);
     assert.ok(Date.now() - t8 < within(4500), `#498 ${JSON.stringify(unit.slice(0, 12))} took ${Date.now() - t8} ms`);
   }
+  // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
+  assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
+  assert.equal(agentGuardDecision(`echo $(${' case x in x) echo a;; esac;'.repeat(2000)})`).allow, true);
+  assert.match(agentGuardDecision(`echo ${'{x}'.repeat(1300)},y`).message, /brace lists expand to too many words/);
+  assert.equal(agentGuardDecision(`echo ${'{x}'.repeat(150)},y`).allow, true);
   // #498 review: the kept spelling of a long double-quoted word with many backslashes is built in one pass.
   const n = Math.floor((MAX_JUDGED - 100) / 2);
   for (const [l, allow] of [[`bash -c "${'\\x'.repeat(n)}; gh pr merge 5"`, false], [`echo "${'\\x'.repeat(n)}"`, true]]) {

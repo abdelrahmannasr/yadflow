@@ -319,8 +319,9 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
       continue;
     }
     // Both shells read a `#` that starts a word as a comment to the end of the line: a `)` in it closes nothing
-    // (#498 review round 6). Not `$#`, `${#x}` or `16#ff`, where it starts no word.
-    if (ansi && ch === '#' && (i === from || /[\s;&|()]/.test(line[i - 1]))) {
+    // (#498 review round 6). Not `$#`, `${#x}` or `16#ff`, where it starts no word. bash 3.2 starts one only after
+    // a blank or a newline (`;#` is no comment to it); zsh after `;`, `&`, `|`, `(` and `)` too (round 7).
+    if (ansi && ch === '#' && (i === from || (mode.ends === 'bash' ? /[ \t\n]/ : /[\s;&|()]/).test(line[i - 1]))) {
       const nl = line.indexOf('\n', i);
       if (nl < 0 || nl >= stop) return line.length;
       i = nl - 1;
