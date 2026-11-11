@@ -1876,7 +1876,10 @@ function gatePart(prog, args, at) {
   if (m[1].endsWith('.mjs') ? prog !== 'node' : !(prog === 'bash' || prog === 'sh')) return false;
   if (!insideProject(name, at)) return false;
   try {
-    return fs.readFileSync(path.resolve(at.cwd, name)).equals(fs.readFileSync(path.join(SHIPPED_CHECKS, m[1])));
+    // A plain file only: a named pipe there would block the read, and the hook with it (#498 review).
+    const local = path.resolve(at.cwd, name);
+    if (!fs.statSync(local).isFile()) return false;
+    return fs.readFileSync(local).equals(fs.readFileSync(path.join(SHIPPED_CHECKS, m[1])));
   } catch { return false; }
 }
 

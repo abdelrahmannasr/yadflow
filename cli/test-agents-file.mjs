@@ -895,7 +895,7 @@ test('#498: yad hook agent-guard judges in a worker; one that runs out of memory
   assert.match(no.verdict.message, /approving or merging/);
   // A worker with almost no memory, or no time, does not answer: the line is refused, never allowed.
   const big = `echo ${'$(echo x) '.repeat(60000)}`;
-  const oom = await judgeInWorker(big, null, { heapMb: 4 });
+  const oom = await judgeInWorker(big, null, { heapMb: 16 }); // 1-2 MB aborts Node itself, before the worker starts
   assert.equal(oom.verdict.allow, false, JSON.stringify(oom.verdict));
   assert.match(oom.verdict.message, /could not be judged/);
   const slow = await judgeInWorker(big, null, { wallMs: 1 });
@@ -905,6 +905,18 @@ test('#498: yad hook agent-guard judges in a worker; one that runs out of memory
   const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
   assert.equal(hook('gh pr merge 5').status, 2);
   assert.match(hook('git status').stdout, /pre-approved/);
+});
+
+test('#498: a named pipe where a shipped check should be is not read, so pre-approval never blocks the hook', { skip: process.platform === 'win32' }, async () => {
+  const { agentGuardPreapproval } = await import('./agent-guard.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fifo-'));
+  try {
+    fs.mkdirSync(path.join(T, 'checks'));
+    execFileSync('mkfifo', [path.join(T, 'checks', 'spec-link.sh')]);
+    const t = Date.now();
+    assert.equal(agentGuardPreapproval('bash checks/spec-link.sh', { cwd: T, root: T }).preapproved, false);
+    assert.ok(Date.now() - t < 2000);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('the hooks read a payload that arrives late or in pieces, retry a pipe that is not ready (EAGAIN), and never lose a verdict at exit', async () => {

@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger, mirrorDrift, productConfigPath, HOOK_PROJECT_DIR_ENVS, PROJECT_FILES } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
-import { payloadCommand, isCursorPayload } from './agent-guard.mjs';
+import { payloadCommand, isCursorPayload, JUDGE_BUDGET_MS } from './agent-guard.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -664,7 +664,10 @@ export async function runAgentGuardHook({ format = null } = {}) {
   // Claude Code names the project in CLAUDE_PROJECT_DIR and where the command runs in the payload's `cwd`.
   const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const preapproval = !cursor && !process.env.YAD_NO_PREAPPROVE ? { root, cwd: typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : root } : null;
-  const { verdict, pre } = process.env.YAD_HOOK_DISABLE ? { verdict: { allow: true }, pre: null } : await judgeInWorker(payloadCommand(payload), preapproval);
+  // No command to judge (no payload, or none in it) fails open without a worker, as before.
+  const command = payloadCommand(payload);
+  const skip = process.env.YAD_HOOK_DISABLE || typeof command !== 'string' || !command.trim();
+  const { verdict, pre } = skip ? { verdict: { allow: true }, pre: null } : await judgeInWorker(command, preapproval);
   if (cursor) {
     process.stdout.write(`${verdict.allow ? CURSOR_ALLOW : cursorDeny(verdict.message)}\n`);
     if (!verdict.allow) console.error(verdict.message);
@@ -680,9 +683,9 @@ export async function runAgentGuardHook({ format = null } = {}) {
 }
 
 // The worker's limits: well above what the longest ordinary line takes (about 400 MB, under a second), and a
-// wall clock past the guard's own 5 s cut-off, for any loop that does not check it.
+// wall clock past two of the guard's own 5 s budgets (pre-approval judges the line again), with slack.
 export const GUARD_HEAP_MB = 1024;
-export const GUARD_WALL_MS = 10_000;
+export const GUARD_WALL_MS = 2 * JUDGE_BUDGET_MS + 2000;
 const NOT_JUDGED = (why) => ({ allow: false, message: `yad agent guard: this command could not be judged (${why}). Run it as separate commands, shorter, or ask the person to run it.` });
 // The verdict (and pre-approval) for `command`, judged in a worker; a refusal when the worker does not answer.
 export function judgeInWorker(command, preapproval, { heapMb = GUARD_HEAP_MB, wallMs = GUARD_WALL_MS } = {}) {
