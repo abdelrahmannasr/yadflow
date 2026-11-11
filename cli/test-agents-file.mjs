@@ -525,6 +525,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Across rows and across the lines a command carries.
     "echo 'gh pr merge 5' > f; bash <(cat f)", "echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"", "echo 'gh pr merge 5' > f; eval \"$(<f)\"",
     "echo 'gh pr merge 5' > f; bash -c 'bash f'", "echo 'gh pr merge 5' > f; eval bash f", "echo \"echo '\" > f; echo 'gh pr merge 5' > f; bash -c \"$(cat f)\"",
+    // The differential test: only `echo`'s leading options are options; zsh writes a pipe to a bare `> f`; a
+    // backslash in a printer's name; zsh's `print`.
+    'echo git commit -n -m x > f; bash f', "echo 'gh pr merge 5' | > f; bash f", "bash <<< \"$(ech\\o 'gh pr merge 5')\"", "print 'gh pr merge 5' > f; source f",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd);
 });
 

@@ -120,6 +120,7 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'subst', { value: [] });
   Object.defineProperty(parts, 'writes', { value: [] });
   Object.defineProperty(parts, 'reads', { value: [] });
+  Object.defineProperty(parts, 'pipedWrites', { value: [] });
   let partSubst = null;
   const wordSubs = [];
   let partWrites = null;
@@ -174,6 +175,8 @@ export function shellParts(rawLine, mode = {}) {
   const endPart = () => {
     endWord(); dropWord = false; hereString = false; redirect = null; redirectBefore = null;
     if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.push(words); }
+    // A redirect alone after a pipe: zsh writes what it is piped to the file (`echo … | > f`), as `cat > f` would.
+    else if (partWrites && parts.length && parts.piped.has(parts.length)) parts.pipedWrites.push({ after: parts.length - 1, writes: partWrites });
     words = []; partBraced = null; partPosix = null; partSubst = null; partWrites = null; partReads = null;
   };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
@@ -1144,7 +1147,10 @@ function printedOf(fed, n, lists) {
   for (const pw of lists) {
     if (!pw.length) continue;
     const prog = programOf(pw[0]);
-    if (prog === 'echo') out.push(pw.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
+    // Only `echo`'s leading options are options: `echo git commit -n` prints the `-n` (#498 review).
+    if (prog === 'echo') { let k = 1; while (k < pw.length && /^-[neE]+$/.test(pw[k])) k++; out.push(pw.slice(k).join(' ')); }
+    // zsh's `print` prints its words too.
+    if (prog === 'print') { let k = 1; while (k < pw.length && /^-[A-Za-z]+$/.test(pw[k])) k++; out.push(pw.slice(k).join(' ')); }
     if (prog === 'printf') out.push(pw.slice(1).join(' '), pw.slice(2).join(' '));
     if (prog === 'cat') {
       for (const a of pw.slice(1)) {
@@ -1172,7 +1178,7 @@ function zipJoin(per, sep) {
 function subOutputs(text, mode) {
   const m = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
   if (m) { const t = fileTexts(m[1]); return t === null ? null : (t.length ? t : ['']); }
-  if (!/echo|printf|cat|<</.test(text)) return [''];
+  if (!/echo|printf|print|cat|<</.test(text.replace(/[\\'"]/g, ''))) return [''];
   const sp = shellParts(text, { ends: mode.ends });
   if (sp.tooComplex) return [''];
   const fed = fedOf(sp, mode, false);
@@ -1265,6 +1271,8 @@ function judgeLine(line, depth, mode = {}) {
   // The process substitutions each part owns (#498, row 1), and what the part before this one printed (`tee`).
   const procsubs = new Map();
   for (const p of parts.procsubs) { if (!procsubs.has(p.from - 1)) procsubs.set(p.from - 1, []); procsubs.get(p.from - 1).push(p); }
+  const pipedWrites = new Map();
+  for (const p of parts.pipedWrites) { if (!pipedWrites.has(p.after)) pipedWrites.set(p.after, []); for (const wr of p.writes) pipedWrites.get(p.after).push(wr); }
   let before = [];
   for (let n = 0; n < parts.length; n++) {
     const part = parts[n];
@@ -1374,6 +1382,7 @@ function judgeLine(line, depth, mode = {}) {
     for (const t of outs) printed.push(t);
     // The files it writes (#498, row 8): its output through `>` or `>>`, or, for `tee`, what it is piped.
     for (const wr of parts.writes[n] ?? []) writeFile(wr.target, outs, wr.append);
+    for (const wr of pipedWrites.get(n) ?? []) writeFile(wr.target, outs, wr.append);
     if (w.length && programOf(w[0]) === 'tee' && parts.piped.has(n)) {
       const append = w.slice(1).some((x) => x === '--append' || /^-[A-Za-z]*a/.test(x));
       for (const a of w.slice(1)) if (!a.startsWith('-')) writeFile(a, before, append);
