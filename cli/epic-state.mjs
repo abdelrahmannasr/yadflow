@@ -795,6 +795,9 @@ const TABLE_RULE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
 const isTableRule = (l) => l.includes('|') && TABLE_RULE.test(l);
 const DIVIDER = /^(-{3,}|\*{3,}|_{3,})$/;
 export function isUnwrittenSection(text) {
+  // Comments are stripped in ONE pass. This reads a section for words; it does not clean HTML. In
+  // `<!<!-- x -->-- y -->` Markdown hides only the inner comment, and the rest shows as text, so it must
+  // stay and make the section written. Code scanning flags the single pass (alert #45): a false positive.
   const lines = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(FRONTMATTER_BLOCK, '')
     .replace(/<!--[\s\S]*?-->/g, '').split('\n').map((l) => l.trim());
   return lines.every((l, i) => !l

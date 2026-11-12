@@ -20634,6 +20634,9 @@ test('isUnwrittenSection: every shipped Foundation template reads as unwritten, 
   // A comment spanning lines is dropped whole; the frontmatter never counts, even with an owner in it.
   assert.equal(isUnwrittenSection('---\nid: EP-foundation\nowner: sam\n---\n## Why\n<!-- one\ntwo -->\n'), true);
   assert.equal(isUnwrittenSection('## Why\n- one bullet\n'), false, 'a list item is writing');
+  // One pass, on purpose. Markdown hides only the inner `<!-- x -->` here; the outer `<!` and `-- y -->`
+  // show on the page as text. Stripping again until nothing changes would hide words a reader sees.
+  assert.equal(isUnwrittenSection('## Why\n<!<!-- x -->-- y -->\n'), false, 'what is left after the strip is text');
   assert.equal(isUnwrittenSection(''), true);
   // The E76 review: a bare `---` divider is not a table rule, so the line above it is not a header row.
   assert.equal(isUnwrittenSection('- Flatmates split rent.\n---\n'), false, 'a list item above a divider');
