@@ -12,7 +12,7 @@
 // The refusal says what to do instead: ask the person to run it themselves (`! <command>` in Claude Code).
 //
 // A SPEED BUMP, NOT PROOF. It reads the command line the agent sends, so a command hidden in a script, an
-// alias is not seen; Codex has no hooks at all. What proves an approval is the platform (and CI's
+// alias, or an `eval` of a value known only when the line runs is not seen; Codex has no hooks at all. What proves an approval is the platform (and CI's
 // ledger guard). The rules in AGENTS.md are what the agent follows; this catches the plain mistake.
 //
 // FAIL-OPEN, like the ledger guard: a payload it cannot read, or no command in it, is allowed.

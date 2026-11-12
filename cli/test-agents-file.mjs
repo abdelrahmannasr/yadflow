@@ -1796,6 +1796,8 @@ test('#532: differential output corpus against bash and zsh with harmless execut
       for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);
     }
   }
+  // Each shell that is installed: macOS has bash 3.2 and zsh; a Linux runner has bash 5 and may have no zsh, so
+  // there this checks bash 5 only. The zsh-only lines are checked by the asserts above on every runner.
   for (const shell of ['/bin/bash', '/bin/zsh']) {
     if (!fs.existsSync(shell)) continue;
     for (const line of corpus) {
