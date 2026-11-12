@@ -1150,12 +1150,13 @@ const files = { map: new Map(), judged: 0, writes: 0, version: 0, seen: [], appe
 const resetFiles = () => { files.map = new Map(); files.judged = 0; files.writes = 0; files.version = 0; files.seen = []; files.appends = 0; };
 const TOO_MUCH_WRITTEN = { allow: false, message: 'yad agent guard: this command runs files it writes too many times, or too much text, to judge. Run it as separate commands.' };
 // `ends`: the end rule the reading this line came from uses (#498); a `$(…)` inside a line is read by the same
-// shell. Unset for a line read afresh (the top line, or what `bash -c` or `eval` runs).
-export function agentGuardDecision(line, depth = 0, ends = undefined) {
+// shell. Unset for a line read afresh (the top line, or what `bash -c` or `eval` runs). `redir` likewise (#518): the
+// redirect reading of the reading this `$(…)` came from — '' for main's, 'bash' or 'zsh' — or null to read afresh.
+export function agentGuardDecision(line, depth = 0, ends = undefined, redir = null) {
   if (typeof line === 'string' && line.length > MAX_JUDGED) {
     return { allow: false, message: `yad agent guard: this command is too long to judge (${line.length} characters, more than ${MAX_JUDGED}). Write what it carries to a file with your editor, or run it as separate commands.` };
   }
-  if (depth > 0) return judgeReadings(line, depth, ends);
+  if (depth > 0) return judgeReadings(line, depth, ends, redir);
   deadline = Date.now() + JUDGE_BUDGET_MS;
   caseLeft.n = CASE_SCAN;
   built.n = 0;
@@ -1184,7 +1185,7 @@ function firstExpandingHeredoc(text) {
 // Every reading the shells may make of the line: as written; with CRs dropped (a CR-dropping shell); with every
 // `\` + newline join made, CRs dropped first (a `$\<LF>(`, an end word split by a join: `EO\<LF>F`); and, where
 // the line has the context the reader does not track, each mode of shellParts. Refused if any reading refuses.
-function judgeReadings(line, depth, ends) {
+function judgeReadings(line, depth, ends, inherited = null) {
   if (typeof line !== 'string') return { allow: true };
   // The end rules of `$(…)` (#498): main's, bash 3.2's and zsh's (see substitutionEnd).
   // A line inside a `$(…)` keeps its reading's rule; a fresh one gets each rule that can differ here.
@@ -1204,9 +1205,14 @@ function judgeReadings(line, depth, ends) {
   // A dimension of its own, crossed with every end rule above: main's redirect reading stays under each of them, and
   // these only add readings (review 1 — tied to the end rule, they replaced main's under bash's and zsh's). Only
   // where some text of the line has one: a descriptor number written right after `>&` (`2>&1`) reads the same in
-  // every shell, so the common lines are read once. A blank before the number (`>& 1`) does not (review 1).
+  // every shell, so the common lines are read once. A blank before the number (`>& 1`) does not (review 1). A `-`
+  // after `>&` brings them in even where it only closes (`2>&-`): bash's comment after it (`>&-#`) needs it.
+  // `>|!` needs no zsh trigger: main's reading already writes the file `!` there, as zsh does.
+  // A line inside a `$(…)` keeps its reading's shell (review 2), as it keeps its end rule: read again by every shell
+  // at every level, a nested line was read 3 times more per level, and in shells the outer reading is not.
   const redirs = [undefined];
-  if (texts.some((t) => /[<>]&[ \t]*(?:[^\s0-9;&|<>()]|[0-9]+[^\s0-9;&|<>()])|[<>]&[ \t]+[0-9]/.test(t))) redirs.push('bash', 'zsh');
+  if (inherited !== null) redirs[0] = inherited || undefined;
+  else if (texts.some((t) => /[<>]&[ \t]*(?:[^\s0-9;&|<>()]|[0-9]+[^\s0-9;&|<>()])|[<>]&[ \t]+[0-9]/.test(t))) redirs.push('bash', 'zsh');
   else if (texts.some((t) => />>?!|>>\||>&[|!]/.test(t))) redirs.push('zsh');
   const expandsAt = firstExpandingHeredoc(line);
   const flags = [];
@@ -1423,7 +1429,8 @@ function subOutputs(text, mode) {
   const m = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
   if (m) { const t = fileTexts(m[1]); return t === null ? [OVER] : (t.length ? t : ['']); }
   if (!/echo|printf|print|cat|<</.test(text.replace(/[\\'"]/g, ''))) return [''];
-  const sp = shellParts(text, { ends: mode.ends });
+  // What a `$(…)` prints is read by the reading's shell too (review 2: `$(echo gh >& 1 pr merge 5)` runs the merge).
+  const sp = shellParts(text, { ends: mode.ends, redir: mode.redir });
   if (sp.tooComplex) return [''];
   const fed = fedOf(sp, mode, false);
   const per = [];
@@ -1542,7 +1549,7 @@ const PROCSUB_WALK = 200000;
 const TOO_MANY_PROCSUBS = { allow: false, message: 'yad agent guard: this command nests too many process substitutions (`<(…)`) to judge. Run it as separate commands.' };
 function judgeParts(parts, depth, mode) {
   for (const sub of parts.subs) {
-    const v = agentGuardDecision(sub, depth + 1, mode.ends ?? '');
+    const v = agentGuardDecision(sub, depth + 1, mode.ends ?? '', mode.redir ?? '');
     if (!v.allow) return v;
   }
   // The text each part is fed, grouped once by part (a loop over every body for every part was quadratic).

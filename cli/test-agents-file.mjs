@@ -606,6 +606,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     'echo gh pr >|! merge 5 >! f; bash f', 'gh pr >& 1 merge 5', 'gh pr 2>& 1 merge 5', 'gh pr >&\t2 merge 5', 'gh pr <& 0 merge 5',
     'git commit -m x >\\\n&--n', 'git commit -m x >&\\\n--n', "echo x >&-#'\ngh pr merge 5\n#'", "echo x 2>&-#'\ngh pr merge 5\n#'", "echo x >& -#'\ngh pr merge 5\n#'",
     `bash -c "echo x >&-#'\ngh pr merge 5\n#'"`,
+    // #518 review 2: what a `$(…)` prints is read by each shell's redirect reading too.
+    '$(echo gh >& 1 pr merge 5)', '$(echo gh <& 0 pr merge 5)', '$(echo gh 2>& 1 pr merge 5)', "bash -c '$(echo gh >& 1 pr merge 5)'", 'eval "$(echo gh >& 1 pr merge 5)"',
+    "bash <<'E'\n$(echo gh >& 1 pr merge 5)\nE", '$(echo gh pr >& 1- merge 5)', 'echo "$(case x in x)\n$(echo gh >& 1 pr merge 5);; esac)"',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -759,7 +762,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'echo gh pr merge 1 2>&--n; bash ./--n', 'echo gh pr merge 1 2>! f; bash f', 'echo gh pr merge 1 > !f; bash f', 'echo gh pr merge 1 <&--n; bash ./--n',
     'git commit -m x >&| -n', 'git push origin main >&2',
     // #518 review 1: a blank before the number copies a descriptor as before; a `#` after `>&-` with a blank is text.
-    'make >& 1 | head', 'echo x >& 2', 'npm test 2>& 1 | tail', 'echo x >&- # done', 'echo "$(case x in x) echo a >&2;; esac)"']) {
+    'make >& 1 | head', 'echo x >& 2', 'npm test 2>& 1 | tail', 'echo x >&- # done', 'echo "$(case x in x) echo a >&2;; esac)"',
+    'x=$(git status >& 1)', 'echo "$(make 2>& 1 | tail)"', 'out=$(npm test >&- 2>&1)']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -894,6 +898,12 @@ test('#518: a long line the bash and zsh readings are added for is judged in bou
     assert.ok(Date.now() - t0 < within(4500), `took ${Date.now() - t0} ms: ${line.slice(0, 30)}`);
   }
   assert.equal(agentGuardDecision(`${'npm run lint >&- ; '.repeat(40000)}git commit -m x >&--n`).allow, false);
+  // Review 2: a `$(…)` inside a `$(…)` keeps its reading's shell, so nesting does not multiply the readings.
+  const nest = (n) => (n ? `$(echo a >&p >& 1 >&|q ${nest(n - 1)})` : 'x');
+  const nested = Array(20).fill(`echo ${nest(3)}`).join('; ');
+  const t1 = Date.now();
+  assert.equal(agentGuardDecision(nested).allow, true);
+  assert.ok(Date.now() - t1 < within(4500), `nested took ${Date.now() - t1} ms`);
 });
 
 test('the refusal says what to do instead: the person runs it', () => {
