@@ -35,7 +35,8 @@ function product(platform = 'github') {
 }
 
 // A fake platform. `state` is the item as the platform holds it; writes change it unless told to drop.
-function fake(platform = 'github', { item = {}, vis = 'private', users = { ann: 7 }, drop = {}, fail = false } = {}) {
+// `repoLabels` (#514): the labels the repo has, or null when they cannot be read.
+function fake(platform = 'github', { item = {}, vis = 'private', users = { ann: 7 }, drop = {}, fail = false, repoLabels = ['UI', 'frontend', 'needs design', 'blocked'] } = {}) {
   const gh = platform === 'github';
   const state = { number: 5, title: 'Old', body: '', state: 'open', labels: [], assignees: [], ...item };
   const calls = [];
@@ -54,6 +55,7 @@ function fake(platform = 'github', { item = {}, vis = 'private', users = { ann: 
     if (method === 'GET') {
       if (/^users\?username=/.test(at)) { const u = decodeURIComponent(at.split('=')[1]); return done(users[u] ? [{ id: users[u], username: u }] : []); }
       if (/^repos\/a\/(p|api)$/.test(at)) return done({ visibility: vis, private: vis === 'private' });
+      if (/\/labels\?/.test(at)) return repoLabels ? done(repoLabels.map((name) => ({ name }))) : no('HTTP 500');
       return done(view());
     }
     if (method === 'POST' && /\/issues$/.test(at)) {
@@ -300,3 +302,113 @@ test('E173 review 2: a comma label on GitLab is refused before anything is chang
   assert.doesNotMatch(r.notes.join(), /token/);
 });
 
+
+// ---- #514: any label — --add and --remove --------------------------------------------------------
+
+// A refusal under --json is printed, not returned: read the answer that was printed.
+async function answerOf(call) {
+  const printed = [];
+  const orig = console.log;
+  console.log = (t) => printed.push(String(t));
+  try { return (await call()) ?? JSON.parse(printed.at(-1)); } finally { console.log = orig; }
+}
+
+test('#514 label --add/--remove: a label the repo has is added as the repo spells it, another is removed, both read back', async () => {
+  for (const platform of ['github', 'gitlab']) {
+    const T = product(platform); const p = fake(platform, { item: { labels: ['priority: P2', 'blocked'] } });
+    const r = await A.runIssuesLabel(T, { ref: '5', add: ['ui'], remove: ['BLOCKED'], json: true, env, runner: p.runner });
+    assert.equal(r.ok, true, `${platform}: ${JSON.stringify(r)}`);
+    assert.deepEqual(p.state.labels.sort(), ['UI', 'priority: P2'], `${platform}: the repo's own spelling, and the priority kept`);
+    assert.match(r.changed.join(), /\+UI/);
+    assert.match(r.changed.join(), /-blocked/);
+    assert.deepEqual(r.dropped, []);
+    // With --priority in the same call.
+    const q = fake(platform, { item: { labels: ['priority: P3'] } });
+    await A.runIssuesLabel(T, { ref: '5', priority: 'P1', add: ['frontend'], json: true, env, runner: q.runner });
+    assert.deepEqual(q.state.labels.sort(), ['frontend', 'priority: P1'], platform);
+  }
+});
+
+test('#514 label --add: a label the repo lacks, or labels that cannot be read, is refused and nothing is written', async () => {
+  const T = product();
+  const p = fake('github');
+  const r = await answerOf(() => A.runIssuesLabel(T, { ref: '5', add: ['ui', 'frontned', 'nope'], json: true, env, runner: p.runner }));
+  assert.equal(r.ok, false); assert.match(r.error, /no label frontned, nope/); assert.match(r.hint, /create it on the platform first/);
+  assert.equal(p.writes().length, 0); reset();
+  const q = fake('github', { repoLabels: null });
+  const s = await answerOf(() => A.runIssuesLabel(T, { ref: '5', add: ['ui'], json: true, env, runner: q.runner }));
+  assert.equal(s.ok, false); assert.match(s.error, /could not be read/);
+  assert.equal(q.writes().length, 0); reset();
+});
+
+test('#514 label --add/--remove: yad\'s own labels are refused, each pointing at what sets it', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-act-'));
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', git_url: 'git@github.com:a/p.git', issues: { priority: { P0: ['fire'] } } }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  for (const [name, why] of [['priority: P1', /--priority/], ['p1', /--priority/], ['FIRE', /--priority/], ['bug', /--type/], ['Type: Bug', /--type/], ['security', /--type/],
+    ['status: done', /yad issues sync/], ['epic: EP-a', /yad issues link/], ['Epic:EP-b', /yad issues link/]]) {
+    for (const flag of ['add', 'remove']) {
+      const p = fake('github', { repoLabels: [name], item: { labels: [name] } });
+      const r = await answerOf(() => A.runIssuesLabel(T, { ref: '5', [flag]: [name], json: true, env, runner: p.runner }));
+      assert.equal(r.ok, false, `${flag} ${name}`); assert.match(r.hint, why, `${flag} ${name}`);
+      assert.equal(p.writes().length, 0, `${flag} ${name}`); reset();
+    }
+  }
+});
+
+test('#514 label --add/--remove: what is already so changes nothing, and is said', async () => {
+  const T = product(); const p = fake('github', { item: { labels: ['UI'] } });
+  const r = await A.runIssuesLabel(T, { ref: '5', add: ['ui'], remove: ['blocked'], json: true, env, runner: p.runner });
+  assert.equal(r.ok, true); assert.equal(p.writes().length, 0);
+  assert.match(r.notes.join(' | '), /already has ui/);
+  assert.match(r.notes.join(' | '), /no label blocked, so there was nothing to remove/);
+});
+
+test('#514 label --add/--remove: a name in both, an empty name, a GitLab comma and a confidential item are refused before any write', async () => {
+  const T = product();
+  for (const o of [{ add: ['ui'], remove: ['UI'] }, { add: [''] }, { remove: ['  '] }, {}]) {
+    const p = fake('github');
+    const r = await answerOf(() => A.runIssuesLabel(T, { ref: '5', ...o, json: true, env, runner: p.runner }));
+    assert.equal(r.ok, false, JSON.stringify(o)); assert.equal(p.writes().length, 0, JSON.stringify(o)); reset();
+  }
+  const G = product('gitlab');
+  const g = fake('gitlab', { repoLabels: ['a,b'] });
+  assert.equal((await answerOf(() => A.runIssuesLabel(G, { ref: '5', add: ['a,b'], json: true, env, runner: g.runner }))).ok, false);
+  assert.equal(g.writes().length, 0); reset();
+  const h = fake('gitlab', { item: { confidential: true } });
+  assert.equal((await answerOf(() => A.runIssuesLabel(G, { ref: '5', add: ['ui'], json: true, env, runner: h.runner }))).ok, false);
+  assert.equal(h.writes().length, 0); reset();
+});
+
+test('#514 label --remove: a label the platform did not take off is reported', async () => {
+  const T = product(); const p = fake('github', { item: { labels: ['blocked'] } });
+  const orig = p.runner;
+  const runner = (cmd, args) => (args.includes('DELETE') ? done({}) : orig(cmd, args)); // the platform answers, and keeps it
+  const r = await A.runIssuesLabel(T, { ref: '5', remove: ['blocked'], json: true, env, runner });
+  assert.match(r.dropped.join(), /blocked is still there/);
+  assert.equal(process.exitCode, 1, 'a dropped change is a failed run'); reset();
+});
+
+test('#514: the real yad command takes --label, --add and --remove, more than once', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const T = product();
+  const bin = new URL('../bin/yad.mjs', import.meta.url).pathname;
+  const runYad = (args) => { try { return execFileSync(process.execPath, [bin, ...args, '--dir', T, '--json'], { env: { ...process.env, YAD_PLATFORM_READ: '0', NO_COLOR: '1' }, encoding: 'utf8' }); } catch (e) { return String(e.stdout); } };
+  const out = runYad(['issues', 'label', '12', '--add', 'ui', '--add', 'frontend', '--remove', 'blocked']);
+  assert.doesNotMatch(out, /does not take|takes no more words|takes </);
+  assert.match(out, /turned off/);
+  assert.doesNotMatch(runYad(['issues', 'list', '--label', 'ui', '--label', 'a,b']), /does not take|takes no more words/);
+  assert.match(runYad(['issues', 'close', '12', '--add', 'ui']), /does not take --add/);
+});
+
+test('#514: yad issues show prints the other labels', async () => {
+  const W = await import('./issues-write.mjs');
+  const T = product(); const p = fake('github', { item: { labels: ['bug', 'priority: P1', 'frontend', 'epic: EP-a'] } });
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try { await W.runIssuesShow(T, { ref: '5', env, runner: p.runner }); } finally { console.log = orig; }
+  const line = lines.find((l) => /labels /.test(l));
+  assert.match(line, /labels frontend$/);
+});

@@ -13,7 +13,7 @@ The team's backlog lives on the platform. In yadflow the platform's thing is a *
 
 | The person wants | Command |
 |---|---|
-| The backlog | `yad issues --json` (filters: `--priority --type --status --assignee --me --repo --since --until`) |
+| The backlog | `yad issues --json` (filters: `--priority --type --status --label --assignee --me --repo --since --until`; repeat `--label` to need every one) |
 | A report to sort and filter | `yad issues --format html` |
 | The predefined labels on each repo | `yad issues labels` (ask first) |
 | One item in full | `yad issues show <ref> --json` |
@@ -23,6 +23,7 @@ The team's backlog lives on the platform. In yadflow the platform's thing is a *
 | To open an item for an idea | `yad issues new --title "…" --body-file <f> --type <t> --priority Pn` (when asked) |
 | To assign one | `yad issues assign <ref> <login>`, or `--me`, or `--none` (when asked) |
 | To change its priority or type | `yad issues label <ref> --priority Pn --type <t>` (when asked) |
+| To add or take off another label | `yad issues label <ref> --add <label> --remove <label>` (when asked; the repo must already have an added label — if it does not, tell the person, never invent one) |
 | To edit, comment, close or reopen | `yad issues edit <ref> --title …`, `comment <ref> --body-file <f>`, `close <ref>`, `reopen <ref>` (when asked) |
 | To bring linked items up to date | `yad issues sync --dry-run`, show the person, then `yad issues sync` (ask first) |
 

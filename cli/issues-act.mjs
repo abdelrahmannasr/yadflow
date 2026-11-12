@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import { run, forTerminal, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { addItemLabels, removeItemLabels, commentOnItem, closeItem, newItem, editItem, reopenItem, setAssignee, makeConfidential, platformLogin } from './platform.mjs';
 import { api, httpStatus } from './protection.mjs';
-import { labelRules, ITEM_TYPES, PRIORITIES } from './issues.mjs';
+import { labelRules, labelOwner, readLabels, ITEM_TYPES, PRIORITIES } from './issues.mjs';
 import { readItem, resolveTarget } from './issues-write.mjs';
 import { allLinks, itemKey } from './issue-links.mjs';
 import { redactTokens, repoFacts, routeFor } from './scan.mjs';
@@ -197,11 +197,25 @@ export async function runIssuesAssign(root, { ref, assignee = null, me = false, 
   });
 }
 
-export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, json = false, env = process.env, runner = run } = {}) {
+// `--add` / `--remove` (#514) take any label but yad's own: those have a flag of their own, or yad writes them.
+const OWNER_HINT = {
+  priority: 'set the priority with --priority',
+  type: 'set the type with --type',
+  status: 'yad writes the status label itself, from what the item and its epic say (`yad issues sync`)',
+  epic: 'yad writes an epic label itself: link the item with `yad issues link <ref> <EP-id>`',
+};
+const names = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]).map((n) => String(n).trim());
+
+export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, add: rawAdd = [], remove: rawRemove = [], json = false, env = process.env, runner = run } = {}) {
   const priority = normPriority(rawPriority);
   const type = normType(rawType);
+  const plus = names(rawAdd);
+  const minus = names(rawRemove);
   return act(root, ref, { json, env, runner }, async (got, out) => {
-    if (priority === null && type === null) throw new Refused('pass --priority, --type or both');
+    if (priority === null && type === null && !plus.length && !minus.length) throw new Refused('pass --priority, --type, --add or --remove');
+    if ([...plus, ...minus].some((n) => !n)) throw new Refused('--add and --remove need a label name');
+    const both = plus.filter((n) => minus.some((m) => m.toLowerCase() === n.toLowerCase()));
+    if (both.length) throw new Refused(`${forTerminal(both.join(', '))} is in both --add and --remove`, 'name each label once');
     if (priority !== null && !PRIORITIES.includes(priority)) throw new Refused(`unknown --priority ${forTerminal(String(priority))}`, `use one of ${PRIORITIES.join(', ')}`);
     if (type !== null && !ITEM_TYPES.includes(type)) throw new Refused(`unknown --type ${forTerminal(String(type))}`, `use one of ${ITEM_TYPES.join(', ')}`);
     if (type === 'security' && got.t.platform === 'github' && !got.item.confidential && routeFor('security', 'github', repoFacts(got.t, runner).vis) !== 'issue') {
@@ -210,9 +224,27 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     // A confidential item's labels are not read, so the old ones could not be removed.
     if (got.item.confidential) throw new Refused('a confidential item\'s labels are not read, so they cannot be replaced here', 'change them on GitLab');
     const rules = labelRules(got.productConfig);
+    for (const n of [...plus, ...minus]) {
+      const owner = labelOwner(n, rules);
+      if (owner) throw new Refused(`${forTerminal(n)} is a${owner === 'epic' ? 'n epic' : ` ${owner}`} label, which --add and --remove do not change`, OWNER_HINT[owner]);
+    }
     const have = new Set(got.item.labels.map((l) => l.toLowerCase()));
     const add = [];
     const remove = [];
+    // A label is added only as the repo already spells it: a missing one is refused, never made by the platform.
+    if (plus.length) {
+      const known = readLabels(got.t, runner);
+      if (!known.ok) throw new Refused(`the repo's labels could not be read, so --add was not checked: ${known.why}`, 'try again, or set the label on the platform');
+      const missing = plus.filter((n) => !known.names.has(n.toLowerCase()));
+      if (missing.length) throw new Refused(`the repo has no label ${forTerminal(missing.join(', '))}`, 'create it on the platform first, then run this again; nothing was changed');
+      for (const n of plus) if (!have.has(n.toLowerCase()) && !add.some((a) => a.toLowerCase() === n.toLowerCase())) add.push(known.real.get(n.toLowerCase()) ?? n);
+      const already = plus.filter((n) => have.has(n.toLowerCase()));
+      if (already.length) out.notes.push(`it already has ${already.map(forTerminal).join(', ')}`);
+    }
+    for (const n of minus) {
+      if (have.has(n.toLowerCase())) remove.push(n);
+      else out.notes.push(`it has no label ${forTerminal(n)}, so there was nothing to remove`);
+    }
     for (const [kind, value] of [['priority', priority], ['type', type]]) {
       if (value === null) continue;
       const want = rules[kind][value][0];
@@ -233,7 +265,7 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
       out.changed.push('made confidential');
       madeConfidential = true;
     }
-    if (!add.length && !stale.length) { out.notes.push('it already has those labels'); return null; }
+    if (!add.length && !stale.length) { if (!out.notes.length) out.notes.push('it already has those labels'); return null; }
     if (add.length) {
       const r = addItemLabels(got.t, got.number, add, { runner });
       if (!r.ok && !madeConfidential) return r;
@@ -247,6 +279,7 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     else {
       const now = new Set(after.labels.map((l) => l.toLowerCase()));
       for (const l of add) if (!now.has(l.toLowerCase())) out.dropped.push(`the label ${l} was not set`);
+      for (const l of stale) if (now.has(l.toLowerCase())) out.dropped.push(`the label ${l} is still there`);
     }
     return null;
   });
@@ -318,7 +351,7 @@ export async function runIssuesReopen(root, { ref, json = false, env = process.e
 const ACT_FLAGS = {
   new: ['--title', '--body', '--body-file', '--type', '--priority', '--assignee', '--me', '--repo'],
   assign: ['--me', '--none'],
-  label: ['--priority', '--type'],
+  label: ['--priority', '--type', '--add', '--remove'],
   edit: ['--title', '--body', '--body-file'],
   comment: ['--body', '--body-file'],
   close: [], reopen: [],

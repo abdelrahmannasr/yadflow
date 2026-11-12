@@ -135,15 +135,16 @@ ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no
 
 ${c.bold('Issues and work items')} ${c.dim('(read live from GitHub issues and GitLab issues, tasks and incidents)')}
   yad issues [list]                    Items of the Product and every registered repo, with priority,
-                                       type, status and assignee. Filter with --priority --type --status
-                                       --assignee --me --repo --since --until --date; order with --sort.
+                                       type, status, assignee and other labels. Filter with --priority
+                                       --type --status --label --assignee --me --repo --since --until
+                                       --date; order with --sort. Repeat --label to need every one.
                                        --format html writes a page you can sort and filter; titles are
                                        included, so check it before sharing it outside the team
   yad issues labels [--dry-run]        Create the predefined priority, type and status labels each repo lacks
   yad scan file <f> --repo <r>         File a scan's findings on the repo's tracker, by category and priority (the yad-scan skill runs it)
   yad issues new --title <t> [--body-file <f>] [--type <t>] [--priority P1] [--assignee <login>|--me] [--repo <r>]
                                        Open an issue / work item (in the Product repo unless --repo names one)
-  yad issues assign <ref> <login>|--me|--none · label <ref> --priority P1 --type bug
+  yad issues assign <ref> <login>|--me|--none · label <ref> --priority P1 --type bug --add <l> --remove <l>
   yad issues edit <ref> [--title] [--body-file] · comment <ref> --body-file <f> · close <ref> · reopen <ref>
   yad issues sync [--dry-run]          Update linked items: status and type labels, and close once every epic shipped
   yad issues show <ref>                One item in full. <ref> is 12 (Product repo) or <repo>#12
@@ -518,7 +519,7 @@ ${c.bold('Environment')}
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const REPORT_USAGE = 'usage: yad report [-m <text>] [--kind bug|enhancement] [--json] | yad report -m <text> [--kind …] --post --confirm <value>';
-const ISSUES_USAGE = 'usage: yad issues new --title <t> [--body-file <f>] [--type <t>] [--priority P0-P3] [--assignee <login>|--me] [--repo <name>] | assign <ref> <login>|--me|--none | label <ref> [--priority P0-P3] [--type <t>] | edit <ref> [--title <t>] [--body-file <f>] | comment <ref> --body-file <f> | close <ref> | reopen <ref> | show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement,security,tech-debt,suggestion] [--status todo,"in progress",done] [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
+const ISSUES_USAGE = 'usage: yad issues new --title <t> [--body-file <f>] [--type <t>] [--priority P0-P3] [--assignee <login>|--me] [--repo <name>] | assign <ref> <login>|--me|--none | label <ref> [--priority P0-P3] [--type <t>] [--add <label>]... [--remove <label>]... | edit <ref> [--title <t>] [--body-file <f>] | comment <ref> --body-file <f> | close <ref> | reopen <ref> | show <ref> | link <ref> <EP-id> | unlink <ref> <EP-id> | sync [--dry-run] | labels [--dry-run] | [list] [--priority P0,P1] [--type bug,feature,enhancement,security,tech-debt,suggestion] [--status todo,"in progress",done] [--label <name>[,<name>]]... [--assignee <login>|none|--me] [--repo <name>] [--since <date>] [--until <date>] [--date created|updated|due] [--sort priority|type|status|due|updated] [--closed-since <date>|<N>d] [--format md|html] [--out <file>] [--json] | yad issues labels [--dry-run] [--json]';
 const STANDUP_USAGE = 'usage: yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json]';
 
 
@@ -1286,7 +1287,7 @@ async function main() {
         const common = { json: !!o.json };
         if (action === 'new') result = await commands.runIssuesNew(o.dir, { ...common, title: o.title, body: o.body ?? null, bodyFile: o['body-file'] ?? null, type: o.type ?? null, priority: o.priority ?? null, assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null });
         else if (action === 'assign') result = await commands.runIssuesAssign(o.dir, { ...common, ref: words[0], assignee: words[1] ?? null, me: !!o.me, none: !!o.none });
-        else if (action === 'label') result = await commands.runIssuesLabel(o.dir, { ...common, ref: words[0], priority: o.priority ?? null, type: o.type ?? null });
+        else if (action === 'label') result = await commands.runIssuesLabel(o.dir, { ...common, ref: words[0], priority: o.priority ?? null, type: o.type ?? null, add: o.add ?? [], remove: o.remove ?? [] });
         else if (action === 'edit') result = await commands.runIssuesEdit(o.dir, { ...common, ref: words[0], title: o.title ?? null, body: o.body ?? null, bodyFile: o['body-file'] ?? null });
         else if (action === 'comment') result = await commands.runIssuesComment(o.dir, { ...common, ref: words[0], body: o.body ?? null, bodyFile: o['body-file'] ?? null });
         else result = await (action === 'close' ? commands.runIssuesClose : commands.runIssuesReopen)(o.dir, { ...common, ref: words[0] });
@@ -1306,7 +1307,7 @@ async function main() {
       if (action === 'sync') { result = await commands.runIssuesSync(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       if (action === 'labels') { result = await commands.runIssuesLabels(o.dir, { dryRun: !!o.dryRun, json: !!o.json }); break; }
       result = await commands.runIssuesList(o.dir, {
-        priority: o.priority ?? null, type: o.type ?? null, status: o.status ?? null, assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null,
+        priority: o.priority ?? null, type: o.type ?? null, status: o.status ?? null, label: o.label ?? [], assignee: o.assignee ?? null, me: !!o.me, repo: o.repo ?? null,
         since: o.since ?? null, until: o.until ?? null, date: o.date ?? null, sort: o.sort ?? null, closedSince: o['closed-since'] ?? null,
         format: o.format ?? null, out: o.out ?? null, json: !!o.json,
       });
