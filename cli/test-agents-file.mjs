@@ -525,6 +525,9 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Review round 1: an `in` right at the 4,096-character bound on a `case` word still counts, as on main (zsh runs it).
     `echo "$(case x${' '.repeat(4090)}in x) echo '"' ;; esac)" ; git push -f ; echo '"'`,
     // Review round 2: a `#'` right after a `)` on an earlier line (the `)#` reading) with B2, B3 and B6 after it.
+    // Round 3: the same after a `|#'` (the `|#` reading), alone or with `)#'`.
+    "[[ a =~ x|#'\n' ]] ; x=$(cat <<'E'\n) ; git push -f ; echo '\nE\n)'", "case a in (x|#'\n') ;; esac ; echo \"$(case x {\nx) git push -f ;; })\"",
+    "(echo a)#'\ncase a in (x|#'\n') ;; esac ; echo \"$(case x {\nx) git push -f ;; })\"",
     "(echo a)#'\nx=$(cat <<'E'\n) ; git push -f ; echo '\nE\n)'", "(echo a)#'\necho \"$(case `echo x` in\nx) gh pr merge 5 ;; esac)\"", "(echo a)#'\necho \"$(case x {\nx) git push -f ;; })\"",
     // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
     // as a shell's script or input.
@@ -706,6 +709,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
     // #516: a heredoc in `$(…)`, zsh's `case x { … }` and a `case` word in backticks, with safe commands.
     // Review round 2: a `#` right at the 4,096-character bound of a `case` word is judged at once (it looped forever).
+    // Round 3: many heredocs that never end, inside `$(…)`, are read in linear time (one text each was quadratic).
+    `x=$(cat <<A\n${'bash <<B\n'.repeat(10000)})`,
     `echo "$(case x${' '.repeat(4090)}#x\nin x) ;; esac)"`, `echo "$(case x${';'.repeat(4090)}#x\nin x) ;; esac)"`,
     "x=$(cat <<'E'\n(a)\nE\n); echo ok", "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\" && git push", 'echo "$(case x { x) echo a ;; })"',
     'echo "$(case `echo x` in x) echo a ;; esac)"', 'echo "$(case x #c\nin x) echo a ;; esac)"',

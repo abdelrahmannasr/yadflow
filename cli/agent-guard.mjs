@@ -210,6 +210,7 @@ export function shellParts(rawLine, mode = {}) {
   // are judged too, as the rest of the line is also read as commands.
   let index = null;
   let restFrom = -1;
+  let restBody = false;
   const heredocsEnd = (from) => {
     index ??= lineIndex(line);
     let at = from;
@@ -222,7 +223,8 @@ export function shellParts(rawLine, mode = {}) {
         // `bash+` (#516): its text is the rest of the input, what a `cat` of it prints, as in
         // `eval "$(cat <<'E'⏎git p)ush -f"`, where bash 3.2 ends the `$(…)` at the `)` and runs `git p` joined to
         // `ush -f`. Only in that reading: in the others, a text here kept the `$(…)` from being judged as commands.
-        if (mode.ends === 'bash+') parts.bodies.push({ part: h.part, text: line.slice(start) });
+        // Once, as below: each later heredoc's text is inside it (one per heredoc was quadratic, review round 3).
+        if (mode.ends === 'bash+' && !restBody) { restBody = true; parts.bodies.push({ part: h.part, text: line.slice(start) }); }
         // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
         if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; const subs = substitutionsIn(line.slice(from), mode); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
         return -1;
@@ -1165,10 +1167,11 @@ function judgeReadings(line, depth, ends) {
   const flagModes = [{}];
   for (const f of flags) for (const m of flagModes.slice()) flagModes.push({ ...m, [f]: true });
   const modes = [];
-  // The rarer readings (#516) take only the `)#` flag: a `#'` right after a `)` on an earlier line otherwise hides
-  // the forms they read (review round 2). Each is one more pass over the whole line, and with every flag and text
+  // The rarer readings (#516) take only the two `#` flags, `)#` and `|#`: a `#'` right after a `)` or `|` on an
+  // earlier line otherwise hides the forms they read (review rounds 2 and 3). Each is one more pass over the whole line, and with every flag and text
   // too they doubled the time on a long line.
-  const rareModes = flags.includes('hashAfterParen') ? [{}, { hashAfterParen: true }] : [{}];
+  const rareModes = [{}];
+  for (const f of ['hashAfterParen', 'hashAfterBar']) if (flags.includes(f)) for (const m of rareModes.slice()) rareModes.push({ ...m, [f]: true });
   for (const rule of rules) for (const m of rule.endsWith('+') ? rareModes : flagModes) modes.push({ ...m, ends: rule });
   // The rarer readings are bash 3.2's and zsh's, and neither drops a CR (Git Bash, which can, is bash 4 or later): the
   // line as written, and with its `\` + newline joins made.
