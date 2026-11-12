@@ -129,12 +129,11 @@ export function stageAllowlist(git, root, paths) {
 export function hiddenFolders(root, paths) {
   const folderOf = new Map();
   for (const p of paths) {
-    // A deletion stages whatever rule hides its folder, so only paths on disk can be refused. A link is a
-    // file to git, whatever it points at (lstat).
-    let st;
-    try { st = fs.lstatSync(path.join(root, p)); } catch { continue; }
+    // A deletion counts too: git stages it, yet still exits 1 over an ignored folder above it (review 3). A
+    // path that is gone is a file, its folders asked as gone ones; a link is a file to git (lstat).
+    let isDir = false;
+    try { isDir = fs.lstatSync(path.join(root, p)).isDirectory(); } catch { /* gone: a file */ }
     const parts = p.replace(/\/+$/, '').split('/');
-    const isDir = st.isDirectory();
     for (let n = 1; n <= parts.length - (isDir ? 0 : 1); n++) {
       const dir = parts.slice(0, n).join('/');
       if (!folderOf.has(dir)) folderOf.set(dir, []);
@@ -191,7 +190,9 @@ export function hiddenFolderText(ignoredBy, where, { staged }) {
   const outside = ignoredBy.find((x) => x.outside);
   // The exact folder, not the rule's own pattern: `!.*` from a global `.*` would let every dotfile in for the
   // whole team (review 2).
-  const way = `remove or narrow that rule${outside ? `, or add \`!/${outside.folder}/\` to this repo's .gitignore` : ''}`;
+  // Escaped as a .gitignore pattern, so a folder named with `[`, `*`, `?` or `\` matches itself only.
+  const literal = (s) => s.replace(/[\\[\]*?]/g, '\\$&');
+  const way = `remove or narrow that rule${outside ? `, or add \`!/${literal(outside.folder)}/\` to this repo's .gitignore` : ''}`;
   const whose = outside ? ', a rule outside this repo, which CI and the rest of the team do not have' : '';
   return staged
     ? `an ignore rule hides ${list} in ${where} — ${rule}${whose}. Its tracked files were staged, but a new file there is left out of the update: ${way}`
