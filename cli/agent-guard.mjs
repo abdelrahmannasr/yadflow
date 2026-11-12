@@ -219,6 +219,10 @@ export function shellParts(rawLine, mode = {}) {
       const next = index.endAfter(h.word, h.tabs, at);
       if (next >= 0) parts.bodies.push({ part: h.part, text: line.slice(start, line.lastIndexOf('\n', next - 2) + 1 || start) });
       if (next < 0) {
+        // `bash+` (#516): its text is the rest of the input, what a `cat` of it prints, as in
+        // `eval "$(cat <<'E'⏎git p)ush -f"`, where bash 3.2 ends the `$(…)` at the `)` and runs `git p` joined to
+        // `ush -f`. Only in that reading: in the others, a text here kept the `$(…)` from being judged as commands.
+        if (mode.ends === 'bash+') parts.bodies.push({ part: h.part, text: line.slice(start) });
         // Once is enough: a later heredoc that never ends starts further on, inside text already judged.
         if (restFrom < 0 && heredocs.some((x) => !x.quoted)) { restFrom = from; const subs = substitutionsIn(line.slice(from), mode); if (subs.tooComplex) parts.tooComplex = true; for (const x of subs) parts.subs.push(x); }
         return -1;
@@ -405,7 +409,14 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
   // escapes (`\'` does not end it), a `#` comment and backticks are skipped, and a `case` is text, as bash 3.2
   // reads them. `zsh`: `$'…'` and comments the same, and a `case <word> in` makes its `x)` patterns close
   // nothing, as zsh reads them. Each is a reading of its own, never mixed in one.
-  const ansi = mode.ends === 'bash' || mode.ends === 'zsh';
+  // `bash+` and `zsh+` (#516) add the rarer forms each shell takes, as readings beside `bash` and `zsh`, so main's
+  // readings stay as they were and a line is only ever refused more: `bash+` reads a heredoc's text as code;
+  // `zsh+` takes a `case` word in backticks, a comment or `;` before `in`, `case x { … }`, and `esac` in more spots.
+  const shell = mode.ends?.replace('+', '');
+  const rare = !!mode.ends?.endsWith('+');
+  const ansi = shell === 'bash' || shell === 'zsh';
+  // One entry per open `case`, and (`zsh+`) per `{ … }` group opened inside one; `at` is the depth of the
+  // innermost `case`, whose `x)` patterns close nothing.
   const cases = [];
   // `mode.until`: scan no further (a bound on a `case` word).
   const stop = Math.min(line.length, mode.until ?? Infinity);
@@ -426,26 +437,35 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
     // Both shells read a `#` that starts a word as a comment to the end of the line: a `)` in it closes nothing
     // (#498 review round 6). Not `$#`, `${#x}` or `16#ff`, where it starts no word. bash 3.2 starts one only after
     // a blank or a newline (`;#` is no comment to it); zsh after `;`, `&`, `|`, `(` and `)` too (round 7).
-    if (ansi && ch === '#' && (i === from || (mode.ends === 'bash' ? /[ \t\n]/ : /[\s;&|()]/).test(line[i - 1]))) {
+    if (ansi && ch === '#' && (i === from || (shell === 'bash' ? /[ \t\n]/ : /[\s;&|()]/).test(line[i - 1]))) {
       const nl = line.indexOf('\n', i);
       if (nl < 0 || nl >= stop) return line.length;
       i = nl - 1;
       continue;
     }
     // bash 3.2 reads backticks inside `$(…)` as nested: a `)` in them closes nothing (zsh does not).
-    if (mode.ends === 'bash' && ch === '`') { i = backtickEnd(line, i + 1); continue; }
-    if (mode.ends === 'zsh' && (ch === 'c' || ch === 'e') && (i === from || /[\s;&|(]/.test(line[i - 1]))) {
+    if (shell === 'bash' && ch === '`') { i = backtickEnd(line, i + 1); continue; }
+    if (shell === 'zsh' && (ch === 'c' || ch === 'e' || (rare && (ch === '{' || ch === '}'))) && (i === from || /[\s;&|(]/.test(line[i - 1]) || (rare && line[i - 1] === ')' && ch !== 'c' && ch !== 'e'))) {
+      const top = cases[cases.length - 1];
       if (ch === 'c' && line.startsWith('case', i)) {
-        const at = caseInEnd(line, i, getIndex);
+        const at = caseInEnd(line, i, getIndex, rare);
         // What a `case` word costs is charged to one budget per reading: past it, the command is refused.
         if ((caseLeft.n -= caseScanned) < 0 || Date.now() > deadline) return -2;
-        if (at >= 0) { cases.push(depth); i = at - 1; continue; }
+        if (at >= 0) { cases.push({ at: depth, braces: line[at - 1] === '{' }); i = at - 1; continue; }
       }
-      // `esac` ends a case only where a command starts: `echo esac` is a word (#498 review).
-      if (ch === 'e' && cases.length && /^esac(?![^\s;&|()<>])/.test(line.slice(i, i + 5)) && commandStart(line, i, from)) { cases.pop(); i += 3; continue; }
+      // `esac` ends a case only where a command starts: `echo esac` is a word (#498 review). `zsh+`: also right
+      // after `}`, `esac`, `]]`, `!` or the case's `in` (#516).
+      if (ch === 'e' && top && !top.group && /^esac(?![^\s;&|()<>])/.test(line.slice(i, i + 5)) && (rare ? zshReservedAt : commandStart)(line, i, from)) { cases.pop(); i += 3; continue; }
+      if (rare && top && /^.(?![^\s;&|()<>])/.test(line.slice(i, i + 2))) {
+        // zsh reads a `}` word as the end of the open `{` anywhere, `echo }` too (#516); a `{` opens a group only
+        // where a command starts, and its `}` is never read as the end of the case.
+        if (ch === '}' && (top.group || top.braces)) { cases.pop(); continue; }
+        if (ch === '{' && zshReservedAt(line, i, from)) { cases.push({ at: top.at, group: true }); continue; }
+      }
     }
     if (ch === '\'' || ch === '"') { quote = ch; continue; }
-    if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+    // `bash+`: bash 3.2 reads a heredoc's text inside `$(…)` as code (#516), so a `)` or a quote in it counts.
+    if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<' && mode.ends !== 'bash+') {
       const m = heredocAt(line, i);
       if (m) { if (!m.expands || mode.literalExpanding) heredocs.push(heredocOf(m)); i += m[0].length - 1; continue; }
     }
@@ -464,7 +484,7 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
       continue;
     }
     if (ch === '(') depth++;
-    else if (ch === ')' && cases.length && depth === cases[cases.length - 1]) continue;
+    else if (ch === ')' && cases.length && depth === cases[cases.length - 1].at) continue;
     else if (ch === ')' && --depth === 0) return i;
   }
   return line.length;
@@ -475,7 +495,7 @@ function substitutionEnd(line, from, getIndex, mode = {}) {
 const CASE_WORD = 4096;
 // How far the last caseInEnd scanned, charged by its caller to one budget per reading.
 let caseScanned = 0;
-function caseInEnd(line, i, getIndex) {
+function caseInEnd(line, i, getIndex, rare = false) {
   const limit = Math.min(line.length, i + CASE_WORD);
   let j = i + 4;
   const done = (at) => { caseScanned = Math.min(Math.max(j, i + 4), limit) - i; return at; };
@@ -485,6 +505,8 @@ function caseInEnd(line, i, getIndex) {
   for (; j < limit && !/[\s;&|()<>]/.test(line[j]); j++) {
     const c = line[j];
     if (c === '\\') j++;
+    // zsh takes a word in backticks (#516).
+    else if (rare && c === '`') { j = backtickEnd(line, j + 1); if (j >= limit) return done(-1); }
     else if (c === '\'') { j++; while (j < limit && line[j] !== '\'') j++; if (j >= limit) return done(-1); }
     else if (c === '"') { j++; while (j < limit && line[j] !== '"') j += line[j] === '\\' ? 2 : 1; if (j >= limit) return done(-1); }
     // The default scan, never the shells' own: that one reads a `case` here again, and the two calling each other
@@ -497,7 +519,15 @@ function caseInEnd(line, i, getIndex) {
     }
   }
   if (j === start || j >= limit) return done(-1);
-  while (j < limit && /\s/.test(line[j])) j++;
+  // `zsh+` (#516): zsh also takes `;` and `#` comments before `in` (a `#` starts one only after a blank), and its
+  // other form, `case x { … }` (the index just past its `{`).
+  for (;;) {
+    while (j < limit && (rare ? /[\s;]/ : /\s/).test(line[j])) j++;
+    if (!rare || line[j] !== '#') break;
+    while (j < limit && line[j] !== '\n') j++;
+  }
+  if (j >= limit) return done(-1);
+  if (rare && line[j] === '{' && /\s/.test(line[j - 1])) return done(j + 1);
   return done(/^in(?![^\s;&|()<>])/.test(line.slice(j, j + 3)) ? j + 2 : -1);
 }
 // Whether a command starts at `i`: only blanks between it and `from`, or a `;`, `&`, `)` or newline (not `|` or
@@ -506,6 +536,17 @@ function commandStart(line, i, from) {
   let k = i - 1;
   while (k >= from && (line[k] === ' ' || line[k] === '\t')) k--;
   return k < from || /[;&)\n]/.test(line[k]);
+}
+// Whether zsh reads a reserved word (`esac`, `{`) at `i` (#516): only blanks between it and `from`, or after a
+// `;`, `&`, `)` or newline (not `|` or `(`: in `case x in a|esac)` the `esac` is a pattern), or right after a
+// `}`, `esac`, `]]`, `!` or `in` word.
+function zshReservedAt(line, i, from) {
+  let k = i - 1;
+  while (k >= from && (line[k] === ' ' || line[k] === '\t')) k--;
+  if (k < from || /[;&)\n]/.test(line[k])) return true;
+  let w = k;
+  while (w >= from && !/[\s;&|()<>]/.test(line[w])) w--;
+  return ['}', 'esac', ']]', '!', 'in'].includes(line.slice(w + 1, k + 1));
 }
 
 // The commands of every `$(…)` and backticks in a heredoc's text, where quotes are plain characters and `\`
@@ -1107,6 +1148,9 @@ function judgeReadings(line, depth, ends) {
     const ansi = line.includes('$\'') || line.includes('#');
     if (ansi || line.includes('`')) rules.push('bash');
     if (ansi || /\bcase\b/.test(line)) rules.push('zsh');
+    // #516: the rarer forms, as readings of their own beside main's (see substitutionEnd).
+    if (line.includes('<<')) rules.push('bash+');
+    if (/\bcase\b/.test(line)) rules.push('zsh+');
   }
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));

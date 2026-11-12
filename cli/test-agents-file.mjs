@@ -509,6 +509,21 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Round 4: a reading that trusts the first reading's quotes past a `$(…)` the shells end elsewhere misses these.
     "echo $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '", "echo $(echo $'\\')\"') ' $(echo ' ; gh pr merge 1 ; echo \"' $'\\')\"') '",
     "echo $(echo $'\\')\"') $(echo $'\\')\"') ' $(echo ' ; git push -f ; echo \"' $'\\')\"') '",
+    // #516, each run by a real shell. B2 (bash 3.2): a heredoc's text inside `$(…)` is read as code.
+    "x=$(cat <<'E'\n) ; git push -f ; echo '\nE\n)'", "echo \"$(cat <<'E'\n)\" ; git push -f ; echo \"\nE\n)\"", "x=$(cat <<E\n) ; gh pr merge 5 ; echo '\nE\n)'",
+    // B2's printed text: bash 3.2 ends the `$(…)` at the heredoc's `)`, so `cat` prints the text before it (the heredoc
+    // never ends there), joined to the text after it.
+    "eval \"$(cat <<'EOF'\ngit p)ush --force\nEOF\n)\"", "bash -c \"$(cat <<'EOF'\ngit commit -)n -m x\n)EOF\n)\"",
+    "bash -c \"$(echo 'eval \"$(cat <<'EOF'\nyad gate )approve EP-x epic\n\nEOF\n)\"')\"",
+    // B3, B4 (zsh): a `case` word in backticks; a comment, a newline or a `;` before `in`.
+    'echo "$(case `echo x` in\nx) gh pr merge 5 ;; esac)"', 'echo "$(case x #c\nin\nx) gh pr merge 5 ;; esac)"', 'echo "$(case x #c\n#d\n\nin\nx) gh pr merge 5 ;; esac)"',
+    'echo "$(case x ;in\nx) gh pr merge 5 ;; esac)"',
+    // B5 (zsh): `esac` right after `}`, `esac`, `]]`, `!` or `in`.
+    `echo "$(case x in x) { echo '"' ; } esac)" ; git push -f ; echo '"'`, 'echo "$(case x in x) [[ a ]] esac)" ; git push -f ; echo "',
+    'echo "$(case x in x) ! esac)" ; git push -f ; echo "',
+    // B6 (zsh): `case x { … }`, closed by `}` (anywhere, `echo }` too) or `esac`; a group's `}` inside it closes the group.
+    'echo "$(case x {\nx) git push -f ;; })"', 'echo "$(case x { x) echo } ;; })" ; git push -f ; echo "', 'echo "$(case x { x) { echo ; } ;; })" ; git push -f',
+    'echo "$(case x { x) echo ;; esac)" ; git push -f',
     // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
     // as a shell's script or input.
     'bash <(echo "gh pr merge 5")', 'bash < <(echo "gh pr merge 5")', 'source <(echo "git push --force")', ". <(echo 'gh pr merge 5')",
@@ -687,6 +702,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     `echo "$(printf $'it\\'s')" "$(printf $'a\\'b')" "$(printf $'c\\'d')"`, 'echo "$(case x in a|esac) echo a;; esac)"',
     // Any number of `$(…)` that a shell ends elsewhere: each reading reads them all in one pass.
     Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
+    // #516: a heredoc in `$(…)`, zsh's `case x { … }` and a `case` word in backticks, with safe commands.
+    "x=$(cat <<'E'\n(a)\nE\n); echo ok", "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\" && git push", 'echo "$(case x { x) echo a ;; })"',
+    'echo "$(case `echo x` in x) echo a ;; esac)"', 'echo "$(case x #c\nin x) echo a ;; esac)"',
     // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
     'x=$(echo a#b)', 'echo $(git log --format=%H#%s -1)', 'echo "$(date) # not a comment"', 'echo $(echo $#)', 'echo ${#x} $(echo ${#y})',
     'n=$((16#ff)); echo $(echo $n)', 'echo $(echo `date`)', 'echo $( # a comment\necho hi )', 'y=$(echo `echo a`)$(echo b)',
