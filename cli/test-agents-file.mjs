@@ -1751,6 +1751,38 @@ test('#532 review: lines main allows stay allowed (group writes, process substit
   assert.equal(agentGuardDecision(`printf '%s' '${msg}' | ${'tee -a log | '.repeat(8)}git commit -F -`).allow, true);
 });
 
+// Lines review 1 found that a real bash 3.2 or zsh 5.9 runs and the output pass let through (main did too).
+const outputGapsReview = [
+  // zsh's `echo` always makes escapes; double quotes keep the backslash (review 2).
+  "echo '\\x67h pr merge 5' | bash", "{ echo '\\0147h pr merge 5'; } | zsh", 'echo "\\x67h pr merge 5" | zsh',
+  // zsh's `print` options (review 3).
+  "{ print -r -- 'gh pr merge 5'; } > f; zsh f", "{ print -f '%s ' gh pr; print merge 5; } | zsh",
+  "print -l 'gh pr merge 5' | bash",
+  // A write that may not run hides no text before it (review 4).
+  '{ echo gh pr merge 5; } > f; false && echo hi > f; bash f', '( echo gh pr merge 5 ) > f; [ -e g ] && : > f; bash f',
+  // A format reads `\NNN` (review 5), and its other conversions.
+  "printf 'gh pr merge\\0405\\n' | bash", "printf '%c%c pr merge 5\\n' gx hx | bash", "printf '%.2s pr merge 5\\n' ghx | bash",
+  // A process substitution a shell runs (review 6).
+  "bash <(printf '\\x67h pr merge 5\\n')", "source <(printf '\\x67h pr merge 5\\n')", "bash < <(printf '\\x67h pr merge 5\\n')",
+  "zsh =(printf '\\x67h pr merge 5\\n')", "bash <(echo '{ echo gh pr merge 5; } > f; bash f')",
+  // Compound commands' output (review 7).
+  'if true; then echo gh pr merge 5; fi > f; bash f', 'for x in 1; do echo gh pr merge 5; done > f; bash f',
+  'while false; do :; done; { if true; then echo gh pr merge 5; fi; } | bash',
+  // Filters, as the shell spells their words (review 8).
+  "{ printf 'gh pr\\n' | tr -d \"\\n\"; echo ' merge 5'; } | bash", "{ printf 'gh pr\\r\\n' | tr -d '\\r\\n'; echo ' merge 5'; } | bash",
+  "{ printf 'gh pr\\n' | tr '\\n' ' '; echo merge 5; } | bash", "{ printf 'gh pr\\n' | head --bytes=5; echo ' merge 5'; } | bash",
+];
+
+test('#532 review: the twins of the output gaps are refused, and text only printed stays allowed', () => {
+  for (const line of outputGapsReview) assert.equal(agentGuardDecision(line).allow, false, line);
+  // bash reads `\0053` in a format as `\005` and `3`: a plain push, not `+main` (a wrong refusal before).
+  for (const line of ["printf 'git push origin \\0053main\\n' | bash", "echo '\\x67h pr merge 5'",
+    "print -r 'gh pr merge 5'", "printf -v x '%s' 'gh pr merge 5'; echo done | bash", 'if true; then echo gh pr merge 5; fi',
+    "bash script.sh <(echo gh pr merge 5)", "{ printf 'gh pr\\n' | tr a-z A-Z; } | bash"]) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+});
+
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
   const T = tmp();
   const log = path.join(T, 'executed');
@@ -1758,7 +1790,7 @@ test('#532: differential output corpus against bash and zsh with harmless execut
   for (const name of ['gh', 'git']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf reached >> "$GUARD_STREAM_LOG"\n', { mode: 0o755 });
   }
-  const corpus = [...outputGaps];
+  const corpus = [...outputGaps, ...outputGapsReview];
   for (const printer of ["echo gh pr merge 5", "printf '%s ' gh pr merge 5", "printf '%b' '\\x67h pr merge 5\\n'"]) {
     for (const group of [`{ ${printer}; }`, `( ${printer} )`]) {
       for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);

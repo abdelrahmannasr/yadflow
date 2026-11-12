@@ -18,7 +18,7 @@
 // FAIL-OPEN, like the ledger guard: a payload it cannot read, or no command in it, is allowed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { streamGuard } from './guard-stream.mjs';
+import { streamGuard, zshDiffers } from './guard-stream.mjs';
 import { fileURLToPath } from 'node:url';
 import { classify, readAllowList } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
@@ -206,7 +206,7 @@ export function shellParts(rawLine, mode = {}) {
     if (words[0] === '{') braceGroups.push(parts.length);
     if (words[0] === '}' && braceGroups.length) {
       // A copy: main's own `parts.writes` holds `partWrites`, and the group's list must never change it (#532 review 1).
-      parts.groups.push({ from: braceGroups.pop(), to: parts.length, writes: [...(partWrites ?? [])] });
+      parts.groups.push({ from: braceGroups.pop(), to: parts.length, writes: [...(partWrites ?? [])], brace: true });
     }
     if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.push(words); }
     // A redirect alone after a pipe: zsh writes what it is piped to the file (`echo … | > f`), as `cat > f` would.
@@ -1259,17 +1259,20 @@ function judgeReadings(line, depth, ends, inherited = null) {
       const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
       if (depth === 0) {
-        // The output pass gets its own text budget, as each reading does: charged on top of what judgeLine just
-        // built, a long text through a few `tee` stages was refused where main allows it (#532 review 11). The
-        // deadline stays shared.
-        built.n = 0;
-        const extra = streamGuard(text, mode, {
+        const api = {
           // Each output parse gets its own case scan.
           shellParts: (s, m) => { const saved = caseLeft.n; caseLeft.n = CASE_SCAN; try { return shellParts(s, m); } finally { caseLeft.n = saved; } },
           stripPrefix, programOf, bareShell, scriptAt, innerLines,
           judge: (t) => agentGuardDecision(t, 1),
-          charge: (n) => { if ((built.n += n) > BUILT_CHARS || Date.now() > deadline) throw Object.assign(new Error('output reading budget exceeded'), { code: 'YAD_GUARD_OUTPUT_LIMIT' }); } });
-        if (!extra.allow) return extra;
+          charge: (n) => { if ((built.n += n) > BUILT_CHARS || Date.now() > deadline) throw Object.assign(new Error('output reading budget exceeded'), { code: 'YAD_GUARD_OUTPUT_LIMIT' }); } };
+        // Read as bash prints, then as zsh prints when the two may differ (escapes, zsh's `echo -`). Each pass
+        // gets its own text budget, as each reading does: charged on top of what judgeLine just built, a long
+        // text through a few `tee` stages was refused where main allows it (#532 review 11). The deadline is shared.
+        for (const zsh of zshDiffers(text) ? [false, true] : [false]) {
+          built.n = 0;
+          const extra = streamGuard(text, mode, api, zsh);
+          if (!extra.allow) return extra;
+        }
       }
     }
   }
