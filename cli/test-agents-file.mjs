@@ -599,6 +599,13 @@ test('the agent guard refuses every human-only yad command and every force push,
     'echo gh pr merge 1 >! f; bash f', 'echo gh pr merge 1 >!f; bash f', 'echo gh pr merge 1 >>! f; bash f', 'echo gh pr merge 1 >>| f; bash f',
     'echo gh pr merge 1 >&| f; bash f', 'echo gh pr merge 1 >&|f; bash f', 'echo gh pr merge 1 >&! f; bash f', 'echo gh pr merge 1 &>! f; bash f',
     'echo gh pr merge 1 &>>! f; bash f', 'echo gh pr merge 1 1>! f; bash f', 'echo gh pr merge 1 >! "f"; bash f', 'bash -c "echo gh pr merge 1 >! f; bash f"',
+    // #518 review 1: main's redirect reading still runs under bash's and zsh's `$(…)` end rules — zsh reads `>|!` as
+    // `>|` writing the file `!` — and a blank before a descriptor number, a `\`-newline join, and a `#` right after
+    // bash's closing `-` are read too.
+    'echo "$(case x in x)\ngh pr >|! merge 5;; esac)"', 'echo "$(case x in x)\ngh pr &>|! merge 5;; esac)"', 'echo "$(case x in x)\ngit commit -m x >|! -n;; esac)"',
+    'echo gh pr >|! merge 5 >! f; bash f', 'gh pr >& 1 merge 5', 'gh pr 2>& 1 merge 5', 'gh pr >&\t2 merge 5', 'gh pr <& 0 merge 5',
+    'git commit -m x >\\\n&--n', 'git commit -m x >&\\\n--n', "echo x >&-#'\ngh pr merge 5\n#'", "echo x 2>&-#'\ngh pr merge 5\n#'", "echo x >& -#'\ngh pr merge 5\n#'",
+    `bash -c "echo x >&-#'\ngh pr merge 5\n#'"`,
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -750,7 +757,9 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'npm run build 2>&1 | tee build.log', 'git log >& log.txt', 'git diff >& d.txt; cat d.txt', 'echo x >&2', 'cmd 2>&1 >/dev/null', 'git fetch 2>&- ; git status',
     'git commit -m x >&-n', 'git commit -m x >&1-', 'git commit -m x 2>&1--n', 'git commit -m x >&p', 'npm test >! out', 'git status >| s.txt', 'npm test >>! out.log',
     'echo gh pr merge 1 2>&--n; bash ./--n', 'echo gh pr merge 1 2>! f; bash f', 'echo gh pr merge 1 > !f; bash f', 'echo gh pr merge 1 <&--n; bash ./--n',
-    'git commit -m x >&| -n', 'git push origin main >&2']) {
+    'git commit -m x >&| -n', 'git push origin main >&2',
+    // #518 review 1: a blank before the number copies a descriptor as before; a `#` after `>&-` with a blank is text.
+    'make >& 1 | head', 'echo x >& 2', 'npm test 2>& 1 | tail', 'echo x >&- # done', 'echo "$(case x in x) echo a >&2;; esac)"']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });

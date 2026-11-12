@@ -88,9 +88,9 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // `mode` picks the reading where bash and zsh decide by context the reader does not track (#492): `literalExpanding`
 // reads an end word holding `$` or a backtick as a heredoc ending at that literal word (else: no heredoc), and
 // `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
-// Which shell a reading is (#518): 'bash' or 'zsh' for their modes (any spelling of them, such as #516's
-// 'bash+'), '' for main's.
-const shellOf = (mode) => (mode?.ends?.startsWith('bash') ? 'bash' : mode?.ends?.startsWith('zsh') ? 'zsh' : '');
+// Which shell's redirect reading this is (#518): 'bash' or 'zsh', or '' for main's. Its own field, never the `$(…)`
+// end rule (`mode.ends`): judgeReadings crosses the two, so main's redirect reading runs under every end rule.
+const shellOf = (mode) => mode?.redir ?? '';
 export function shellParts(rawLine, mode = {}) {
   // The private-use characters that shield quoted braces (below) cannot come from the line itself: a typed one
   // would turn into a real `{` when a carried command is re-read (`bash -c "gh pr {merge,\uE000} 5"`).
@@ -314,7 +314,8 @@ export function shellParts(rawLine, mode = {}) {
       let j = i + (ch === '&' ? 2 : 1);
       if (line[j] === '>' || line[j] === '|' || (ch === '<' && line[j] === '>')) j++;
       // #518: zsh's `>!`, `>>!`, `&>!`, `&>>!` and `>>|` write the file, as `>|` does (the `!` or `|` is the operator's).
-      if (shellOf(mode) === 'zsh' && ch !== '<' && (line[j] === '!' || (line[j] === '|' && line[j - 1] === '>'))) j++;
+      // After `>|` or `&>|` a `!` is the target's (zsh writes the file `!`), not the operator's (review 1).
+      if (shellOf(mode) === 'zsh' && ch !== '<' && ((line[j] === '!' && line[j - 1] !== '|') || (line[j] === '|' && line[j - 1] === '>'))) j++;
       // `>&n` and `>&-` copy or close a file descriptor, read as before; a bare `>&` before a word writes it.
       if (line[j] === '&') {
         j++;
@@ -342,7 +343,12 @@ export function shellParts(rawLine, mode = {}) {
           if (k < line.length && !ends(k)) {
             if (digits && ends(k + digits.length)) { i = k + digits.length - 1; continue; }
             if (shell === 'bash' && digits && line[k + digits.length] === '-' && ends(k + digits.length + 1)) { i = k + digits.length; continue; }
-            if (line[k] === '-' && (shell === 'bash' || ends(k + 1))) { i = k; continue; }
+            if (line[k] === '-' && (shell === 'bash' || ends(k + 1))) {
+              // bash reads the `-` as a token of its own, so a `#` right after it starts a comment (review 1).
+              if (shell === 'bash' && line[k + 1] === '#') { i = k + 1; while (i + 1 < line.length && line[i + 1] !== '\n') i++; continue; }
+              i = k;
+              continue;
+            }
             if (shell === 'zsh' && line[k] === 'p' && ends(k + 1)) { i = k; continue; }
             redirectBefore = dropWord ? redirect : null;
             redirect = { op: into ? '>' : '<', fd: into ? (fd || '1') : fd };
@@ -1191,17 +1197,17 @@ function judgeReadings(line, depth, ends) {
     if (line.includes('<<')) rules.push('bash+');
     if (/\bcase\b/.test(line)) rules.push('zsh+');
   }
-  // #518: bash and zsh read the word after `>&` / `<&` their own ways (see shellParts), and zsh writes a file with
-  // `>!`, `>>!`, `>>|` and `>&|`. Only when the line has one: a plain descriptor number (`2>&1`, `>&2`) reads the same
-  // in every shell, so the common lines are not read three times.
-  if (ends === undefined) {
-    if (/[<>]&[ \t]*(?:[^\s0-9;&|<>()]|[0-9]+[^\s0-9;&|<>()])/.test(line)) rules.push('bash', 'zsh');
-    if (/>>?!|>>\||>&[|!]/.test(line)) rules.push('zsh');
-  }
-  rules.splice(0, rules.length, ...new Set(rules));
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
   if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));
+  // #518: how bash and zsh read the word after `>&` / `<&`, and zsh's `>!`, `>>!`, `>>|` and `>&|` (see shellParts).
+  // A dimension of its own, crossed with every end rule above: main's redirect reading stays under each of them, and
+  // these only add readings (review 1 — tied to the end rule, they replaced main's under bash's and zsh's). Only
+  // where some text of the line has one: a descriptor number written right after `>&` (`2>&1`) reads the same in
+  // every shell, so the common lines are read once. A blank before the number (`>& 1`) does not (review 1).
+  const redirs = [undefined];
+  if (texts.some((t) => /[<>]&[ \t]*(?:[^\s0-9;&|<>()]|[0-9]+[^\s0-9;&|<>()])|[<>]&[ \t]+[0-9]/.test(t))) redirs.push('bash', 'zsh');
+  else if (texts.some((t) => />>?!|>>\||>&[|!]/.test(t))) redirs.push('zsh');
   const expandsAt = firstExpandingHeredoc(line);
   const flags = [];
   if (expandsAt >= 0) flags.push('literalExpanding');
@@ -1218,7 +1224,9 @@ function judgeReadings(line, depth, ends) {
   // too they doubled the time on a long line.
   const rareModes = [{}];
   for (const f of ['hashAfterParen', 'hashAfterBar']) if (flags.includes(f)) for (const m of rareModes.slice()) rareModes.push({ ...m, [f]: true });
-  for (const rule of rules) for (const m of rule.endsWith('+') ? rareModes : flagModes) modes.push({ ...m, ends: rule });
+  // #518: each shell's redirect reading is crossed with every end rule, the rarer ones too; main's (no `redir`) stays
+  // under all of them.
+  for (const redir of redirs) for (const rule of rules) for (const m of rule.endsWith('+') ? rareModes : flagModes) modes.push(redir ? { ...m, ends: rule, redir } : { ...m, ends: rule });
   // The rarer readings are bash 3.2's and zsh's, and neither drops a CR (Git Bash, which can, is bash 4 or later): the
   // line as written, and with its `\` + newline joins made.
   const rareTexts = /\\\n/.test(line) ? [line, line.replace(/\\\n/g, '')] : [line];
@@ -1237,9 +1245,9 @@ function judgeReadings(line, depth, ends) {
     for (const text of texts) {
       const from = firstExpandingHeredoc(text);
       for (const one of text.slice(from < 0 ? 0 : from).split('\n')) {
-        for (const rule of rules) {
+        for (const redir of redirs) for (const rule of rules) {
           if (depth === 0) { caseLeft.n = CASE_SCAN; built.n = 0; resetFiles(); }
-          const v = judgeLine(one, depth, { ends: rule });
+          const v = judgeLine(one, depth, redir ? { ends: rule, redir } : { ends: rule });
           if (!v.allow) return v;
         }
       }
