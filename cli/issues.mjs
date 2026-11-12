@@ -74,11 +74,16 @@ export function pickType(labels, table) {
 // #514 — what a label is to yad: one of its own (a priority, type or status spelling, or an item's `epic:` link) or
 // any other. `owner` names which, so a write can say which flag sets it.
 export function labelOwner(name, rules) {
-  const l = String(name).trim().toLowerCase();
+  const l = labelKey(name);
   if (/^epic:/.test(l)) return 'epic';
-  for (const kind of ['priority', 'type', 'status']) if (Object.values(rules[kind]).some((names) => names.some((n) => n.toLowerCase() === l))) return kind;
+  for (const kind of ['priority', 'type', 'status']) if (Object.values(rules[kind]).some((names) => names.some((n) => labelKey(n) === l))) return kind;
   return null;
 }
+// THE one way #514 compares two label names: as an item's labels are read (`clean`: control and invisible
+// characters out, each run of spaces one space, trimmed), in any case. Every comparison of a name a person
+// typed, an item carries, a repo has or a rule lists goes through it — two spellings of one rule let a
+// double-spaced `priority:  P1` past the refusal of yad's own labels (review 2).
+export const labelKey = (name) => clean(name).toLowerCase();
 // An item's labels that are none of yad's own, in the order the platform gave them.
 export const otherLabels = (labels, rules) => labels.filter((l) => labelOwner(l, rules) === null);
 
@@ -262,8 +267,8 @@ const lower = (v) => String(v).toLowerCase();
 // `--label a --label b` asks for both and `--label a,b` for either. Whole names, any case.
 export function applyFilters(items, { priority, type, status, assignee, repo, label = [], since, until, date = 'created', sort = 'priority', mine = null } = {}) {
   const inList = (want, v, none) => !want || list(want).map(lower).includes(lower(v ?? none));
-  const labelSets = (Array.isArray(label) ? label : [label]).filter((v) => v != null).map((v) => list(v).map(lower));
-  const hasLabels = (i) => { const have = new Set(i.labels.map((l) => lower(l).trim())); return labelSets.every((any) => any.some((n) => have.has(n))); };
+  const labelSets = (Array.isArray(label) ? label : [label]).filter((v) => v != null).map((v) => list(v).map(labelKey));
+  const hasLabels = (i) => { const have = new Set(i.labels.map(labelKey)); return labelSets.every((any) => any.some((n) => have.has(n))); };
   const out = items.filter((i) => inList(priority, i.priority, 'none') && inList(type, i.type, 'none') && inList(status, i.status, '') && inList(repo, i.repo, '') && hasLabels(i)
     && (!assignee || (lower(assignee) === 'none' ? i.assignees.length === 0 : i.assignees.some((a) => [a.login, a.member].filter(Boolean).map(lower).includes(lower(assignee)))))
     && (!mine || i.assignees.some((a) => mine.get(`${i.platform}\0${i.host}`)?.toLowerCase() === a.login.toLowerCase()))
@@ -444,13 +449,14 @@ export function readLabels(t, runner) {
   const gh = t.platform === 'github';
   const at = gh ? `repos/${t.repo}/labels?per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/labels?per_page=${PAGE}`;
   const names = new Set();
-  const real = new Map(); // lower-cased → the repo's own spelling (#514 adds a label as the repo spells it)
+  // #514: `keys` and `real` are by `labelKey`; `names` stays lower-cased only, as its other callers read it.
+  const keys = new Set();
+  const real = new Map(); // labelKey → the repo's own spelling, so a label is added and removed as the repo spells it
   for (let page = 1; page <= MAX_PAGES; page++) {
     const res = api(runner, t.cli, t.host, `${at}&page=${page}`);
     if (!res.ok || !Array.isArray(res.body)) return { ok: false, why: whyFailed(res.ok ? { unreadable: true } : res, { platform: t.platform, host: t.host, what: `the labels of ${shown(t.repo)}`, plural: true }) };
-    // Keyed with each run of spaces folded to one, the way an item's labels are read (`clean`).
-    for (const l of res.body) if (typeof l?.name === 'string') { const k = l.name.replace(/\s+/g, ' ').trim().toLowerCase(); names.add(k); if (!real.has(k)) real.set(k, l.name); }
-    if (res.body.length < PAGE) return { ok: true, names, real };
+    for (const l of res.body) if (typeof l?.name === 'string') { names.add(l.name.toLowerCase()); const k = labelKey(l.name); keys.add(k); if (!real.has(k)) real.set(k, l.name); }
+    if (res.body.length < PAGE) return { ok: true, names, keys, real };
   }
   return { ok: false, why: `${shown(t.repo)} has more labels than yad reads` };
 }

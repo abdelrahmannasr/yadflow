@@ -407,6 +407,50 @@ test('#514 review 1: an unchanged priority is still said beside a note about ano
   assert.match(r.notes.join(' | '), /already has those labels/);
 });
 
+test('#514 review 2: extra spaces, odd case or an invisible character never get yad\'s own labels past the refusal', async () => {
+  const T = product();
+  for (const name of ['priority:  P1', ' Priority:\tP1 ', 'type:  bug', 'status:   done', 'epic:  EP-a', 'pri\u200bority: P1']) {
+    for (const flag of ['add', 'remove']) {
+      const p = fake('github', { repoLabels: ['priority: P1', 'type: bug', 'status: done', 'epic: EP-a'], item: { labels: ['priority: P1', 'type: bug', 'status: done', 'epic: EP-a'] } });
+      const r = await answerOf(() => A.runIssuesLabel(T, { ref: '5', [flag]: [name], json: true, env, runner: p.runner }));
+      if (name.includes('\u200b')) { assert.equal(p.writes().length, 0, `${flag} ${JSON.stringify(name)}`); reset(); continue; }
+      assert.equal(r.ok, false, `${flag} ${JSON.stringify(name)}`);
+      assert.equal(p.writes().length, 0, `${flag} ${JSON.stringify(name)}`); reset();
+    }
+  }
+});
+
+test('#514 review 2: a label is removed as the repo spells it, so a double-spaced one really goes', async () => {
+  for (const platform of ['github', 'gitlab']) {
+    const T = product(platform);
+    // The platform holds the real spelling; yad reads the item's labels cleaned, as `needs design`.
+    const p = fake(platform, { repoLabels: ['needs  design'], item: { labels: ['needs  design', 'ui'] } });
+    const r = await A.runIssuesLabel(T, { ref: '5', remove: ['needs design'], json: true, env, runner: p.runner });
+    assert.equal(r.ok, true, `${platform}: ${JSON.stringify(r)}`);
+    assert.deepEqual(p.state.labels, ['ui'], platform);
+    assert.deepEqual(r.dropped, [], platform);
+  }
+});
+
+test('#514 review 3: when the repo\'s labels cannot be read, a --priority change still goes through with the item\'s spelling', async () => {
+  for (const platform of ['github', 'gitlab']) {
+    const T = product(platform); const p = fake(platform, { repoLabels: null, item: { labels: ['priority: P3', 'ui'] } });
+    const r = await A.runIssuesLabel(T, { ref: '5', priority: 'P1', json: true, env, runner: p.runner });
+    assert.equal(r.ok, true, platform); assert.deepEqual(r.dropped, [], platform);
+    assert.deepEqual(p.state.labels.sort(), ['priority: P1', 'ui'], platform);
+  }
+});
+
+test('#514 review 2: the same label in both lists is refused however it is spaced; a repeated --add is said once', async () => {
+  const T = product();
+  const p = fake('github', { item: { labels: ['needs design'] } });
+  const r = await answerOf(() => A.runIssuesLabel(T, { ref: '5', add: ['needs design'], remove: ['Needs  Design'], json: true, env, runner: p.runner }));
+  assert.equal(r.ok, false); assert.equal(p.writes().length, 0); reset();
+  const q = fake('github', { item: { labels: ['UI'] } });
+  const s = await A.runIssuesLabel(T, { ref: '5', add: ['ui', 'UI', ' ui '], json: true, env, runner: q.runner });
+  assert.equal(s.notes.filter((n) => /already has/.test(n)).join(), 'it already has ui');
+});
+
 test('#514 label --remove: a label the platform did not take off is reported', async () => {
   const T = product(); const p = fake('github', { item: { labels: ['blocked'] } });
   const orig = p.runner;
