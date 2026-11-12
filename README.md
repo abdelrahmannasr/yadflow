@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/yadflow?logo=npm)](https://www.npmjs.com/package/yadflow)
 [![CI](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml)
 [![node](https://img.shields.io/node/v/yadflow?logo=node.js)](https://github.com/abdelrahmannasr/yadflow/blob/main/package.json)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/abdelrahmannasr/yadflow/badge)](https://scorecard.dev/viewer/?uri=github.com/abdelrahmannasr/yadflow)
+[![license: MIT](https://img.shields.io/npm/l/yadflow)](https://github.com/abdelrahmannasr/yadflow/blob/main/LICENSE)
 
 Coordinate work, automate repetitive delivery tasks, and keep the decisions behind your software.
 Yadflow connects plans, architecture, code and reviews in a versioned project record. Your team and
