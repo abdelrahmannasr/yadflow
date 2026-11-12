@@ -1164,6 +1164,74 @@ test('#509: yad update --open-pr with glab warning about two config files says t
   }
 });
 
+// #526: glab as git's login helper prints its two-config-files warning on every git push, and git passes it
+// through. A `pre-push` hook's stderr reaches yad the same way, so it stands in for the helper here.
+const GLAB_WARNING_HOOK = (exit) => [
+  '#!/bin/sh',
+  "echo 'Warning: Multiple config files found. Only the first one will be used.' >&2",
+  "echo '  Using: /home/me/.config/glab-cli/config.yml' >&2",
+  "echo '  Ignoring: /home/me/Library/Application Support/glab-cli/config.yml' >&2",
+  "echo 'Consider consolidating to one location to avoid confusion.' >&2",
+  ...(exit ? ["echo 'remote: HTTP Basic: Access denied' >&2"] : []),
+  `exit ${exit}`,
+].join('\n') + '\n';
+function repoWithPushHook(exit) {
+  const T = tmp();
+  const R = tmp();
+  const hooks = tmp();
+  git(R, ['init', '-q', '--bare', '-b', 'main']);
+  git(T, ['init', '-q', '-b', 'main']);
+  git(T, ['config', 'user.name', 'Alice Smith']);
+  git(T, ['config', 'user.email', 'alice@work.com']);
+  git(T, ['config', 'commit.gpgsign', 'false']); git(T, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+  put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+  git(T, ['add', '.sdlc/cli-version.json']);
+  git(T, ['commit', '-q', '-m', 'chore: start']);
+  git(T, ['remote', 'add', 'origin', R]);
+  git(T, ['push', '-q', '-u', 'origin', 'main']);
+  fs.writeFileSync(path.join(hooks, 'pre-push'), GLAB_WARNING_HOOK(exit), { mode: 0o755 });
+  git(T, ['config', 'core.hooksPath', hooks]);
+  return { T, dirs: [T, R, hooks] };
+}
+
+test('#526: a git push that glab, as git\'s login helper, warns on reads the real error first, and a push that works drops the warning', { skip: process.platform === 'win32' }, async () => {
+  const { run } = await import('./lib.mjs');
+  for (const exit of [1, 0]) {
+    const { T, dirs } = repoWithPushHook(exit);
+    try {
+      git(T, ['commit', '-q', '--allow-empty', '-m', 'chore: more']);
+      const r = run('git', ['push', '-q', 'origin', 'main'], { cwd: T });
+      assert.equal(r.ok, exit === 0);
+      assert.doesNotMatch(r.stderr, /Multiple config files|Consider consolidating|Ignoring:/);
+      if (exit) assert.equal(r.stderr.split('\n')[0], 'glab reads only one of its two config files, so a login saved in the other is not used (see `yad doctor`, glab-config) — remote: HTTP Basic: Access denied');
+      else assert.equal(r.stderr, '');
+    } finally { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); }
+  }
+});
+
+test('#526: yad update --open-pr says the real reason a push failed, not glab\'s warning', { skip: process.platform === 'win32' }, async () => {
+  const { openUpdatePr } = await import('./update-commit.mjs');
+  const { T, dirs } = repoWithPushHook(1);
+  const said = [];
+  const { log: l, error: e } = console;
+  const code = process.exitCode;
+  try {
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.7.0' });
+    console.log = (...a) => said.push(a.join(' '));
+    console.error = (...a) => said.push(a.join(' '));
+    const r = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: T, defaultBranch: 'main', platform: 'gitlab', creator: () => ({ ok: true }), version: '4.7.0', checked: true });
+    console.log = l; console.error = e;
+    assert.equal(r.reason, 'push-failed');
+    const line = said.find((x) => /could not push/.test(x));
+    assert.match(line, /could not push \S+ — glab reads only one of its two config files, .* — remote: HTTP Basic: Access denied/);
+    assert.doesNotMatch(said.join('\n'), /Multiple config files/);
+  } finally {
+    console.log = l; console.error = e;
+    process.exitCode = code;
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('yad update refuses --push and --open-pr together; --open-pr is the agent\'s without asking', async () => {
   assert.equal(classify(['update'], ['open-pr']), 'open-pr');
   assert.equal(askFor(classify(['update'], ['open-pr'])), 'never');

@@ -405,7 +405,9 @@ export function run(cmd, args = [], opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts, ...(stdio === undefined ? {} : { stdio }) });
   const ok = r.status === 0;
   let stderr = (r.stderr || '').trim();
-  if (/^glab(?:\.exe)?$/i.test(path.basename(String(cmd)))) stderr = withoutGlabConfigWarning(stderr, { ok });
+  // git too (#526): with glab as git's login helper (`glab auth login`), git passes glab's warning through on a
+  // push, fetch, pull, ls-remote or clone.
+  if (/^(?:glab|git)(?:\.exe)?$/i.test(path.basename(String(cmd)))) stderr = withoutGlabConfigWarning(stderr, { ok });
   return {
     ok,
     code: r.status,
@@ -425,7 +427,8 @@ export function run(cmd, args = [], opts = {}) {
 // block is dropped from what yad reads. When the run FAILED, one short line goes BEFORE the real error
 // instead, because a login saved in the ignored file is not used — often the very reason the run failed — and
 // a line after glab's long error would be cut off. It shares its line with the error's first line, so a caller
-// that shows only stderr's first line still shows the error. Only that exact block is removed.
+// that shows only stderr's first line still shows the error. Only that exact block is removed. git's own calls get
+// the same (#526): git passes its login helper's stderr through, and that helper can be glab.
 export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
   const lines = String(stderr).split('\n');
   const start = lines.findIndex((l) => /^Warning: Multiple config files found\b/i.test(l.trim()));
