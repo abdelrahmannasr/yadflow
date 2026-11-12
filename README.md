@@ -321,6 +321,9 @@ The record is worth trusting because people approve what goes into it.
 - **Learn:** the [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/) (setup to
   your first shipped feature) · the [team guide](TEAM-GUIDE.md) · the
   [terminology and workflow report](https://abdelrahmannasr.github.io/yadflow/)
+- **Talk:** [GitHub Discussions](https://github.com/abdelrahmannasr/yadflow/discussions) — ask
+  questions in Q&A, suggest ideas, and share what you build. Bugs go to
+  [Issues](https://github.com/abdelrahmannasr/yadflow/issues/new/choose).
 - **Reference:**
   - [every `yad` command](docs/CLI.md#commands)
   - [working together: capture, claims, owners, fold](docs/CLI.md#working-together-capture-claims-owners-and-fold)
