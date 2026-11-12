@@ -4476,7 +4476,7 @@ for (const packageManager of [
     const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
     const r = runGate(INSTALL_DEPS, T, [], env);
     assert.equal(r.code, 0, r.out);
-    assert.match(fs.readFileSync(commandLog, 'utf8'), new RegExp(`corepack prepare ${packageManager.replace(/[+.]/g, '\\$&')} --activate`));
+    assert.ok(fs.readFileSync(commandLog, 'utf8').includes(`corepack prepare ${packageManager} --activate`));
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
@@ -6708,7 +6708,7 @@ test('ledger-guard: a non-bot commit mutating the Foundation ledger FAILS (E75)'
       commit(T, 'sneaky', { [file]: '[{"status":"approved"}]\n' });
       const r = runGate(LEDGER_GUARD, T);
       assert.equal(r.code, 1, `${file}\n${r.out}`);
-      assert.match(r.out, new RegExp(file.replace(/[.]/g, '\\.')));
+      assert.ok(r.out.includes(file), `${file} named in:\n${r.out}`);
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
 });

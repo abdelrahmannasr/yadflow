@@ -203,12 +203,20 @@ test('sorts: an item with no value comes last', () => {
 const HOSTILE = '</script><script>alert(1)</script> <img src=x onerror=alert(2)> [x](javascript:alert(3)) `c` | y';
 const model = (over = {}) => ({ items: [it({ title: HOSTILE, assignees: [{ login: '"><b>', member: null }], flags: ['<i>'], url: 'https://x.test/1"onclick="a' })], summary: I.summarize([]), notRead: ['<u>repo</u>: not read'], notes: [], closedSince: '2026-10-10', ...over });
 
+// The report's own script, from its opening tag on. Found in any case and with any attributes, the same
+// way the tag is counted, and never silently missed: a miss would leave nothing to check.
+const lastScript = (html) => {
+  const at = html.toLowerCase().lastIndexOf('<script');
+  assert.notEqual(at, -1, 'the script tag is found');
+  return html.slice(at);
+};
+
 test('HTML: a hostile title, login, note and URL stay text; no item text reaches the script', () => {
   const html = I.renderHtml(model());
   assert.doesNotMatch(html, /<img|<script>alert|<b>|<u>|<i>/);
   assert.ok(html.includes('&lt;/script&gt;'));
-  assert.equal(html.match(/<script>/g).length, 1);
-  const script = html.slice(html.lastIndexOf('<script>'));
+  assert.equal(html.toLowerCase().split('<script').length - 1, 1, 'one script tag, in any case and with any attributes');
+  const script = lastScript(html);
   assert.doesNotMatch(script, /alert|innerHTML|insertAdjacent|document\.write|eval\(/);
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /Check this report before sharing/);
@@ -433,7 +441,7 @@ test('#514: a hostile label stays text in the HTML column, the filter attribute 
   assert.ok(html.includes(`<span class="lbl">${shown}</span>`), 'the cell shows it as text');
   assert.ok(html.includes(`data-l="${shown}"`), 'the filter attribute holds it escaped');
   assert.ok(html.includes(`<option value="${shown}">${shown}</option>`), 'the drop-down too');
-  const script = html.slice(html.lastIndexOf('<script>'));
+  const script = lastScript(html);
   assert.doesNotMatch(script, /alert|innerHTML/);
   const row = I.renderMarkdown(m).split('\n').find((l) => l.includes('| x |'));
   assert.equal(row.split(/(?<!\\)\|/).length, 11, 'the label makes no new column');
