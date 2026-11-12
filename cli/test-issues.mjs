@@ -207,7 +207,7 @@ test('HTML: a hostile title, login, note and URL stay text; no item text reaches
   const html = I.renderHtml(model());
   assert.doesNotMatch(html, /<img|<script>alert|<b>|<u>|<i>/);
   assert.ok(html.includes('&lt;/script&gt;'));
-  assert.equal(html.match(/<script>/g).length, 1);
+  assert.equal(html.toLowerCase().split('<script').length - 1, 1, 'one script tag, in any case and with any attributes');
   const script = html.slice(html.lastIndexOf('<script>'));
   assert.doesNotMatch(script, /alert|innerHTML|insertAdjacent|document\.write|eval\(/);
   assert.match(html, /Content-Security-Policy/);

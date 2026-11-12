@@ -15833,7 +15833,7 @@ test('reconcile --push: commits chore(yad-update) on the Product + connected rep
 
     // Product commit
     const productSubject = git(T, 'log', '-1', '--format=%s').toString().trim();
-    assert.match(productSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'Product subject');
+    assert.equal(productSubject, `chore(yad-update): sync SDLC install to yadflow v${PKG_VERSION}`, 'Product subject');
     assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on the Product commit');
     // the version stamp + new guard workflow rode the Product commit
     const productCommitFiles = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
@@ -21821,7 +21821,7 @@ test('codeowners check: a line that matches no file is found, and a submodule is
     const files = Array.from({ length: 1 + rnd(6) }, () => Array.from({ length: 1 + rnd(3) }, () => ['a', 'b', 'ab', 'x.js', '$', 'a b', '+'][rnd(7)]).join('/'));
     const pats = Array.from({ length: 4 }, () => `${rnd(3) === 0 ? '/' : ''}${Array.from({ length: 1 + rnd(3) }, word).join('/')}${rnd(3) === 0 ? '/' : ''}`);
     for (const platform of ['github', 'gitlab']) {
-      const parsed = parseCodeowners(pats.map((x) => `${x.replace(/ /g, platform === 'gitlab' ? '\\ ' : '')} @a`).join('\n'), platform);
+      const parsed = parseCodeowners(pats.map((x) => `${x.replace(/\\/g, '\\\\').replace(/ /g, platform === 'gitlab' ? '\\ ' : '')} @a`).join('\n'), platform);
       const brute = parsed.rules.filter((r) => !files.some((f) => matches(r.pat, f))).map((r) => r.line);
       assert.deepEqual(deadLines(parsed, files).map((d) => d.line), brute, `${platform} ${JSON.stringify(pats)} ${JSON.stringify(files)}`);
     }
