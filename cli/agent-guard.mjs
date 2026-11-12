@@ -1302,7 +1302,10 @@ function fileTexts(p) {
   if (f.over || f.texts.size > FILE_TEXTS) return null;
   const out = [...f.texts];
   for (const a of f.all ?? []) if (!f.texts.has(a)) out.push(a);
+  for (const a of f.allOpen ?? []) if (!f.texts.has(a)) out.push(a);
   for (const t of out) if ((files.judged += t.length) > MAX_JUDGED) return null;
+  // #518: the file's last write ended with no newline, so what is read after it runs on into its last line.
+  if (f.open) out.open = true;
   return out;
 }
 // A write of `texts` (the readings of what a part prints) to a file: added to its texts, never replacing one.
@@ -1312,27 +1315,45 @@ function writeFile(target, texts, append) {
   files.writes++;
   const key = normPath(target);
   let f = files.map.get(key);
-  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, over: false, v: 0 }));
+  if (!f) files.map.set(key, (f = { texts: new Set(), all: null, allOpen: null, open: false, over: false, v: 0 }));
   if (append) files.appends++;
   const size = f.texts.size;
   const oldAll = f.all;
+  const oldAllOpen = f.allOpen;
   const wasOver = f.over;
+  const wasOpen = f.open;
   for (const t of texts) if (t !== '') f.texts.add(t);
   // Joined one by one, not through zipJoin's reduce, so a long run of `>>` stays linear (#498 review).
+  // #518: `allOpen` is the same run read with no newline after a write that printed none (`printf 'gh pr ' > f;
+  // echo merge 1 >> f`), beside `all`, which keeps the newline reading. One list beside the other: linear too.
   if (append) {
     if (texts.length) {
       const old = f.all;
-      if (old === null) f.all = texts.slice();
-      else { const n = Math.max(old.length, texts.length); f.all = []; for (let j = 0; j < n; j++) f.all.push(`${old[Math.min(j, old.length - 1)]}\n${texts[Math.min(j, texts.length - 1)]}`); }
+      if (old === null) { f.all = texts.slice(); f.allOpen = null; } else {
+        const prior = f.allOpen ?? old;
+        const n = Math.max(old.length, texts.length);
+        const glued = f.open || f.allOpen !== null;
+        f.all = [];
+        f.allOpen = glued ? [] : null;
+        for (let j = 0; j < n; j++) {
+          const t = texts[Math.min(j, texts.length - 1)];
+          f.all.push(`${old[Math.min(j, old.length - 1)]}\n${t}`);
+          if (glued) f.allOpen.push(`${prior[Math.min(j, prior.length - 1)]}${f.open ? '' : '\n'}${t}`);
+        }
+      }
+      f.open = !!texts.open;
     }
   } else {
     for (const a of f.all ?? []) if (a !== '') f.texts.add(a);
+    for (const a of f.allOpen ?? []) if (a !== '') f.texts.add(a);
     f.all = texts.length ? texts.slice() : null;
+    f.allOpen = null;
+    f.open = !!(texts.length && texts.open);
   }
-  if (f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) { f.all = null; f.over = true; }
+  if ((f.all && (f.all.length > FILE_TEXTS || f.all.some((a) => a.length > MAX_JUDGED))) || (f.allOpen && (f.allOpen.length > FILE_TEXTS || f.allOpen.some((a) => a.length > MAX_JUDGED)))) { f.all = null; f.allOpen = null; f.over = true; }
   // A new version only when a read would now give something else.
-  const sameAll = oldAll === f.all || (oldAll !== null && f.all !== null && oldAll.length === f.all.length && oldAll.every((a, j) => a === f.all[j]));
-  if (f.v === 0 || f.texts.size !== size || !sameAll || f.over !== wasOver) f.v = ++files.version;
+  const same = (a, b) => a === b || (a !== null && b !== null && a.length === b.length && a.every((x, j) => x === b[j]));
+  if (f.v === 0 || f.texts.size !== size || !same(oldAll, f.all) || !same(oldAllOpen, f.allOpen) || f.over !== wasOver || f.open !== wasOpen) f.v = ++files.version;
 }
 // The text each part is fed (its heredocs and here-strings), grouped once by part. A here-string's `$(…)` is also
 // read with its printed text in place (#498, row 2), one level deep: `bash <<< "$(echo '…; gh pr merge 5')"`.
@@ -1364,7 +1385,7 @@ function printedOf(fed, n, lists, input = []) {
     if (prog === 'echo' || prog === 'print') {
       let k = 1;
       let format = false;
-      while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
+      while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; if (pw[k].includes('n')) out.open = true; k++; }
       out.push(pw.slice(k).join(' '));
       // And main's reading, every `-n`/`-e`/`-E` word dropped wherever it stands: judged on its own, as main
       // judged it, and kept out of the joins (in the list, it moved the readings the joins pair, #498 review).
@@ -1375,11 +1396,14 @@ function printedOf(fed, n, lists, input = []) {
     if (prog === 'printf') {
       const f = pw[1] === '--' ? 2 : 1;
       out.push(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
+      // #518: a format that does not end in a newline prints none (`printf 'gh pr '`, `printf '%s' x`): what is
+      // printed next runs on into the same line. Unknown counts as none; the newline reading is kept as well.
+      if (!/(?:\\n|\n)$/.test(pw[f] ?? '')) out.open = true;
     }
     if (prog === 'cat' || prog === 'tee') {
       // A word read past its limits stays, even as an option (`cat -$(cat f)` may be `cat -- h`, #498 review).
       const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-' || (prog === 'cat' && a.includes(OVER)));
-      if (prog === 'tee' || !args.length || args.includes('-')) for (const x of input) out.push(x);
+      if (prog === 'tee' || !args.length || args.includes('-')) { for (const x of input) out.push(x); if (input.open) out.open = true; }
       if (prog === 'cat') {
         const per = [];
         for (const a of args) {
@@ -1396,6 +1420,7 @@ function printedOf(fed, n, lists, input = []) {
         // (#498 review). Their memory is bounded by BUILT_CHARS.
         for (const t of per) for (const x of t) out.push(x);
         if (per.length > 1) { const z = zipJoin(per); if (z === null) return null; for (const x of z) out.push(x); }
+        if (per.length && per[per.length - 1].open) out.open = true;
       }
     }
   }
@@ -1406,20 +1431,30 @@ function printedOf(fed, n, lists, input = []) {
 // one join each, so a long `cat f f f …` stays linear (#498 review). Null once the line's BUILT_CHARS are
 // spent: the line is refused. Never a text in place of the readings: a check that does not look for it would
 // let them through.
+// #518: a list marked `open` printed no newline at its end, so its text runs on into the next one's. Each such join
+// is also made with nothing between them, as more readings after the newline ones, which are always kept — one
+// more string per reading, so it stays linear. The mark is on the list, never in the text.
 function zipJoin(per) {
   let n = 0;
   for (const p of per) n = Math.max(n, p.length);
+  const glue = per.slice(0, -1).some((p) => p.open);
   const out = [];
+  const glued = [];
   for (let j = 0; j < n; j++) {
     const pieces = [];
+    let one = '';
     for (let q = 0; q < per.length; q++) {
       if ((q & 4095) === 0 && Date.now() > deadline) return [OVER];
       const x = per[q][Math.min(j, per[q].length - 1)];
-      if ((built.n += x.length + 1) > BUILT_CHARS) return null;
+      if ((built.n += (glue ? 2 : 1) * (x.length + 1)) > BUILT_CHARS) return null;
       pieces.push(x);
+      if (glue) one += (q && !per[q - 1].open ? '\n' : '') + x;
     }
     out.push(pieces.join('\n'));
+    if (glue) glued.push(one);
   }
+  for (const g of glued) out.push(g);
+  if (per.length && per[per.length - 1].open) out.open = true;
   return out;
 }
 // The readings of what a `$(…)` prints, when its text says (#498, row 2): `$(<f)`, and the `echo`, `printf`,
@@ -1712,6 +1747,7 @@ function judgeParts(parts, depth, mode) {
     // The files it writes (#498, row 8): its output through `>` or `>>` (with what it is piped, which a filter
     // like `cat` or `sort` passes on), and, for `tee`, its file words.
     const written = parts.piped.has(n) && prog !== 'cat' && prog !== 'tee' ? [...outs, ...before] : outs;
+    if (outs.open) written.open = true;
     // Each file once per part (`>&f >&f …` wrote the part's text once per redirect, #498 review).
     const once = new Set();
     for (const wr of parts.writes[n] ?? []) { const key = `${wr.append}:${wr.target}`; if (!once.has(key)) { once.add(key); writeFile(wr.target, written, wr.append); } }

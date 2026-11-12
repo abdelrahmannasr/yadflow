@@ -609,6 +609,13 @@ test('the agent guard refuses every human-only yad command and every force push,
     // #518 review 2: what a `$(…)` prints is read by each shell's redirect reading too.
     '$(echo gh >& 1 pr merge 5)', '$(echo gh <& 0 pr merge 5)', '$(echo gh 2>& 1 pr merge 5)', "bash -c '$(echo gh >& 1 pr merge 5)'", 'eval "$(echo gh >& 1 pr merge 5)"',
     "bash <<'E'\n$(echo gh >& 1 pr merge 5)\nE", '$(echo gh pr >& 1- merge 5)', 'echo "$(case x in x)\n$(echo gh >& 1 pr merge 5);; esac)"',
+    // #518, PR 2: text printed with no newline runs on into what is printed next — through `>>`, a pipe, a group, a
+    // process substitution, `cat` of two files and a `$(…)`; `echo -n`, `print -n` and a `printf` format with no
+    // newline at its end.
+    "printf 'gh pr ' > f; printf 'merge 1' >> f; bash f", "{ printf 'gh pr '; echo merge 5; } | bash", "bash <(printf 'gh pr '; echo merge 1)", "echo -n 'gh pr ' > f; echo merge 1 >> f; bash f",
+    "printf '%s' 'gh pr ' > f; echo merge 1 >> f; bash f", "print -n 'gh pr ' > f; echo merge 1 >> f; zsh f", "printf 'gh pr ' > a; echo merge 5 > b; cat a b | bash", "printf 'gh pr ' > a; echo merge 5 > b; cat a b > c; bash c",
+    "{ echo -n gh pr; echo ' merge 5'; } | bash", "{ printf 'git com'; printf 'mit -n -m x'; } | bash", "echo -ne 'gh pr ' > f; echo merge 1 >> f; bash f", "printf -- 'gh pr ' > f; echo merge 1 >> f; bash f",
+    "printf 'gh pr ' > f; printf 'mer' >> f; echo 'ge 5' >> f; bash f", "source <(printf 'gh pr '; echo merge 1)", "echo x | { printf 'gh pr '; echo merge 5; } | bash",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -763,7 +770,11 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     'git commit -m x >&| -n', 'git push origin main >&2',
     // #518 review 1: a blank before the number copies a descriptor as before; a `#` after `>&-` with a blank is text.
     'make >& 1 | head', 'echo x >& 2', 'npm test 2>& 1 | tail', 'echo x >&- # done', 'echo "$(case x in x) echo a >&2;; esac)"',
-    'x=$(git status >& 1)', 'echo "$(make 2>& 1 | tail)"', 'out=$(npm test >&- 2>&1)']) {
+    'x=$(git status >& 1)', 'echo "$(make 2>& 1 | tail)"', 'out=$(npm test >&- 2>&1)',
+    // #518, PR 2: a newline printed between them keeps the texts apart; ordinary prompts and files stay allowed.
+    "printf 'gh pr \\n' > f; echo merge 1 >> f; bash f", "printf '%s\\n' 'gh pr ' > f; echo merge 1 >> f; bash f", "echo 'gh pr' > f; echo merge 1 >> f; bash f",
+    "printf 'building ' ; npm run build", "echo -n 'Password: '; read -s p", "printf 'npm ' > f; echo test >> f; bash f", "{ printf 'a'; echo b; } | cat",
+    `${Array.from({ length: 60 }, (_, i) => `printf 'line ${i} ' >> notes.md`).join('; ')}; cat notes.md`]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -898,6 +909,12 @@ test('#518: a long line the bash and zsh readings are added for is judged in bou
     assert.ok(Date.now() - t0 < within(4500), `took ${Date.now() - t0} ms: ${line.slice(0, 30)}`);
   }
   assert.equal(agentGuardDecision(`${'npm run lint >&- ; '.repeat(40000)}git commit -m x >&--n`).allow, false);
+  // PR 2: joins with no newline stay linear — a long run of `>>` after `printf`, and `cat` of many files.
+  for (const line of [`${Array.from({ length: 3000 }, (_, i) => `printf 'a${i} ' >> f`).join('; ')}; bash f`, `printf 'x ' > a; ${'cat a a a a a a a a a a | '.repeat(1)}cat ${'a '.repeat(20000)}| bash`]) {
+    const t2 = Date.now();
+    agentGuardDecision(line);
+    assert.ok(Date.now() - t2 < within(4500), `took ${Date.now() - t2} ms: ${line.slice(0, 30)}`);
+  }
   // Review 2: a `$(…)` inside a `$(…)` keeps its reading's shell, so nesting does not multiply the readings.
   const nest = (n) => (n ? `$(echo a >&p >& 1 >&|q ${nest(n - 1)})` : 'x');
   const nested = Array(20).fill(`echo ${nest(3)}`).join('; ');
