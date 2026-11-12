@@ -13349,7 +13349,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
@@ -15833,7 +15833,7 @@ test('reconcile --push: commits chore(yad-update) on the Product + connected rep
 
     // Product commit
     const productSubject = git(T, 'log', '-1', '--format=%s').toString().trim();
-    assert.match(productSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'Product subject');
+    assert.equal(productSubject, `chore(yad-update): sync SDLC install to yadflow v${PKG_VERSION}`, 'Product subject');
     assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on the Product commit');
     // the version stamp + new guard workflow rode the Product commit
     const productCommitFiles = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
@@ -20634,6 +20634,9 @@ test('isUnwrittenSection: every shipped Foundation template reads as unwritten, 
   // A comment spanning lines is dropped whole; the frontmatter never counts, even with an owner in it.
   assert.equal(isUnwrittenSection('---\nid: EP-foundation\nowner: sam\n---\n## Why\n<!-- one\ntwo -->\n'), true);
   assert.equal(isUnwrittenSection('## Why\n- one bullet\n'), false, 'a list item is writing');
+  // One pass, on purpose. Markdown hides only the inner `<!-- x -->` here; the outer `<!` and `-- y -->`
+  // show on the page as text. Stripping again until nothing changes would hide words a reader sees.
+  assert.equal(isUnwrittenSection('## Why\n<!<!-- x -->-- y -->\n'), false, 'what is left after the strip is text');
   assert.equal(isUnwrittenSection(''), true);
   // The E76 review: a bare `---` divider is not a table rule, so the line above it is not a header row.
   assert.equal(isUnwrittenSection('- Flatmates split rent.\n---\n'), false, 'a list item above a divider');
@@ -21818,7 +21821,7 @@ test('codeowners check: a line that matches no file is found, and a submodule is
     const files = Array.from({ length: 1 + rnd(6) }, () => Array.from({ length: 1 + rnd(3) }, () => ['a', 'b', 'ab', 'x.js', '$', 'a b', '+'][rnd(7)]).join('/'));
     const pats = Array.from({ length: 4 }, () => `${rnd(3) === 0 ? '/' : ''}${Array.from({ length: 1 + rnd(3) }, word).join('/')}${rnd(3) === 0 ? '/' : ''}`);
     for (const platform of ['github', 'gitlab']) {
-      const parsed = parseCodeowners(pats.map((x) => `${x.replace(/ /g, platform === 'gitlab' ? '\\ ' : '')} @a`).join('\n'), platform);
+      const parsed = parseCodeowners(pats.map((x) => `${x.replace(/\\/g, '\\\\').replace(/ /g, platform === 'gitlab' ? '\\ ' : '')} @a`).join('\n'), platform);
       const brute = parsed.rules.filter((r) => !files.some((f) => matches(r.pat, f))).map((r) => r.line);
       assert.deepEqual(deadLines(parsed, files).map((d) => d.line), brute, `${platform} ${JSON.stringify(pats)} ${JSON.stringify(files)}`);
     }

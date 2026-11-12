@@ -102,7 +102,7 @@ jobs:
       # registered for yadflow on npmjs.com. An exact version, not @latest, so a new npm release
       # cannot change what the publish job runs without a commit here. Keep it >= 11.5.1.
       - name: Upgrade npm (trusted publishing)
-        run: npm install -g npm@11.20.0
+        run: npm install -g npm@11.21.2
 
       - name: Install dependencies
         run: npm ci
