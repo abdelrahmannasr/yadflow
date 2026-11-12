@@ -523,7 +523,7 @@ function caseInEnd(line, i, getIndex, rare = false) {
   // other form, `case x { … }` (the index just past its `{`).
   for (;;) {
     while (j < limit && (rare ? /[\s;]/ : /\s/).test(line[j])) j++;
-    if (!rare || line[j] !== '#') break;
+    if (!rare || j >= limit || line[j] !== '#') break;
     while (j < limit && line[j] !== '\n') j++;
   }
   if (rare && j < limit && line[j] === '{' && /\s/.test(line[j - 1])) return done(j + 1);
@@ -1165,9 +1165,11 @@ function judgeReadings(line, depth, ends) {
   const flagModes = [{}];
   for (const f of flags) for (const m of flagModes.slice()) flagModes.push({ ...m, [f]: true });
   const modes = [];
-  // The rarer readings (#516) run with no flag: each is one more pass over the whole line, and with every flag and
-  // text too they doubled the time on a long line, so lines main judged were refused out of time.
-  for (const rule of rules) for (const m of rule.endsWith('+') ? [{}] : flagModes) modes.push({ ...m, ends: rule });
+  // The rarer readings (#516) take only the `)#` flag: a `#'` right after a `)` on an earlier line otherwise hides
+  // the forms they read (review round 2). Each is one more pass over the whole line, and with every flag and text
+  // too they doubled the time on a long line.
+  const rareModes = flags.includes('hashAfterParen') ? [{}, { hashAfterParen: true }] : [{}];
+  for (const rule of rules) for (const m of rule.endsWith('+') ? rareModes : flagModes) modes.push({ ...m, ends: rule });
   // The rarer readings are bash 3.2's and zsh's, and neither drops a CR (Git Bash, which can, is bash 4 or later): the
   // line as written, and with its `\` + newline joins made.
   const rareTexts = /\\\n/.test(line) ? [line, line.replace(/\\\n/g, '')] : [line];

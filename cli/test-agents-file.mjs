@@ -524,6 +524,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     'echo "$(case x {\nx) git push -f ;; })"', `echo "$(case x { x) echo '"' } )" ; git push -f ; echo '"'`, `echo "$(case x { x) echo '"' ;; esac)" ; git push -f ; echo '"'`,
     // Review round 1: an `in` right at the 4,096-character bound on a `case` word still counts, as on main (zsh runs it).
     `echo "$(case x${' '.repeat(4090)}in x) echo '"' ;; esac)" ; git push -f ; echo '"'`,
+    // Review round 2: a `#'` right after a `)` on an earlier line (the `)#` reading) with B2, B3 and B6 after it.
+    "(echo a)#'\nx=$(cat <<'E'\n) ; git push -f ; echo '\nE\n)'", "(echo a)#'\necho \"$(case `echo x` in\nx) gh pr merge 5 ;; esac)\"", "(echo a)#'\necho \"$(case x {\nx) git push -f ;; })\"",
     // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
     // as a shell's script or input.
     'bash <(echo "gh pr merge 5")', 'bash < <(echo "gh pr merge 5")', 'source <(echo "git push --force")', ". <(echo 'gh pr merge 5')",
@@ -703,6 +705,8 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Any number of `$(…)` that a shell ends elsewhere: each reading reads them all in one pass.
     Array.from({ length: 100 }, (_, n) => `echo "$(case x${n} in x${n}) echo esac;; esac)"`).join('\n'), Array(4).fill('echo $(case a in a) echo hi;; esac)').join(' '), Array(100).fill("$(echo $'\\')')").join(' '),
     // #516: a heredoc in `$(…)`, zsh's `case x { … }` and a `case` word in backticks, with safe commands.
+    // Review round 2: a `#` right at the 4,096-character bound of a `case` word is judged at once (it looped forever).
+    `echo "$(case x${' '.repeat(4090)}#x\nin x) ;; esac)"`, `echo "$(case x${';'.repeat(4090)}#x\nin x) ;; esac)"`,
     "x=$(cat <<'E'\n(a)\nE\n); echo ok", "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\" && git push", 'echo "$(case x { x) echo a ;; })"',
     'echo "$(case `echo x` in x) echo a ;; esac)"', 'echo "$(case x #c\nin x) echo a ;; esac)"',
     // A `#` that starts no word is no comment, and backticks inside `$(…)` are ordinary.
