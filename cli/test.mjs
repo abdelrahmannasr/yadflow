@@ -13349,7 +13349,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f', '0.0.6': 'sha256:095be46dfa09e92d6998d5401cd1f6fcf71c6c408129887cd0d641875aaee655' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
