@@ -587,6 +587,28 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Readings are paired by their place: empty ones from files never written keep theirs.
     ...['bash -c "$(cat e1 e2 a; cat q)"', 'eval "$(cat e1 e2 a; cat q)"', 'source <(cat e1 e2 a; cat q)'].map((t) => `printf '"' > a; printf '' > a; printf 'echo hi\\n' > q; printf 'gh pr merge 5\\n' > q; false && printf 'echo z\\n' > q; ${t}`),
     ...['cat $(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
+    // #518, PR 1: the word after `>&` / `<&` as bash 3.2 reads it — an unquoted `-` closes the descriptor and the
+    // rest is a word of the command — and as zsh reads it — any word but digits, `-` or `p` is a file written.
+    'git commit -m x >&--n', 'git commit -m x >& --n', 'git commit -m x <&--n', 'git commit -m x <& --n', 'git commit -m x 2>&--n', 'git commit -m x 1>&--n',
+    'git commit -m x >&\t--n', 'git commit -m x >&-"-n"', 'git commit -m x >& -"-n"', 'git commit -m x >&-\\-n', 'git push origin >& -+main', 'git push origin >&-+main',
+    // Crossed with a brace and a `$(…)` word: bash expands the word that follows the `-`.
+    'git commit -m x >&--{n,x}', 'git commit -m x >&--$(echo n)', 'git commit -m x >& --$(echo n)', 'git push origin >&-{+main,x}',
+    'echo gh pr merge 1 >&--n; bash ./--n', 'echo gh pr merge 1 >&-n; bash ./-n', 'echo gh pr merge 1 >&1--n; bash ./1--n', 'echo gh pr merge 1 >&1-; bash ./1-',
+    'echo gh pr merge 1 >&p; bash ./p', 'echo gh pr merge 1 >&--n; source ./--n',
+    // zsh's `>!`, `>>!`, `&>!`, `&>>!`, `>>|`, `>&|` and `>&!` write a file, as `>|` does.
+    'echo gh pr merge 1 >! f; bash f', 'echo gh pr merge 1 >!f; bash f', 'echo gh pr merge 1 >>! f; bash f', 'echo gh pr merge 1 >>| f; bash f',
+    'echo gh pr merge 1 >&| f; bash f', 'echo gh pr merge 1 >&|f; bash f', 'echo gh pr merge 1 >&! f; bash f', 'echo gh pr merge 1 &>! f; bash f',
+    'echo gh pr merge 1 &>>! f; bash f', 'echo gh pr merge 1 1>! f; bash f', 'echo gh pr merge 1 >! "f"; bash f', 'bash -c "echo gh pr merge 1 >! f; bash f"',
+    // #518 review 1: main's redirect reading still runs under bash's and zsh's `$(…)` end rules — zsh reads `>|!` as
+    // `>|` writing the file `!` — and a blank before a descriptor number, a `\`-newline join, and a `#` right after
+    // bash's closing `-` are read too.
+    'echo "$(case x in x)\ngh pr >|! merge 5;; esac)"', 'echo "$(case x in x)\ngh pr &>|! merge 5;; esac)"', 'echo "$(case x in x)\ngit commit -m x >|! -n;; esac)"',
+    'echo gh pr >|! merge 5 >! f; bash f', 'gh pr >& 1 merge 5', 'gh pr 2>& 1 merge 5', 'gh pr >&\t2 merge 5', 'gh pr <& 0 merge 5',
+    'git commit -m x >\\\n&--n', 'git commit -m x >&\\\n--n', "echo x >&-#'\ngh pr merge 5\n#'", "echo x 2>&-#'\ngh pr merge 5\n#'", "echo x >& -#'\ngh pr merge 5\n#'",
+    `bash -c "echo x >&-#'\ngh pr merge 5\n#'"`,
+    // #518 review 2: what a `$(…)` prints is read by each shell's redirect reading too.
+    '$(echo gh >& 1 pr merge 5)', '$(echo gh <& 0 pr merge 5)', '$(echo gh 2>& 1 pr merge 5)', "bash -c '$(echo gh >& 1 pr merge 5)'", 'eval "$(echo gh >& 1 pr merge 5)"',
+    "bash <<'E'\n$(echo gh >& 1 pr merge 5)\nE", '$(echo gh pr >& 1- merge 5)', 'echo "$(case x in x)\n$(echo gh >& 1 pr merge 5);; esac)"',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -732,7 +754,16 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
     `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',
     // Review round 4: bash passes nothing here.
-    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`]) {
+    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`,
+    // #518, PR 1: the forms around the new readings stay allowed — a descriptor copied, moved or closed, a file
+    // written that nothing runs, and words that run nothing in bash or zsh.
+    'npm run build 2>&1 | tee build.log', 'git log >& log.txt', 'git diff >& d.txt; cat d.txt', 'echo x >&2', 'cmd 2>&1 >/dev/null', 'git fetch 2>&- ; git status',
+    'git commit -m x >&-n', 'git commit -m x >&1-', 'git commit -m x 2>&1--n', 'git commit -m x >&p', 'npm test >! out', 'git status >| s.txt', 'npm test >>! out.log',
+    'echo gh pr merge 1 2>&--n; bash ./--n', 'echo gh pr merge 1 2>! f; bash f', 'echo gh pr merge 1 > !f; bash f', 'echo gh pr merge 1 <&--n; bash ./--n',
+    'git commit -m x >&| -n', 'git push origin main >&2',
+    // #518 review 1: a blank before the number copies a descriptor as before; a `#` after `>&-` with a blank is text.
+    'make >& 1 | head', 'echo x >& 2', 'npm test 2>& 1 | tail', 'echo x >&- # done', 'echo "$(case x in x) echo a >&2;; esac)"',
+    'x=$(git status >& 1)', 'echo "$(make 2>& 1 | tail)"', 'out=$(npm test >&- 2>&1)']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -857,6 +888,22 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);
+});
+
+test('#518: a long line the bash and zsh readings are added for is judged in bounded time', () => {
+  const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
+  for (const line of [`${'npm run lint >&- ; '.repeat(40000)}gh pr view 1`, `${'echo x >! f; '.repeat(40000)}bash f`, `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f >&-`]) {
+    const t0 = Date.now();
+    agentGuardDecision(line);
+    assert.ok(Date.now() - t0 < within(4500), `took ${Date.now() - t0} ms: ${line.slice(0, 30)}`);
+  }
+  assert.equal(agentGuardDecision(`${'npm run lint >&- ; '.repeat(40000)}git commit -m x >&--n`).allow, false);
+  // Review 2: a `$(…)` inside a `$(…)` keeps its reading's shell, so nesting does not multiply the readings.
+  const nest = (n) => (n ? `$(echo a >&p >& 1 >&|q ${nest(n - 1)})` : 'x');
+  const nested = Array(20).fill(`echo ${nest(3)}`).join('; ');
+  const t1 = Date.now();
+  assert.equal(agentGuardDecision(nested).allow, true);
+  assert.ok(Date.now() - t1 < within(4500), `nested took ${Date.now() - t1} ms`);
 });
 
 test('the refusal says what to do instead: the person runs it', () => {
