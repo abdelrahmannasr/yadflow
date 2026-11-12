@@ -616,6 +616,17 @@ test('the agent guard refuses every human-only yad command and every force push,
     "printf '%s' 'gh pr ' > f; echo merge 1 >> f; bash f", "print -n 'gh pr ' > f; echo merge 1 >> f; zsh f", "printf 'gh pr ' > a; echo merge 5 > b; cat a b | bash", "printf 'gh pr ' > a; echo merge 5 > b; cat a b > c; bash c",
     "{ echo -n gh pr; echo ' merge 5'; } | bash", "{ printf 'git com'; printf 'mit -n -m x'; } | bash", "echo -ne 'gh pr ' > f; echo merge 1 >> f; bash f", "printf -- 'gh pr ' > f; echo merge 1 >> f; bash f",
     "printf 'gh pr ' > f; printf 'mer' >> f; echo 'ge 5' >> f; bash f", "source <(printf 'gh pr '; echo merge 1)", "echo x | { printf 'gh pr '; echo merge 5; } | bash",
+    // PR 2 review 1: the readings with no newline are kept apart, never among those paired by place — these two main
+    // refused only by its pairs, which readings put among them had moved — and the mark passes through `tee`, `cat`,
+    // `< f` and a filter; `printf`'s and `echo`'s escapes are made; an escaped backslash before `n` is no newline.
+    "printf x > a; echo y >> a; echo 'gh pr \\' > g; echo q0 > b; echo q1 > b; echo q2 > b; echo q3 > b; echo 'merge 5' > b; echo r0 > b; echo r1 > b; echo r2 > b; echo r3 > b; echo 'merge 5' > b; { cat a g; cat b; } | bash",
+    "echo x0 > x; echo x1 > x; echo x2 > x; echo x3 > x; echo x4 > x; echo 'gh pr \\' > g; : > a; printf p > b; echo y >> b; echo z > b; echo 'merge 5' > b; echo r0 > b; echo r1 > b; echo r2 > b; echo 'merge 5' > b; { cat x g a; cat b; } | bash",
+    "printf 'gh pr ' | tee f; echo merge 1 >> f; bash f", "printf 'gh pr ' | tee -a f; echo merge 1 >> f; bash f", "printf 'gh pr ' | cat > f; echo merge 1 >> f; bash f",
+    "{ printf 'gh pr ' | cat; echo merge 5; } | bash", "printf 'gh pr ' > f; { cat < f; echo merge 5; } | bash", "printf 'gh pr ' > f; cat < f > g; echo merge 5 >> g; bash g",
+    "bash <(printf 'gh pr ' | cat; echo merge 1)", "printf 'gh pr ' | tr a a > f; echo merge 5 >> f; bash f", "printf 'gh pr ' | sed s/x/x/ > f; echo merge 5 >> f; bash f",
+    "printf 'git push --force\\n' | bash", "{ printf 'git push'; printf ' --force\\n'; } | bash", "source <(printf -- 'git push'; printf ' --force\\n')",
+    "printf 'git push' > f; printf ' --force\\n' >> f; printf 'x' >> f; bash f", "{ printf 'git -c a=\\\\n'; echo 'b push --force'; } | bash", "{ echo -e 'gh pr \\c'; echo merge 5; } | bash",
+    "{ print -f 'gh pr '; echo merge 5; } | zsh",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -774,7 +785,10 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // #518, PR 2: a newline printed between them keeps the texts apart; ordinary prompts and files stay allowed.
     "printf 'gh pr \\n' > f; echo merge 1 >> f; bash f", "printf '%s\\n' 'gh pr ' > f; echo merge 1 >> f; bash f", "echo 'gh pr' > f; echo merge 1 >> f; bash f",
     "printf 'building ' ; npm run build", "echo -n 'Password: '; read -s p", "printf 'npm ' > f; echo test >> f; bash f", "{ printf 'a'; echo b; } | cat",
-    `${Array.from({ length: 60 }, (_, i) => `printf 'line ${i} ' >> notes.md`).join('; ')}; cat notes.md`]) {
+    `${Array.from({ length: 60 }, (_, i) => `printf 'line ${i} ' >> notes.md`).join('; ')}; cat notes.md`,
+    // PR 2 review 1: what a `grep -q` is piped is not printed; a script built line by line with `printf` runs.
+    "{ printf 'gh pr ' | grep -q x; echo merge 5; } | bash", `printf '#!/bin/sh\\n' > run.sh; ${Array.from({ length: 30 }, (_, i) => `printf 'npm run step${i}\\n' >> run.sh`).join('; ')}; bash run.sh`,
+    "printf 'x=1\\n' > env.sh; echo 'echo $x' >> env.sh; bash env.sh"]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
