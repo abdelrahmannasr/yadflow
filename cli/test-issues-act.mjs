@@ -381,6 +381,32 @@ test('#514 label --add/--remove: a name in both, an empty name, a GitLab comma a
   assert.equal(h.writes().length, 0); reset();
 });
 
+test('#514 review 1: a label named twice is removed once; a GitHub DELETE of a label already gone would fail the run', async () => {
+  const T = product(); const p = fake('github', { item: { labels: ['blocked'] } });
+  const orig = p.runner;
+  const deletes = [];
+  // GitHub answers 404 when the label is not on the issue.
+  const runner = (cmd, args) => { if (args.includes('DELETE')) { deletes.push(args); if (!p.state.labels.includes('blocked')) return no('HTTP 404'); } return orig(cmd, args); };
+  const r = await A.runIssuesLabel(T, { ref: '5', remove: ['blocked', 'Blocked', ' blocked '], json: true, env, runner });
+  assert.equal(r.ok, true); assert.equal(deletes.length, 1); assert.deepEqual(r.dropped, []);
+  assert.deepEqual(p.state.labels, []);
+});
+
+test('#514 review 1: a repo label with two spaces matches the name yad shows, and reads back as set', async () => {
+  const T = product(); const p = fake('github', { repoLabels: ['needs  design'] });
+  const r = await A.runIssuesLabel(T, { ref: '5', add: ['needs design'], json: true, env, runner: p.runner });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(p.state.labels, ['needs  design'], 'added as the repo spells it');
+  assert.deepEqual(r.dropped, []);
+});
+
+test('#514 review 1: an unchanged priority is still said beside a note about another label', async () => {
+  const T = product(); const p = fake('github', { item: { labels: ['priority: P1'] } });
+  const r = await A.runIssuesLabel(T, { ref: '5', priority: 'P1', remove: ['absent'], json: true, env, runner: p.runner });
+  assert.match(r.notes.join(' | '), /nothing to remove/);
+  assert.match(r.notes.join(' | '), /already has those labels/);
+});
+
 test('#514 label --remove: a label the platform did not take off is reported', async () => {
   const T = product(); const p = fake('github', { item: { labels: ['blocked'] } });
   const orig = p.runner;

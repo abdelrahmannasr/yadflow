@@ -448,7 +448,8 @@ export function readLabels(t, runner) {
   for (let page = 1; page <= MAX_PAGES; page++) {
     const res = api(runner, t.cli, t.host, `${at}&page=${page}`);
     if (!res.ok || !Array.isArray(res.body)) return { ok: false, why: whyFailed(res.ok ? { unreadable: true } : res, { platform: t.platform, host: t.host, what: `the labels of ${shown(t.repo)}`, plural: true }) };
-    for (const l of res.body) if (typeof l?.name === 'string') { names.add(l.name.toLowerCase()); if (!real.has(l.name.toLowerCase())) real.set(l.name.toLowerCase(), l.name); }
+    // Keyed with each run of spaces folded to one, the way an item's labels are read (`clean`).
+    for (const l of res.body) if (typeof l?.name === 'string') { const k = l.name.replace(/\s+/g, ' ').trim().toLowerCase(); names.add(k); if (!real.has(k)) real.set(k, l.name); }
     if (res.body.length < PAGE) return { ok: true, names, real };
   }
   return { ok: false, why: `${shown(t.repo)} has more labels than yad reads` };

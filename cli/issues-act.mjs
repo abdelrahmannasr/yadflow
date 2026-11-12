@@ -205,6 +205,9 @@ const OWNER_HINT = {
   epic: 'yad writes an epic label itself: link the item with `yad issues link <ref> <EP-id>`',
 };
 const names = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]).map((n) => String(n).trim());
+// One label, whatever its case or spacing: an item's labels are read with each run of spaces folded to one
+// (`clean` in cli/issues.mjs), so every comparison folds the same way (#514 review 1).
+const fold = (s) => String(s).replace(/\s+/g, ' ').trim().toLowerCase();
 
 export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, add: rawAdd = [], remove: rawRemove = [], json = false, env = process.env, runner = run } = {}) {
   const priority = normPriority(rawPriority);
@@ -228,31 +231,32 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
       const owner = labelOwner(n, rules);
       if (owner) throw new Refused(`${forTerminal(n)} is a${owner === 'epic' ? 'n epic' : ` ${owner}`} label, which --add and --remove do not change`, OWNER_HINT[owner]);
     }
-    const have = new Set(got.item.labels.map((l) => l.toLowerCase()));
+    const have = new Set(got.item.labels.map(fold));
     const add = [];
     const remove = [];
     // A label is added only as the repo already spells it: a missing one is refused, never made by the platform.
     if (plus.length) {
       const known = readLabels(got.t, runner);
       if (!known.ok) throw new Refused(`the repo's labels could not be read, so --add was not checked: ${known.why}`, 'try again, or set the label on the platform');
-      const missing = plus.filter((n) => !known.names.has(n.toLowerCase()));
+      const missing = plus.filter((n) => !known.names.has(fold(n)));
       if (missing.length) throw new Refused(`the repo has no label ${forTerminal(missing.join(', '))}`, 'create it on the platform first, then run this again; nothing was changed');
-      for (const n of plus) if (!have.has(n.toLowerCase()) && !add.some((a) => a.toLowerCase() === n.toLowerCase())) add.push(known.real.get(n.toLowerCase()) ?? n);
-      const already = plus.filter((n) => have.has(n.toLowerCase()));
+      for (const n of plus) if (!have.has(fold(n)) && !add.some((a) => fold(a) === fold(n))) add.push(known.real.get(fold(n)) ?? n);
+      const already = plus.filter((n) => have.has(fold(n)));
       if (already.length) out.notes.push(`it already has ${already.map(forTerminal).join(', ')}`);
     }
     for (const n of minus) {
-      if (have.has(n.toLowerCase())) remove.push(n);
+      if (remove.some((r) => fold(r) === fold(n))) continue; // named twice: one removal, never a second that fails
+      if (have.has(fold(n))) remove.push(n);
       else out.notes.push(`it has no label ${forTerminal(n)}, so there was nothing to remove`);
     }
     for (const [kind, value] of [['priority', priority], ['type', type]]) {
       if (value === null) continue;
       const want = rules[kind][value][0];
-      if (!rules[kind][value].some((l) => have.has(l.toLowerCase()))) add.push(want);
-      for (const [other, names] of Object.entries(rules[kind])) if (other !== value) remove.push(...names.filter((l) => have.has(l.toLowerCase())));
+      if (!rules[kind][value].some((l) => have.has(fold(l)))) add.push(want);
+      for (const [other, names] of Object.entries(rules[kind])) if (other !== value) remove.push(...names.filter((l) => have.has(fold(l))));
     }
-    const realNames = new Map(got.item.labels.map((l) => [l.toLowerCase(), l]));
-    const stale = remove.map((l) => realNames.get(l.toLowerCase()) ?? l);
+    const realNames = new Map(got.item.labels.map((l) => [fold(l), l]));
+    const stale = [...new Map(remove.map((l) => [fold(l), realNames.get(fold(l)) ?? l])).values()];
     if (got.t.platform === 'gitlab' && [...add, ...stale].some((l) => l.includes(','))) throw new Refused('a GitLab label name with a comma cannot be sent', 'rename that label in the issues settings of .sdlc/product.json');
     // On GitLab a vulnerability is confidential first, so the label is never on a public item. This runs even when
     // the label is already there: a public item that carries it is exactly what must not stay.
@@ -265,7 +269,7 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
       out.changed.push('made confidential');
       madeConfidential = true;
     }
-    if (!add.length && !stale.length) { if (!out.notes.length) out.notes.push('it already has those labels'); return null; }
+    if (!add.length && !stale.length) { if (priority !== null || type !== null || !out.notes.length) out.notes.push('it already has those labels'); return null; }
     if (add.length) {
       const r = addItemLabels(got.t, got.number, add, { runner });
       if (!r.ok && !madeConfidential) return r;
@@ -277,9 +281,9 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     if (madeConfidential) out.notes.push('it is confidential now, so its labels could not be read back to check');
     else if (!after) out.notes.push('the item could not be read again to check the change');
     else {
-      const now = new Set(after.labels.map((l) => l.toLowerCase()));
-      for (const l of add) if (!now.has(l.toLowerCase())) out.dropped.push(`the label ${l} was not set`);
-      for (const l of stale) if (now.has(l.toLowerCase())) out.dropped.push(`the label ${l} is still there`);
+      const now = new Set(after.labels.map(fold));
+      for (const l of add) if (!now.has(fold(l))) out.dropped.push(`the label ${l} was not set`);
+      for (const l of stale) if (now.has(fold(l))) out.dropped.push(`the label ${l} is still there`);
     }
     return null;
   });

@@ -429,6 +429,10 @@ test('#514: a hostile label stays text in the HTML column, the filter attribute 
   const m = model({ items: [it({ title: 'x', labels: [bad] })] });
   const html = I.renderHtml(m);
   assert.doesNotMatch(html, /<img/);
+  const shown = '&quot;&gt;&lt;img src=x onerror=alert(1)&gt;|[x](javascript:y)';
+  assert.ok(html.includes(`<span class="lbl">${shown}</span>`), 'the cell shows it as text');
+  assert.ok(html.includes(`data-l="${shown}"`), 'the filter attribute holds it escaped');
+  assert.ok(html.includes(`<option value="${shown}">${shown}</option>`), 'the drop-down too');
   const script = html.slice(html.lastIndexOf('<script>'));
   assert.doesNotMatch(script, /alert|innerHTML/);
   const row = I.renderMarkdown(m).split('\n').find((l) => l.includes('| x |'));
