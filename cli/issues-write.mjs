@@ -14,7 +14,7 @@ import { productIdentity } from './members.mjs';
 import { prTarget } from './pr-list.mjs';
 import { repoSources } from './standup.mjs';
 import { api, shown, whyFailed, httpStatus, TIMEOUT } from './protection.mjs';
-import { labelRules, pick, pickType, itemStatus } from './issues.mjs';
+import { labelRules, pick, pickType, itemStatus, otherLabels } from './issues.mjs';
 import { runEpicNew, epicIdFrom } from './epic.mjs';
 import { allLinks, combinedStage, epicStage, itemKey, readLinks, writeLinks } from './issue-links.mjs';
 
@@ -117,6 +117,9 @@ export async function runIssuesShow(root, { ref, json = false, env = process.env
   if (json) return emitJSON({ ok: true, ...out });
   log(`${c.bold(out.ref)} ${out.title ?? '(confidential: open it on GitLab to read it)'}`);
   info(`${out.state} · priority ${out.priority ?? 'none'} · type ${out.type ?? 'none'} · assigned ${out.assignees.join(', ') || 'nobody'}`);
+  // #514: the labels that are none of yad's own. Each was made safe to print when it was read.
+  const others = otherLabels(out.labels, rules);
+  if (others.length) info(`labels ${others.join(', ')}`);
   if (out.url) info(out.url);
   if (out.body) log(`\n${out.body}`);
   return undefined;

@@ -229,7 +229,7 @@ test('Markdown: a hostile title cannot make a link, an image, a tag or a new col
   assert.ok(row.includes('\\[x\\]\\(javascript\\:alert\\(3\\)\\)'));
   assert.ok(row.includes('\\<img'));
   assert.ok(row.includes('y |'));
-  assert.equal(row.split(/(?<!\\)\|/).length, 10);
+  assert.equal(row.split(/(?<!\\)\|/).length, 11, 'nine columns (#514 added Labels), nothing more');
 });
 
 test('terminal: control characters in a title never reach the output', () => {
@@ -368,4 +368,74 @@ test('an unreadable registry: --repo is not refused, and the report says why', a
 test('Markdown: www. after a word-joining character is still broken', () => {
   assert.doesNotMatch(I.mdEscape('_www.evil.com'), /www\./);
   assert.ok(I.mdEscape('awww.good').includes('awww.good'));
+});
+
+// ---- #514: any label — filter on it and show it ----------------------------------------------------
+
+test('#514: --label needs every value, a comma list inside one value needs any, whole names in any case', () => {
+  const items = [
+    it({ ref: 'a', labels: ['Frontend', 'urgent'] }),
+    it({ ref: 'b', labels: ['frontend'] }),
+    it({ ref: 'c', labels: ['backend', 'urgent'] }),
+    it({ ref: 'd', labels: ['frontend-old'] }),
+  ];
+  const refs = (label) => I.applyFilters(items, { label }).map((i) => i.ref).sort();
+  assert.deepEqual(refs(['frontend']), ['a', 'b'], 'any case; not a part of a longer name');
+  assert.deepEqual(refs(['frontend', 'URGENT']), ['a'], 'two values: both');
+  assert.deepEqual(refs([' frontend , backend ']), ['a', 'b', 'c'], 'a comma list: either, spaces trimmed');
+  assert.deepEqual(refs(['frontend,backend', 'urgent']), ['a', 'c']);
+  assert.deepEqual(refs([]), ['a', 'b', 'c', 'd'], 'no --label: no filter');
+  assert.deepEqual(refs(['nothing']), []);
+});
+
+test('#514: yad issues --label reads labels from GitHub and GitLab alike; an empty value is refused', async () => {
+  const T = product();
+  try {
+    const gh = await I.runIssuesList(T, { label: ['ui'], json: true, now: NOW, env, runner: single([ghNode(1, label('UI')), ghNode(2, label('api'))]) });
+    assert.deepEqual(gh.items.map((i) => i.number), [1]);
+    const gl = I.listTrackerItems(glTarget, { closedSinceMs: since, runner: (c, args) => (args.some((a) => String(a).includes('state=closed')) ? ok([]) : ok([glNode(3, { labels: ['UI'] }), glNode(4, { labels: ['api'] })])) }).items;
+    assert.deepEqual(I.applyFilters(gl.map((g) => it({ ref: `#${g.number}`, labels: g.labels })), { label: ['ui'] }).map((i) => i.ref), ['#3']);
+    for (const bad of [[''], [' , ']]) {
+      assert.equal(await I.runIssuesList(T, { label: bad, json: true, now: NOW, env, runner: () => { throw new Error('asked the platform'); } }), undefined, JSON.stringify(bad));
+    }
+    process.exitCode = 0;
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#514: text, Markdown and HTML show the other labels — never the priority, type, status or epic ones', async () => {
+  const rules = I.labelRules({ issues: { priority: { P1: ['urgent!'] } } });
+  const m = model({ items: [it({ title: 'x', labels: ['bug', 'priority: P0', 'urgent!', 'status: done', 'epic: EP-a', 'frontend', 'needs design'] })] });
+  const md = I.renderMarkdown(m, rules);
+  const row = md.split('\n').find((l) => l.includes('| x |'));
+  assert.ok(row.includes('| frontend, needs design |'), row);
+  const html = I.renderHtml(m, rules);
+  assert.match(html, /<span class="lbl">frontend<\/span> <span class="lbl">needs design<\/span>/);
+  assert.match(html, /data-l="frontend\nneeds design"/);
+  assert.match(html, /<select id="f-l"><option value="">All<\/option><option value="frontend">frontend<\/option><option value="needs design">needs design<\/option><\/select>/);
+  for (const own of ['bug', 'priority: P0', 'urgent!', 'status: done', 'epic: EP-a']) assert.ok(!html.includes(`class="lbl">${own}<`), own);
+  // The terminal line.
+  const T = product({ issues: { priority: { P1: ['urgent!'] } } });
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try { await I.runIssuesList(T, { now: NOW, env, runner: single([ghNode(1, label('urgent!', 'frontend'))]) }); } finally { console.log = orig; fs.rmSync(T, { recursive: true, force: true }); }
+  const line = lines.find((l) => l.includes('t1'));
+  assert.match(line, /\{frontend\}/);
+  assert.doesNotMatch(line, /urgent!/, 'a renamed priority label is the priority, not another label');
+});
+
+test('#514: a hostile label stays text in the HTML column, the filter attribute and the drop-down, and in Markdown', () => {
+  const bad = '"><img src=x onerror=alert(1)>|[x](javascript:y)';
+  const m = model({ items: [it({ title: 'x', labels: [bad] })] });
+  const html = I.renderHtml(m);
+  assert.doesNotMatch(html, /<img/);
+  const shown = '&quot;&gt;&lt;img src=x onerror=alert(1)&gt;|[x](javascript:y)';
+  assert.ok(html.includes(`<span class="lbl">${shown}</span>`), 'the cell shows it as text');
+  assert.ok(html.includes(`data-l="${shown}"`), 'the filter attribute holds it escaped');
+  assert.ok(html.includes(`<option value="${shown}">${shown}</option>`), 'the drop-down too');
+  const script = html.slice(html.lastIndexOf('<script>'));
+  assert.doesNotMatch(script, /alert|innerHTML/);
+  const row = I.renderMarkdown(m).split('\n').find((l) => l.includes('| x |'));
+  assert.equal(row.split(/(?<!\\)\|/).length, 11, 'the label makes no new column');
+  assert.doesNotMatch(row, /\]\(javascript/);
 });

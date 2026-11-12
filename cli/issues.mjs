@@ -71,6 +71,22 @@ export function pickType(labels, table) {
   return ordinary.value ? ordinary : pick(labels, part((f) => f));
 }
 
+// #514 — what a label is to yad: one of its own (a priority, type or status spelling, or an item's `epic:` link) or
+// any other. `owner` names which, so a write can say which flag sets it.
+export function labelOwner(name, rules) {
+  const l = labelKey(name);
+  if (/^epic:/.test(l)) return 'epic';
+  for (const kind of ['priority', 'type', 'status']) if (Object.values(rules[kind]).some((names) => names.some((n) => labelKey(n) === l))) return kind;
+  return null;
+}
+// THE one way #514 compares two label names: as an item's labels are read (`clean`: control and invisible
+// characters out, each run of spaces one space, trimmed), in any case. Every comparison of a name a person
+// typed, an item carries, a repo has or a rule lists goes through it — two spellings of one rule let a
+// double-spaced `priority:  P1` past the refusal of yad's own labels (review 2).
+export const labelKey = (name) => clean(name).toLowerCase();
+// An item's labels that are none of yad's own, in the order the platform gave them.
+export const otherLabels = (labels, rules) => labels.filter((l) => labelOwner(l, rules) === null);
+
 // ---- reading ---------------------------------------------------------------------------------------
 
 const str = (v) => (typeof v === 'string' && v ? v : null);
@@ -247,9 +263,13 @@ const list = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
 const lower = (v) => String(v).toLowerCase();
 
 // Narrow and sort. `mine` (from `--me`) is a map `platform\0host` → this person's login.
-export function applyFilters(items, { priority, type, status, assignee, repo, since, until, date = 'created', sort = 'priority', mine = null } = {}) {
+// `label` (#514): each value is a comma list, and an item must carry one name of EVERY value — so
+// `--label a --label b` asks for both and `--label a,b` for either. Whole names, any case.
+export function applyFilters(items, { priority, type, status, assignee, repo, label = [], since, until, date = 'created', sort = 'priority', mine = null } = {}) {
   const inList = (want, v, none) => !want || list(want).map(lower).includes(lower(v ?? none));
-  const out = items.filter((i) => inList(priority, i.priority, 'none') && inList(type, i.type, 'none') && inList(status, i.status, '') && inList(repo, i.repo, '')
+  const labelSets = (Array.isArray(label) ? label : [label]).filter((v) => v != null).map((v) => list(v).map(labelKey));
+  const hasLabels = (i) => { const have = new Set(i.labels.map(labelKey)); return labelSets.every((any) => any.some((n) => have.has(n))); };
+  const out = items.filter((i) => inList(priority, i.priority, 'none') && inList(type, i.type, 'none') && inList(status, i.status, '') && inList(repo, i.repo, '') && hasLabels(i)
     && (!assignee || (lower(assignee) === 'none' ? i.assignees.length === 0 : i.assignees.some((a) => [a.login, a.member].filter(Boolean).map(lower).includes(lower(assignee)))))
     && (!mine || i.assignees.some((a) => mine.get(`${i.platform}\0${i.host}`)?.toLowerCase() === a.login.toLowerCase()))
     && (!since || (i[date] && i[date] >= since)) && (!until || (i[date] && i[date] <= until)));
@@ -269,10 +289,14 @@ const who = (i) => (i.assignees.length ? i.assignees.map((a) => a.member || a.lo
 const counts = (s) => `${s.total} item${s.total === 1 ? '' : 's'}: ${STATUSES.map((v) => `${s.status[v]} ${v}`).join(', ')}; ${s.priority.none} with no priority, ${s.type.none} with no type, ${s.unassigned} unassigned`;
 const gaps = (m) => [...m.notRead, ...m.notes];
 
-function renderText(m) {
+// An item's other labels as text, or '' (#514). Label names are the platform's text: `clean` made them safe to print.
+const othersOf = (i, rules) => otherLabels(i.labels, rules);
+
+function renderText(m, rules = labelRules(null)) {
   info(c.bold(counts(m.summary)));
   for (const i of m.items) {
-    log(`  ${i.ref.padEnd(14)} ${(i.priority ?? '--').padEnd(3)} ${(i.type ?? '-').padEnd(12)} ${i.status.padEnd(12)} ${who(i).padEnd(16)} ${i.title}${i.flags.length ? c.yellow(`  [${i.flags.join('; ')}]`) : ''}`);
+    const others = othersOf(i, rules);
+    log(`  ${i.ref.padEnd(14)} ${(i.priority ?? '--').padEnd(3)} ${(i.type ?? '-').padEnd(12)} ${i.status.padEnd(12)} ${who(i).padEnd(16)} ${i.title}${others.length ? c.dim(`  {${others.join(', ')}}`) : ''}${i.flags.length ? c.yellow(`  [${i.flags.join('; ')}]`) : ''}`);
   }
   if (!m.items.length) log(m.notRead.length ? '  nothing found in the repos that answered' : '  no items');
   for (const g of gaps(m)) note(c.yellow(g));
@@ -282,10 +306,10 @@ function renderText(m) {
 // are the triggers of GitHub's automatic links (`https:`, `www.`, an address's `@`).
 export const mdEscape = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/([\\`*_{}[\]()<>#|!~&:@])/g, '\\$1').replace(/(?<![a-z0-9])www\./gi, (w) => `${w.slice(0, 3)}\\.`);
 
-export function renderMarkdown(m) {
-  const L = ['# Issues and work items', '', `- ${counts(m.summary)}`, `- Closed items since ${m.closedSince}`, '', '| Item | Priority | Type | Status | Assignee | Due | Title | Notes |', '|---|---|---|---|---|---|---|---|'];
+export function renderMarkdown(m, rules = labelRules(null)) {
+  const L = ['# Issues and work items', '', `- ${counts(m.summary)}`, `- Closed items since ${m.closedSince}`, '', '| Item | Priority | Type | Status | Assignee | Due | Title | Labels | Notes |', '|---|---|---|---|---|---|---|---|---|'];
   for (const i of m.items) {
-    L.push(`| ${i.url ? `[${mdEscape(i.ref)}](${i.url.replace(/[()|]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)})` : mdEscape(i.ref)} | ${i.priority ?? 'none'} | ${i.type ?? 'none'} | ${i.status} | ${mdEscape(who(i))} | ${i.due ?? ''} | ${mdEscape(i.title)} | ${mdEscape(i.flags.join('; '))} |`);
+    L.push(`| ${i.url ? `[${mdEscape(i.ref)}](${i.url.replace(/[()|]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)})` : mdEscape(i.ref)} | ${i.priority ?? 'none'} | ${i.type ?? 'none'} | ${i.status} | ${mdEscape(who(i))} | ${i.due ?? ''} | ${mdEscape(i.title)} | ${mdEscape(othersOf(i, rules).join(', '))} | ${mdEscape(i.flags.join('; '))} |`);
   }
   if (gaps(m).length) L.push('', '## Not read, or incomplete', '', ...gaps(m).map((g) => `- ${mdEscape(g)}`));
   L.push('', `_${FOOTER}_`, '');
@@ -296,17 +320,21 @@ const options = (values) => values.map((v) => `<option value="${esc(lower(v))}">
 
 // One self-contained file. The table is written here, escaped, and reads with scripting off. The script only
 // hides and re-orders those rows using their data attributes; it never builds markup from an item's text.
-export function renderHtml(m) {
+export function renderHtml(m, rules = labelRules(null)) {
   const people = [...new Set(m.items.flatMap((i) => i.assignees.map((a) => a.member || a.login)))].sort();
+  // #514: every other label seen, once each (the first spelling met), for the Label filter.
+  const labelNames = [...new Map(m.items.flatMap((i) => othersOf(i, rules)).map((l) => [lower(l), l]).reverse()).values()].sort((a, b) => lower(a).localeCompare(lower(b)));
   const repos = [...new Set(m.items.map((i) => i.repo))].sort();
   const cell = (label, inner, cls = '') => `<td data-label="${label}"${cls ? ` class="${cls}"` : ''}>${inner}</td>`;
   const row = (i) => {
     const members = i.assignees.map((a) => lower(a.member || a.login)).join('\n');
+    const others = othersOf(i, rules);
     const num = i.url ? `<a href="${esc(i.url)}" rel="noopener noreferrer">${esc(i.ref)}</a>` : esc(i.ref);
-    return `<tr data-priority="${rank(PRIORITIES, i.priority)}" data-p="${esc(lower(i.priority ?? 'none'))}" data-type="${rank(ITEM_TYPES, i.type)}" data-t="${esc(lower(i.type ?? 'none'))}" data-status="${rank(STATUSES, i.status)}" data-s="${esc(i.status)}" data-repo="${esc(lower(i.repo))}" data-members="${esc(members)}" data-created="${esc(i.created ?? '')}" data-updated="${esc(i.updated ?? '')}" data-due="${esc(i.due ?? '')}" data-ref="${esc(i.ref)}">`
+    return `<tr data-priority="${rank(PRIORITIES, i.priority)}" data-p="${esc(lower(i.priority ?? 'none'))}" data-type="${rank(ITEM_TYPES, i.type)}" data-t="${esc(lower(i.type ?? 'none'))}" data-status="${rank(STATUSES, i.status)}" data-s="${esc(i.status)}" data-repo="${esc(lower(i.repo))}" data-members="${esc(members)}" data-l="${esc(others.map(lower).join('\n'))}" data-created="${esc(i.created ?? '')}" data-updated="${esc(i.updated ?? '')}" data-due="${esc(i.due ?? '')}" data-ref="${esc(i.ref)}">`
       + cell('Item', num, 'ref') + cell('Priority', i.priority ? `<span class="pri pri-${esc(lower(i.priority))}">${esc(i.priority)}</span>` : '<span class="dim">none</span>')
       + cell('Type', i.type ? esc(i.type) : '<span class="dim">none</span>') + cell('Status', `<span class="st st-${rank(STATUSES, i.status)}">${esc(i.status)}</span>`)
       + cell('Title', `${esc(i.title)}${i.flags.map((f) => `<span class="flag">${esc(f)}</span>`).join('')}`, 'title') + cell('Assignee', i.assignees.length ? esc(who(i)) : '<span class="dim">unassigned</span>')
+      + cell('Labels', others.length ? others.map((l) => `<span class="lbl">${esc(l)}</span>`).join(' ') : '<span class="dim">none</span>')
       + cell('Epic', i.epic ? esc(i.epic.id) : '<span class="dim">none</span>') + cell('Created', esc(i.created ?? ''), 'date') + cell('Updated', esc(i.updated ?? ''), 'date') + cell('Due', esc(i.due ?? ''), 'date') + '</tr>';
   };
   const th = (key, label) => `<th scope="col"${key ? ` aria-sort="none"` : ''}>${key ? `<button type="button" data-sort="${key}">${label}</button>` : label}</th>`;
@@ -324,15 +352,15 @@ export function renderHtml(m) {
 .filters label{display:flex;flex-direction:column;font-size:12px;color:var(--dim);gap:2px}select,input,#reset{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:4px 6px;min-height:32px}#reset{align-self:flex-end;cursor:pointer}
 #count{margin:0 0 8px;color:var(--dim)}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--dim);white-space:nowrap}th button{all:unset;cursor:pointer}th button:focus-visible{outline:2px solid var(--link)}
 [aria-sort=ascending] button::after{content:" ▲"}[aria-sort=descending] button::after{content:" ▼"}td.ref,td.date{white-space:nowrap}td.title{min-width:260px;overflow-wrap:anywhere}
-.pri{font-weight:600}.pri-p0{color:var(--p0)}.pri-p1{color:var(--p1)}.st{white-space:nowrap}.st-0{color:var(--dim)}.flag{display:block;color:var(--warn);font-size:12px}
+.pri{font-weight:600}.pri-p0{color:var(--p0)}.pri-p1{color:var(--p1)}.st{white-space:nowrap}.st-0{color:var(--dim)}.flag{display:block;color:var(--warn);font-size:12px}.lbl{display:inline-block;border:1px solid var(--line);border-radius:10px;padding:0 6px;font-size:12px;white-space:nowrap}
 footer{color:var(--dim);font-size:12px;margin-top:20px;border-top:1px solid var(--line);padding-top:10px}
 @media (max-width:720px){thead{position:absolute;left:-9999px}tr{display:block;border:1px solid var(--line);border-radius:8px;margin:0 0 10px;padding:6px 10px}td{display:flex;gap:10px;border:0;padding:3px 0}td::before{content:attr(data-label);color:var(--dim);flex:0 0 72px;font-size:12px}td:empty{display:none}td.title{min-width:0;display:block}td.title::before{display:block}}
 </style></head><body><div class="wrap"><h1>Issues and work items</h1>
 <p class="sub">${esc(counts(m.summary))}. Closed items since ${esc(m.closedSince)}.</p>
 ${missing.length ? `<section class="gaps"><h2>Not read, or incomplete</h2><ul>${missing.map((g) => `<li>${esc(g)}</li>`).join('')}</ul></section>` : ''}
-<form class="filters" id="filters">${select('f-member', 'Member', `<option value="\n">Unassigned</option>${options(people)}`)}${select('f-t', 'Type', `${options(ITEM_TYPES)}<option value="none">None</option>`)}${select('f-p', 'Priority', `${options(PRIORITIES)}<option value="none">None</option>`)}${select('f-s', 'Status', options(STATUSES))}${select('f-repo', 'Repo', options(repos))}
+<form class="filters" id="filters">${select('f-member', 'Member', `<option value="\n">Unassigned</option>${options(people)}`)}${select('f-t', 'Type', `${options(ITEM_TYPES)}<option value="none">None</option>`)}${select('f-p', 'Priority', `${options(PRIORITIES)}<option value="none">None</option>`)}${select('f-s', 'Status', options(STATUSES))}${select('f-repo', 'Repo', options(repos))}${select('f-l', 'Label', options(labelNames))}
 <label>Date<select id="f-date">${DATE_FIELDS.map((d) => `<option value="${d}">${d[0].toUpperCase()}${d.slice(1)}</option>`).join('')}</select></label><label>From<input type="date" id="f-from"></label><label>To<input type="date" id="f-to"></label><button type="reset" id="reset">Clear</button></form>
-<p id="count" role="status"></p><table><thead><tr>${th('ref', 'Item')}${th('priority', 'Priority')}${th('type', 'Type')}${th('status', 'Status')}${th('', 'Title')}${th('', 'Assignee')}${th('', 'Epic')}${th('created', 'Created')}${th('updated', 'Updated')}${th('due', 'Due')}</tr></thead>
+<p id="count" role="status"></p><table><thead><tr>${th('ref', 'Item')}${th('priority', 'Priority')}${th('type', 'Type')}${th('status', 'Status')}${th('', 'Title')}${th('', 'Assignee')}${th('', 'Labels')}${th('', 'Epic')}${th('created', 'Created')}${th('updated', 'Updated')}${th('due', 'Due')}</tr></thead>
 <tbody id="rows">${m.items.map(row).join('\n')}</tbody></table>${m.items.length ? '' : `<p class="dim">${m.notRead.length ? 'Nothing found in the repos that answered.' : 'No items.'}</p>`}
 <footer>${esc(FOOTER)}</footer></div>
 <script>${PAGE_SCRIPT}</script></body></html>\n`;
@@ -340,13 +368,13 @@ ${missing.length ? `<section class="gaps"><h2>Not read, or incomplete</h2><ul>${
 
 // Fixed text: no value from an item is ever part of this script.
 const PAGE_SCRIPT = `(function(){var body=document.getElementById('rows'),rows=[].slice.call(body.rows),all=rows.length,$=function(i){return document.getElementById(i)},count=$('count');
-function apply(){var m=$('f-member').value,t=$('f-t').value,p=$('f-p').value,s=$('f-s').value,r=$('f-repo').value,d=$('f-date').value,a=$('f-from').value,b=$('f-to').value,n=0;rows.forEach(function(x){var v=x.dataset[d],on=(!t||x.dataset.t===t)&&(!p||x.dataset.p===p)&&(!s||x.dataset.s===s)&&(!r||x.dataset.repo===r)&&(!m||(m==='\\n'?x.dataset.members==='':x.dataset.members.split('\\n').indexOf(m)>=0))&&(!a||(v&&v>=a))&&(!b||(v&&v<=b));x.hidden=!on;if(on)n++});count.textContent='Showing '+n+' of '+all}
+function apply(){var m=$('f-member').value,t=$('f-t').value,p=$('f-p').value,s=$('f-s').value,r=$('f-repo').value,l=$('f-l').value,d=$('f-date').value,a=$('f-from').value,b=$('f-to').value,n=0;rows.forEach(function(x){var v=x.dataset[d],on=(!t||x.dataset.t===t)&&(!p||x.dataset.p===p)&&(!s||x.dataset.s===s)&&(!r||x.dataset.repo===r)&&(!l||x.dataset.l.split('\\n').indexOf(l)>=0)&&(!m||(m==='\\n'?x.dataset.members==='':x.dataset.members.split('\\n').indexOf(m)>=0))&&(!a||(v&&v>=a))&&(!b||(v&&v<=b));x.hidden=!on;if(on)n++});count.textContent='Showing '+n+' of '+all}
 var form=$('filters');form.addEventListener('input',apply);form.addEventListener('change',apply);form.addEventListener('reset',function(){setTimeout(apply,0)});form.addEventListener('submit',function(e){e.preventDefault()});
 var num={priority:1,type:1,status:1};document.querySelectorAll('[data-sort]').forEach(function(btn){btn.addEventListener('click',function(){var k=btn.dataset.sort,th=btn.parentNode,up=th.getAttribute('aria-sort')!=='ascending';document.querySelectorAll('th[aria-sort]').forEach(function(h){h.setAttribute('aria-sort','none')});th.setAttribute('aria-sort',up?'ascending':'descending');rows.sort(function(x,y){var a=x.dataset[k],b=y.dataset[k];if(!a!==!b)return a?-1:1;var c=num[k]?a-b:a.localeCompare(b,undefined,{numeric:true});return up?c:-c});rows.forEach(function(x){body.appendChild(x)})})});apply()})();`;
 
 // ---- the commands ----------------------------------------------------------------------------------
 
-const LIST_ONLY = new Set(['--priority', '--type', '--status', '--assignee', '--me', '--repo', '--since', '--until', '--date', '--sort', '--closed-since', '--format', '--out', '--json', '--dir']);
+const LIST_ONLY = new Set(['--priority', '--type', '--status', '--label', '--assignee', '--me', '--repo', '--since', '--until', '--date', '--sort', '--closed-since', '--format', '--out', '--json', '--dir']);
 // The Markdown link of an item's URL, with the characters that would end it encoded.
 export const mdUrl = (u) => u.replace(/[()|]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
 
@@ -372,12 +400,14 @@ function closedSince(value, now) {
 }
 
 // `yad issues [list]`. Returns the model (E1 makes it the `--json` answer), or undefined after refusing.
-export async function runIssuesList(root, { priority = null, type = null, status = null, assignee = null, me = false, repo = null, since = null, until = null, date = null, sort = null, closedSince: closed = null, format = null, out = null, json = false, now = Date.now(), env = process.env, runner, loginOf = platformLogin } = {}) {
+export async function runIssuesList(root, { priority = null, type = null, status = null, label = [], assignee = null, me = false, repo = null, since = null, until = null, date = null, sort = null, closedSince: closed = null, format = null, out = null, json = false, now = Date.now(), env = process.env, runner, loginOf = platformLogin } = {}) {
   const refuse = (msg, hint) => { fail(msg); if (hint) hand(hint); process.exitCode = 1; };
   if (!fs.existsSync(productConfigPath(root))) return refuse('not a Product (no .sdlc/product.json here)', 'run it from the Product, or pass --dir');
   if (!format && out) format = /\.html?$/i.test(out) ? 'html' : 'md';
   if (format && !['md', 'html'].includes(format)) return refuse(`unknown --format ${forTerminal(String(format))}`, 'use --format md or --format html (or --json for the data)');
   if (assignee && me) return refuse('pass --assignee <login> or --me, not both');
+  const labels = (Array.isArray(label) ? label : [label]).filter((v) => v != null);
+  if (labels.some((v) => !list(v).length)) return refuse('--label needs a label name', 'pass --label <name>; repeat it to ask for more than one, or give a comma list for any of them');
   for (const bad of [checkValues('--priority', priority, [...PRIORITIES, 'none']), checkValues('--type', type, [...ITEM_TYPES, 'none']), checkValues('--status', status, STATUSES), oneValue('--sort', sort, SORTS), oneValue('--date', date, DATE_FIELDS)]) if (bad) return refuse(bad);
   for (const [flag, v] of [['--since', since], ['--until', until]]) if (v && !realDate(v)) return refuse(`${flag} must be a real date, YYYY-MM-DD (got ${forTerminal(String(v))})`);
   const window = closedSince(closed, now);
@@ -400,16 +430,17 @@ export async function runIssuesList(root, { priority = null, type = null, status
     const bad = list(repo).filter((v) => !known.map(lower).includes(lower(v)));
     if (bad.length) return refuse(`no repo named ${forTerminal(bad.join(', '))}`, `use one of: ${known.join(', ')}`);
   }
-  const items = applyFilters(whole.items, { priority, type, status, assignee, repo, since, until, date: date ? lower(date) : 'created', sort: sort ? lower(sort) : 'priority', mine });
+  const items = applyFilters(whole.items, { priority, type, status, label: labels, assignee, repo, since, until, date: date ? lower(date) : 'created', sort: sort ? lower(sort) : 'priority', mine });
   const model = { ...whole, items, summary: summarize(items), unfiltered: whole.items.length };
+  const rules = labelRules(readJSON(productConfigPath(root), null));
   if (format) {
     const dest = out || `issues-report.${format}`;
-    writeReport(dest, format === 'md' ? renderMarkdown(model) : renderHtml(model));
+    writeReport(dest, format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules));
     if (json) note(`wrote ${format.toUpperCase()} report → ${dest}`); else info(`wrote ${format.toUpperCase()} report → ${c.bold(dest)}`);
     for (const g of gaps(model)) if (!json) note(c.yellow(g));
     return { ...model, out: dest };
   }
-  if (!json) renderText(model);
+  if (!json) renderText(model, rules);
   return { ...model, out: null };
 }
 
@@ -418,11 +449,14 @@ export function readLabels(t, runner) {
   const gh = t.platform === 'github';
   const at = gh ? `repos/${t.repo}/labels?per_page=${PAGE}` : `projects/${encodeURIComponent(t.repo)}/labels?per_page=${PAGE}`;
   const names = new Set();
+  // #514: `keys` and `real` are by `labelKey`; `names` stays lower-cased only, as its other callers read it.
+  const keys = new Set();
+  const real = new Map(); // labelKey → the repo's own spelling, so a label is added and removed as the repo spells it
   for (let page = 1; page <= MAX_PAGES; page++) {
     const res = api(runner, t.cli, t.host, `${at}&page=${page}`);
     if (!res.ok || !Array.isArray(res.body)) return { ok: false, why: whyFailed(res.ok ? { unreadable: true } : res, { platform: t.platform, host: t.host, what: `the labels of ${shown(t.repo)}`, plural: true }) };
-    for (const l of res.body) if (typeof l?.name === 'string') names.add(l.name.toLowerCase());
-    if (res.body.length < PAGE) return { ok: true, names };
+    for (const l of res.body) if (typeof l?.name === 'string') { names.add(l.name.toLowerCase()); const k = labelKey(l.name); keys.add(k); if (!real.has(k)) real.set(k, l.name); }
+    if (res.body.length < PAGE) return { ok: true, names, keys, real };
   }
   return { ok: false, why: `${shown(t.repo)} has more labels than yad reads` };
 }

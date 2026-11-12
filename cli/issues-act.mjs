@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import { run, forTerminal, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { addItemLabels, removeItemLabels, commentOnItem, closeItem, newItem, editItem, reopenItem, setAssignee, makeConfidential, platformLogin } from './platform.mjs';
 import { api, httpStatus } from './protection.mjs';
-import { labelRules, ITEM_TYPES, PRIORITIES } from './issues.mjs';
+import { labelRules, labelOwner, labelKey, readLabels, ITEM_TYPES, PRIORITIES } from './issues.mjs';
 import { readItem, resolveTarget } from './issues-write.mjs';
 import { allLinks, itemKey } from './issue-links.mjs';
 import { redactTokens, repoFacts, routeFor } from './scan.mjs';
@@ -197,11 +197,27 @@ export async function runIssuesAssign(root, { ref, assignee = null, me = false, 
   });
 }
 
-export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, json = false, env = process.env, runner = run } = {}) {
+// `--add` / `--remove` (#514) take any label but yad's own: those have a flag of their own, or yad writes them.
+const OWNER_HINT = {
+  priority: 'set the priority with --priority',
+  type: 'set the type with --type',
+  status: 'yad writes the status label itself, from what the item and its epic say (`yad issues sync`)',
+  epic: 'yad writes an epic label itself: link the item with `yad issues link <ref> <EP-id>`',
+};
+const names = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]).map((n) => String(n).trim());
+// Every comparison of two label names is `labelKey` (cli/issues.mjs), never a spelling of its own (#514 reviews 1-2).
+const fold = labelKey;
+
+export async function runIssuesLabel(root, { ref, priority: rawPriority = null, type: rawType = null, add: rawAdd = [], remove: rawRemove = [], json = false, env = process.env, runner = run } = {}) {
   const priority = normPriority(rawPriority);
   const type = normType(rawType);
+  const plus = names(rawAdd);
+  const minus = names(rawRemove);
   return act(root, ref, { json, env, runner }, async (got, out) => {
-    if (priority === null && type === null) throw new Refused('pass --priority, --type or both');
+    if (priority === null && type === null && !plus.length && !minus.length) throw new Refused('pass --priority, --type, --add or --remove');
+    if ([...plus, ...minus].some((n) => !n)) throw new Refused('--add and --remove need a label name');
+    const both = plus.filter((n) => minus.some((m) => fold(m) === fold(n)));
+    if (both.length) throw new Refused(`${forTerminal(both.join(', '))} is in both --add and --remove`, 'name each label once');
     if (priority !== null && !PRIORITIES.includes(priority)) throw new Refused(`unknown --priority ${forTerminal(String(priority))}`, `use one of ${PRIORITIES.join(', ')}`);
     if (type !== null && !ITEM_TYPES.includes(type)) throw new Refused(`unknown --type ${forTerminal(String(type))}`, `use one of ${ITEM_TYPES.join(', ')}`);
     if (type === 'security' && got.t.platform === 'github' && !got.item.confidential && routeFor('security', 'github', repoFacts(got.t, runner).vis) !== 'issue') {
@@ -210,17 +226,44 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     // A confidential item's labels are not read, so the old ones could not be removed.
     if (got.item.confidential) throw new Refused('a confidential item\'s labels are not read, so they cannot be replaced here', 'change them on GitLab');
     const rules = labelRules(got.productConfig);
-    const have = new Set(got.item.labels.map((l) => l.toLowerCase()));
+    for (const n of [...plus, ...minus]) {
+      const owner = labelOwner(n, rules);
+      if (owner) throw new Refused(`${forTerminal(n)} is a${owner === 'epic' ? 'n epic' : ` ${owner}`} label, which --add and --remove do not change`, OWNER_HINT[owner]);
+    }
+    const have = new Set(got.item.labels.map(fold));
     const add = [];
     const remove = [];
+    // The repo's labels, read once and only when needed.
+    let known = null;
+    const repoLabels = () => (known ??= readLabels(got.t, runner));
+    // A label is added only as the repo already spells it: a missing one is refused, never made by the platform.
+    if (plus.length) {
+      repoLabels();
+      if (!known.ok) throw new Refused(`the repo's labels could not be read, so --add was not checked: ${known.why}`, 'try again, or set the label on the platform');
+      const missing = plus.filter((n) => !known.keys.has(fold(n)));
+      if (missing.length) throw new Refused(`the repo has no label ${forTerminal(missing.join(', '))}`, 'create it on the platform first, then run this again; nothing was changed');
+      for (const n of plus) if (!have.has(fold(n)) && !add.some((a) => fold(a) === fold(n))) add.push(known.real.get(fold(n)) ?? n);
+      const already = [...new Map(plus.filter((n) => have.has(fold(n))).map((n) => [fold(n), n])).values()];
+      if (already.length) out.notes.push(`it already has ${already.map(forTerminal).join(', ')}`);
+    }
+    for (const n of minus) {
+      if (remove.some((r) => fold(r) === fold(n))) continue; // named twice: one removal, never a second that fails
+      if (have.has(fold(n))) remove.push(n);
+      else out.notes.push(`it has no label ${forTerminal(n)}, so there was nothing to remove`);
+    }
     for (const [kind, value] of [['priority', priority], ['type', type]]) {
       if (value === null) continue;
       const want = rules[kind][value][0];
-      if (!rules[kind][value].some((l) => have.has(l.toLowerCase()))) add.push(want);
-      for (const [other, names] of Object.entries(rules[kind])) if (other !== value) remove.push(...names.filter((l) => have.has(l.toLowerCase())));
+      if (!rules[kind][value].some((l) => have.has(fold(l)))) add.push(want);
+      for (const [other, names] of Object.entries(rules[kind])) if (other !== value) remove.push(...names.filter((l) => have.has(fold(l))));
     }
-    const realNames = new Map(got.item.labels.map((l) => [l.toLowerCase(), l]));
-    const stale = remove.map((l) => realNames.get(l.toLowerCase()) ?? l);
+    // Removed as the repo spells it: an item's labels are read cleaned (spaces folded), and a DELETE or a GitLab
+    // remove_labels of the cleaned spelling misses a label like `needs  design`. If the repo's labels cannot be
+    // read, the item's own spelling is sent, and the read-back says if it stayed.
+    const realNames = new Map(got.item.labels.map((l) => [fold(l), l]));
+    if (remove.length) repoLabels();
+    const spelled = (l) => (known?.ok ? known.real.get(fold(l)) : null) ?? realNames.get(fold(l)) ?? l;
+    const stale = [...new Map(remove.map((l) => [fold(l), spelled(l)])).values()];
     if (got.t.platform === 'gitlab' && [...add, ...stale].some((l) => l.includes(','))) throw new Refused('a GitLab label name with a comma cannot be sent', 'rename that label in the issues settings of .sdlc/product.json');
     // On GitLab a vulnerability is confidential first, so the label is never on a public item. This runs even when
     // the label is already there: a public item that carries it is exactly what must not stay.
@@ -233,7 +276,7 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
       out.changed.push('made confidential');
       madeConfidential = true;
     }
-    if (!add.length && !stale.length) { out.notes.push('it already has those labels'); return null; }
+    if (!add.length && !stale.length) { if (priority !== null || type !== null || !out.notes.length) out.notes.push('it already has those labels'); return null; }
     if (add.length) {
       const r = addItemLabels(got.t, got.number, add, { runner });
       if (!r.ok && !madeConfidential) return r;
@@ -245,8 +288,9 @@ export async function runIssuesLabel(root, { ref, priority: rawPriority = null, 
     if (madeConfidential) out.notes.push('it is confidential now, so its labels could not be read back to check');
     else if (!after) out.notes.push('the item could not be read again to check the change');
     else {
-      const now = new Set(after.labels.map((l) => l.toLowerCase()));
-      for (const l of add) if (!now.has(l.toLowerCase())) out.dropped.push(`the label ${l} was not set`);
+      const now = new Set(after.labels.map(fold));
+      for (const l of add) if (!now.has(fold(l))) out.dropped.push(`the label ${l} was not set`);
+      for (const l of stale) if (now.has(fold(l))) out.dropped.push(`the label ${l} is still there`);
     }
     return null;
   });
@@ -318,7 +362,7 @@ export async function runIssuesReopen(root, { ref, json = false, env = process.e
 const ACT_FLAGS = {
   new: ['--title', '--body', '--body-file', '--type', '--priority', '--assignee', '--me', '--repo'],
   assign: ['--me', '--none'],
-  label: ['--priority', '--type'],
+  label: ['--priority', '--type', '--add', '--remove'],
   edit: ['--title', '--body', '--body-file'],
   comment: ['--body', '--body-file'],
   close: [], reopen: [],

@@ -4,4 +4,4 @@
 export const VALUE_FLAGS = new Set(['--dir', '--issue', '--body-file', '--priority', '--status', '--assignee', '--date', '--sort', '--closed-since', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets', '--theme', '--thread', '--by', '--count', '--engagement', '--keep', '--role', '--fallback', '--detect', '--install', '--source', '--tz', '--verdict', '--ran-by', '--note', '--uid', '--run', '--via', '--kind', '--confirm',
   // E159: the setup answers an agent passes after asking the person.
   '--default-branch', '--design', '--design-url', '--testing', '--testing-url', '--learning', '--connect', '--coderabbit']);
-export const LIST_FLAGS = new Set(['--signal', '--approver', '--add-repo']);
+export const LIST_FLAGS = new Set(['--signal', '--approver', '--add-repo', '--label', '--add', '--remove']);
