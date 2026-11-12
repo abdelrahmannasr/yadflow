@@ -1,0 +1,49 @@
+title: "[Q&A] "
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for asking. Please check the
+        [troubleshooting guide](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/CLI.md#troubleshooting-yad-doctor--error-codes)
+        first — it explains every `yad` error code. If something is broken rather than unclear,
+        please [open a bug report](https://github.com/abdelrahmannasr/yadflow/issues/new/choose) instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you want to do?
+      description: Describe the goal, then the step where you got stuck.
+      placeholder: |
+        I want two teams to review the same epic, but …
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Commands you ran, skills you used, and what happened.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: yadflow version
+      description: "`npx yadflow --version`"
+    validations:
+      required: true
+  - type: dropdown
+    id: assistant
+    attributes:
+      label: AI assistant
+      options:
+        - Claude Code
+        - Codex CLI
+        - Cursor
+        - Gemini CLI
+        - GitHub Copilot
+        - Zencoder
+        - opencode
+        - Other / none
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [GitHub, GitLab, local (no platform)]

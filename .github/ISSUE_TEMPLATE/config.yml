@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question
+    url: https://github.com/abdelrahmannasr/yadflow/discussions/new?category=q-a
+    about: Help with setup, review gates, skills and the yad CLI — ask in Discussions (Q&A)
+  - name: Suggest an idea
+    url: https://github.com/abdelrahmannasr/yadflow/discussions/new?category=ideas
+    about: Talk through a feature idea in Discussions before it becomes an issue
   - name: Security vulnerability
     url: https://github.com/abdelrahmannasr/yadflow/security/advisories/new
     about: Please report vulnerabilities privately — see SECURITY.md
