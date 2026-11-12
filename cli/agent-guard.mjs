@@ -1179,6 +1179,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
     return judgeReadings(line, depth);
   } catch (e) {
     if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return TOO_MUCH_WRITTEN;
+    if (e?.code === 'YAD_GUARD_TOO_DEEP') return TOO_DEEP;
     // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
@@ -1258,8 +1259,12 @@ function judgeReadings(line, depth, ends, inherited = null) {
       const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
       if (depth === 0) {
+        // The output pass gets its own text budget, as each reading does: charged on top of what judgeLine just
+        // built, a long text through a few `tee` stages was refused where main allows it (#532 review 11). The
+        // deadline stays shared.
+        built.n = 0;
         const extra = streamGuard(text, mode, {
-          // Each output parse gets its own case scan, while copies and time remain shared.
+          // Each output parse gets its own case scan.
           shellParts: (s, m) => { const saved = caseLeft.n; caseLeft.n = CASE_SCAN; try { return shellParts(s, m); } finally { caseLeft.n = saved; } },
           stripPrefix, programOf, bareShell, scriptAt, innerLines,
           judge: (t) => agentGuardDecision(t, 1),

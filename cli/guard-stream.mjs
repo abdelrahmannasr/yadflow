@@ -57,7 +57,9 @@ export function streamGuard(line, mode, api) {
     return join(out);
   }
   function run(text, level = 0, stdin = '') {
-    if (level > 3) throw Object.assign(new Error('output nesting limit exceeded'), { code: 'YAD_GUARD_OUTPUT_LIMIT' });
+    // `$(…)` and shells nest as main counts them (its TOO_DEEP). A process substitution is not a level: main
+    // bounds those with its own walk, and each one's text is shorter than the line (#532 review 10).
+    if (level > 3) throw Object.assign(new Error('output nesting limit exceeded'), { code: 'YAD_GUARD_TOO_DEEP' });
     const fileSub = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
     if (fileSub) return read(fileSub[1]);
     if (/^[A-Za-z0-9_]*$/.test(text) && !/^(echo|printf|print|cat|tee|eval|bash|zsh|sh|dash|ksh)$/.test(text)) return '';
@@ -74,7 +76,8 @@ export function streamGuard(line, mode, api) {
     for (const g of parts.groups) { if (!groups.has(g.to)) groups.set(g.to, []); groups.get(g.to).push(g); }
     const close = (n) => {
       for (const g of groups.get(n) ?? []) {
-        const output = join(outputs.slice(g.from, g.to).filter((s) => s !== undefined));
+        // What reaches the group's own output: not what its parts wrote to files (#532 review 9).
+        const output = join(stdout.slice(g.from, g.to).filter((s) => s !== undefined));
         before = output;
         for (let i = g.from; i < g.to; i++) stdout[i] = '';
         if (!g.writes.length && parts[g.to]?.[0] !== '}') stdout[g.to - 1] = output;
@@ -106,7 +109,7 @@ export function streamGuard(line, mode, api) {
       const redirected = join((parts.reads[n] ?? []).map(read));
       let out = '';
       const proc = procs.get(n) ?? [];
-      const procOutputs = proc.map((p) => run(p.text ?? '', level + 1));
+      const procOutputs = proc.map((p) => run(p.text ?? '', level));
       if (parts[n][0] === '}') out = before;
       else if (prog === 'echo' || prog === 'print') {
         let k = 1, newline = true, decode = prog === 'print' || mode.redir === 'zsh';

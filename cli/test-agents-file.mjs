@@ -1739,6 +1739,18 @@ test('#532 review 1: a group record never changes what main reads a part writes'
     assert.equal(agentGuardDecision(line).allow, false, line);
 });
 
+test('#532 review: lines main allows stay allowed (group writes, process substitutions, long text)', () => {
+  // A part that writes to a file adds nothing to its group's output (review 9).
+  for (const line of ['{ echo gh pr merge 5 > g; echo hi; } > f; bash f', '( echo gh pr merge 5 > g ) > f; bash f'])
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  // Process substitutions are not nesting levels; main bounds them with its own walk (review 10).
+  assert.equal(agentGuardDecision('cat <(cat <(cat <(cat <(echo hi))))').allow, true);
+  assert.equal(agentGuardDecision('cat <(cat <(cat <(cat <(echo gh pr merge 5)))) | bash').allow, false);
+  // The output pass has its own text budget: a long message through a few `tee` stages (review 11).
+  const msg = 'fix: a line of text for the body\n'.repeat(27000);
+  assert.equal(agentGuardDecision(`printf '%s' '${msg}' | ${'tee -a log | '.repeat(8)}git commit -F -`).allow, true);
+});
+
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
   const T = tmp();
   const log = path.join(T, 'executed');
