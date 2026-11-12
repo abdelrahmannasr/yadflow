@@ -1727,6 +1727,18 @@ test('#532: every reported output gap is refused, while text only printed stays 
   }
 });
 
+test('#532 review 1: a group record never changes what main reads a part writes', () => {
+  // The `}` part's write list was shared with the group record, so a later redirect-only part (`> g`) was added
+  // to main's own reading of `{ :; } > f`, and `g` read as emptied by it: a refusal main makes was lost.
+  assert.deepEqual(shellParts('{ :; } > f; > g').writes.map((w) => w && w.map((x) => x.target)), [null, ['f']]);
+  assert.equal(agentGuardDecision("printf 'gh pr ' > g; { :; } > f; false && > g; echo merge 5 >> g; bash g").allow, false);
+  // A redirect-only part writes a subshell's output only straight after its `)`; later ones are other commands.
+  for (const line of ['( echo gh pr merge 5 ); > f; bash f', '{ echo gh pr merge 5; }; > f; bash f',
+    '( echo gh pr merge 5 ) && > f; bash f']) assert.equal(agentGuardDecision(line).allow, true, line);
+  for (const line of ['( echo gh pr merge 5 ) > f; bash f', '( ( echo gh pr merge 5 ) > f ); bash f'])
+    assert.equal(agentGuardDecision(line).allow, false, line);
+});
+
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
   const T = tmp();
   const log = path.join(T, 'executed');

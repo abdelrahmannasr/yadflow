@@ -205,13 +205,16 @@ export function shellParts(rawLine, mode = {}) {
     afterDup = null;
     if (words[0] === '{') braceGroups.push(parts.length);
     if (words[0] === '}' && braceGroups.length) {
-      const g = { from: braceGroups.pop(), to: parts.length, writes: partWrites ?? [] };
-      parts.groups.push(g); closedGroup = g;
+      // A copy: main's own `parts.writes` holds `partWrites`, and the group's list must never change it (#532 review 1).
+      parts.groups.push({ from: braceGroups.pop(), to: parts.length, writes: [...(partWrites ?? [])] });
     }
     if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.push(words); }
     // A redirect alone after a pipe: zsh writes what it is piped to the file (`echo … | > f`), as `cat > f` would.
     else if (partWrites && parts.length && parts.piped.has(parts.length)) parts.pipedWrites.push({ after: parts.length - 1, writes: partWrites });
+    // Only the redirect-only part straight after a `( … )` writes that subshell's output (`( … ) > f`); any later
+    // part is another command, so the record is cleared at every part's end (#532 review 1).
     if (!words.length && partWrites && closedGroup) closedGroup.writes.push(...partWrites);
+    closedGroup = null;
     words = []; partBraced = null; partPosix = null; partSubst = null; partWrites = null; partReads = null;
   };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
