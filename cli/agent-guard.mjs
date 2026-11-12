@@ -88,6 +88,9 @@ const heredocOf = (m) => ({ word: m[2].replace(/\\(.)|['"]/g, '$1'), tabs: m[1] 
 // `mode` picks the reading where bash and zsh decide by context the reader does not track (#492): `literalExpanding`
 // reads an end word holding `$` or a backtick as a heredoc ending at that literal word (else: no heredoc), and
 // `hashAfterParen` reads a `#` right after `(` or `)` as a comment (else: text). agentGuardDecision judges both.
+// Which shell a reading is (#518): 'bash' or 'zsh' for their modes (any spelling of them, such as #516's
+// 'bash+'), '' for main's.
+const shellOf = (mode) => (mode?.ends?.startsWith('bash') ? 'bash' : mode?.ends?.startsWith('zsh') ? 'zsh' : '');
 export function shellParts(rawLine, mode = {}) {
   // The private-use characters that shield quoted braces (below) cannot come from the line itself: a typed one
   // would turn into a real `{` when a carried command is re-read (`bash -c "gh pr {merge,\uE000} 5"`).
@@ -310,9 +313,44 @@ export function shellParts(rawLine, mode = {}) {
       if (inWord && /^[0-9]+$/.test(word)) { fd = word; word = ''; inWord = false; wordKeep.length = 0; wordSubs.length = 0; } else endWord();
       let j = i + (ch === '&' ? 2 : 1);
       if (line[j] === '>' || line[j] === '|' || (ch === '<' && line[j] === '>')) j++;
+      // #518: zsh's `>!`, `>>!`, `&>!`, `&>>!` and `>>|` write the file, as `>|` does (the `!` or `|` is the operator's).
+      if (shellOf(mode) === 'zsh' && ch !== '<' && (line[j] === '!' || (line[j] === '|' && line[j - 1] === '>'))) j++;
       // `>&n` and `>&-` copy or close a file descriptor, read as before; a bare `>&` before a word writes it.
       if (line[j] === '&') {
         j++;
+        // #518: how bash 3.2 and zsh read the word after `>&` / `<&` (blanks allowed before it), each in its own mode;
+        // main's reading below stays as it was. Both: digits alone copy a descriptor.
+        //   bash: an unquoted `-` closes it, and what follows is a word of the command (`>&--n` and `>& --n` pass
+        //         `-n`; `>&--{n,x}` passes `-n -x`); digits and `-` move one; any other word after `>&` is a file
+        //         written, as `&>` writes it (`>&1--n`, `>&p`).
+        //   zsh:  `-` alone closes, `p` alone is the coprocess; any other word after `>&` is a file written, the whole
+        //         word (`>&--n` writes `--n`, `>&1-` writes `1-`); `>&|` and `>&!` write the next word, as `&>|` does.
+        const shell = shellOf(mode);
+        if (shell) {
+          const into = ch !== '<';
+          if (shell === 'zsh' && into && (line[j] === '|' || line[j] === '!')) {
+            redirectBefore = dropWord ? redirect : null;
+            redirect = { op: '>', fd: fd || '1' };
+            dropWord = true;
+            i = j;
+            continue;
+          }
+          let k = j;
+          while (line[k] === ' ' || line[k] === '\t') k++;
+          const ends = (at) => at >= line.length || /[\s;&|<>()]/.test(line[at]);
+          const digits = /^[0-9]*/.exec(line.slice(k, k + 24))[0];
+          if (k < line.length && !ends(k)) {
+            if (digits && ends(k + digits.length)) { i = k + digits.length - 1; continue; }
+            if (shell === 'bash' && digits && line[k + digits.length] === '-' && ends(k + digits.length + 1)) { i = k + digits.length; continue; }
+            if (line[k] === '-' && (shell === 'bash' || ends(k + 1))) { i = k; continue; }
+            if (shell === 'zsh' && line[k] === 'p' && ends(k + 1)) { i = k; continue; }
+            redirectBefore = dropWord ? redirect : null;
+            redirect = { op: into ? '>' : '<', fd: into ? (fd || '1') : fd };
+            dropWord = true;
+            i = k - 1;
+            continue;
+          }
+        }
         const from = j;
         while (j < line.length && /[0-9-]/.test(line[j])) j++;
         if (j === from) afterDup = { write: ch !== '<' && (fd === '' || fd === '1') };
@@ -320,7 +358,7 @@ export function shellParts(rawLine, mode = {}) {
         continue;
       }
       redirectBefore = dropWord ? redirect : null;
-      redirect = { op: line.slice(i, j).replace(/\|/g, ''), fd: ch === '&' ? '1' : fd };
+      redirect = { op: line.slice(i, j).replace(/[|!]/g, ''), fd: ch === '&' ? '1' : fd };
       dropWord = true;
       i = j - 1;
       continue;
@@ -1153,6 +1191,14 @@ function judgeReadings(line, depth, ends) {
     if (line.includes('<<')) rules.push('bash+');
     if (/\bcase\b/.test(line)) rules.push('zsh+');
   }
+  // #518: bash and zsh read the word after `>&` / `<&` their own ways (see shellParts), and zsh writes a file with
+  // `>!`, `>>!`, `>>|` and `>&|`. Only when the line has one: a plain descriptor number (`2>&1`, `>&2`) reads the same
+  // in every shell, so the common lines are not read three times.
+  if (ends === undefined) {
+    if (/[<>]&[ \t]*(?:[^\s0-9;&|<>()]|[0-9]+[^\s0-9;&|<>()])/.test(line)) rules.push('bash', 'zsh');
+    if (/>>?!|>>\||>&[|!]/.test(line)) rules.push('zsh');
+  }
+  rules.splice(0, rules.length, ...new Set(rules));
   const texts = [line];
   if (line.includes('\r')) texts.push(line.replace(/\r/g, ''));
   if (/\\\r?\n/.test(line)) texts.push(line.replace(/\r/g, '').replace(/\\\n/g, ''));

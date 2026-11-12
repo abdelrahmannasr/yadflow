@@ -587,6 +587,18 @@ test('the agent guard refuses every human-only yad command and every force push,
     // Readings are paired by their place: empty ones from files never written keep theirs.
     ...['bash -c "$(cat e1 e2 a; cat q)"', 'eval "$(cat e1 e2 a; cat q)"', 'source <(cat e1 e2 a; cat q)'].map((t) => `printf '"' > a; printf '' > a; printf 'echo hi\\n' > q; printf 'gh pr merge 5\\n' > q; false && printf 'echo z\\n' > q; ${t}`),
     ...['cat $(cat f) | bash', 'cat $(<f) | bash', 'cat $(cat f) > g; bash g'].map((t) => `bash -c "printf '%s' 'gh pr merge 5' > h"; cat > f <<'E'\nh${' '.repeat(300000)}\nE\n${t}`),
+    // #518, PR 1: the word after `>&` / `<&` as bash 3.2 reads it — an unquoted `-` closes the descriptor and the
+    // rest is a word of the command — and as zsh reads it — any word but digits, `-` or `p` is a file written.
+    'git commit -m x >&--n', 'git commit -m x >& --n', 'git commit -m x <&--n', 'git commit -m x <& --n', 'git commit -m x 2>&--n', 'git commit -m x 1>&--n',
+    'git commit -m x >&\t--n', 'git commit -m x >&-"-n"', 'git commit -m x >& -"-n"', 'git commit -m x >&-\\-n', 'git push origin >& -+main', 'git push origin >&-+main',
+    // Crossed with a brace and a `$(…)` word: bash expands the word that follows the `-`.
+    'git commit -m x >&--{n,x}', 'git commit -m x >&--$(echo n)', 'git commit -m x >& --$(echo n)', 'git push origin >&-{+main,x}',
+    'echo gh pr merge 1 >&--n; bash ./--n', 'echo gh pr merge 1 >&-n; bash ./-n', 'echo gh pr merge 1 >&1--n; bash ./1--n', 'echo gh pr merge 1 >&1-; bash ./1-',
+    'echo gh pr merge 1 >&p; bash ./p', 'echo gh pr merge 1 >&--n; source ./--n',
+    // zsh's `>!`, `>>!`, `&>!`, `&>>!`, `>>|`, `>&|` and `>&!` write a file, as `>|` does.
+    'echo gh pr merge 1 >! f; bash f', 'echo gh pr merge 1 >!f; bash f', 'echo gh pr merge 1 >>! f; bash f', 'echo gh pr merge 1 >>| f; bash f',
+    'echo gh pr merge 1 >&| f; bash f', 'echo gh pr merge 1 >&|f; bash f', 'echo gh pr merge 1 >&! f; bash f', 'echo gh pr merge 1 &>! f; bash f',
+    'echo gh pr merge 1 &>>! f; bash f', 'echo gh pr merge 1 1>! f; bash f', 'echo gh pr merge 1 >! "f"; bash f', 'bash -c "echo gh pr merge 1 >! f; bash f"',
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
@@ -732,7 +744,13 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     // Review round 3: a long `case` in a process substitution; a quoted word after `>&`.
     `bash <(case x in ${'a) echo a;; '.repeat(600)}esac)`, 'git commit -m x >&"--n"', 'echo hi 2>& f',
     // Review round 4: bash passes nothing here.
-    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`]) {
+    'git commit -m x >& "-"-n', 'git commit -m x >&1--n', `bash <(${'case y in y) :;; esac; '.repeat(40000)})`,
+    // #518, PR 1: the forms around the new readings stay allowed — a descriptor copied, moved or closed, a file
+    // written that nothing runs, and words that run nothing in bash or zsh.
+    'npm run build 2>&1 | tee build.log', 'git log >& log.txt', 'git diff >& d.txt; cat d.txt', 'echo x >&2', 'cmd 2>&1 >/dev/null', 'git fetch 2>&- ; git status',
+    'git commit -m x >&-n', 'git commit -m x >&1-', 'git commit -m x 2>&1--n', 'git commit -m x >&p', 'npm test >! out', 'git status >| s.txt', 'npm test >>! out.log',
+    'echo gh pr merge 1 2>&--n; bash ./--n', 'echo gh pr merge 1 2>! f; bash f', 'echo gh pr merge 1 > !f; bash f', 'echo gh pr merge 1 <&--n; bash ./--n',
+    'git commit -m x >&| -n', 'git push origin main >&2']) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
 });
@@ -857,6 +875,16 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
   assert.equal(long.allow, false);
   assert.match(long.message, /too long to judge/);
+});
+
+test('#518: a long line the bash and zsh readings are added for is judged in bounded time', () => {
+  const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
+  for (const line of [`${'npm run lint >&- ; '.repeat(40000)}gh pr view 1`, `${'echo x >! f; '.repeat(40000)}bash f`, `cat > f <<'E'\n${'npm run lint\n'.repeat(45000)}E\nbash f >&-`]) {
+    const t0 = Date.now();
+    agentGuardDecision(line);
+    assert.ok(Date.now() - t0 < within(4500), `took ${Date.now() - t0} ms: ${line.slice(0, 30)}`);
+  }
+  assert.equal(agentGuardDecision(`${'npm run lint >&- ; '.repeat(40000)}git commit -m x >&--n`).allow, false);
 });
 
 test('the refusal says what to do instead: the person runs it', () => {
