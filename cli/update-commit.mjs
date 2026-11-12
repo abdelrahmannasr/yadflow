@@ -20,6 +20,7 @@
 // passes commit-message and the story-linking gates treat it as an exempt maintenance commit; no
 // Task trailer, no Co-Authored-By (human-owned machine state, not an authored code change).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
@@ -77,11 +78,11 @@ export function buildUpdateMessage({ version = VERSION, items = [] } = {}) {
 //     legacy rename's old file — stages) — this also drops a no-match pathspec (the root
 //     .gitlab-ci.yml a github repo never has) that would otherwise abort `git add`.
 // Returns the pathspecs actually staged.
-function stageAllowlist(git, root, paths) {
+export function stageAllowlist(git, root, paths) {
   // Every path list goes to git on stdin, never as arguments: `--open-pr` hands over every file of every skill
   // folder, hundreds of paths, which overflowed Windows' 32K command line (E157 update review 7); and one
   // spawn per path took minutes (review 6).
-  if (!paths.length) return { staged: [] };
+  if (!paths.length) return { staged: [], ignoredBy: [] };
   // Whole-repo lists can pass Node's 1 MB default in a big repo, which cuts them short: a cut list would drop a
   // deletion from staging without a word. Room is made, and a list that still fails is said, never used.
   const big = { cwd: root, maxBuffer: 1024 * 1024 * 1024 };
@@ -89,7 +90,7 @@ function stageAllowlist(git, root, paths) {
   const trackedRun = run('git', ['ls-files', '-z'], big);
   // check-ignore exits 1 when nothing is ignored; only a spawn error is a failed read there.
   const unread = ignoredRun.error || trackedRun.error || !trackedRun.ok;
-  if (unread) return { staged: [], addError: `could not list the repo's files (${(ignoredRun.error || trackedRun.error)?.code || trackedRun.stderr.split('\n')[0] || `exit ${trackedRun.code}`})` };
+  if (unread) return { staged: [], ignoredBy: [], addError: `could not list the repo's files (${(ignoredRun.error || trackedRun.error)?.code || trackedRun.stderr.split('\n')[0] || `exit ${trackedRun.code}`})` };
   const ignored = new Set(ignoredRun.stdout.split('\0').filter(Boolean));
   const tracked = trackedRun.stdout.split('\0').filter(Boolean);
   const trackedSet = new Set(tracked);
@@ -97,7 +98,7 @@ function stageAllowlist(git, root, paths) {
   const under = (p, f) => f === p || f.startsWith(`${p.replace(/\/$/, '')}/`);
   const isTracked = (p) => trackedSet.has(p) || tracked.some((t) => under(p, t));
   const keep = paths.filter((p) => !ignored.has(p) && (fs.existsSync(path.join(root, p)) || isTracked(p)));
-  if (!keep.length) return { staged: [] };
+  if (!keep.length) return { staged: [], ignoredBy: [] };
   // `git add` can exit non-zero (index lock, permissions) yet run() never throws — surface it rather
   // than silently reporting "nothing to commit". (A directory pathspec whose contents are ALL ignored
   // also exits 1 after staging the rest; the empty-diff below then correctly drops it.)
@@ -108,7 +109,96 @@ function stageAllowlist(git, root, paths) {
     : !diff.ok ? `could not read what was staged (${diff.error?.code || diff.stderr.split('\n')[0] || `exit ${diff.code}`})` : null;
   // Nothing of ours may stay staged when the list of it could not be read.
   if (!diff.ok) withPaths(root, ['reset', '-q'], keep);
-  return { staged, addError };
+  // Why git refused (#508). git refuses a TRACKED file only when an ignore rule hides one of its FOLDERS — a
+  // person's global ignore hiding `.claude/`, say (a rule on the file itself never stops `git add`). Such a
+  // file passes the check-ignore filter above, which never reports tracked files, and `git add` exits 1 over
+  // it, though it staged it. So the folders above each kept path are asked of git (`--no-index` reports
+  // ignored folders whatever is tracked in them) rather than git's message, which is translated. A lock is
+  // said as a lock, and git's own words are always kept beside this.
+  // Exit 1 only: git refuses an ignored path with 1, and a fatal error (a file it cannot read) with 128 —
+  // then nothing was staged, and an ignore rule beside it is not why (review 2).
+  const ignoredBy = add.code === 1 && !/index\.lock/.test(add.stderr) ? hiddenFolders(root, keep) : [];
+  return { staged, addError, ignoredBy };
+}
+
+// The ignored folders the kept paths sit in: [{ folder, paths, source, line, pattern, outside }], the highest
+// ignored folder per path (`.claude`, not `.claude/skills/x`). A negated pattern (`!x`) re-includes, so it is
+// never named as the rule that hides. The source is shown with `~` for the home folder, and relative to the
+// repo for the repo's own files; one inside the git folder (`.git/info/exclude`) is this clone's alone, like
+// a global ignore, so it counts as `outside` too.
+export function hiddenFolders(root, paths) {
+  const folderOf = new Map();
+  for (const p of paths) {
+    // A deletion counts too: git stages it, yet still exits 1 over an ignored folder above it that is still
+    // on disk (review 3). A folder that is gone is never refused (git exits 0 for it), so only folders on disk
+    // are asked (review 4). A path that is gone is a file; a link is a file to git (lstat).
+    let isDir = false;
+    try { isDir = fs.lstatSync(path.join(root, p)).isDirectory(); } catch { /* gone: a file */ }
+    const parts = p.replace(/\/+$/, '').split('/');
+    for (let n = 1; n <= parts.length - (isDir ? 0 : 1); n++) {
+      const dir = parts.slice(0, n).join('/');
+      let onDisk = false;
+      try { onDisk = fs.lstatSync(path.join(root, dir)).isDirectory(); } catch { /* gone */ }
+      if (!onDisk) break; // nothing below a gone folder is on disk either
+      if (!folderOf.has(dir)) folderOf.set(dir, []);
+      folderOf.get(dir).push(p);
+    }
+  }
+  if (!folderOf.size) return [];
+  // Asked by name, never with a trailing slash: with one, `.claude/*` is read as matching `.claude` itself.
+  // Every folder asked is on disk, so a folder-only pattern (`build/`) matches it as a folder.
+  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: [...folderOf.keys()].join('\0'), maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || !r.stdout) return [];
+  const gitDirRun = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
+  // Compared by real path: git names a temp or linked folder by its real spelling (`/private/var`), the run by
+  // the one it was given (`/var`).
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const gitDir = real(gitDirRun.ok && gitDirRun.stdout ? gitDirRun.stdout : path.join(root, '.git'));
+  const inside = (child, parent) => { const rel = path.relative(real(parent), real(child)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
+  const home = os.homedir();
+  const rules = new Map();
+  const f = r.stdout.split('\0');
+  for (let i = 0; i + 3 < f.length; i += 4) {
+    const [source, line, pattern, dirSlash] = f.slice(i, i + 4);
+    if (!source || !pattern || !dirSlash || pattern.startsWith('!')) continue;
+    rules.set(dirSlash.replace(/\/+$/, ''), { source, line, pattern });
+  }
+  const seen = new Set();
+  const out = [];
+  for (const [dir, under] of folderOf) {
+    const rule = rules.get(dir);
+    if (!rule) continue;
+    const fresh = under.filter((p) => !seen.has(p));
+    if (!fresh.length) continue; // a higher folder already names these paths
+    fresh.forEach((p) => seen.add(p));
+    const abs = path.resolve(root, rule.source);
+    const local = inside(abs, gitDir) || real(abs) === gitDir;
+    const inRepo = !local && inside(abs, root);
+    const shown = inRepo ? path.relative(real(root), real(abs)).split(path.sep).join('/')
+      : local && inside(abs, root) ? path.relative(real(root), real(abs)).split(path.sep).join('/')
+      : home && inside(abs, home) ? `~/${path.relative(real(home), real(abs)).split(path.sep).join('/')}` : abs;
+    out.push({ folder: dir, paths: fresh, source: shown, line: Number(rule.line) || null, pattern: rule.pattern, outside: !inRepo });
+  }
+  return out;
+}
+
+// The words for an ignored folder that git would not stage from (#508): the folder, the rule, whether the rule
+// is the repo's or only this machine's, and the way out. `staged` is what happened to the tracked files
+// there: on `--open-pr` the run unstages and stops; on a plain push git staged them and the run goes on.
+export function hiddenFolderText(ignoredBy, where, { staged }) {
+  const folders = ignoredBy.map((x) => x.folder);
+  const list = `${folders.slice(0, 3).join(', ')}${folders.length > 3 ? ` and ${folders.length - 3} more` : ''}`;
+  const rule = ignoredBy.slice(0, 2).map((x) => `${x.source}:${x.line} (\`${x.pattern}\`)`).join(', ');
+  const outside = ignoredBy.find((x) => x.outside);
+  // The exact folder, not the rule's own pattern: `!.*` from a global `.*` would let every dotfile in for the
+  // whole team (review 2).
+  // Escaped as a .gitignore pattern, so a folder named with `[`, `*`, `?` or `\` matches itself only.
+  const literal = (s) => s.replace(/[\\[\]*?]/g, '\\$&');
+  const way = `remove or narrow that rule${outside ? `, or add \`!/${literal(outside.folder)}/\` to this repo's .gitignore` : ''}`;
+  const whose = outside ? ', a rule outside this repo, which CI and the rest of the team do not have' : '';
+  return staged
+    ? `an ignore rule hides ${list} in ${where} — ${rule}${whose}. Its tracked files were staged, but a new file there is left out of the update: ${way}`
+    : `git would not stage the update's files under ${list} in ${where}: an ignore rule hides ${folders.length === 1 ? 'that folder' : 'those folders'} — ${rule}${whose}. ${way[0].toUpperCase()}${way.slice(1)}; then run this again: the update is in the working tree, and the next run carries it`;
 }
 
 // `git <args>` over a list of literal paths read from stdin (NUL-separated), not the command line.
@@ -161,8 +251,8 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
     }
   }
 
-  const { staged, addError } = stageAllowlist(git, root, paths);
-  if (addError) warn(`${label}: git add reported "${addError}" — staging may be incomplete`);
+  const { staged, addError, ignoredBy } = stageAllowlist(git, root, paths);
+  if (addError) warn(ignoredBy.length ? `${label}: git add reported "${addError}" — ${hiddenFolderText(ignoredBy, label, { staged: true })}` : `${label}: git add reported "${addError}" — staging may be incomplete`);
   if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return { label, product: isProduct, committed: false, pushed: false, skipped: false, error: false }; }
 
   // Pushing HEAD lands any local commits ahead of the remote too. Warn before we add ours so the
@@ -387,13 +477,15 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
   const where = isProduct ? '.' : label;
   // Staged on the default branch first, so a repo with nothing to commit never gets a branch, and a
   // staging problem is said before anything else moves.
-  const { staged, addError } = stageAllowlist(git, root, paths);
+  const { staged, addError, ignoredBy } = stageAllowlist(git, root, paths);
   const unstage = () => { if (staged.length) withPaths(root, ['reset', '-q'], staged); };
   if (addError) {
     unstage();
     fail(`${label}: git add failed — ${addError}`);
     process.exitCode = 1;
-    return out({ error: true, reason: 'add-failed', hint: `git could not stage the update in ${where} (${oneLine(addError).slice(0, 160)}) — often a leftover index.lock or file permissions; fix it and run this again: the update is in the working tree, and the next run carries it` });
+    const hint = ignoredBy.length ? `${hiddenFolderText(ignoredBy, where, { staged: false })} (git said: ${oneLine(addError).slice(0, 160)})`
+      : `git could not stage the update in ${where} (${oneLine(addError).slice(0, 160)}) — often a leftover index.lock or file permissions; fix it and run this again: the update is in the working tree, and the next run carries it`;
+    return out({ error: true, reason: 'add-failed', hint });
   }
   if (!staged.length) { info(`${label}: nothing to commit (unchanged or ignored)`); return out({}); }
   // An update branch left from an update that already merged (`updatePrBlocker` lets the run on once this
