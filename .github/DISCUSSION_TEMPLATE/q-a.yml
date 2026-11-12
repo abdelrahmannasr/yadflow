@@ -1,4 +1,3 @@
-title: "[Q&A] "
 body:
   - type: markdown
     attributes:
@@ -21,14 +20,11 @@ body:
     attributes:
       label: What have you tried?
       description: Commands you ran, skills you used, and what happened.
-      render: shell
   - type: input
     id: version
     attributes:
       label: yadflow version
-      description: "`npx yadflow --version`"
-    validations:
-      required: true
+      description: "Run `npx yadflow --version`. Leave it empty if you have not installed yadflow yet."
   - type: dropdown
     id: assistant
     attributes:
