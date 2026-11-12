@@ -431,12 +431,17 @@ export function run(cmd, args = [], opts = {}) {
 // the same (#526): git passes its login helper's stderr through, and that helper can be glab.
 export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
   const lines = String(stderr).split('\n');
-  const start = lines.findIndex((l) => /^Warning: Multiple config files found\b/i.test(l.trim()));
-  if (start < 0) return stderr;
-  let end = start + 1;
-  while (end < lines.length && /^\s+(?:Using|Ignoring):/.test(lines[end])) end += 1;
-  if (end < lines.length && /^Consider consolidating\b/i.test(lines[end].trim())) end += 1;
-  const rest = [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim();
+  const isStart = (l) => /^Warning: Multiple config files found\b/i.test(l.trim());
+  if (!lines.some(isStart)) return stderr;
+  // Every block: one git push runs its login helper more than once (`get`, then `store` or `erase`), and glab
+  // prints the block each time (#526 review).
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!isStart(lines[i])) { kept.push(lines[i]); continue; }
+    while (i + 1 < lines.length && /^\s+(?:Using|Ignoring):/.test(lines[i + 1])) i += 1;
+    if (i + 1 < lines.length && /^Consider consolidating\b/i.test(lines[i + 1].trim())) i += 1;
+  }
+  const rest = kept.join('\n').trim();
   if (ok) return rest;
   const hint = 'glab reads only one of its two config files, so a login saved in the other is not used (see `yad doctor`, glab-config)';
   return rest ? `${hint} — ${rest}` : hint;

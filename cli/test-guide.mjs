@@ -1166,12 +1166,17 @@ test('#509: yad update --open-pr with glab warning about two config files says t
 
 // #526: glab as git's login helper prints its two-config-files warning on every git push, and git passes it
 // through. A `pre-push` hook's stderr reaches yad the same way, so it stands in for the helper here.
-const GLAB_WARNING_HOOK = (exit) => [
-  '#!/bin/sh',
+// A push runs the helper more than once (`get`, then `store` or `erase`), and glab warns each time: two blocks.
+const GLAB_BLOCK = [
   "echo 'Warning: Multiple config files found. Only the first one will be used.' >&2",
   "echo '  Using: /home/me/.config/glab-cli/config.yml' >&2",
   "echo '  Ignoring: /home/me/Library/Application Support/glab-cli/config.yml' >&2",
   "echo 'Consider consolidating to one location to avoid confusion.' >&2",
+];
+const GLAB_WARNING_HOOK = (exit) => [
+  '#!/bin/sh',
+  ...GLAB_BLOCK,
+  ...GLAB_BLOCK,
   ...(exit ? ["echo 'remote: HTTP Basic: Access denied' >&2"] : []),
   `exit ${exit}`,
 ].join('\n') + '\n';
