@@ -405,7 +405,9 @@ export function run(cmd, args = [], opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts, ...(stdio === undefined ? {} : { stdio }) });
   const ok = r.status === 0;
   let stderr = (r.stderr || '').trim();
-  if (/^glab(?:\.exe)?$/i.test(path.basename(String(cmd)))) stderr = withoutGlabConfigWarning(stderr, { ok });
+  // git too (#526): with glab as git's login helper (`glab auth login`), git passes glab's warning through on a
+  // push, fetch, pull, ls-remote or clone.
+  if (/^(?:glab|git)(?:\.exe)?$/i.test(path.basename(String(cmd)))) stderr = withoutGlabConfigWarning(stderr, { ok });
   return {
     ok,
     code: r.status,
@@ -425,15 +427,21 @@ export function run(cmd, args = [], opts = {}) {
 // block is dropped from what yad reads. When the run FAILED, one short line goes BEFORE the real error
 // instead, because a login saved in the ignored file is not used — often the very reason the run failed — and
 // a line after glab's long error would be cut off. It shares its line with the error's first line, so a caller
-// that shows only stderr's first line still shows the error. Only that exact block is removed.
+// that shows only stderr's first line still shows the error. Only that exact block is removed. git's own calls get
+// the same (#526): git passes its login helper's stderr through, and that helper can be glab.
 export function withoutGlabConfigWarning(stderr = '', { ok = true } = {}) {
   const lines = String(stderr).split('\n');
-  const start = lines.findIndex((l) => /^Warning: Multiple config files found\b/i.test(l.trim()));
-  if (start < 0) return stderr;
-  let end = start + 1;
-  while (end < lines.length && /^\s+(?:Using|Ignoring):/.test(lines[end])) end += 1;
-  if (end < lines.length && /^Consider consolidating\b/i.test(lines[end].trim())) end += 1;
-  const rest = [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim();
+  const isStart = (l) => /^Warning: Multiple config files found\b/i.test(l.trim());
+  if (!lines.some(isStart)) return stderr;
+  // Every block: one git push runs its login helper more than once (`get`, then `store` or `erase`), and glab
+  // prints the block each time (#526 review).
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!isStart(lines[i])) { kept.push(lines[i]); continue; }
+    while (i + 1 < lines.length && /^\s+(?:Using|Ignoring):/.test(lines[i + 1])) i += 1;
+    if (i + 1 < lines.length && /^Consider consolidating\b/i.test(lines[i + 1].trim())) i += 1;
+  }
+  const rest = kept.join('\n').trim();
   if (ok) return rest;
   const hint = 'glab reads only one of its two config files, so a login saved in the other is not used (see `yad doctor`, glab-config)';
   return rest ? `${hint} — ${rest}` : hint;
