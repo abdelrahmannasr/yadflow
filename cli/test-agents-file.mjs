@@ -1663,3 +1663,63 @@ test('E167: nothing that creates, prints or changes a secret, token or variable 
     assert.match(PREAPPROVED.never, /secrets, tokens, variables/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #532: output readings stay separate from the historical positional readings.
+const outputGaps = [
+  '{ echo gh pr merge 5; } > f; bash f',
+  '( echo gh pr merge 5 ) > f; bash f',
+  '{ echo gh pr merge 5; } >! f; zsh f',
+  '{ echo gh pr merge 5; } | tee f; bash f',
+  "echo echo 'gh pr merge 5' | bash > g; bash g",
+  "echo 'echo gh pr merge 5' > f; eval \"$(<f)\" > g; bash g",
+  '$(echo $(echo gh >& 1 pr merge 5))',
+  "printf 'gh pr ' | cat - <(echo merge 5) | bash",
+  "{ printf '%s ' gh pr; echo merge 5; } | bash",
+  "printf 'gh pr ' > a; printf '%s\\n' 'merge 5' >> a; bash a",
+  "{ printf '%b\\n' 'gh pr \\c'; echo merge 5; } | bash",
+  "printf '\\x67h pr merge 5\\n' | bash",
+  "printf 'git push \\055-force\\n' | bash",
+  "{ printf 'gh pr\\n' | tr -d '\\n'; echo ' merge 5'; } | bash",
+  "{ printf 'gh prX' | head -c 5; echo ' merge 5'; } | bash",
+];
+test('#532: every reported output gap is refused, while text only printed stays allowed', () => {
+  for (const line of outputGaps) assert.equal(agentGuardDecision(line).allow, false, line);
+  for (const line of ["printf '%s ' gh pr merge 5", '{ echo gh pr merge 5; } > f',
+    "printf '\\x67h pr merge 5\\n'", "{ printf '%s ' echo; echo hello; } | bash",
+    "printf 'echo ' > a; printf '%s\\n' hello >> a; bash a"]) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+});
+
+test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
+  const T = tmp();
+  const log = path.join(T, 'executed');
+  const bin = path.join(T, 'bin'); fs.mkdirSync(bin);
+  for (const name of ['gh', 'git']) {
+    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf reached >> "$GUARD_STREAM_LOG"\n', { mode: 0o755 });
+  }
+  const corpus = [...outputGaps];
+  for (const printer of ["echo gh pr merge 5", "printf '%s ' gh pr merge 5", "printf '%b' '\\x67h pr merge 5\\n'"]) {
+    for (const group of [`{ ${printer}; }`, `( ${printer} )`]) {
+      for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);
+    }
+  }
+  for (const shell of ['/bin/bash', '/bin/zsh']) {
+    if (!fs.existsSync(shell)) continue;
+    for (const line of corpus) {
+      fs.rmSync(log, { force: true });
+      try {
+        execFileSync(shell, ['-c', line], { cwd: T, timeout: 2000, stdio: 'ignore',
+          env: { PATH: `${bin}:/bin:/usr/bin`, HOME: T, GUARD_STREAM_LOG: log } });
+      } catch { /* A shell-specific syntax error is not an execution witness. */ }
+      if (fs.existsSync(log)) assert.equal(agentGuardDecision(line).allow, false, `${shell}: ${line}`);
+    }
+  }
+});
+
+test('#532: repeated cat stdin copies are charged before they exhaust the deadline', () => {
+  const line = `printf x > a; echo go | ${'cat - $(<a) | '.repeat(25)}bash`;
+  const v = agentGuardDecision(line);
+  assert.equal(v.allow, false);
+  assert.doesNotMatch(v.message, /took too long/);
+});

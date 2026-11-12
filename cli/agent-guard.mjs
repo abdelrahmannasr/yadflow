@@ -12,12 +12,13 @@
 // The refusal says what to do instead: ask the person to run it themselves (`! <command>` in Claude Code).
 //
 // A SPEED BUMP, NOT PROOF. It reads the command line the agent sends, so a command hidden in a script, an
-// alias or `eval` is not seen; Codex has no hooks at all. What proves an approval is the platform (and CI's
+// alias is not seen; Codex has no hooks at all. What proves an approval is the platform (and CI's
 // ledger guard). The rules in AGENTS.md are what the agent follows; this catches the plain mistake.
 //
 // FAIL-OPEN, like the ledger guard: a payload it cannot read, or no command in it, is allowed.
 import fs from 'node:fs';
 import path from 'node:path';
+import { streamGuard } from './guard-stream.mjs';
 import { fileURLToPath } from 'node:url';
 import { classify, readAllowList } from './agent-rules.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from './argv-flags.mjs';
@@ -124,6 +125,9 @@ export function shellParts(rawLine, mode = {}) {
   Object.defineProperty(parts, 'writes', { value: [] });
   Object.defineProperty(parts, 'reads', { value: [] });
   Object.defineProperty(parts, 'pipedWrites', { value: [] });
+  Object.defineProperty(parts, 'groups', { value: [] });
+  const braceGroups = [];
+  let closedGroup = null;
   let partSubst = null;
   const wordSubs = [];
   let partWrites = null;
@@ -199,9 +203,15 @@ export function shellParts(rawLine, mode = {}) {
   const endPart = () => {
     endWord(); dropWord = false; hereString = false; redirect = null; redirectBefore = null;
     afterDup = null;
+    if (words[0] === '{') braceGroups.push(parts.length);
+    if (words[0] === '}' && braceGroups.length) {
+      const g = { from: braceGroups.pop(), to: parts.length, writes: partWrites ?? [] };
+      parts.groups.push(g); closedGroup = g;
+    }
     if (words.length) { parts.braced.push(partBraced); parts.posix.push(partPosix); parts.subst.push(partSubst); parts.writes.push(partWrites); parts.reads.push(partReads); parts.push(words); }
     // A redirect alone after a pipe: zsh writes what it is piped to the file (`echo … | > f`), as `cat > f` would.
     else if (partWrites && parts.length && parts.piped.has(parts.length)) parts.pipedWrites.push({ after: parts.length - 1, writes: partWrites });
+    if (!words.length && partWrites && closedGroup) closedGroup.writes.push(...partWrites);
     words = []; partBraced = null; partPosix = null; partSubst = null; partWrites = null; partReads = null;
   };
   // Where the heredocs opened on this line end: the index just past the last one's end line, or -1 when an end
@@ -388,15 +398,16 @@ export function shellParts(rawLine, mode = {}) {
         const owner = !isProc ? null : carry ? [...prevProc.owner, ...(prevProc.viaStdin ? [] : ['\0']), ...words] : prevProc ? prevProc.owner.slice(0, 64) : words.slice();
         const viaStdin = !zshEq && redirectBefore?.op === '<';
         endPart();
-        parens.push({ proc: owner && owner.length ? { owner, position: owner.length, viaStdin, maybe: !!prevProc && !carry, from: parts.length } : null, cases: 0 });
+        parens.push({ from: parts.length, proc: owner && owner.length ? { owner, position: owner.length, viaStdin, maybe: !!prevProc && !carry, sourceFrom: i + 1, from: parts.length } : null, cases: 0 });
         continue;
       }
       endPart();
       if (ch === ')' && !parens.at(-1)?.cases) {
         const top = parens.pop();
         const p = top?.proc;
+        if (top && !p) { closedGroup = { from: top.from, to: parts.length, writes: [] }; parts.groups.push(closedGroup); }
         // A held `)` before already recorded this substitution: its record now runs to this, the real close.
-        if (p && top.held) { top.held.to = parts.length; afterProc = p; } else if (p) { parts.procsubs.push({ ...p, to: parts.length }); afterProc = p; }
+        if (p && top.held) { top.held.to = parts.length; top.held.text = line.slice(p.sourceFrom, i); afterProc = p; } else if (p) { parts.procsubs.push({ ...p, to: parts.length, text: line.slice(p.sourceFrom, i) }); afterProc = p; }
       } else if (ch === ')' && parens.at(-1)?.held) {
         // One record per substitution, run on to each later held `)` (#498 review: a `case` the reader took
         // for the reserved word may hold every one).
@@ -1164,6 +1175,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
   try {
     return judgeReadings(line, depth);
   } catch (e) {
+    if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return TOO_MUCH_WRITTEN;
     // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
@@ -1242,6 +1254,15 @@ function judgeReadings(line, depth, ends, inherited = null) {
       if (depth === 0) { caseLeft.n = CASE_SCAN; built.n = 0; resetFiles(); }
       const v = judgeLine(text, depth, mode);
       if (!v.allow) return v;
+      if (depth === 0) {
+        const extra = streamGuard(text, mode, {
+          // Each output parse gets its own case scan, while copies and time remain shared.
+          shellParts: (s, m) => { const saved = caseLeft.n; caseLeft.n = CASE_SCAN; try { return shellParts(s, m); } finally { caseLeft.n = saved; } },
+          stripPrefix, programOf, bareShell, scriptAt, innerLines,
+          judge: (t) => agentGuardDecision(t, 1),
+          charge: (n) => { if ((built.n += n) > BUILT_CHARS || Date.now() > deadline) throw Object.assign(new Error('output reading budget exceeded'), { code: 'YAD_GUARD_OUTPUT_LIMIT' }); } });
+        if (!extra.allow) return extra;
+      }
     }
   }
   // An end word that expands can end the heredoc on any line, whatever the variable holds (`bash -c "cat <<E$x …"`
@@ -1355,7 +1376,9 @@ function fedOf(parts, mode, deep) {
 // files of one `cat` also joined. `input` is what it reads from a pipe or a `<` file, which `cat` (with no file,
 // or `-`) and `tee` print. A file read past its limits gives OVER; null when its joins are too long (see zipJoin).
 function printedOf(fed, n, lists, input = []) {
-  const out = [...(fed.get(n) ?? [])];
+  const out = [];
+  const add = (...xs) => { for (const x of xs) { if ((built.n += x.length + 64) > BUILT_CHARS) throw Object.assign(new Error('output reading budget exceeded'), { code: 'YAD_GUARD_OUTPUT_LIMIT' }); out.push(x); } };
+  for (const x of fed.get(n) ?? []) add(x);
   for (const pw of lists) {
     if (!pw.length) continue;
     const prog = programOf(pw[0]);
@@ -1365,21 +1388,21 @@ function printedOf(fed, n, lists, input = []) {
       let k = 1;
       let format = false;
       while (k < pw.length && (prog === 'echo' ? /^-[neE]+$/ : /^-[A-Za-z]+$/).test(pw[k])) { if (prog === 'print' && pw[k].includes('f')) format = true; k++; }
-      out.push(pw.slice(k).join(' '));
+      add(pw.slice(k).join(' '));
       // And main's reading, every `-n`/`-e`/`-E` word dropped wherever it stands: judged on its own, as main
       // judged it, and kept out of the joins (in the list, it moved the readings the joins pair, #498 review).
       if (prog === 'echo') (out.alone ??= []).push(pw.slice(1).filter((x) => !/^-[neE]+$/.test(x)).join(' '));
-      if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) out.push(pw.slice(k + 1).join(' '));
+      if (pw[k] === '-' || (prog === 'print' && pw[k] === '--') || format) add(pw.slice(k + 1).join(' '));
     }
     // `printf` prints its format and its words; also its words after the format (`--` ends its options).
     if (prog === 'printf') {
       const f = pw[1] === '--' ? 2 : 1;
-      out.push(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
+      add(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
     }
     if (prog === 'cat' || prog === 'tee') {
       // A word read past its limits stays, even as an option (`cat -$(cat f)` may be `cat -- h`, #498 review).
       const args = pw.slice(1).filter((a) => !a.startsWith('-') || a === '-' || (prog === 'cat' && a.includes(OVER)));
-      if (prog === 'tee' || !args.length || args.includes('-')) for (const x of input) out.push(x);
+      if (prog === 'tee' || !args.length || args.includes('-')) for (const x of input) add(x);
       if (prog === 'cat') {
         const per = [];
         for (const a of args) {
@@ -1394,8 +1417,8 @@ function printedOf(fed, n, lists, input = []) {
         }
         // Every reading, empty ones too: the joins pair readings by their place, so dropping one moves the rest
         // (#498 review). Their memory is bounded by BUILT_CHARS.
-        for (const t of per) for (const x of t) out.push(x);
-        if (per.length > 1) { const z = zipJoin(per); if (z === null) return null; for (const x of z) out.push(x); }
+        for (const t of per) for (const x of t) add(x);
+        if (per.length > 1) { const z = zipJoin(per); if (z === null) return null; for (const x of z) add(x); }
       }
     }
   }
