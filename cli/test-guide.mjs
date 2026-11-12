@@ -1364,8 +1364,13 @@ test('#508: hiddenFolders names the ignored folder above a kept path, never a fi
     // folder, so a kept `.claude/settings.json` names nothing; and a deletion names nothing either.
     put(path.join(A, '.gitignore'), '.claude/*\n!.claude/settings.json\n');
     assert.deepEqual(hiddenFolders(A, ['.claude/settings.json']), []);
-    // A deletion in an ignored folder: git stages it but still exits 1, so the folder is named (review 3).
+    // A deletion in an ignored folder still on disk: git stages it but still exits 1, so the folder is named
+    // (review 3). A folder that is gone is never refused, so it is never named — not `.claude` read as matching
+    // `.claude/*`, not `old` beside a real refusal (review 4).
     assert.deepEqual(hiddenFolders(A, ['vendor/gone.js']).map((x) => x.folder), ['vendor']);
+    put(path.join(A, '.gitignore'), '.claude/*\nold/\n');
+    fs.rmSync(path.join(A, '.claude'), { recursive: true, force: true });
+    assert.deepEqual(hiddenFolders(A, ['.claude/settings.json', 'old/a.md', 'vendor/lib/a.js']).map((x) => x.folder), ['vendor']);
     // A folder named with glob characters is suggested escaped, so the pattern matches it alone.
     assert.match(hiddenFolderText([{ folder: 'we ird[1]*', paths: ['we ird[1]*/a'], source: '~/mine', line: 1, pattern: 'x', outside: true }], '.', { staged: false }), /add `!\/we ird\\\[1\\\]\\\*\/` to this repo/);
   } finally { fs.rmSync(P, { recursive: true, force: true }); }

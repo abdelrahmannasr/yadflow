@@ -129,23 +129,25 @@ export function stageAllowlist(git, root, paths) {
 export function hiddenFolders(root, paths) {
   const folderOf = new Map();
   for (const p of paths) {
-    // A deletion counts too: git stages it, yet still exits 1 over an ignored folder above it (review 3). A
-    // path that is gone is a file, its folders asked as gone ones; a link is a file to git (lstat).
+    // A deletion counts too: git stages it, yet still exits 1 over an ignored folder above it that is still
+    // on disk (review 3). A folder that is gone is never refused (git exits 0 for it), so only folders on disk
+    // are asked (review 4). A path that is gone is a file; a link is a file to git (lstat).
     let isDir = false;
     try { isDir = fs.lstatSync(path.join(root, p)).isDirectory(); } catch { /* gone: a file */ }
     const parts = p.replace(/\/+$/, '').split('/');
     for (let n = 1; n <= parts.length - (isDir ? 0 : 1); n++) {
       const dir = parts.slice(0, n).join('/');
+      let onDisk = false;
+      try { onDisk = fs.lstatSync(path.join(root, dir)).isDirectory(); } catch { /* gone */ }
+      if (!onDisk) break; // nothing below a gone folder is on disk either
       if (!folderOf.has(dir)) folderOf.set(dir, []);
       folderOf.get(dir).push(p);
     }
   }
   if (!folderOf.size) return [];
-  // Asked as the folder git sees: a folder on disk by its name, so `.claude/*` is not read as matching
-  // `.claude` itself (it does with a trailing slash); a folder that is gone (a deletion) with the slash, so a
-  // folder-only pattern (`build/`) still matches it.
-  const ask = (d) => (fs.existsSync(path.join(root, d)) ? d : `${d}/`);
-  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: [...folderOf.keys()].map(ask).join('\0'), maxBuffer: 64 * 1024 * 1024 });
+  // Asked by name, never with a trailing slash: with one, `.claude/*` is read as matching `.claude` itself.
+  // Every folder asked is on disk, so a folder-only pattern (`build/`) matches it as a folder.
+  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: [...folderOf.keys()].join('\0'), maxBuffer: 64 * 1024 * 1024 });
   if (r.error || !r.stdout) return [];
   const gitDirRun = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
   // Compared by real path: git names a temp or linked folder by its real spelling (`/private/var`), the run by
