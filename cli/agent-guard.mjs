@@ -526,8 +526,7 @@ function caseInEnd(line, i, getIndex, rare = false) {
     if (!rare || line[j] !== '#') break;
     while (j < limit && line[j] !== '\n') j++;
   }
-  if (j >= limit) return done(-1);
-  if (rare && line[j] === '{' && /\s/.test(line[j - 1])) return done(j + 1);
+  if (rare && j < limit && line[j] === '{' && /\s/.test(line[j - 1])) return done(j + 1);
   return done(/^in(?![^\s;&|()<>])/.test(line.slice(j, j + 3)) ? j + 2 : -1);
 }
 // Whether a command starts at `i`: only blanks between it and `from`, or a `;`, `&`, `)` or newline (not `|` or
@@ -1166,9 +1165,14 @@ function judgeReadings(line, depth, ends) {
   const flagModes = [{}];
   for (const f of flags) for (const m of flagModes.slice()) flagModes.push({ ...m, [f]: true });
   const modes = [];
-  for (const rule of rules) for (const m of flagModes) modes.push({ ...m, ends: rule });
+  // The rarer readings (#516) run with no flag: each is one more pass over the whole line, and with every flag and
+  // text too they doubled the time on a long line, so lines main judged were refused out of time.
+  for (const rule of rules) for (const m of rule.endsWith('+') ? [{}] : flagModes) modes.push({ ...m, ends: rule });
+  // The rarer readings are bash 3.2's and zsh's, and neither drops a CR (Git Bash, which can, is bash 4 or later): the
+  // line as written, and with its `\` + newline joins made.
+  const rareTexts = /\\\n/.test(line) ? [line, line.replace(/\\\n/g, '')] : [line];
   for (const mode of modes) {
-    for (const text of texts) {
+    for (const text of mode.ends?.endsWith('+') ? rareTexts : texts) {
       // Each reading of the command gets its own budget for `case` words (#498).
       if (depth === 0) { caseLeft.n = CASE_SCAN; built.n = 0; resetFiles(); }
       const v = judgeLine(text, depth, mode);

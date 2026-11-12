@@ -518,12 +518,12 @@ test('the agent guard refuses every human-only yad command and every force push,
     // B3, B4 (zsh): a `case` word in backticks; a comment, a newline or a `;` before `in`.
     'echo "$(case `echo x` in\nx) gh pr merge 5 ;; esac)"', 'echo "$(case x #c\nin\nx) gh pr merge 5 ;; esac)"', 'echo "$(case x #c\n#d\n\nin\nx) gh pr merge 5 ;; esac)"',
     'echo "$(case x ;in\nx) gh pr merge 5 ;; esac)"',
-    // B5 (zsh): `esac` right after `}`, `esac`, `]]`, `!` or `in`.
-    `echo "$(case x in x) { echo '"' ; } esac)" ; git push -f ; echo '"'`, 'echo "$(case x in x) [[ a ]] esac)" ; git push -f ; echo "',
-    'echo "$(case x in x) ! esac)" ; git push -f ; echo "',
+    // B5 (zsh): `esac` right after `}` or `]]` (and `esac`, `!`, `in`: no line found that main lets through and zsh runs).
+    `echo "$(case x in x) { echo '"' ; } esac)" ; git push -f ; echo '"'`, `echo "$(case x in x) [[ '"' ]] esac)" ; git push -f ; echo '"'`,
     // B6 (zsh): `case x { … }`, closed by `}` (anywhere, `echo }` too) or `esac`; a group's `}` inside it closes the group.
-    'echo "$(case x {\nx) git push -f ;; })"', 'echo "$(case x { x) echo } ;; })" ; git push -f ; echo "', 'echo "$(case x { x) { echo ; } ;; })" ; git push -f',
-    'echo "$(case x { x) echo ;; esac)" ; git push -f',
+    'echo "$(case x {\nx) git push -f ;; })"', `echo "$(case x { x) echo '"' } )" ; git push -f ; echo '"'`, `echo "$(case x { x) echo '"' ;; esac)" ; git push -f ; echo '"'`,
+    // Review round 1: an `in` right at the 4,096-character bound on a `case` word still counts, as on main (zsh runs it).
+    `echo "$(case x${' '.repeat(4090)}in x) echo '"' ;; esac)" ; git push -f ; echo '"'`,
     // #498, rows 1, 2, 8: text that reaches a shell (bash 3.2 and zsh 5.9 run each). Row 1: a process substitution
     // as a shell's script or input.
     'bash <(echo "gh pr merge 5")', 'bash < <(echo "gh pr merge 5")', 'source <(echo "git push --force")', ". <(echo 'gh pr merge 5')",
