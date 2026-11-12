@@ -11,12 +11,19 @@ import path from 'node:path';
 const SHELL_PROG = /^(?:bash|sh|zsh|dash|ksh|source|\.)$/;
 // A compound command's last part: its output, and its redirects, are the whole command's.
 const CLOSERS = new Set(['}', 'fi', 'done', 'esac']);
-const OPENERS = new Set(['if', 'for', 'while', 'until', 'case', 'select']);
+// Each opener with the word that closes it.
+const OPENERS = new Map([['if', 'fi'], ['for', 'done'], ['while', 'done'], ['until', 'done'], ['select', 'done'], ['case', 'esac']]);
+// Reserved words that may stand before a compound command in the same part (`then while …`, `{ if …`, `! for …`).
+const LEAD = new Set(['{', '(', 'then', 'do', 'else', 'elif', '!', 'time']);
+// The part's first word that is not one of those (`time -p for …` too).
+const headOf = (ws) => { let i = 0; while (i < ws.length && (LEAD.has(ws[i]) || (ws[i - 1] === 'time' && ws[i] === '-p'))) i++; return ws[i]; };
 // Every text a file may hold is kept (a write that may not run hides none before it, as in the guard's own
 // file reading); past this many for one file the line is refused.
 const MAX_TEXTS = 64;
 // A `printf` width past this is refused, not built (`%999999999s`).
 const MAX_WIDTH = 65536;
+// Process substitutions nested past this many are refused as too deep.
+const PROC_LEVELS = 16;
 const LIMIT = 'YAD_GUARD_OUTPUT_LIMIT';
 const fail = (message, code = LIMIT) => Object.assign(new Error(message), { code });
 
@@ -69,13 +76,20 @@ export function streamGuard(line, mode, api, zsh = false) {
   const charge = api.charge;
   const copy = (s) => { charge(s.length + 1); return s; };
   const join = (xs) => { for (const x of xs) charge(x.length + 1); return xs.join(''); };
-  const key = (s) => path.posix.normalize(s);
+  // A file's name as the reader records a redirect's target, with no backslash (the run's word keeps the one the
+  // shell keeps in double quotes): `> "a\b"; bash "a\b"` is one file (#532 review 2). Two names may share one.
+  const key = (s) => path.posix.normalize(s.replace(/\\/g, ''));
   // Every text the file may hold, one after another on lines of their own: no two are read as one line.
-  const read = (s) => {
+  // Each text on its own, for a shell that runs the file: joined, an open quote in one would hide the next
+  // (#532 review 2). Past MAX_TEXTS a file is refused only when read, not when written.
+  const textsOf = (s) => {
     const texts = files.get(key(s));
-    if (!texts) return '';
-    return join(texts.flatMap((t, i) => i ? ['\n', t] : [t]));
+    if (!texts) return [];
+    if (texts.over) throw fail('too many writes to one file');
+    for (const t of texts) charge(t.length + 1);
+    return texts.slice();
   };
+  const read = (s) => join(textsOf(s).flatMap((t, i) => i ? ['\n', t] : [t]));
   // A `>` adds a text (the same text again only moves to the end, as the guard's own set of a file's texts
   // keeps it once); a `>>` adds to each one.
   const write = (wr, text) => {
@@ -87,7 +101,7 @@ export function streamGuard(line, mode, api, zsh = false) {
     if (wr.append) { for (let i = 0; i < texts.length; i++) { charge(t.length + 1); texts[i] += t; } return; }
     const at = texts.indexOf(t);
     if (at >= 0) texts.splice(at, 1);
-    else if (texts.length >= MAX_TEXTS) throw fail('too many writes to one file');
+    else if (texts.length >= MAX_TEXTS) { texts.over = true; return; }
     texts.push(t);
   };
   const check = (s) => { if (s && verdict.allow) verdict = api.judge(s); };
@@ -152,10 +166,11 @@ export function streamGuard(line, mode, api, zsh = false) {
     }
     return join(out);
   }
-  function run(text, level = 0, stdin = '') {
-    // `$(…)` and shells nest as the guard counts them (its TOO_DEEP). A process substitution is not a level: the
-    // guard bounds those with its own walk, and each one's text is shorter than the line (#532 review 10).
+  function run(text, level = 0, stdin = '', procLevel = 0) {
+    // `$(…)` and shells nest as the guard counts them (its TOO_DEEP). Process substitutions count on their own,
+    // deeper (#532 review 10): each level parses its text again, so 1,500 of them overflowed the stack (review 2).
     if (level > 3) throw fail('output nesting limit exceeded', 'YAD_GUARD_TOO_DEEP');
+    if (procLevel > PROC_LEVELS) throw fail('process substitutions nested too deep', 'YAD_GUARD_TOO_MANY_PROCSUBS');
     const fileSub = /^\s*<\s*([^\s;&|<>()$`'"\\]+)\s*$/.exec(text);
     if (fileSub) return read(fileSub[1]);
     if (/^[A-Za-z0-9_]*$/.test(text) && !/^(echo|printf|print|cat|tee|eval|bash|zsh|sh|dash|ksh)$/.test(text)) return '';
@@ -173,11 +188,13 @@ export function streamGuard(line, mode, api, zsh = false) {
     const groups = new Map();
     const addGroup = (g) => { if (!groups.has(g.to)) groups.set(g.to, []); groups.get(g.to).push(g); };
     for (const g of parts.groups) addGroup(g);
+    // A closer closes only its own opener: inside a `case`, a pattern spelled `done` or `fi` closes nothing
+    // (#532 review 2), and a mismatched one is left alone rather than pairing with the wrong opener.
     const opened = [];
     for (let n = 0; n < parts.length; n++) {
-      const w = parts[n][0];
-      if (OPENERS.has(w)) opened.push(n);
-      else if (CLOSERS.has(w) && w !== '}' && opened.length) addGroup({ from: opened.pop(), to: n, writes: [], closer: true });
+      const w = headOf(parts[n]);
+      if (OPENERS.has(w)) opened.push({ n, end: OPENERS.get(w) });
+      else if (CLOSERS.has(w) && w !== '}' && opened.at(-1)?.end === w) addGroup({ from: opened.pop().n, to: n, writes: [], closer: true });
     }
     const close = (n) => {
       for (const g of groups.get(n) ?? []) {
@@ -201,7 +218,7 @@ export function streamGuard(line, mode, api, zsh = false) {
         if (!entry) { words.push(parts.posix[n]?.get(i) ?? parts[n][i]); continue; }
         const pieces = []; let from = 0;
         for (const sub of entry.subs) {
-          pieces.push(entry.word.slice(from, sub.at), run(sub.text, level + 1).replace(/\n+$/, ''));
+          pieces.push(entry.word.slice(from, sub.at), run(sub.text, level + 1, '', procLevel).replace(/\n+$/, ''));
           from = sub.at + sub.len;
         }
         pieces.push(entry.word.slice(from));
@@ -219,8 +236,9 @@ export function streamGuard(line, mode, api, zsh = false) {
       const stdinText = () => input || fed || redirected;
       let out = '';
       const proc = procs.get(n) ?? [];
-      const procOutputs = proc.map((p) => run(p.text ?? '', level));
-      if (CLOSERS.has(parts[n][0])) out = before;
+      const procOutputs = proc.map((p) => run(p.text ?? '', level, '', procLevel + 1));
+      // A closing part prints its group's output; one that closes none (a `case` pattern) prints nothing.
+      if (CLOSERS.has(parts[n][0])) out = (groups.get(n) ?? []).some((g) => g.brace || g.closer) ? before : '';
       else if (prog === 'echo') {
         // zsh's `echo` always makes escapes, and its `-` ends the options; bash's makes them with -e.
         let k = 1, newline = true, decode = zsh;
@@ -238,7 +256,7 @@ export function streamGuard(line, mode, api, zsh = false) {
         while (k < words.length) {
           const w = words[k];
           if (w === '-' || w === '--') { k++; break; }
-          if (!/^-[A-Za-z]+$/.test(w)) break;
+          if (!/^-[A-Za-z]/.test(w)) break;
           k++;
           for (const c of w.slice(1)) {
             if (c === 'n') newline = false;
@@ -246,11 +264,15 @@ export function streamGuard(line, mode, api, zsh = false) {
             else if (c === 'e') decode = true;
             else if (c === 'l') sep = '\n';
             else if (c === 'N') { sep = '\0'; end = '\0'; }
-            else if (c === 'f') fmt = words[k++] ?? '';
             else if ('sSz'.includes(c)) silent = true;
-            else if (c === 'v') { silent = true; k++; }
-            else if (c === 'u') { if (words[k++] !== '1') silent = true; }
-            else if ('CxX'.includes(c)) k++;
+            else if ('fvuCxX'.includes(c)) {
+              // An option that takes a value takes the rest of the word (`-u1`, `-f'%s '`), or else the next word.
+              const rest = w.slice(w.indexOf(c) + 1);
+              const value = rest || (words[k++] ?? '');
+              if (c === 'f') fmt = value;
+              else if (c === 'v' || (c === 'u' && value !== '1')) silent = true;
+              break;
+            }
           }
         }
         if (silent) out = '';
@@ -297,26 +319,33 @@ export function streamGuard(line, mode, api, zsh = false) {
       } else {
         const script = api.scriptAt(words);
         const body = api.innerLines(words);
-        if (api.bareShell(words)) body.push(stdinText());
-        if (script >= 0) body.push(read(words[script]));
-        if (words[0]?.includes('/')) body.push(read(words[0]));
-        // A process substitution a shell runs: its stdin (`bash < <(…)`), or its script (`bash <(…)`,
-        // `source <(…)`, zsh's `zsh =(…)`), the first word after the shell and its options (#532 review 6).
-        for (let i = 0; i < proc.length; i++) {
-          const p = proc[i];
-          const pre = parts[n].slice(0, p.position);
-          const at = pre.findLastIndex((w) => SHELL_PROG.test(api.programOf(w)));
-          if (at < 0) continue;
-          if (p.viaStdin || pre.slice(at + 1).every((w) => w.startsWith('-') && w !== '-c')) body.push(procOutputs[i]);
+        // A file a shell runs is run text by text (see textsOf).
+        if (api.bareShell(words)) {
+          if (!input && !fed && parts.reads[n]?.length) for (const r of parts.reads[n]) body.push(...textsOf(r));
+          else body.push(stdinText());
         }
-        for (const t of body) { check(t); out = join([out, run(t, level + 1)]); }
+        if (script >= 0) body.push(...textsOf(words[script]));
+        if (words[0]?.includes('/')) body.push(...textsOf(words[0]));
+        // A process substitution the command's shell runs (#532 review 6): its stdin when it has no script
+        // (`bash < <(…)`, not `bash x < <(…)`), or its script, the first word after the shell's options
+        // (`bash <(…)`, `source <(…)`, zsh's `zsh =(…)`), never with -c or -s. Only the command word counts as the
+        // shell: `ls . <(…)` and `grep sh <(…)` run nothing (review 2).
+        const cmdAt = SHELL_PROG.test(prog) ? parts[n].indexOf(words[0]) : -1;
+        const opts = (ws) => ws.every((w) => w.startsWith('-') && w !== '-c' && w !== '-s');
+        for (let i = 0; cmdAt >= 0 && i < proc.length; i++) {
+          const p = proc[i];
+          const runs = p.viaStdin ? opts(words.slice(1)) : p.position > cmdAt && opts(parts[n].slice(cmdAt + 1, p.position));
+          if (runs) body.push(procOutputs[i]);
+        }
+        for (const t of body) { check(t); out = join([out, run(t, level + 1, '', procLevel)]); }
       }
       // Judge substituted commands too, but quote words so data arguments stay data.
       if (parts.subst[n]) check(words.map((w) => "'" + w.replace(/'/g, "'\\''") + "'").join(' '));
-      for (const wr of parts.writes[n] ?? []) write(wr, out);
+      const after = proc.flatMap((p) => p.after ?? []);
+      for (const wr of [...(parts.writes[n] ?? []), ...after]) write(wr, out);
       for (const p of pipedWrites.get(n) ?? []) for (const wr of p.writes) write(wr, out);
       if (prog === 'tee') for (const a of words.slice(1)) if (!a.startsWith('-')) write({ target: a, append: words.includes('-a') || words.includes('--append') }, out);
-      stdout[n] = parts.writes[n]?.length ? '' : out; before = out;
+      stdout[n] = parts.writes[n]?.length || after.length ? '' : out; before = out;
       if (proc.length) n = Math.max(...proc.map((p) => p.to)) - 1;
     }
     close(parts.length);

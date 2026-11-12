@@ -1783,6 +1783,41 @@ test('#532 review: the twins of the output gaps are refused, and text only print
   }
 });
 
+// Lines review 2 found that a real bash 3.2 or zsh 5.9 runs, and the output pass let through.
+const outputGapsReview2 = [
+  // A file name with a backslash the shell keeps in double quotes is the file its redirect wrote (R1).
+  `{ printf 'gh pr '; echo merge 5; } > "a\\b"; bash "a\\b"`, `{ printf 'gh pr '; echo merge 5; } > "a\\b"; source "a\\b"`,
+  // Each text a file may hold is run on its own: an open quote in one hides no other (R2).
+  `echo "echo '" > f; test -n "$X" || { printf 'gh pr '; echo merge 5; } > f; bash f`,
+  // Compound commands after a reserved word, nested, and a `case` pattern spelled like a closer (R3).
+  "{ if true; then printf 'gh '; fi; printf 'pr '; } > f; echo merge 5 >> f; bash f",
+  "if true; then while false; do :; done; printf 'gh '; printf 'pr '; fi > f; echo merge 5 >> f; bash f",
+  "for i in 1; do for j in 1; do :; done; printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "time for i in 1; do printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "! for i in 1; do printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "case x in x) printf 'gh pr ' ;; done) : ;; esac > f; echo merge 5 >> f; bash f",
+  // A redirect after a process substitution, and `print` options with their value attached.
+  "cat <(printf 'gh pr ') > f; echo merge 5 >> f; bash f", 'print -u1 gh pr merge 5 | zsh', `print -f"%s " gh pr merge 5 | zsh`,
+];
+
+test('#532 review 2: holes the round-1 fixes opened are closed, and lines that run nothing stay allowed', () => {
+  for (const line of outputGapsReview2) assert.equal(agentGuardDecision(line).allow, false, line);
+  // A file written past 64 texts is refused only when it is read (B1); only the command word is the shell that
+  // runs a process substitution, and `bash x < <(…)` runs `x` (B2).
+  for (const line of [Array.from({ length: 65 }, (_, i) => `echo ${i} > out.txt`).join('; '),
+    "ls . <(printf 'gh pr '; echo merge 5)", "grep -n sh <(printf 'gh pr '; echo merge 5)",
+    "bash x < <(printf 'gh pr '; echo merge 5)", 'print -u2 gh pr merge 5 | zsh']) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+  assert.equal(agentGuardDecision(`${Array.from({ length: 65 }, (_, i) => `echo ${i} > f`).join('; ')}; bash f`).allow, false);
+  // A deep nest of process substitutions is refused at once, with the process substitution message (B3).
+  const t = Date.now();
+  const deep = agentGuardDecision(`${'cat <('.repeat(1500)}echo hi${')'.repeat(1500)}`);
+  assert.equal(deep.allow, false);
+  assert.match(deep.message, /process substitutions/);
+  assert.ok(Date.now() - t < 2000, `took ${Date.now() - t} ms`);
+});
+
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
   const T = tmp();
   const log = path.join(T, 'executed');
@@ -1790,7 +1825,7 @@ test('#532: differential output corpus against bash and zsh with harmless execut
   for (const name of ['gh', 'git']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf reached >> "$GUARD_STREAM_LOG"\n', { mode: 0o755 });
   }
-  const corpus = [...outputGaps, ...outputGapsReview];
+  const corpus = [...outputGaps, ...outputGapsReview, ...outputGapsReview2];
   for (const printer of ["echo gh pr merge 5", "printf '%s ' gh pr merge 5", "printf '%b' '\\x67h pr merge 5\\n'"]) {
     for (const group of [`{ ${printer}; }`, `( ${printer} )`]) {
       for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);

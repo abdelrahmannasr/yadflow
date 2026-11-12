@@ -411,6 +411,10 @@ export function shellParts(rawLine, mode = {}) {
         if (top && !p) { closedGroup = { from: top.from, to: parts.length, writes: [] }; parts.groups.push(closedGroup); }
         // A held `)` before already recorded this substitution: its record now runs to this, the real close.
         if (p && top.held) { top.held.to = parts.length; top.held.text = line.slice(p.sourceFrom, i); afterProc = p; } else if (p) { parts.procsubs.push({ ...p, to: parts.length, text: line.slice(p.sourceFrom, i) }); afterProc = p; }
+        // A redirect-only part straight after it is its command's (`cat <(…) > f`): kept in `after`, which only the
+        // output pass reads (#532 review 2).
+        const rec = p && (top.held ?? parts.procsubs.at(-1));
+        if (rec) closedGroup = { writes: (rec.after ??= []) };
       } else if (ch === ')' && parens.at(-1)?.held) {
         // One record per substitution, run on to each later held `)` (#498 review: a `case` the reader took
         // for the reserved word may hold every one).
@@ -1180,6 +1184,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
   } catch (e) {
     if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return TOO_MUCH_WRITTEN;
     if (e?.code === 'YAD_GUARD_TOO_DEEP') return TOO_DEEP;
+    if (e?.code === 'YAD_GUARD_TOO_MANY_PROCSUBS') return TOO_MANY_PROCSUBS;
     // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
