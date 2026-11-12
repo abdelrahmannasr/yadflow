@@ -1329,7 +1329,7 @@ function writeFile(target, texts, append) {
   const wasOpen = f.open;
   const gluedSize = f.gluedTexts?.size ?? 0;
   for (const t of texts) if (t !== '') f.texts.add(t);
-  for (const t of texts.glued ?? []) if (t !== '') (f.gluedTexts ??= new Set()).add(t);
+  for (const t of texts.glued ?? []) if (t !== '' && !f.texts.has(t)) (f.gluedTexts ??= new Set()).add(t);
   // Joined one by one, not through zipJoin's reduce, so a long run of `>>` stays linear (#498 review).
   // #518: `allOpen` is the same run read with no newline after a write that printed none (`printf 'gh pr ' > f;
   // echo merge 1 >> f`), beside `all`, which keeps the newline reading. One list beside the other: linear too.
@@ -1354,7 +1354,7 @@ function writeFile(target, texts, append) {
     }
   } else {
     for (const a of f.all ?? []) if (a !== '') f.texts.add(a);
-    for (const a of f.allOpen ?? []) if (a !== '') (f.gluedTexts ??= new Set()).add(a);
+    for (const a of f.allOpen ?? []) if (a !== '' && !f.texts.has(a)) (f.gluedTexts ??= new Set()).add(a);
     f.all = texts.length ? texts.slice() : null;
     f.allOpen = texts.glued?.length ? [...texts.glued, ...texts] : null;
     f.open = !!(texts.length && texts.open);
@@ -1376,6 +1376,8 @@ function fedOf(parts, mode, deep) {
       const s = spellWord(x.subst, mode, true);
       if (s === null) return null;
       for (const ws of s) add(x.part, ws.join(' '));
+      // Kept apart (`fed.apart`), as spellWord keeps them: `fed` heads printedOf's paired list (#518 review 2).
+      for (const ws of s.glued ?? []) { fed.apart ??= new Map(); if (!fed.apart.has(x.part)) fed.apart.set(x.part, []); fed.apart.get(x.part).push(ws.join(' ')); }
     }
   }
   return fed;
@@ -1415,7 +1417,7 @@ function printedOf(fed, n, lists, input = []) {
       out.push(pw.slice(1).join(' '), pw.slice(f).join(' '), pw.slice(f + 1).join(' '));
       // #518: a format that does not end in a newline prints none (`printf 'gh pr '`, `printf '%s' x`): what is
       // printed next runs on into the same line. Unknown counts as none; the newline reading is kept as well.
-      if (!endsInNewline(pw[f] ?? '')) out.open = true;
+      if (!endsInNewline(pw[f] ?? '') || /(?:^|[^\\])(?:\\\\)*\\c/.test(pw[f] ?? '')) out.open = true;
       // And the format with its escapes made (`printf 'git push --force\n'` prints a line a shell runs), apart.
       const made = printfEscapes(pw.slice(f).join(' '));
       if (made !== pw.slice(f).join(' ')) apart.push(made);
@@ -1443,6 +1445,15 @@ function printedOf(fed, n, lists, input = []) {
         if (per.length && per[per.length - 1].open) out.open = true;
       }
     }
+  }
+  for (const t of fed.apart?.get(n) ?? []) apart.push(t);
+  // What its spellings kept apart print (#518 review 2): read the same way, every reading of it kept apart.
+  if (lists.glued?.length) {
+    const more = printedOf(new Map(), n, lists.glued, input);
+    if (more === null) return null;
+    for (const t of more) apart.push(t);
+    for (const t of more.glued ?? []) apart.push(t);
+    if (more.open) out.open = true;
   }
   if (apart.length) out.glued = apart;
   return out;
@@ -1541,10 +1552,11 @@ function spellWord(entry, mode, noSplit = false) {
   const res = spellPass(entry, outs, noSplit);
   // #518: the readings a `$(…)` prints that are kept apart, in a pass of their own after main's, so they move none
   // of the pairs main's pass makes by place (review 1).
+  // Returned apart (`res.glued`), never in `res`, which its callers pair by place too (review 2).
   if (res !== null && outs.some((o) => o.glued?.length)) {
     const more = spellPass(entry, outs.map((o) => (o.glued?.length ? o.glued : o)), noSplit);
     if (more === null) return null;
-    for (const ws of more) res.push(ws);
+    if (more.length) res.glued = more;
   }
   return res;
 }
@@ -1583,6 +1595,8 @@ function spellingsOf(parts, n, subst) {
   const posix = parts.posix[n];
   if (posix) { const kept = part.slice(); for (const [k, v] of posix) kept[k] = v; out.push(stripPrefix(kept)); }
   if (subst) for (const s of subst) out.push(stripPrefix(s));
+  // The spellings kept apart (#518 review 2): printedOf reads them into its own readings kept apart.
+  if (subst?.glued?.length) out.glued = subst.glued.map(stripPrefix);
   return out;
 }
 // The spellings of part `n` with each `$(…)` read for what it prints (#498, row 2), whole parts with the prefix;
@@ -1598,18 +1612,32 @@ function substituted(parts, n, mode) {
     if (a === null) return null;
     alts.set(k, a); m = Math.max(m, a.length);
   }
-  const out = [];
-  for (let j = 0; j < m; j++) {
-    if (Date.now() > deadline) return null;
-    const ws = [];
-    for (let k = 0; k < part.length; k++) {
-      const a = alts.get(k);
-      // Every word is copied once per reading, so each is counted (#498 review).
-      if (!a) { built.n += part[k].length + 1; ws.push(part[k]); continue; }
-      for (const x of a[Math.min(j, a.length - 1)]) { built.n += x.length + 1; ws.push(x); }
+  const pass = (pick, count) => {
+    const res = [];
+    for (let j = 0; j < count; j++) {
+      if (Date.now() > deadline) return null;
+      const ws = [];
+      for (let k = 0; k < part.length; k++) {
+        const a = pick(k);
+        // Every word is copied once per reading, so each is counted (#498 review).
+        if (!a) { built.n += part[k].length + 1; ws.push(part[k]); continue; }
+        for (const x of a[Math.min(j, a.length - 1)]) { built.n += x.length + 1; ws.push(x); }
+      }
+      if (built.n > BUILT_CHARS) return null;
+      res.push(ws);
     }
-    if (built.n > BUILT_CHARS) return null;
-    out.push(ws);
+    return res;
+  };
+  const out = pass((k) => alts.get(k), m);
+  if (out === null) return null;
+  // #518 review 2: the spellings each word's `$(…)` gives apart (spellWord's `.glued`), in a pass of their own and
+  // returned apart (`out.glued`): in `out` they would move the spellings printedOf pairs by place.
+  if ([...alts.values()].some((a) => a.glued?.length)) {
+    let m2 = 0;
+    for (const a of alts.values()) m2 = Math.max(m2, (a.glued?.length ? a.glued : a).length);
+    const more = pass((k) => { const a = alts.get(k); return a && (a.glued?.length ? a.glued : a); }, m2);
+    if (more === null) return null;
+    if (more.length) out.glued = more;
   }
   return out;
 }
@@ -1700,7 +1728,8 @@ function judgeParts(parts, depth, mode) {
     if (subst === null) return TOO_MUCH_WRITTEN;
     // A file read past its limits whose text is the command (`$(<f)`): refused, as a shell would run it.
     // A file read past its limits, in a word of a command that is not a printer (`gh $(<f)`): refused.
-    for (const s of subst) {
+    // The spellings kept apart (#518 review 2) are judged too: `variants` pairs nothing by place.
+    for (const s of [...subst, ...(subst.glued ?? [])]) {
       const sw = stripPrefix(s);
       if (sw.length && (sw[0].includes(OVER) || (!PRINTERS.has(programOf(sw[0])) && sw.some((x) => x.includes(OVER))))) return TOO_MUCH_WRITTEN;
       variants.push(s);

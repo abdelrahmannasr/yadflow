@@ -627,6 +627,11 @@ test('the agent guard refuses every human-only yad command and every force push,
     "printf 'git push --force\\n' | bash", "{ printf 'git push'; printf ' --force\\n'; } | bash", "source <(printf -- 'git push'; printf ' --force\\n')",
     "printf 'git push' > f; printf ' --force\\n' >> f; printf 'x' >> f; bash f", "{ printf 'git -c a=\\\\n'; echo 'b push --force'; } | bash", "{ echo -e 'gh pr \\c'; echo merge 5; } | bash",
     "{ print -f 'gh pr '; echo merge 5; } | zsh",
+    // PR 2 review 2: a word's spellings kept apart stay apart too — main refuses this only by pairing `gh` with the
+    // last spelling of the next word — and `\c` before a final `\n` still prints no newline (zsh).
+    "printf '%s\\n' 'pr merge 5' > c; printf z0 > a; printf '%s\\n' gh > a; eval $(<a) $(<c)",
+    "printf '%s\\n' --force >> c; printf '%s\\n' 'pr merge 5' > a; printf '%s' gh > c; echo $(<c) \"$(cat a)\" | bash",
+    "{ printf 'gh pr \\c\\n'; echo merge 5; } | zsh",
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
