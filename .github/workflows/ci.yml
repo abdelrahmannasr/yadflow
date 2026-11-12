@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every PR, whatever its base: a stacked PR (based on another PR's branch) got no CI run before,
+  # and GitHub does not re-run it when the base later moves to main (#534).
   pull_request:
-    branches: [main]
   # Nightly, and by hand (#434): the macOS legs run on these and on pushes to main, not on pull requests. The
   # nightly run repeats every job, so `npm audit` also catches an advisory published since the last merge.
   schedule:
