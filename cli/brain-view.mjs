@@ -254,6 +254,9 @@ export const scriptSafeJSON = (value) => JSON.stringify(value)
   .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sha256b64 = (s) => createHash('sha256').update(s, 'utf8').digest('base64');
 
+const SERVED_START = '<!--SERVED:start-->';
+const SERVED_END = '<!--SERVED:end-->';
+
 // One HTML file with everything inline, and a CSP that allows exactly the inline blocks it holds (by hash)
 // and no network at all.
 export function snapshotHTML(model) {
@@ -269,9 +272,14 @@ export function snapshotHTML(model) {
     "img-src data:", "base-uri 'none'", "form-action 'none'",
   ].join('; ');
   // The key placeholder goes before anything is spliced in: the brain's own names may hold the same text.
-  const body = readView(PAGE.html).replaceAll('__TOKEN__', '')
+  // The served page's <script src> tags sit between two markers and are cut out by them, never by matching
+  // HTML with a pattern.
+  const shell = readView(PAGE.html).replaceAll('__TOKEN__', '');
+  const from = shell.indexOf(SERVED_START);
+  const to = shell.indexOf(SERVED_END);
+  if (from < 0 || to < from) throw new Error(`the page has no ${SERVED_START} … ${SERVED_END} block`);
+  const body = (shell.slice(0, from) + shell.slice(to + SERVED_END.length))
     .replace(/<link rel="stylesheet"[^>]*>/, () => `<style>${css}</style>`)
-    .replace(/<script src="[^"]*"><\/script>\s*/g, '')
     .replace('<!--SCRIPTS-->', () => [
       `<script type="application/json" id="yad-brain-data">${scriptSafeJSON(model)}</script>`,
       ...scripts.map((s) => `<script>${s}</script>`),
