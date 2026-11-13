@@ -20,6 +20,7 @@
 //      written by --html escapes the JSON so no label can close its <script> tag.
 
 import fs from 'node:fs';
+import { setInterval, clearInterval } from 'node:timers';
 import http from 'node:http';
 import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -29,12 +30,15 @@ import { c, emitJSON, forTerminal, info, log, ok, refuse, run, warn } from './li
 import { BRAIN_DIR, BRAIN_FILE, codeBehind, ensureBrainDir, readBrain, writePlain } from './brain.mjs';
 import { VENDORED } from './brain-vendor.mjs';
 import { openUrl } from './report.mjs';
+import { activityIndex, activitySources, follow, matchEvent, planOf, readBacklog } from './brain-activity.mjs';
+import { activityWanted } from './plan.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VIEW_DIR = path.join(HERE, 'brain', 'view');
 const VENDOR_DIR = path.join(HERE, 'brain', 'vendor');
 
 export const VIEW_FILE = path.join(BRAIN_DIR, 'view.html');
+export const LIVE_FILE = path.join(BRAIN_DIR, 'live.html');
 // Above this many nodes the page asks before drawing everything: a WebGL layout of tens of thousands of
 // nodes can stall a laptop's browser for a minute.
 export const WARN_ABOVE = 5000;
@@ -154,24 +158,29 @@ export function viewModel(brain, { codeBehind: behind = [], builtAt = null } = {
     counts: { nodes: vnodes.length, edges: edges.length, work: vnodes.filter((n) => n.layer === 'work').length, code: vnodes.filter((n) => n.layer === 'code').length },
     defaultCount: inDefault.filter(Boolean).length,
     warnAbove: WARN_ABOVE,
-    meta: { format: short(brain?.format, 40), builtAt, codeBehind: behind.map((r) => short(r, 200)) },
+    meta: { format: short(brain?.format, 40), inputs: short(brain?.inputs, 100), builtAt, codeBehind: behind.map((r) => short(r, 200)) },
   };
 }
 
 // ---- the page's files ----------------------------------------------------------------------------
 
 const PAGE = Object.freeze({ html: 'index.html', js: 'app.js', css: 'style.css' });
+// E178: the live view, "the Observatory" — its own page, script and style, served at the same three routes.
+const LIVE_PAGE = Object.freeze({ html: 'live.html', js: 'live.js', css: 'live.css' });
 const readView = (name) => fs.readFileSync(path.join(VIEW_DIR, name), 'utf8');
 const readVendor = (file) => fs.readFileSync(path.join(VENDOR_DIR, file));
 
-// The model for what is on disk now, or a refusal: { model } | { problem, hint }.
-function loadModel(root, runner) {
+// The model for what is on disk now, or a refusal: { model } | { problem, hint }. The live view adds the plan
+// (each task's declared files), for Plan vs reality.
+function loadModel(root, runner, { live = false } = {}) {
   let brain;
   try { brain = readBrain(root); } catch (e) { return { problem: e.message, hint: e.hint }; }
   if (!brain) return { problem: `no brain here yet (${BRAIN_FILE})`, hint: 'build it: `yad brain build`' };
   let builtAt = null;
   try { builtAt = fs.statSync(path.join(root, BRAIN_FILE)).mtime.toISOString(); } catch { /* shown as unknown */ }
-  return { model: viewModel(brain, { codeBehind: codeBehind(root, brain, runner), builtAt }) };
+  const model = viewModel(brain, { codeBehind: codeBehind(root, brain, runner), builtAt });
+  if (live) { model.plan = planOf(model); model.live = true; }
+  return { model };
 }
 
 // ---- the server ----------------------------------------------------------------------------------
@@ -196,16 +205,79 @@ function tokenMatches(given, token) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// ---- the live stream (E178) ----------------------------------------------------------------------
+
+// The `/events` stream: Server-Sent Events, one way, from this machine's activity records to the page.
+//   status    { activity, sources, brain } — whether the record is on, which repos are followed
+//   backlog   [event…] — the recent past (readBacklog), so the timeline can replay at once
+//   activity  one event — each new record, matched to the brain (matchEvent), as it lands
+// The files are followed only while a page is open, and a page that stops reading (its buffer passes 8 MB)
+// is dropped rather than held in memory.
+function activityStream(root, { runner, heartbeat, interval }) {
+  const clients = new Set();
+  let current = null; // { model, index }
+  let followers = null;
+  let sources = [];
+  const use = (model) => { current = { model, index: activityIndex(model) }; };
+  const ensureModel = () => {
+    if (!current) { const m = loadModel(root, runner, { live: true }); if (m.model) use(m.model); }
+    return current;
+  };
+  const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const send = (res, chunk) => {
+    if (res.writableLength > 8 * 1024 * 1024) { res.destroy(); clients.delete(res); return; }
+    res.write(chunk);
+  };
+  const broadcast = (src, r) => {
+    const c = ensureModel();
+    if (!c) return;
+    const chunk = frame('activity', { ...matchEvent(c.index, src, r), brain: c.model.meta.inputs });
+    for (const res of clients) send(res, chunk);
+  };
+  const start = () => {
+    if (followers) return;
+    sources = activitySources(root, { runner });
+    followers = sources.map((src) => follow(src, broadcast, { interval }));
+  };
+  const stop = () => { for (const f of followers || []) f.stop(); followers = null; };
+  const ping = setInterval(() => { for (const res of clients) send(res, ': ping\n\n'); }, heartbeat);
+  ping.unref?.();
+  return {
+    use,
+    attach(req, res, headers) {
+      res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      start();
+      const c = ensureModel();
+      res.write(frame('status', { activity: activityWanted(root), sources: sources.map((x) => x.repo ?? 'product'), brain: c?.model.meta.inputs ?? null }));
+      const backlog = c ? readBacklog(sources).map(({ src, r }) => matchEvent(c.index, src, r)) : [];
+      res.write(frame('backlog', backlog));
+      clients.add(res);
+      req.on('close', () => { clients.delete(res); if (!clients.size) stop(); });
+      return undefined;
+    },
+    close() { clearInterval(ping); stop(); for (const res of clients) res.end(); clients.clear(); },
+  };
+}
+
+// The recorded past, matched, for a replay file (`--html --live`).
+function recordedReplay(root, model, runner) {
+  const index = activityIndex(model);
+  return readBacklog(activitySources(root, { runner })).map(({ src, r }) => matchEvent(index, src, r));
+}
+
 // Start the viewer's server: { url, token, port, close() }. `root` is the Product.
-export function startBrainServer(root, { runner = run, host = '127.0.0.1', port = 0 } = {}) {
+export function startBrainServer(root, { runner = run, host = '127.0.0.1', port = 0, live = false, heartbeat = 15000, interval = 500 } = {}) {
   const token = randomBytes(24).toString('hex');
+  const page = live ? LIVE_PAGE : PAGE;
+  const stream = live ? activityStream(root, { runner, heartbeat, interval }) : null;
   // The route table: a request path is only ever a KEY here. Nothing it says reaches the filesystem.
   const routes = new Map([
-    ['/', () => ({ type: TYPES.html, body: readView(PAGE.html).replaceAll('__TOKEN__', token) })],
-    ['/app.js', () => ({ type: TYPES.js, body: readView(PAGE.js) })],
-    ['/style.css', () => ({ type: TYPES.css, body: readView(PAGE.css) })],
+    ['/', () => ({ type: TYPES.html, body: readView(page.html).replaceAll('__TOKEN__', token) })],
+    ['/app.js', () => ({ type: TYPES.js, body: readView(page.js) })],
+    ['/style.css', () => ({ type: TYPES.css, body: readView(page.css) })],
     ['/graph.json', () => {
-      const m = loadModel(root, runner);
+      const m = loadModel(root, runner, { live });
+      if (m.model && stream) stream.use(m.model);
       return m.model
         ? { type: TYPES.json, body: JSON.stringify(m.model) }
         : { status: 404, type: TYPES.json, body: JSON.stringify({ error: m.problem, hint: m.hint }) };
@@ -224,6 +296,8 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
     let url;
     try { url = new URL(req.url, `http://${expectedHost}`); } catch { return text(400, 'bad request'); }
     if (!tokenMatches(url.searchParams.get('t'), token)) return text(403, 'forbidden');
+    // E178: the live stream — Server-Sent Events, one way, read-only, behind the same key and Host check.
+    if (stream && url.pathname === '/events' && req.method === 'GET') return stream.attach(req, res, BASE_HEADERS);
     const route = routes.get(url.pathname);
     if (!route) return text(404, 'not found');
     try {
@@ -240,7 +314,7 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
       expectedHost = `${host}:${a.port}`;
       resolve({
         url: `http://${expectedHost}/?t=${token}`, token, port: a.port, host, server,
-        close: () => new Promise((done) => { server.closeAllConnections?.(); server.close(() => done()); }),
+        close: () => new Promise((done) => { stream?.close(); server.closeAllConnections?.(); server.close(() => done()); }),
       });
     });
   });
@@ -259,9 +333,10 @@ const SERVED_END = '<!--SERVED:end-->';
 
 // One HTML file with everything inline, and a CSP that allows exactly the inline blocks it holds (by hash)
 // and no network at all.
-export function snapshotHTML(model) {
-  const scripts = [...VENDORED.map((v) => readVendor(v.file).toString('utf8')), readView(PAGE.js)];
-  const css = readView(PAGE.css);
+export function snapshotHTML(model, { live = false } = {}) {
+  const page = live ? LIVE_PAGE : PAGE;
+  const scripts = [...VENDORED.map((v) => readVendor(v.file).toString('utf8')), readView(page.js)];
+  const css = readView(page.css);
   // A script's own text must not hold `</script`, or the file would end it early. The vendored files and
   // app.js are checked here, so a future release that holds one fails loudly instead of breaking the page.
   for (const s of scripts) if (/<\/script/i.test(s)) throw new Error('an inline script holds </script');
@@ -274,7 +349,7 @@ export function snapshotHTML(model) {
   // The key placeholder goes before anything is spliced in: the brain's own names may hold the same text.
   // The served page's <script src> tags sit between two markers and are cut out by them, never by matching
   // HTML with a pattern.
-  const shell = readView(PAGE.html).replaceAll('__TOKEN__', '');
+  const shell = readView(page.html).replaceAll('__TOKEN__', '');
   const from = shell.indexOf(SERVED_START);
   const to = shell.indexOf(SERVED_END);
   if (from < 0 || to < from) throw new Error(`the page has no ${SERVED_START} … ${SERVED_END} block`);
@@ -311,43 +386,47 @@ function trackedRisk(file, runner = spawnSync) {
 
 // ---- the command ---------------------------------------------------------------------------------
 
-export const VIEW_USAGE = 'usage: yad brain view [--open]  |  yad brain view --html [<file>] [--open]   (--json prints what was done)';
+export const VIEW_USAGE = 'usage: yad brain view [--live] [--open]  |  yad brain view --html [<file>] [--live] [--open]   (--json prints what was done)';
 
-export async function runBrainView(root, { args = [], html = false, open = false, json = false, runner = run, opener = openUrl, gitRunner = spawnSync, wait = true } = {}) {
+export async function runBrainView(root, { args = [], html = false, open = false, live = false, json = false, runner = run, opener = openUrl, gitRunner = spawnSync, wait = true } = {}) {
   if (args.length > (html ? 1 : 0) || args.some((a) => String(a).startsWith('-'))) {
     return refuse(`unexpected argument(s): ${args.map(forTerminal).join(' ')}`, VIEW_USAGE, { json });
   }
-  const m = loadModel(root, runner);
+  const m = loadModel(root, runner, { live });
   if (!m.model) return refuse(m.problem, m.hint, { json });
   const behind = m.model.meta.codeBehind;
   const behindLine = behind.length ? `the code moved in ${behind.join(', ')} since the brain was built — run \`yad brain build\` for a current picture` : null;
 
   if (html) {
     const own = args.length === 1;
-    const file = own ? path.resolve(args[0]) : path.join(ensureBrainDir(root), 'view.html');
+    const file = own ? path.resolve(args[0]) : path.join(ensureBrainDir(root), live ? 'live.html' : 'view.html');
+    // E178: `--live` with `--html` is a REPLAY file — the recorded activity embedded, played back offline.
+    if (live) m.model.replay = recordedReplay(root, m.model, runner);
     let page;
-    try { page = snapshotHTML(m.model); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
+    try { page = snapshotHTML(m.model, { live }); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
     if (own) {
       const problem = writeOwnFile(file, page);
       if (problem) return refuse(problem, null, { json });
-    } else writePlain(path.dirname(file), 'view.html', page);
+    } else writePlain(path.dirname(file), path.basename(file), page);
     const risk = own && trackedRisk(file, gitRunner);
     const riskLine = risk ? `${forTerminal(file)} is in a git work tree and not ignored: it holds the names in your code — do not commit it` : null;
     const opened = open ? opener(file) : null;
-    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}) });
-    ok(`wrote ${forTerminal(own ? file : VIEW_FILE)} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges; open it in a browser (it needs no server and no network)`);
+    const events = live ? { events: m.model.replay.length } : {};
+    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, ...events, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}) });
+    ok(`wrote ${forTerminal(own ? file : (live ? LIVE_FILE : VIEW_FILE))} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges${live ? `, ${m.model.replay.length} recorded events to replay` : ''}; open it in a browser (it needs no server and no network)`);
     if (behindLine) warn(behindLine);
     if (riskLine) warn(riskLine);
     if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — open the file yourself');
     return undefined;
   }
 
-  const s = await startBrainServer(root, { runner });
+  const s = await startBrainServer(root, { runner, live });
   const opened = open ? opener(s.url) : null;
   if (json) emitJSON({ url: s.url, port: s.port, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(open ? { opened } : {}) });
   else {
-    log(c.bold('\nyad brain view'));
+    log(c.bold(live ? '\nyad brain view --live' : '\nyad brain view'));
     ok(`the brain is at ${s.url}`);
+    if (live && !activityWanted(root)) warn('the live activity record is off, so nothing the agent does will show — set `"activity": true` in the Product config, then `yad check --fix`');
     info('only this machine can reach it, and only with that address (it holds a one-time key). Ctrl-C stops it.');
     info('reload the page after `yad brain build` to see the new graph');
     if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — copy the address into your browser');

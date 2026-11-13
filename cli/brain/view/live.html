@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Project brain, live</title>
+<link rel="stylesheet" href="style.css?t=__TOKEN__">
+</head>
+<body>
+<canvas id="stars" class="stars" aria-hidden="true"></canvas>
+<header class="bar">
+  <div class="mark">
+    <span id="pulse" class="pulse" aria-hidden="true"></span>
+    <span id="mode" class="mode">Connecting</span>
+  </div>
+  <div class="where">
+    <span id="where-story" class="where-story">No task yet</span>
+    <span id="where-task" class="where-task"></span>
+  </div>
+  <p class="limit" title="The record holds tool calls and file paths only: never prompts, reasoning, file content, search terms or command text.">Shows what the agent did, not why</p>
+</header>
+
+<main class="deck">
+  <section class="now" aria-labelledby="now-h">
+    <h2 id="now-h" class="sr-only">Now</h2>
+    <div id="now-op" class="now-op">Waiting</div>
+    <div id="now-path" class="now-path is-quiet">for the agent's first move</div>
+    <div id="now-when" class="now-when"></div>
+    <p id="now-say" class="sr-only" aria-live="polite"></p>
+    <ul class="tally" aria-label="What the agent did in this window">
+      <li data-op="read"><span class="tally-n" id="n-read">0</span><span class="tally-l">files read</span><canvas class="spark" id="sp-read" width="120" height="26" aria-hidden="true"></canvas></li>
+      <li data-op="search"><span class="tally-n" id="n-search">0</span><span class="tally-l">searches</span><canvas class="spark" id="sp-search" width="120" height="26" aria-hidden="true"></canvas></li>
+      <li data-op="edit"><span class="tally-n" id="n-edit">0</span><span class="tally-l">edits</span><canvas class="spark" id="sp-edit" width="120" height="26" aria-hidden="true"></canvas></li>
+      <li data-op="run"><span class="tally-n" id="n-run">0</span><span class="tally-l">commands</span><canvas class="spark" id="sp-run" width="120" height="26" aria-hidden="true"></canvas></li>
+    </ul>
+    <div class="sessions" id="sessions" hidden>
+      <label for="session">Session</label>
+      <select id="session"><option value="">Every session</option></select>
+    </div>
+  </section>
+
+  <section class="sky" aria-label="The brain, lit by what the agent touches">
+    <div id="graph" class="graph"></div>
+    <canvas id="fx" class="fx" aria-hidden="true"></canvas>
+    <div id="empty" class="empty" hidden>
+      <div class="empty-ring" aria-hidden="true"></div>
+      <p id="empty-title" class="empty-title">Waiting for the agent</p>
+      <p id="empty-hint" class="empty-hint">Start a task in Claude Code or Cursor. Each file it reads, searches or edits will light up here.</p>
+    </div>
+    <div id="inspect" class="inspect" hidden></div>
+    <div class="sky-tools" role="group" aria-label="View">
+      <button type="button" id="t-follow" class="tool" aria-pressed="true" title="Move the view to each node the agent touches (F)">Follow</button>
+      <button type="button" id="t-heat" class="tool" aria-pressed="true" title="Keep a glow where the agent has worked (H)">Heat</button>
+      <button type="button" id="t-fit" class="tool" title="Show the whole brain">Fit</button>
+    </div>
+    <p id="toast" class="toast" role="status" hidden></p>
+  </section>
+
+  <section class="plan" aria-labelledby="plan-h">
+    <h2 id="plan-h" class="plan-h">Plan and reality</h2>
+    <div id="plan-task" class="plan-task">
+      <p class="quiet">When the agent touches a file a task declares, that task shows here with its files.</p>
+    </div>
+    <div id="plan-out" class="plan-out" hidden>
+      <h3>Edited outside the plan</h3>
+      <p class="quiet small">No task of this story declares these files.</p>
+      <ul id="plan-out-list" class="paths"></ul>
+    </div>
+    <div class="plan-touched">
+      <h3><span id="touched-n">0</span> files touched</h3>
+      <details id="unmapped" hidden>
+        <summary><span id="unmapped-n">0</span> not in the brain</summary>
+        <ul id="unmapped-list" class="paths"></ul>
+      </details>
+    </div>
+    <p id="rebuilt" class="note" hidden>The brain was rebuilt since this page opened. Reload it to match.</p>
+  </section>
+</main>
+
+<footer class="river" aria-label="Timeline">
+  <div class="river-tools">
+    <button type="button" id="r-play" class="tool" title="Play from here (Space)">Play</button>
+    <div class="speeds" role="group" aria-label="Speed">
+      <button type="button" class="tool speed" data-speed="1" aria-pressed="true">1×</button>
+      <button type="button" class="tool speed" data-speed="4" aria-pressed="false">4×</button>
+      <button type="button" class="tool speed" data-speed="16" aria-pressed="false">16×</button>
+    </div>
+    <button type="button" id="r-live" class="tool tool-live" title="Back to now (L)">Live</button>
+    <div class="spans" role="group" aria-label="How far back">
+      <button type="button" class="tool span" data-span="session" aria-pressed="true">This session</button>
+      <button type="button" class="tool span" data-span="all" aria-pressed="false">Two weeks</button>
+    </div>
+  </div>
+  <div class="river-wrap">
+    <canvas id="river" class="river-canvas" tabindex="0" aria-label="Timeline: drag to replay, arrow keys to step"></canvas>
+    <div id="river-tip" class="river-tip" hidden></div>
+  </div>
+  <div class="river-ends"><span id="river-from"></span><span id="river-to"></span></div>
+</footer>
+<!--SCRIPTS-->
+<!--SERVED:start-->
+<script src="vendor/graphology.umd.min.js?t=__TOKEN__"></script>
+<script src="vendor/graphology-library.min.js?t=__TOKEN__"></script>
+<script src="vendor/sigma.min.js?t=__TOKEN__"></script>
+<script src="app.js?t=__TOKEN__"></script>
+<!--SERVED:end-->
+</body>
+</html>
