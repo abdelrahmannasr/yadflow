@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The #280 guard (cli/test.mjs): printed lines go to stderr while the runner owns stdout.
 if (process.env.NODE_TEST_CONTEXT) {
@@ -799,25 +799,35 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
 });
 
 test('#535 CI: a reading of what a command writes, stopped by the deadline, is refused as out of time, not as too much written', async () => {
-  // A slow runner, made on purpose: the guard with a 50 ms budget, loaded from a copy whose imports point back
-  // here. Each line below is allowed in full time; at this budget its reading of written files is cut short.
+  // A slow runner, made on purpose: a copy of the guard whose budget the test sets per call, with its imports
+  // pointing back here (its SHIPPED_CHECKS path points nowhere, which agentGuardDecision never reads). Where the
+  // deadline lands depends on the machine's speed, so each line is timed at the full budget, then judged again
+  // at budgets from a tenth of that time to nearly all of it: every phase the deadline can stop is reached.
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guard-slow-'));
   try {
-    let src = fs.readFileSync(path.join(dir, 'agent-guard.mjs'), 'utf8')
-      .replace(/export const JUDGE_BUDGET_MS = \d+;/, 'export const JUDGE_BUDGET_MS = 50;')
+    const src = fs.readFileSync(path.join(dir, 'agent-guard.mjs'), 'utf8')
+      .replace('deadline = Date.now() + JUDGE_BUDGET_MS;', 'deadline = Date.now() + (globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS);')
       .replace(/from '\.\/([\w-]+\.mjs)'/g, (_, f) => `from ${JSON.stringify(new URL(f, import.meta.url).href)}`);
-    assert.match(src, /JUDGE_BUDGET_MS = 50;/);
+    assert.ok(src.includes('globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS'), 'the budget is set per call in the copy');
     const copy = path.join(T, 'agent-guard.mjs');
     fs.writeFileSync(copy, src);
-    const slow = await import(new URL(`file://${copy}`).href);
+    const slow = await import(pathToFileURL(copy).href);
     const half = (unit) => unit.repeat(Math.floor(slow.MAX_JUDGED / 2 / unit.length));
-    for (const unit of ['echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
-      const d = slow.agentGuardDecision(half(unit));
-      assert.equal(d.allow, false, unit);
-      assert.match(d.message, /took too long to judge/, `${unit}: ${d.message}`);
+    const steps = process.env.NODE_V8_COVERAGE ? [0.1, 0.3, 0.5, 0.7, 0.9] : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+    for (const unit of ['bash -c "$(echo x)";', 'echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
+      const line = half(unit);
+      const t0 = Date.now();
+      assert.equal(slow.agentGuardDecision(line).allow, true, `${unit}: allowed in full time`);
+      const full = Date.now() - t0;
+      for (const f of steps) {
+        globalThis.YAD_TEST_BUDGET = Math.max(1, Math.round(full * f));
+        const d = slow.agentGuardDecision(line);
+        assert.ok(d.allow || /took too long to judge/.test(d.message), `${unit} at ${globalThis.YAD_TEST_BUDGET} of ${full} ms: ${d.message}`);
+      }
+      delete globalThis.YAD_TEST_BUDGET;
     }
-  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  } finally { delete globalThis.YAD_TEST_BUDGET; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
