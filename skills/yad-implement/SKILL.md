@@ -143,6 +143,10 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   server (in Claude Code, `/mcp`), tell the person to start the agent in the folder you edit — or to set
   **Client Project Dir** in the MCP for Unity window to the folder the agent starts in, and press Configure
   again (a worktree is a new folder, so it needs this too) — and restart it, then run this step again.
+  A second Unity server, AI Game Developer, is `ai-game-developer` in the same list (E175): when it is
+  `installed` and `unity-mcp` is not, use it instead, with its own tools (below). Offer `yad toolbox connect
+  ai-game-developer --json` only when the person asks for it or already uses it; its steps set its connection
+  mode to Custom (local), since Cloud mode sends Editor data to ai-game.dev.
 - **Probe once.** Read the console (`read_console`). If it fails, or the Editor is open on another folder
   than the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor
   on the folder you edit and start the server from the MCP for Unity window; if they cannot, use the fallback
@@ -155,12 +159,18 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   Editor or change files the task did not declare, and the agent guard does not see MCP calls. After each
   edit, refresh, read the console and fix every error your change caused before you commit; when the task
   declares tests, run them (EditMode or PlayMode).
+- **With AI Game Developer instead, only these tools:** `rql-query`, to read the console (its `console`
+  source, after Unity recompiles the files you changed) and to find objects, and `tests-run` for the task's
+  tests. Probe once by reading the console the same way, and ask the person the same things if it fails.
+  Never `rql-mutate`, `script-execute`, `script-update-or-create`, `script-delete`, `package-add`,
+  `package-remove`, `assetstore-add`, or `tool-set-visibility`: they run code in the Editor, change files the
+  task did not declare, or show the agent more tools, and the agent guard does not see MCP calls.
 - **Unity's files.** Unity writes a `.meta` file beside each new file and folder under `Assets/` (it holds the
   ID): a declared file's own `.meta`, and the `.meta` of a folder made for it, go in the commit with it, and a
   declared file deleted or renamed takes its `.meta` with it. They do not count against the ≤3-file rule —
   `yad commit` counts a `.meta` only when its own file or folder is not staged. Any other file
   the Editor writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*` — is left unstaged
-  and named to the person; whether the team commits the `com.coplaydev.unity-mcp` package is theirs to decide,
+  and named to the person; whether the team commits the `com.coplaydev.unity-mcp` or `com.ivanmurzak.unity.mcp` package is theirs to decide,
   never part of a task commit.
 - **Without it**, or on a no, the toolbox's fallback holds:
   `files only: yad-implement edits the C# and asks the person to open Unity and report its console errors`.
