@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* global console, process */
 // Is every tool in the toolbox vetted, and recently enough to publish? (E88) And every skill the
-// recommendation catalogue names (E52), which carries the same record.
+// recommendation catalogue names (E52), which carries the same record, and every browser library the brain
+// viewer vendors (E177, cli/brain-vendor.mjs).
 //
 // Every entry in cli/toolbox.mjs carries a `vetted` record: where its licence was read, its official
 // source, and the day that was done. The unit suite already fails on an incomplete record. This adds the
@@ -24,6 +25,7 @@
 // `npx repomix@…` out as text change with it — the test that holds them names each line.
 import { isCalendarDay, staleVettings, TOOLBOX, VET_MAX_AGE_DAYS, vettingProblems } from '../cli/toolbox.mjs';
 import { asVetted, RECOMMENDATIONS } from '../cli/recommend.mjs';
+import { VENDORED } from '../cli/brain-vendor.mjs';
 
 const at = process.argv.indexOf('--today');
 const day = at === -1 ? null : process.argv[at + 1];
@@ -37,14 +39,16 @@ const today = day ? new Date(`${day}T00:00:00Z`) : new Date();
 
 // A catalogue entry is named `<step>:<skill>`, and lives in cli/recommend.mjs rather than cli/toolbox.mjs.
 const skills = RECOMMENDATIONS.map(asVetted);
-const all = [...TOOLBOX, ...skills];
-const fileOf = (id) => (skills.some((s) => s.id === id) ? 'cli/recommend.mjs' : 'cli/toolbox.mjs');
+// E177: the browser libraries the brain viewer vendors carry the same record, in cli/brain-vendor.mjs.
+const all = [...TOOLBOX, ...skills, ...VENDORED];
+const vendored = new Set(VENDORED.map((v) => v.id));
+const fileOf = (id) => (skills.some((s) => s.id === id) ? 'cli/recommend.mjs' : vendored.has(id) ? 'cli/brain-vendor.mjs' : 'cli/toolbox.mjs');
 const incomplete = all.map((t) => [t, vettingProblems(t)]).filter(([, p]) => p.length);
 const stale = staleVettings(today, all);
 
 if (!incomplete.length && !stale.length) {
   const oldest = all.map((t) => t.vetted.on).sort()[0];
-  console.log(`all ${TOOLBOX.length} toolbox tools and ${skills.length} recommended skills are vetted; the oldest record is from ${oldest} (limit: ${VET_MAX_AGE_DAYS} days)`);
+  console.log(`all ${TOOLBOX.length} toolbox tools and ${skills.length} recommended skills are vetted, and the ${VENDORED.length} browser libraries the brain viewer vendors; the oldest record is from ${oldest} (limit: ${VET_MAX_AGE_DAYS} days)`);
   process.exit(0);
 }
 for (const [t, problems] of incomplete) console.error(`${t.id} (${fileOf(t.id)}): not vetted — ${problems.join('; ')}`);

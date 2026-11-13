@@ -5,9 +5,12 @@
 import js from '@eslint/js';
 
 export default [
+  // The brain viewer's browser libraries (E177) are vendored byte for byte from npm: not ours to lint.
+  { ignores: ['cli/brain/vendor/**'] },
   js.configs.recommended,
   {
     files: ['cli/**/*.mjs', 'cli/**/*.js', 'bin/**/*.mjs'],
+    ignores: ['cli/brain/view/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -22,6 +25,22 @@ export default [
         // is named here — and that one is only ever touched inside a try/catch.
         globalThis: 'readonly',
         AbortSignal: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  // The brain viewer's page script (E177) runs in a browser, as a plain script.
+  {
+    files: ['cli/brain/view/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'script',
+      globals: {
+        window: 'readonly', document: 'readonly', location: 'readonly', fetch: 'readonly',
+        URLSearchParams: 'readonly', Promise: 'readonly', Set: 'readonly', Number: 'readonly', String: 'readonly',
+        Object: 'readonly', Date: 'readonly', JSON: 'readonly', Error: 'readonly',
       },
     },
     rules: {
