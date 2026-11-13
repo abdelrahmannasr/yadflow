@@ -42,8 +42,8 @@ const yad = (cwd, ...a) => spawnSync(process.execPath, [YAD, ...a], {
 // The same, with git on PATH too, for a command that asks git: a folder holding only a link to git, so a
 // Graphify installed beside git (Homebrew's one folder) is never found.
 const GIT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-brain-git-'));
-fs.symlinkSync(spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim(), path.join(GIT_DIR, 'git'));
 process.on('exit', () => fs.rmSync(GIT_DIR, { recursive: true, force: true }));
+fs.symlinkSync(spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim(), path.join(GIT_DIR, 'git'));
 const yadGit = (cwd, ...a) => spawnSync(process.execPath, [YAD, ...a], {
   cwd, encoding: 'utf8',
   env: { ...process.env, PATH: [path.dirname(process.execPath), GIT_DIR].join(path.delimiter), NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1' },
@@ -565,8 +565,8 @@ test('review 3: a grouped ship keeps the first PR found in either row order', ()
 
 test('review 4: --json build and status name a Graphify that does not start; the key is absent otherwise', () => {
   const { ws, root } = product();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-brain-bin-'));
   try {
-    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-brain-bin-'));
     // A `graphify` on PATH that cannot be started: no permission to run it.
     fs.writeFileSync(path.join(bin, 'graphify'), '#!/bin/sh\necho graphify 0.9.108\n', { mode: 0o644 });
     fs.symlinkSync(path.join(GIT_DIR, 'git'), path.join(bin, 'git'));
@@ -576,6 +576,7 @@ test('review 4: --json build and status name a Graphify that does not start; the
     let b = run('brain', 'build', '--json');
     assert.equal(b.graphify, null);
     assert.equal('graphifyError' in b, false);
+    assert.equal('graphifyError' in run('brain', 'status', '--json'), false);
     // Runnable but failing to start the interpreter it names: the spawn errors.
     fs.writeFileSync(path.join(bin, 'graphify'), '#!/no/such/interpreter\n');
     fs.chmodSync(path.join(bin, 'graphify'), 0o755); // a write to a file that exists keeps its old mode
@@ -584,6 +585,5 @@ test('review 4: --json build and status name a Graphify that does not start; the
     assert.equal(typeof b.graphifyError, 'string');
     assert.ok(b.warnings.some((w) => /cannot be started/.test(w)));
     assert.equal(typeof run('brain', 'status', '--json').graphifyError, 'string');
-    done(bin);
-  } finally { done(ws); }
+  } finally { done(ws, bin); }
 });
