@@ -798,6 +798,28 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   }
 });
 
+test('#535 CI: a reading of what a command writes, stopped by the deadline, is refused as out of time, not as too much written', async () => {
+  // A slow runner, made on purpose: the guard with a 50 ms budget, loaded from a copy whose imports point back
+  // here. Each line below is allowed in full time; at this budget its reading of written files is cut short.
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guard-slow-'));
+  try {
+    let src = fs.readFileSync(path.join(dir, 'agent-guard.mjs'), 'utf8')
+      .replace(/export const JUDGE_BUDGET_MS = \d+;/, 'export const JUDGE_BUDGET_MS = 50;')
+      .replace(/from '\.\/([\w-]+\.mjs)'/g, (_, f) => `from ${JSON.stringify(new URL(f, import.meta.url).href)}`);
+    assert.match(src, /JUDGE_BUDGET_MS = 50;/);
+    const copy = path.join(T, 'agent-guard.mjs');
+    fs.writeFileSync(copy, src);
+    const slow = await import(new URL(`file://${copy}`).href);
+    const half = (unit) => unit.repeat(Math.floor(slow.MAX_JUDGED / 2 / unit.length));
+    for (const unit of ['echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
+      const d = slow.agentGuardDecision(half(unit));
+      assert.equal(d.allow, false, unit);
+      assert.match(d.message, /took too long to judge/, `${unit}: ${d.message}`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
   // A coverage run makes this work about seven times slower, which says nothing about the guard, so it is not
   // timed. The other runs are timed, but a shared CI machine has passed 3 s on work that takes 0.5 s here, so
