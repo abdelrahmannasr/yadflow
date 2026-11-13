@@ -204,6 +204,11 @@ export const COMMAND_CLASS = {
   'history list': { class: 'read' },
   'history show': { class: 'read' },
   'history search': { class: 'read' },
+  // E176: runs Graphify in each code repo and writes only the brain's own ignored folder (and a local
+  // .git/info/exclude line). The two reads print names taken from the code, which anyone can write.
+  'brain build': { class: 'local-write' },
+  'brain query': { class: 'read' },
+  'brain status': { class: 'read' },
   'repo list': { class: 'read' },
   'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   'repo sync': { class: 'local-write' },
@@ -238,7 +243,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 // A test holds this to bin/yad.mjs.
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
-  toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check',
+  toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check', brain: 'status',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
@@ -383,7 +388,8 @@ export const claudeBlock = () => ['@AGENTS.md'];
 // command that is not a read (`yad mode` begins `yad mode team`). Written into `.claude/settings.json`
 // `permissions.allow` as `Bash(yad <words>:*)`; nothing that writes, pushes, posts or approves is ever there.
 // `standup` reads, but `--out <file>` writes the file named: a prefix rule would let it overwrite any file.
-const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show']);
+// `brain query` and `brain status` print names read from the code (E176), which anyone can write, as `issues show` does.
+const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show', 'brain query', 'brain status']);
 export function readAllowList() {
   const keys = Object.keys(COMMAND_CLASS);
   const reads = keys.filter((key) => {

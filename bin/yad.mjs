@@ -434,6 +434,14 @@ ${c.bold('Build helpers')}
   yad history search <text> [filters] [--json]
                                        Match text in ids, titles, themes, types, repos, and in who
                                        closed or merged a step, its PR and its commit
+  yad brain build [--repo <name>] [--json]
+                                       The project brain (E176): run Graphify (local, no LLM) in each
+                                       connected code repo, then merge its code graph with the work items
+                                       (epics, stories, tasks, contract surfaces, ships) into
+                                       .sdlc/brain/graph.json — on this machine only, never committed
+  yad brain query <text> [--limit <n>] [--json]
+                                       The brain's nodes whose name holds <text>, each with its neighbours
+  yad brain status [--json]            Is the brain current, and is each repo's code graph current
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -646,6 +654,7 @@ const ACTIONS = {
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
+  brain: { known: ['build', 'query', 'status'], default: 'status' },
   repo: { known: ['list', 'refresh', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
@@ -671,7 +680,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
-  'story',
+  'story', 'brain',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -684,6 +693,8 @@ function writesProduct(cmd, o) {
   // `build merged` only asks the platform, unless --ship records what it found.
   if (cmd === 'build') return action === 'sync' ? !o.dryRun : action !== 'merged' || !!o.ship;
   if (cmd === 'check') return !!o.fix;
+  // `brain build` writes only its own ignored folder, but into the Product: run from a code repo, it refuses.
+  if (cmd === 'brain') return action === 'build';
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
@@ -1397,6 +1408,12 @@ async function main() {
         action: action || 'list', args, json: !!o.json, unknownFlags,
         type: o.type ?? null, theme: o.theme ?? null, thread: o.thread ?? null, open: !!o.open, done: !!o.done,
       });
+      break;
+    }
+    case 'brain': {
+      const [, action, ...args] = o._;
+      if (action !== 'query' && args.length) { refuse(`unexpected argument(s): ${args.join(' ')}`, commands.BRAIN_USAGE); break; }
+      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json });
       break;
     }
     case 'repo': {
