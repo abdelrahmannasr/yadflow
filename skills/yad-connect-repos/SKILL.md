@@ -200,7 +200,10 @@ Optionally, offer to build the **project brain** (E176) — one knowledge graph 
 items, on this machine only: **`yad brain build`**. It runs Graphify in each connected repo with its LLM
 pass off (code is parsed locally; nothing leaves the machine), writes `.sdlc/brain/`, which ignores
 itself, and commits nothing. Without Graphify it builds the work items alone and says how to install it
-(`yad toolbox connect graphify`). Then `yad brain query <text>` answers "which story touches this file?".
+(`yad toolbox connect graphify`). Then `yad brain query <text>` answers "which story touches this file?",
+and `yad brain view --open` draws the graph in the person's browser (E177): a local page only this machine
+can reach, until Ctrl-C. It keeps running, so start it for the person to open rather than waiting on it; or
+use `yad brain view --html --open`, which writes one offline file and returns.
 
 ## Other actions
 
