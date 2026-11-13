@@ -125,7 +125,8 @@ test('the view model: two layers, a colour per kind, the work and the code it na
     assert.equal(ids.has('code:backend:lib_util_pad'), false, 'code the epic never names');
     const repo = m.filters.repos.find((f) => f.id === 'repo:backend');
     assert.ok(repo.nodes.map((i) => m.nodes[i].id).includes('story:EP-checkout-S01'), 'a story that builds in it');
-    assert.equal(repo.nodes.map((i) => m.nodes[i].id).includes('file:backend:lib/util.js'), false, 'not every file the repo holds');
+    const repoIds = repo.nodes.map((i) => m.nodes[i].id);
+    assert.ok(repoIds.includes('file:backend:lib/util.js') && repoIds.includes('code:backend:lib_util_pad'), 'the file and its code; "All the code" decides whether they are drawn');
     assert.ok(m.filters.stories.some((f) => f.id === 'story:EP-checkout-S01'));
     assert.deepEqual(m.meta, { format: 'yad-brain-1', builtAt: '2026-11-13T00:00:00.000Z', codeBehind: [] });
     assert.equal(m.warnAbove, WARN_ABOVE);
@@ -233,7 +234,7 @@ test('each vendored library is the copy its record names: the hash, the licence,
 
 test('--html: one file, no network, a CSP that names each inline block, and no name can close its tag', () => {
   const evil = '</script><img src=x onerror=alert(1)><!--';
-  const model = viewModel({ format: 'yad-brain-1', nodes: [{ id: 'epic:a', kind: 'epic', label: evil }, { id: 'x y', kind: 'code', label: '&amp;' }], edges: [] });
+  const model = viewModel({ format: 'yad-brain-1', nodes: [{ id: 'epic:a', kind: 'epic', label: evil }, { id: 'x y', kind: 'code', label: '&amp; run __TOKEN__ check' }], edges: [] });
   const html = snapshotHTML(model);
   assert.doesNotMatch(html, /<[a-z][^>]*\s(src|href)=/i, 'no tag loads anything from anywhere');
   assert.ok(!html.includes(evil) && !html.includes('</script><img'), 'the label never appears raw');
@@ -250,7 +251,8 @@ test('--html: one file, no network, a CSP that names each inline block, and no n
     assert.ok(hashes.has(createHash('sha256').update(b, 'utf8').digest('base64')), 'each inline block is allowed by its hash');
   }
   assert.equal(hashes.size, blocks.length + 1, 'and nothing else is');
-  assert.equal(html.includes('__TOKEN__'), false);
+  assert.equal(html.replace(/run __TOKEN__ check/g, '').includes('__TOKEN__'), false, 'the page\'s own placeholders are gone');
+  assert.ok(html.includes('run __TOKEN__ check'), 'and a name that holds the same text keeps it (review 1)');
   assert.equal(scriptSafeJSON({ a: '<>&  ' }), '{"a":"\\u003c\\u003e\\u0026\\u2028\\u2029"}');
 });
 
@@ -314,4 +316,55 @@ test('brain view is a local write, never pre-approved for an agent', () => {
   assert.equal(classify(['brain', 'view']), 'local-write');
   assert.equal(classify(['brain', 'view'], ['html', 'open']), 'local-write');
   assert.equal(readAllowList().some((r) => r.includes('brain view')), false);
+});
+
+test('review 1: a change-epic shows its parent, never the parent\'s tree; a repo shows its files with their code; one node per id', () => {
+  const m = viewModel({
+    format: 'yad-brain-1',
+    nodes: [
+      { id: 'epic:A', kind: 'epic', label: 'A' }, { id: 'epic:B', kind: 'epic', label: 'B' },
+      { id: 'story:A-S1', kind: 'story', label: 'A-S1' }, { id: 'story:B-S1', kind: 'story', label: 'B-S1' },
+      { id: 'repo:be', kind: 'repo', label: 'be' },
+      { id: 'file:be:x.js', kind: 'file', label: 'x.js', repo: 'be' }, { id: 'code:be:x', kind: 'code', label: 'x', repo: 'be' },
+      { id: 'epic:A', kind: 'epic', label: 'a second A' },
+    ],
+    edges: [
+      { source: 'epic:B', target: 'epic:A', relation: 'changes', confidence: 'EXTRACTED' },
+      { source: 'epic:A', target: 'story:A-S1', relation: 'has-story', confidence: 'EXTRACTED' },
+      { source: 'epic:B', target: 'story:B-S1', relation: 'has-story', confidence: 'EXTRACTED' },
+      { source: 'repo:be', target: 'file:be:x.js', relation: 'holds', confidence: 'EXTRACTED' },
+      { source: 'file:be:x.js', target: 'code:be:x', relation: 'defines', confidence: 'EXTRACTED' },
+    ],
+  });
+  const ids = (f) => f.nodes.map((i) => m.nodes[i].id).sort();
+  assert.deepEqual(ids(m.filters.epics.find((f) => f.id === 'epic:B')), ['epic:A', 'epic:B', 'story:B-S1']);
+  assert.deepEqual(ids(m.filters.epics.find((f) => f.id === 'epic:A')), ['epic:A', 'story:A-S1']);
+  assert.deepEqual(ids(m.filters.repos[0]), ['code:be:x', 'file:be:x.js', 'repo:be']);
+  assert.equal(m.nodes.filter((n) => n.id === 'epic:A').length, 1);
+  assert.equal(m.nodes.find((n) => n.id === 'epic:A').label, 'A', 'the first wins');
+  assert.equal(m.filters.epics.length, 2);
+  assert.equal(m.counts.nodes, 7);
+});
+
+test('review 1: --open finds a real opener on each system, explorer on Windows, and says when there is none', async () => {
+  const { openUrl } = await import('./report.mjs');
+  for (const [platform, cmd] of [['darwin', 'open'], ['linux', 'xdg-open'], ['win32', 'explorer']]) {
+    const ran = [];
+    assert.equal(openUrl('http://127.0.0.1:1/?t=k', { platform, exists: (c) => c === cmd, runner: (c, a) => ran.push([c, ...a]) }), true, platform);
+    assert.deepEqual(ran, [[cmd, 'http://127.0.0.1:1/?t=k']], platform);
+  }
+  assert.equal(openUrl('x', { platform: 'linux', exists: () => false, runner: () => assert.fail('nothing to run') }), false);
+
+  const { ws, root } = product();
+  const opened = [];
+  const printed = [];
+  const log = console.log;
+  console.log = (...a) => printed.push(a.join(' '));
+  let s;
+  try {
+    s = await runBrainView(root, { open: true, wait: false, runner: quiet, opener: (u) => { opened.push(u); return false; } });
+    assert.equal(opened[0], s.url, 'the address with its key');
+    assert.match(printed.join('\n'), /no browser opener was found here/);
+    assert.equal((await raw(s.port, { pathname: new URL(s.url).pathname + new URL(s.url).search })).status, 200);
+  } finally { console.log = log; await s?.close(); done(ws); }
 });

@@ -159,9 +159,15 @@ const OWN_FLAGS = new Set(['--json', '--post', '--confirm', '--kind']);
 const withoutOwnFlags = (argv) => argv.filter((a) => !OWN_FLAGS.has(String(a).split('=')[0]));
 
 // ---- open a URL (best-effort) -------------------------------------------------------------------
-export function openUrl(url, { runner = run } = {}) {
-  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  if (has(cmd)) runner(cmd, [url]);
+// Returns whether an opener was found, so a caller can say "open it yourself" when none was. On Windows
+// `start` is a built-in of cmd.exe, not a program, so it is never on PATH and cannot be spawned without a
+// shell: `explorer.exe` opens a URL or a file in its default app, and takes the argument with no shell to
+// parse it (E177 review 1).
+export function openUrl(url, { runner = run, platform = process.platform, exists = has } = {}) {
+  const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'explorer' : 'xdg-open';
+  if (!exists(cmd)) return false;
+  runner(cmd, [url]);
+  return true;
 }
 
 // ---- the flow -----------------------------------------------------------------------------------

@@ -2168,7 +2168,9 @@ yad brain view --html ~/brain.html # one file, where you name it
   define, and the code a contract surface is handled by. **All the code** draws the rest too. Above 5,000
   nodes the page asks first, because a very large drawing can slow the browser tab.
 - **Filters** by epic, story or repo. An epic or a story shows its parts, the files they declare, and one
-  step of code from those files.
+  step of code from those files. A change-epic also shows the epic it changes, but not that epic's own parts.
+  A repo shows every node in it; **All the code** decides whether the files and code the work does not name
+  are drawn.
 - **Search** finds a node by its name, file or id. Exact names come first, then the work items before the code.
 - **Click a node** to see its id, repo, file and line, step or status, and every link in and out, with how
   each link is known. A solid line was read from a file (EXTRACTED). A faint line was matched by name (INFERRED).
@@ -2187,6 +2189,9 @@ yad brain view --html ~/brain.html # one file, where you name it
 | Strict headers | A Content-Security-Policy (the browser's rule for which scripts may run) that allows only the page's own files, `nosniff`, `no-store`, `no-referrer` (so the key is never sent on), and no CORS header (so no other site can read the answers) |
 
 The key is in the address, so treat the address like a password while the page runs. Ctrl-C stops it.
+`--open` hands the address to `open` (macOS), `xdg-open` (Linux) or `explorer` (Windows), so on a machine
+other people log in to, they could see it in the process list for the moment that program runs; there,
+leave out `--open` and copy the address yourself. When none of those programs is found, yad says so.
 
 **The `--html` file** holds everything inline: the libraries, the page and the brain. It needs no server
 and no network, and its own Content-Security-Policy allows only the blocks it holds, by their hashes. Names

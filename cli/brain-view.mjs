@@ -60,9 +60,10 @@ const OTHER = { colour: '#a8a29e', layer: 'code', legend: 'Other' };
 
 // The edges a filter follows DOWN from an epic or a story: its parts, their declared files, and one hop of
 // code from those files. `builds-in`, `touches` and `merged-into` are followed one step, to show the repo,
-// never through it (a repo holds every file).
-const DOWN = new Set(['has-story', 'has-contract', 'has-task', 'declares-file', 'shipped-as', 'touches-surface', 'declares', 'mapped-to', 'handled-by', 'named-as', 'changes']);
-const ONE_STEP = new Set(['builds-in', 'touches', 'merged-into', 'defines']);
+// never through it (a repo holds every file). `changes` points from a change-epic UP to its parent, so it is
+// one step too: the parent is shown, never the parent's own tree (review 1).
+const DOWN = new Set(['has-story', 'has-contract', 'has-task', 'declares-file', 'shipped-as', 'touches-surface', 'declares', 'mapped-to', 'handled-by', 'named-as']);
+const ONE_STEP = new Set(['builds-in', 'touches', 'merged-into', 'defines', 'changes']);
 
 // The edges by which the work names code: their targets are in the default view.
 const LINKS_TO_CODE = new Set(['declares-file', 'mapped-to', 'handled-by', 'named-as']);
@@ -76,9 +77,12 @@ const short = (v, n = 300) => (typeof v === 'string' ? v.slice(0, n) : typeof v 
 //     confidence }] (s and t are node indexes), legend, filters: { epics, stories, repos: [{ id, label, nodes }] },
 //     counts, defaultCount, warnAbove, meta }
 export function viewModel(brain, { codeBehind: behind = [], builtAt = null } = {}) {
-  const nodes = Array.isArray(brain?.nodes) ? brain.nodes.filter((n) => n && typeof n.id === 'string') : [];
-  const index = new Map();
-  nodes.forEach((n, i) => { if (!index.has(n.id)) index.set(n.id, i); });
+  // One node per id: the first wins, as in the index. A brain yad wrote has no repeats; a hand-edited one
+  // must not draw a second, unlinked copy (review 1).
+  const seenIds = new Set();
+  const nodes = (Array.isArray(brain?.nodes) ? brain.nodes : [])
+    .filter((n) => n && typeof n.id === 'string' && !seenIds.has(n.id) && seenIds.add(n.id));
+  const index = new Map(nodes.map((n, i) => [n.id, i]));
   const edges = [];
   const out = nodes.map(() => []);
   const inn = nodes.map(() => []);
@@ -129,10 +133,12 @@ export function viewModel(brain, { codeBehind: behind = [], builtAt = null } = {
   const filters = {
     epics: list('epic').map(([n, i]) => ({ id: n.id, label: n.label, nodes: reach(i) })).sort(byLabel),
     stories: list('story').map(([n, i]) => ({ id: n.id, label: n.label, nodes: reach(i) })).sort(byLabel),
-    // A repo's filter: the repo, every node that names it, and the stories that build in it.
+    // A repo's filter: the repo, every node that names it, and the stories that build in it. Files and code
+    // alike: the page's own "All the code" choice decides whether the ones the work does not name are drawn,
+    // so a symbol is never drawn without the file that defines it (review 1).
     repos: list('repo').map(([n, i]) => {
       const set = new Set([i]);
-      vnodes.forEach((m, j) => { if (m.repo === n.label && (m.kind !== 'file' || inDefault[j])) set.add(j); });
+      vnodes.forEach((m, j) => { if (m.repo === n.label) set.add(j); });
       for (const k of inn[i]) if (edges[k].relation === 'builds-in' || edges[k].relation === 'touches') set.add(edges[k].s);
       return { id: n.id, label: n.label, nodes: [...set].sort((a, b) => a - b) };
     }).sort(byLabel),
@@ -262,7 +268,8 @@ export function snapshotHTML(model) {
     `style-src 'sha256-${sha256b64(css)}'`,
     "img-src data:", "base-uri 'none'", "form-action 'none'",
   ].join('; ');
-  const body = readView(PAGE.html)
+  // The key placeholder goes before anything is spliced in: the brain's own names may hold the same text.
+  const body = readView(PAGE.html).replaceAll('__TOKEN__', '')
     .replace(/<link rel="stylesheet"[^>]*>/, () => `<style>${css}</style>`)
     .replace(/<script src="[^"]*"><\/script>\s*/g, '')
     .replace('<!--SCRIPTS-->', () => [
@@ -270,8 +277,7 @@ export function snapshotHTML(model) {
       ...scripts.map((s) => `<script>${s}</script>`),
     ].join('\n'));
   return body
-    .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, () => `<meta http-equiv="Content-Security-Policy" content="${csp}">`)
-    .replaceAll('__TOKEN__', '');
+    .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, () => `<meta http-equiv="Content-Security-Policy" content="${csp}">`);
 }
 
 // Write `data` to the path the person named, by a temp file and a rename, refusing a link at the target (a
@@ -319,22 +325,24 @@ export async function runBrainView(root, { args = [], html = false, open = false
     } else writePlain(path.dirname(file), 'view.html', page);
     const risk = own && trackedRisk(file, gitRunner);
     const riskLine = risk ? `${forTerminal(file)} is in a git work tree and not ignored: it holds the names in your code — do not commit it` : null;
-    if (open) opener(file);
+    const opened = open ? opener(file) : null;
     if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(riskLine ? { warning: riskLine } : {}) });
     ok(`wrote ${forTerminal(own ? file : VIEW_FILE)} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges; open it in a browser (it needs no server and no network)`);
     if (behindLine) warn(behindLine);
     if (riskLine) warn(riskLine);
+    if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — open the file yourself');
     return undefined;
   }
 
   const s = await startBrainServer(root, { runner });
-  if (open) opener(s.url);
+  const opened = open ? opener(s.url) : null;
   if (json) emitJSON({ url: s.url, port: s.port, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind });
   else {
     log(c.bold('\nyad brain view'));
     ok(`the brain is at ${s.url}`);
     info('only this machine can reach it, and only with that address (it holds a one-time key). Ctrl-C stops it.');
     info('reload the page after `yad brain build` to see the new graph');
+    if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — copy the address into your browser');
     if (behindLine) warn(behindLine);
   }
   if (!wait) return s;

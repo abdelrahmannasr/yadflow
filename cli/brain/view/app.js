@@ -268,7 +268,9 @@
       state.allCode = on;
       build();
       draw();
-      select(state.selected);
+      // A selected node the smaller view does not hold is let go, rather than drawing all the code again
+      // (review 1: unticking "All the code" undid itself).
+      select(state.selected !== null && graph.hasNode(String(state.selected)) ? state.selected : null);
     }
     $('all-code').addEventListener('change', function () {
       var box = this;
