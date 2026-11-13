@@ -693,6 +693,8 @@ function writesProduct(cmd, o) {
   // `build merged` only asks the platform, unless --ship records what it found.
   if (cmd === 'build') return action === 'sync' ? !o.dryRun : action !== 'merged' || !!o.ship;
   if (cmd === 'check') return !!o.fix;
+  // `brain build` writes the brain into the Product: with no Product found, it gets the shared refusal (--dir or cd).
+  if (cmd === 'brain') return action === 'build';
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;

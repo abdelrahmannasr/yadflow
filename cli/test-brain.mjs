@@ -416,3 +416,55 @@ test('review 1: a busy node shows edges in as well as out', () => {
   assert.ok(m.neighbours.some((x) => x.direction === 'in') && m.neighbours.some((x) => x.direction === 'out'));
   assert.equal(m.more, 18);
 });
+
+// ---- review round 2 ---------------------------------------------------------------------------------
+
+test('review 2: a committed link in place of graph.json, files.txt or meta.json is replaced, never written through', () => {
+  const { ws, root, be } = product();
+  try {
+    const victim = path.join(tmp(), 'victim');
+    fs.writeFileSync(victim, 'keep\n');
+    const dir = path.join(root, '.sdlc', 'brain', 'repos', 'backend');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const f of ['graph.json', 'files.txt', 'meta.json']) fs.symlinkSync(victim, path.join(dir, f));
+    assert.equal(buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner }).ok, true);
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep\n');
+    for (const f of ['graph.json', 'files.txt', 'meta.json']) assert.equal(fs.lstatSync(path.join(dir, f)).isFile(), true, f);
+    assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
+    done(path.dirname(victim));
+  } finally { done(ws); }
+});
+
+test('review 2: a timeout says so; build runs the file found on PATH; one that cannot start is not "installed"', async () => {
+  const { ws, root, be } = product();
+  try {
+    const timedOut = (cmd, args, opts) => (cmd === 'graphify' ? { ok: false, code: null, stdout: '', stderr: 'progress 40%', error: { code: 'ETIMEDOUT' } } : fakeGraphify().runner(cmd, args, opts));
+    assert.match(buildRepoGraph(root, { name: 'backend', target: be }, { runner: timedOut }).why, /longer than 20 minutes/);
+    const { runBrain, graphifyHere } = await import('./brain.mjs');
+    const calls = [];
+    const runner = (cmd, args = [], opts = {}) => {
+      calls.push(cmd);
+      if (cmd === '/opt/x/graphify' && args[0] === '--version') return { ok: true, stdout: `graphify ${GRAPHIFY_VERSION}`, stderr: '' };
+      if (cmd === '/opt/x/graphify') { put(path.join(opts.cwd, 'graphify-out', 'graph.json'), JSON.stringify(graphifyGraph())); return { ok: true, stdout: '', stderr: '' }; }
+      const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts });
+      return { ok: r.status === 0, code: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
+    };
+    await runBrain(root, { action: 'build', json: false, runner, where: () => '/opt/x/graphify' });
+    assert.ok(calls.filter((c) => c === '/opt/x/graphify').length >= 2, 'the version and the update both ran the file found');
+    assert.equal(calls.includes('graphify'), false, 'never the bare name');
+    assert.equal(composeBrain(root).brain.repos.backend.code, true);
+    const cannot = graphifyHere({ where: () => 'C:\\x\\graphify.cmd', runner: () => ({ ok: false, error: { code: 'EINVAL' }, stdout: '', stderr: '' }) });
+    assert.deepEqual(cannot, { bin: 'C:\\x\\graphify.cmd', version: null, startError: 'EINVAL' });
+  } finally { done(ws); process.exitCode = 0; }
+});
+
+test('review 2: a grouped ship keeps the first PR found, whatever the row order', () => {
+  const { ws, root } = product();
+  try {
+    const log = path.join(root, 'epics', 'EP-checkout', '.sdlc', 'build-log.json');
+    const b = JSON.parse(fs.readFileSync(log, 'utf8'));
+    b.ships.push({ story: 'EP-checkout-S04', task: 'T01', repo: 'mobile', mergeCommit: 'def5678', pr: 9 }, { story: 'EP-checkout-S04', task: 'T02', repo: 'mobile', mergeCommit: 'def5678' });
+    put(log, JSON.stringify(b));
+    assert.equal(composeBrain(root).brain.nodes.find((n) => n.id === 'ship:mobile:def5678').label, '2 tasks #9');
+  } finally { done(ws); }
+});

@@ -26,6 +26,7 @@
 // Every name a key is made from comes from a file anyone can edit, so the lookups are Maps, never plain
 // objects: a story naming the repo `constructor` must not reach Object.prototype (E176 review 1).
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { c, emitJSON, fail, forTerminal, hand, info, isPlainObject, log, ok, refuse, run, warn } from './lib.mjs';
 import { err } from './errors.mjs';
@@ -93,6 +94,19 @@ function readPlain(base, rel) {
   return readInput(cur);
 }
 
+// Write a file by a temp file and a rename: a rename replaces a link where `writeFileSync` would follow it,
+// and a committed link (`files.txt -> ~/.zshrc`) would take every name from the code repo (E176 review 2).
+function writePlain(dir, name, data) {
+  const file = path.join(dir, name);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, data, { flag: 'wx' });
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
 // ---- Graphify's file -----------------------------------------------------------------------------
 
 // Graphify's graph.json, as { schemaVersion, graphifyVersion, nodes, edges }. Its edges are under `links`
@@ -112,10 +126,12 @@ export function readGraphify(text) {
 }
 
 // The Graphify program on PATH, as { bin, version }, or null. `bin` is the file found, which is what runs.
+// A file found that cannot be started (on Windows a `.cmd` shim, which needs a shell) is { bin, startError }.
 export function graphifyHere({ runner = run, where = whereOnPath } = {}) {
   const bin = where('graphify');
   if (!bin) return null;
   const r = runner(bin, ['--version'], { timeout: 60_000 });
+  if (r.error) return { bin, version: null, startError: r.error.code || r.error.message };
   const m = /graphify\s+v?(\d[\w.+-]*)/i.exec(`${r.stdout}\n${r.stderr}`);
   return { bin, version: m ? m[1] : 'unknown' };
 }
@@ -146,7 +162,6 @@ export function excludeGraphifyOut(target, { runner = run } = {}) {
   return true;
 }
 
-const repoDir = (root, name) => path.join(root, BRAIN_DIR, 'repos', name);
 const headOf = (target, runner) => { const r = runner('git', ['rev-parse', 'HEAD'], { cwd: target }); return r.ok && /^[0-9a-f]{7,64}$/.test(r.stdout) ? r.stdout : null; };
 
 // The code repos the brain can read: registered, on disk, with a safe name that no other repo shares in
@@ -188,6 +203,7 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   const r = runner(bin, ['update', '.', '--force'], {
     cwd: repo.target, env: graphifyEnv(env), timeout: GRAPHIFY_TIMEOUT_MS, stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 16 * 1024 * 1024,
   });
+  if (r.error?.code === 'ETIMEDOUT') return { ok: false, why: `graphify took longer than ${GRAPHIFY_TIMEOUT_MS / 60000} minutes and was stopped` };
   if (!r.ok) return { ok: false, why: `graphify failed — ${forTerminal((r.stderr || String(r.error?.code || 'no output')).split('\n').pop())}` };
   let text;
   try {
@@ -201,27 +217,29 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   try { g = readGraphify(text); } catch (e) { return { ok: false, why: e.message }; }
   const head = headOf(repo.target, runner);
   // Tracked and new files git does not ignore, that are on disk: the working tree Graphify parsed, not HEAD.
-  const ls = runner('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo.target, maxBuffer: 64 * 1024 * 1024 });
+  // Spawned directly, never through `run()`, which trims its output and so the first name's leading space.
+  const lsr = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo.target, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const ls = { ok: lsr.status === 0, stdout: lsr.stdout || '' };
   const dir = plainDirs(root, [...BRAIN_DIR.split(path.sep), 'repos', repo.name], (p) => path.relative(root, p));
-  fs.writeFileSync(path.join(dir, 'graph.json'), text);
+  writePlain(dir, 'graph.json', text);
   // The list git holds is NUL-separated; kept sorted and LF-separated, so it hashes the same everywhere.
   const files = ls.ok ? [...new Set([...ls.stdout.split('\0').filter(Boolean).filter((f) => fs.existsSync(path.join(repo.target, f))), ...g.nodes.map((n) => (isPlainObject(n) && typeof n.source_file === 'string' ? posix(n.source_file) : null)).filter(Boolean)])].sort() : null;
-  if (files) fs.writeFileSync(path.join(dir, 'files.txt'), `${files.join('\n')}\n`);
+  if (files) writePlain(dir, 'files.txt', `${files.join('\n')}\n`);
   else fs.rmSync(path.join(dir, 'files.txt'), { force: true });
   const meta = { head, graphifyVersion: g.graphifyVersion, schemaVersion: g.schemaVersion, builtAt: new Date().toISOString() };
-  fs.writeFileSync(path.join(dir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`);
+  writePlain(dir, 'meta.json', `${JSON.stringify(meta, null, 2)}\n`);
   return { ok: true, nodes: g.nodes.length, edges: g.edges.length, ...(excluded ? {} : { warning: 'graphify-out/ could not be added to the repo\'s .git/info/exclude — git may show it' }) };
 }
 
 // The code graph kept for one repo, or why there is none: { graph?, meta?, files?, inputs, why? }.
 function storedRepoGraph(root, name) {
-  const dir = repoDir(root, name);
   const input = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'graph.json')));
   const filesIn = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'files.txt')));
   const inputs = { input, filesIn };
   if (!input.bytes) return { inputs, why: input.absent ? 'not built yet' : `unreadable (${input.error})` };
   let meta = {};
-  try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { /* no head known */ }
+  const metaIn = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'meta.json')));
+  try { if (metaIn.bytes) meta = JSON.parse(metaIn.bytes.toString('utf8')); } catch { /* no head known */ }
   const files = filesIn.bytes ? new Set(filesIn.bytes.toString('utf8').split('\n').filter(Boolean)) : null;
   try { return { graph: readGraphify(input.bytes.toString('utf8')), meta: isPlainObject(meta) ? meta : {}, files, inputs }; } catch (e) { return { inputs, why: e.message }; }
 }
@@ -402,10 +420,12 @@ export function composeBrain(root, { registry = readRegistry(root).registry } = 
           const shid = `ship:${r}:${key}`;
           const prev = g.nodes.get(shid);
           const tasks = [...new Set([...(prev?.tasks || []), `${sidText}/${task}`])].sort();
+          // The first PR and date found are kept, so the label does not depend on which row is read last.
+          const pr = prev?.pr ?? (s.pr ? s.pr : undefined);
           g.node(shid, { kind: 'ship', repo: r }, { define: true });
           Object.assign(g.nodes.get(shid), {
-            tasks, label: `${tasks.length > 1 ? `${tasks.length} tasks` : task}${s.pr ? ` #${s.pr}` : ''}`,
-            ...(s.shippedAt && !prev?.date ? { date: s.shippedAt } : {}),
+            tasks, label: `${tasks.length > 1 ? `${tasks.length} tasks` : task}${pr ? ` #${pr}` : ''}`,
+            ...(pr ? { pr } : {}), ...(s.shippedAt && !prev?.date ? { date: s.shippedAt } : {}),
           });
           const tid = `task:${sidText}:${r}:${task}`;
           g.edge(g.nodes.has(tid) ? tid : sid, shid, 'shipped-as');
@@ -567,7 +587,7 @@ export function queryBrain(brain, text, { limit = 10, neighbours = 12 } = {}) {
 
 // ---- the command ---------------------------------------------------------------------------------
 
-export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | status   (each with --json)';
+export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | status   (each with --json; the search text cannot start with -)';
 export const BRAIN_FLAGS = Object.freeze(['--repo', '--limit', '--json', '--dir']);
 
 export async function runBrain(root, { action = 'status', args = [], repo = null, limit = null, json = false, unknownFlags = [], runner = run, where = whereOnPath } = {}) {
@@ -596,6 +616,9 @@ function brainBuild(root, { repo, json, runner, where }) {
   if (!here) {
     warn('Graphify is not installed here, so the brain has no code layer: the work items only');
     if (!json) hand(`install it: \`uv tool install graphifyy==${GRAPHIFY_VERSION}\` (or \`yad toolbox connect graphify\`), then run \`yad brain build\` again`);
+  } else if (here.startError) {
+    warn(`Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)}), so the brain has no code layer: the work items only`);
+    if (!json) hand(`install it with uv, which makes a program that starts directly: \`uv tool install graphifyy==${GRAPHIFY_VERSION}\``);
   } else {
     if (here.version !== GRAPHIFY_VERSION) warn(`Graphify ${forTerminal(here.version)} is installed; yadflow vetted ${GRAPHIFY_VERSION}. It is used anyway`);
     for (const r of usable.filter((x) => !repo || x.name === repo)) {
@@ -632,10 +655,11 @@ function brainQuery(root, { text, limit, json, runner }) {
   let brain;
   try { brain = readBrain(root); } catch (e) { return refuse(e.message, e.hint, { json }); }
   if (!brain) return refuse(`no brain here yet (${BRAIN_FILE})`, 'build it: `yad brain build`', { json });
-  const fresh = brainFreshness(root, { runner });
-  if (fresh.state === 'behind') warn(`${BRAIN_FILE} is behind the files it is built from — the answer may be out of date; run \`yad brain build\``);
+  // A cheap check, not `status`'s full rebuild: has any repo's code moved since its graph was built?
+  const behind = codeBehind(root, brain, runner);
+  if (behind.length) warn(`the code moved in ${behind.join(', ')} since the brain was built — the answer may be out of date; run \`yad brain build\` (\`yad brain status\` checks everything)`);
   const matches = queryBrain(brain, text, { limit: n });
-  if (json) return emitJSON({ query: text, state: fresh.state, matches });
+  if (json) return emitJSON({ query: text, codeBehind: behind, matches });
   log(c.bold(`\nyad brain query ${forTerminal(text)}`));
   if (!matches.length) { info('no node matches'); return undefined; }
   for (const m of matches) {
@@ -649,12 +673,26 @@ function brainQuery(root, { text, limit, json, runner }) {
   return undefined;
 }
 
+// The repos whose HEAD moved since the brain recorded it.
+function codeBehind(root, brain, runner) {
+  const { registry } = readRegistry(root);
+  const { usable } = brainRepos(root, registry);
+  const out = [];
+  for (const r of usable) {
+    const built = isPlainObject(brain.repos) && Object.hasOwn(brain.repos, r.name) ? brain.repos[r.name]?.head : null;
+    if (!built) continue;
+    const head = headOf(r.target, runner);
+    if (head && head !== built) out.push(r.name);
+  }
+  return out;
+}
+
 function brainStatus(root, { json, runner, where }) {
   const here = graphifyHere({ runner, where });
   const f = brainFreshness(root, { runner });
   // A brain that cannot be read is a failure, said with exit 1; behind or missing is a state, exit 0.
   if (f.state === 'unreadable') process.exitCode = 1;
-  if (json) return emitJSON({ ...(f.state === 'unreadable' ? { ok: false } : {}), file: posix(BRAIN_FILE), ...f, graphify: here?.version ?? null, vetted: GRAPHIFY_VERSION });
+  if (json) return emitJSON({ ...(f.state === 'unreadable' ? { ok: false, error: f.why, code: CODE, hint: 'run `yad brain build`' } : {}), file: posix(BRAIN_FILE), ...f, graphify: here?.version ?? null, vetted: GRAPHIFY_VERSION });
   log(c.bold('\nyad brain status'));
   if (f.problem) warn(f.problem);
   if (f.state === 'current') ok(`${BRAIN_FILE} is current — ${f.counts?.nodes ?? 0} nodes, ${f.counts?.edges ?? 0} edges`);
@@ -671,6 +709,7 @@ function brainStatus(root, { json, runner, where }) {
     if (r.state === 'current') ok(line); else if (r.state === 'behind' || r.state === 'unknown') warn(line); else info(line);
   }
   if (!here) info(`Graphify is not installed here (vetted: ${GRAPHIFY_VERSION}); the brain has the work items only`);
+  else if (here.startError) warn(`Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)})`);
   else if (here.version !== GRAPHIFY_VERSION) warn(`Graphify ${forTerminal(here.version)} is installed; yadflow vetted ${GRAPHIFY_VERSION}`);
   return undefined;
 }
