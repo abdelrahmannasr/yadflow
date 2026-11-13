@@ -706,7 +706,12 @@ export function versionInRange(version, range) {
 
 // Is a program on PATH — by reading the PATH folders, never by starting one. On Windows a program is
 // `name` plus one of PATHEXT's endings (`.EXE`, `.CMD`, …); elsewhere it must be an executable file.
-export function onPath(bin, { env = process.env, platform = process.platform } = {}) {
+// Whether a program is on PATH. `whereOnPath` gives the file itself, so a caller can start THAT file: a bare
+// name started without a shell is looked for in the current folder first on Windows (E176 review 1).
+export function onPath(bin, opts = {}) {
+  return whereOnPath(bin, opts) !== null;
+}
+export function whereOnPath(bin, { env = process.env, platform = process.platform } = {}) {
   // Only absolute folders: an empty or relative entry means "the current folder", which is not where a
   // tool is installed, and would make the answer depend on where `yad` happened to run.
   // On Windows that means a drive and a root (C:\x) or a share (\\server\share): \x is on whatever drive
@@ -722,11 +727,11 @@ export function onPath(bin, { env = process.env, platform = process.platform } =
       try {
         if (!fs.statSync(full).isFile()) continue;
         if (platform !== 'win32') fs.accessSync(full, fs.constants.X_OK);
-        return true;
+        return full;
       } catch { /* not here */ }
     }
   }
-  return false;
+  return null;
 }
 
 const lower = (s) => String(s).toLowerCase();

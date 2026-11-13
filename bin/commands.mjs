@@ -44,7 +44,7 @@ export { runIssuesShow, runIssuesLink, runIssuesUnlink, runEpicNewFromIssue, see
 export { runIssuesList, runIssuesLabels, foreignFlags as issuesForeignFlags } from '../cli/issues.mjs';
 export { runIndex } from '../cli/index-command.mjs';
 export { runHistory, HISTORY_FLAGS } from '../cli/history.mjs';
-export { runBrain, BRAIN_USAGE } from '../cli/brain.mjs';
+export { runBrain, BRAIN_USAGE, BRAIN_FLAGS } from '../cli/brain.mjs';
 export { runRepo } from '../cli/repo.mjs';
 export { runRiskMap } from '../cli/riskmap-command.mjs';
 export { runCodeowners } from '../cli/codeowners-command.mjs';

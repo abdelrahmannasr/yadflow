@@ -18,7 +18,7 @@ process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
 const {
   readGraphify, surfacesOf, tasksOf, composeBrain, buildRepoGraph, ensureBrainDir, excludeGraphifyOut,
-  writeBrain, readBrain, brainFreshness, queryBrain, BRAIN_FILE, GRAPHIFY_ENV, GRAPHIFY_VERSION,
+  writeBrain, readBrain, brainFreshness, queryBrain, graphifyEnv, safeName, BRAIN_FILE, GRAPHIFY_ENV, GRAPHIFY_VERSION,
 } = await import('./brain.mjs');
 const { TOOLBOX } = await import('./toolbox.mjs');
 const { RECIPES } = await import('./toolbox-connect.mjs');
@@ -68,8 +68,9 @@ function product() {
     '## T01 — Add `POST /orders` route + create path',
     '- **Files:** `src/order/index.js`, `src/order/store.js`, `src/routes.js`', '',
     '## T02 — Validate input',
-    '- **Files:** `src/order/validate.js`, `../outside.js`, `/etc/passwd`', '',
+    '- **Files:** `src/order/validate.js`, `../outside.js`, `/etc/passwd`, `package.json`', '',
   ].join('\n'));
+  put(path.join(be, 'package.json'), '{}\n');
   git(be, 'init', '-q');
   git(be, 'add', '-A');
   git(be, 'commit', '-qm', 'init');
@@ -280,4 +281,138 @@ test('the Graphify toolbox entry pins the version the brain runs', () => {
   assert.ok(t.install.every((i) => / graphifyy$/.test(i.command)), 'the install text names the package; the agent\'s recipe holds the pin');
   assert.deepEqual(RECIPES.graphify.map((s) => s.run), [`uv tool install graphifyy==${GRAPHIFY_VERSION}`]);
   assert.deepEqual(t.usedBy, ['yad brain build']);
+});
+
+// ---- review round 1 ---------------------------------------------------------------------------------
+
+const storyFile = (root, id) => path.join(root, 'epics', id.replace(/-S\d+$/, ''), 'stories', `${id}.md`);
+
+test('review 1: a repo named like a built-in key never reaches Object.prototype', () => {
+  const { ws, root, be } = product();
+  try {
+    buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner });
+    const f = storyFile(root, 'EP-checkout-S01');
+    fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('repos: [backend]', 'repos: [backend, constructor, __proto__, toString]'));
+    const reg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'repos.json'), 'utf8'));
+    reg.repos.push({ ...reg.repos[0], name: '__proto__' }, { ...reg.repos[0], name: 'Backend' });
+    put(path.join(root, '.sdlc', 'repos.json'), JSON.stringify(reg));
+    const { brain } = composeBrain(root);
+    assert.ok(brain.edges.some((e) => e.source === 'story:EP-checkout-S01' && e.target === 'repo:constructor'));
+    assert.equal(Object.getPrototypeOf(brain.repos), Object.prototype, 'no prototype was set');
+    assert.equal(brain.repos.Backend.why, 'another repo has the same name in another case');
+    assert.equal(safeName('__proto__'), false);
+    assert.equal(safeName('constructor'), false);
+  } finally { done(ws); }
+});
+
+test('review 1: ships come from the Product ledger, so they are drawn when no repo is cloned', () => {
+  const { ws, root } = product();
+  try {
+    fs.rmSync(path.join(root, 'demo-repos'), { recursive: true, force: true });
+    const { brain } = composeBrain(root);
+    const ships = brain.nodes.filter((n) => n.kind === 'ship');
+    assert.ok(ships.length >= 5, `ships: ${ships.length}`);
+    assert.ok(brain.edges.some((e) => e.source === 'story:EP-checkout-S01' && e.relation === 'shipped-as'), 'to the story when the task is unknown here');
+  } finally { done(ws); }
+});
+
+test('review 1: a parent epic keeps its own title, whatever order the epics are read in', () => {
+  const { ws, root } = product();
+  try {
+    // The child (EP-checkout-queue-filter) is read after its parent and names it as a placeholder.
+    const epic = path.join(root, 'epics', 'EP-checkout', 'epic.md');
+    fs.writeFileSync(epic, fs.readFileSync(epic, 'utf8').replace(/^---\n/, '---\ntitle: Checkout for real\n'));
+    const { brain } = composeBrain(root);
+    assert.equal(brain.nodes.find((n) => n.id === 'epic:EP-checkout').label, 'Checkout for real');
+  } finally { done(ws); }
+});
+
+test('review 1: ships with no merge commit stay apart; one merge commit for many tasks is one ship', () => {
+  const { ws, root } = product();
+  try {
+    const log = path.join(root, 'epics', 'EP-checkout', '.sdlc', 'build-log.json');
+    const b = JSON.parse(fs.readFileSync(log, 'utf8'));
+    b.ships.push(
+      { story: 'EP-checkout-S01', task: 'retro', repo: 'backend', retroactive: true, shippedAt: '2026-01-01' },
+      { story: 'EP-checkout-S03', task: 'retro', repo: 'backend', retroactive: true, shippedAt: '2026-02-01' },
+      { story: 'EP-checkout-S04', task: 'T01', repo: 'mobile', mergeCommit: 'abc1234', pr: 7 },
+      { story: 'EP-checkout-S04', task: 'T02', repo: 'mobile', mergeCommit: 'abc1234', pr: 7 },
+    );
+    put(log, JSON.stringify(b));
+    const { brain } = composeBrain(root);
+    const ids = brain.nodes.filter((n) => n.kind === 'ship').map((n) => n.id);
+    assert.ok(ids.includes('ship:backend:EP-checkout-S01:retro:') && ids.includes('ship:backend:EP-checkout-S03:retro:'));
+    const grouped = brain.nodes.find((n) => n.id === 'ship:mobile:abc1234');
+    assert.deepEqual(grouped.tasks, ['EP-checkout-S04/T01', 'EP-checkout-S04/T02']);
+    assert.equal(grouped.label, '2 tasks #7');
+  } finally { done(ws); }
+});
+
+test('review 1: a declared file git holds is not missing, even when it is not code; a planned one is', () => {
+  const { ws, root, be } = product();
+  try {
+    buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner });
+    const { brain } = composeBrain(root);
+    const node = (id) => brain.nodes.find((n) => n.id === id);
+    assert.equal(node('file:backend:package.json').missing, undefined);
+    assert.equal(node('file:backend:src/order/store.js').missing, true);
+    assert.equal(brain.edges.some((e) => e.target === 'file:backend:src/order/store.js' && e.relation === 'holds'), false, 'a repo does not hold a missing file');
+  } finally { done(ws); }
+});
+
+test('review 1: Graphify gets no LLM settings from the shell, matched in any case', () => {
+  const env = graphifyEnv({ PATH: '/bin', HOME: '/h', OPENAI_API_KEY: 'k', ANTHROPIC_API_KEY: 'k', gemini_api_key: 'k', OLLAMA_HOST: 'h', AWS_PROFILE: 'p', OPENAI_BASE_URL: 'u', graphify_backend: 'gemini', GRAPHIFY_VIZ_NODE_LIMIT: '1' });
+  assert.deepEqual(env, { PATH: '/bin', HOME: '/h', GRAPHIFY_BACKEND: 'none', GRAPHIFY_QUERY_LOG_DISABLE: '1' });
+});
+
+test('review 1: a link or a committed graphify-out/ is refused; a link under .sdlc/brain/repos is never written through', () => {
+  const { ws, root, be } = product();
+  try {
+    const away = tmp();
+    fs.symlinkSync(away, path.join(be, 'graphify-out'));
+    assert.match(buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner }).why, /not a plain folder/);
+    fs.rmSync(path.join(be, 'graphify-out'));
+    put(path.join(be, 'graphify-out', 'keep.txt'), 'x');
+    git(be, 'add', '-f', 'graphify-out/keep.txt');
+    git(be, 'commit', '-qm', 'tracked');
+    assert.match(buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner }).why, /committed in this repo/);
+    git(be, 'rm', '-rq', 'graphify-out');
+    git(be, 'commit', '-qm', 'untracked');
+    ensureBrainDir(root);
+    fs.symlinkSync(away, path.join(root, '.sdlc', 'brain', 'repos'));
+    assert.throws(() => buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner }), /not a plain folder/);
+    assert.deepEqual(fs.readdirSync(away), [], 'nothing written through the link');
+    done(away);
+  } finally { done(ws); }
+});
+
+test('review 1: status of an unreadable brain exits 1; a flag brain does not take is refused, never searched for', () => {
+  const { ws, root } = product();
+  try {
+    put(path.join(root, BRAIN_FILE), '{');
+    let r = yad(root, 'brain', 'status');
+    assert.equal(r.status, 1);
+    r = yad(root, 'brain', 'status', '--json');
+    assert.equal(r.status, 1);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.ok, false);
+    assert.equal(j.state, 'unreadable');
+    r = yad(root, 'brain', 'query', 'Order', '--repoo', 'x');
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /does not take --repoo/);
+    fs.rmSync(path.join(root, BRAIN_FILE));
+    assert.equal(yad(root, 'brain', 'build').status, 0);
+    const s = JSON.parse(yad(root, 'brain', 'status', '--json').stdout);
+    assert.ok(s.repos.every((x) => !('builtAt' in x)));
+  } finally { done(ws); }
+});
+
+test('review 1: a busy node shows edges in as well as out', () => {
+  const nodes = [{ id: 'a', kind: 'k', label: 'center' }, ...Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, kind: 'k', label: `n${i}` }))];
+  const edges = [...Array.from({ length: 20 }, (_, i) => ({ source: 'a', target: `n${i}`, relation: 'out', confidence: 'EXTRACTED' })),
+    ...Array.from({ length: 10 }, (_, i) => ({ source: `n${20 + i}`, target: 'a', relation: 'in', confidence: 'EXTRACTED' }))];
+  const [m] = queryBrain({ nodes, edges }, 'center');
+  assert.equal(m.neighbours.length, 12);
+  assert.ok(m.neighbours.some((x) => x.direction === 'in') && m.neighbours.some((x) => x.direction === 'out'));
+  assert.equal(m.more, 18);
 });

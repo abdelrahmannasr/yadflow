@@ -693,8 +693,6 @@ function writesProduct(cmd, o) {
   // `build merged` only asks the platform, unless --ship records what it found.
   if (cmd === 'build') return action === 'sync' ? !o.dryRun : action !== 'merged' || !!o.ship;
   if (cmd === 'check') return !!o.fix;
-  // `brain build` writes only its own ignored folder, but into the Product: run from a code repo, it refuses.
-  if (cmd === 'brain') return action === 'build';
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
@@ -1412,8 +1410,14 @@ async function main() {
     }
     case 'brain': {
       const [, action, ...args] = o._;
-      if (action !== 'query' && args.length) { refuse(`unexpected argument(s): ${args.join(' ')}`, commands.BRAIN_USAGE); break; }
-      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json });
+      // As history does: a flag brain does not take is refused, read from the raw arguments — `parseArgs`
+      // turns an unknown flag into a plain word, which `query` would take as search text.
+      const BRAIN_OWN = new Set(commands.BRAIN_FLAGS);
+      const unknownFlags = [...new Set(process.argv.slice(2)
+        .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
+        .map((t) => t.split('=')[0])
+        .filter((f) => !BRAIN_OWN.has(f)))];
+      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json, unknownFlags });
       break;
     }
     case 'repo': {

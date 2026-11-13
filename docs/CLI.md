@@ -2116,18 +2116,25 @@ when a name matched a name.
 | surface → code (`named-as`, `handled-by`) | a symbol with the same name, or a handler named on the code-map line for that surface | INFERRED |
 | task → ship (`shipped-as`) | the build log | EXTRACTED |
 
-A file a task declares that the code graph does not hold is marked `missing` — it was planned, and is not
-in the code at HEAD.
+A file a task declares that is not in the repo's checkout when the code graph was built (tracked or new,
+and not ignored) is marked `missing` — it was planned, and is not there. A file that is there but is not code (a `package.json`, a
+migration) is not missing.
 
 **Privacy: nothing leaves your machine.**
 
 - Graphify runs with `GRAPHIFY_BACKEND=none`, so only its local parse of the code runs (tree-sitter, a
-  code parser), and no LLM is called. Its query log is turned off (`GRAPHIFY_QUERY_LOG_DISABLE=1`).
+  code parser), and no LLM is called. Its query log is turned off (`GRAPHIFY_QUERY_LOG_DISABLE=1`). Your
+  shell's LLM settings (`*_API_KEY`, `*_BASE_URL`, `OLLAMA_*`, `AWS_*` and the like) are left out of its
+  environment, so even a misread setting has nothing to call. yad starts the `graphify` file it found on
+  `PATH`, never a program of that name inside the repo.
 - yad runs only `graphify update . --force` and `graphify --version`. It never runs `graphify install`,
   `hook install` or `watch`, and never starts Graphify's MCP server. `yad brain query` reads the merged
   file itself.
 - Graphify writes `graphify-out/` inside each code repo. yad adds that folder to the repo's
-  `.git/info/exclude`, a local ignore list that is never committed.
+  `.git/info/exclude`, a local ignore list that is never committed. A repo where `graphify-out` is a link,
+  or is committed, is skipped with the reason. Graphify gets 20 minutes per repo.
+- A repo name must be one plain word, and two repos whose names differ only in case are not both read
+  (they would share one folder on macOS and Windows).
 - `.sdlc/brain/` holds its own `.gitignore` (`*`), so the folder ignores itself. It is never committed,
   because it holds names from your code and is rebuilt from git.
 
@@ -2144,8 +2151,8 @@ is used, with a warning. A graph whose `schema_version` this yadflow does not re
 | `--json` | Keys |
 |---|---|
 | `brain build` | `file`, `graphify` (the version here, or `null`), `vetted`, `built[{name, ok, nodes?, edges?, why?}]`, `skipped[{name, why}]`, `counts{nodes, edges, kinds}`, `inputs` |
-| `brain query` | `query`, `matches[{node{id, kind, label, repo?, file?}, neighbours[{relation, direction, confidence, node}]}]` |
-| `brain status` | `file`, `state` (`current`, `behind`, `missing` or `unreadable`), `repos[{name, state, builtAt?, head?, graphifyVersion?, why?}]`, `counts?`, `graphify`, `vetted` |
+| `brain query` | `query`, `state` (as `status` gives it: an answer from a brain that is `behind` may be out of date, and says so), `matches[{node{id, kind, label, repo?, file?, missing?}, neighbours[{relation, direction, confidence, node}], more}]` — up to 12 neighbours, the edges out first, then the edges in; `more` counts the rest |
+| `brain status` | `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
 ## Work-item history: `yad history`
 
