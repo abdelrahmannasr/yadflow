@@ -39,6 +39,13 @@ const yad = (cwd, ...a) => spawnSync(process.execPath, [YAD, ...a], {
   env: { ...process.env, PATH: path.dirname(process.execPath), NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1' },
 });
 
+// The same, with git's folder on PATH too, for a command that asks git (Graphify is never in git's folder).
+const GIT_DIR = path.dirname(spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim());
+const yadGit = (cwd, ...a) => spawnSync(process.execPath, [YAD, ...a], {
+  cwd, encoding: 'utf8',
+  env: { ...process.env, PATH: [path.dirname(process.execPath), GIT_DIR].join(path.delimiter), NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1' },
+});
+
 // A Graphify graph as 0.9.108 writes it (read from a real run): edges under `links`.
 const graphifyGraph = ({ key = 'links', schema = 1 } = {}) => ({
   directed: false, multigraph: false, graph: { schema_version: schema, graphify_version: '0.9.108' },
@@ -466,5 +473,85 @@ test('review 2: a grouped ship keeps the first PR found, whatever the row order'
     b.ships.push({ story: 'EP-checkout-S04', task: 'T01', repo: 'mobile', mergeCommit: 'def5678', pr: 9 }, { story: 'EP-checkout-S04', task: 'T02', repo: 'mobile', mergeCommit: 'def5678' });
     put(log, JSON.stringify(b));
     assert.equal(composeBrain(root).brain.nodes.find((n) => n.id === 'ship:mobile:def5678').label, '2 tasks #9');
+  } finally { done(ws); }
+});
+
+// ---- review round 3 ---------------------------------------------------------------------------------
+
+test('review 3: the merged file is written by a rename too, so a link left at its name is replaced', () => {
+  const { ws, root } = product();
+  try {
+    const victim = path.join(tmp(), 'victim');
+    fs.writeFileSync(victim, 'keep\n');
+    ensureBrainDir(root);
+    fs.symlinkSync(victim, path.join(root, BRAIN_FILE));
+    writeBrain(root, composeBrain(root).brain);
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep\n');
+    assert.equal(fs.lstatSync(path.join(root, BRAIN_FILE)).isFile(), true);
+    done(path.dirname(victim));
+  } finally { done(ws); }
+});
+
+test('review 3: a file name that starts with a space keeps it in the list of files', () => {
+  const { ws, root, be } = product();
+  try {
+    put(path.join(be, ' lead.js'), '//\n');
+    git(be, 'add', '-A');
+    git(be, 'commit', '-qm', 'lead');
+    buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner });
+    const files = fs.readFileSync(path.join(root, '.sdlc', 'brain', 'repos', 'backend', 'files.txt'), 'utf8').split('\n');
+    assert.ok(files.includes(' lead.js'), files.slice(0, 3).join('|'));
+  } finally { done(ws); }
+});
+
+test('review 3: query names the repos whose code moved; status --json says why it cannot read the brain', () => {
+  const { ws, root, be } = product();
+  try {
+    buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner });
+    writeBrain(root, composeBrain(root).brain);
+    let q = JSON.parse(yadGit(root, 'brain', 'query', 'Order', '--json').stdout);
+    assert.deepEqual(q.codeBehind, []);
+    put(path.join(be, 'src', 'later.js'), '//\n');
+    git(be, 'add', '-A');
+    git(be, 'commit', '-qm', 'later');
+    q = JSON.parse(yadGit(root, 'brain', 'query', 'Order', '--json').stdout);
+    assert.deepEqual(q.codeBehind, ['backend']);
+    const b = JSON.parse(fs.readFileSync(path.join(root, BRAIN_FILE), 'utf8'));
+    b.repos = ['odd'];
+    put(path.join(root, BRAIN_FILE), JSON.stringify(b));
+    assert.deepEqual(JSON.parse(yadGit(root, 'brain', 'query', 'Order', '--json').stdout).codeBehind, [], 'an odd repos field is ignored');
+    put(path.join(root, BRAIN_FILE), '{');
+    const s = JSON.parse(yad(root, 'brain', 'status', '--json').stdout);
+    assert.equal(s.code, 'YAD-STATE-011');
+    assert.match(s.error, /does not parse/);
+    assert.match(s.hint, /yad brain build/);
+  } finally { done(ws); }
+});
+
+test('review 3: a Graphify that cannot start builds the work items only, and --json names why', async () => {
+  const { ws, root } = product();
+  try {
+    const { runBrain } = await import('./brain.mjs');
+    const runner = (cmd, args = [], opts = {}) => {
+      if (cmd === '/opt/x/graphify') return { ok: false, code: null, stdout: '', stderr: '', error: { code: 'EINVAL' } };
+      const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts });
+      return { ok: r.status === 0, code: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
+    };
+    await runBrain(root, { action: 'build', runner, where: () => '/opt/x/graphify' });
+    const brain = readBrain(root);
+    assert.ok(brain.nodes.some((n) => n.kind === 'story'));
+    assert.equal(brain.repos.backend.code, false);
+    assert.equal(fs.existsSync(path.join(root, '.sdlc', 'brain', 'repos', 'backend')), false, 'no repo was built');
+  } finally { done(ws); process.exitCode = 0; }
+});
+
+test('review 3: a grouped ship keeps the first PR found in either row order', () => {
+  const { ws, root } = product();
+  try {
+    const log = path.join(root, 'epics', 'EP-checkout', '.sdlc', 'build-log.json');
+    const b = JSON.parse(fs.readFileSync(log, 'utf8'));
+    b.ships.push({ story: 'EP-checkout-S04', task: 'T02', repo: 'mobile', mergeCommit: 'fed9876' }, { story: 'EP-checkout-S04', task: 'T01', repo: 'mobile', mergeCommit: 'fed9876', pr: 11 });
+    put(log, JSON.stringify(b));
+    assert.equal(composeBrain(root).brain.nodes.find((n) => n.id === 'ship:mobile:fed9876').label, '2 tasks #11');
   } finally { done(ws); }
 });

@@ -131,6 +131,8 @@ export function graphifyHere({ runner = run, where = whereOnPath } = {}) {
   const bin = where('graphify');
   if (!bin) return null;
   const r = runner(bin, ['--version'], { timeout: 60_000 });
+  // A slow or hung program is installed: it is said as that, not as one that cannot start.
+  if (r.error?.code === 'ETIMEDOUT') return { bin, version: null, startError: 'ETIMEDOUT', hung: true };
   if (r.error) return { bin, version: null, startError: r.error.code || r.error.message };
   const m = /graphify\s+v?(\d[\w.+-]*)/i.exec(`${r.stdout}\n${r.stderr}`);
   return { bin, version: m ? m[1] : 'unknown' };
@@ -218,6 +220,7 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   const head = headOf(repo.target, runner);
   // Tracked and new files git does not ignore, that are on disk: the working tree Graphify parsed, not HEAD.
   // Spawned directly, never through `run()`, which trims its output and so the first name's leading space.
+  // So the injected `runner` does not see this call: a test gives the repo real files instead.
   const lsr = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo.target, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const ls = { ok: lsr.status === 0, stdout: lsr.stdout || '' };
   const dir = plainDirs(root, [...BRAIN_DIR.split(path.sep), 'repos', repo.name], (p) => path.relative(root, p));
@@ -518,15 +521,7 @@ export function readBrain(root) {
 }
 
 export function writeBrain(root, brain) {
-  ensureBrainDir(root);
-  const file = path.join(root, BRAIN_FILE);
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tmp, `${JSON.stringify(brain)}\n`);
-    fs.renameSync(tmp, file);
-  } finally {
-    fs.rmSync(tmp, { force: true });
-  }
+  writePlain(ensureBrainDir(root), 'graph.json', `${JSON.stringify(brain)}\n`);
 }
 
 // How the brain on disk compares with the files it is built from.
@@ -617,8 +612,10 @@ function brainBuild(root, { repo, json, runner, where }) {
     warn('Graphify is not installed here, so the brain has no code layer: the work items only');
     if (!json) hand(`install it: \`uv tool install graphifyy==${GRAPHIFY_VERSION}\` (or \`yad toolbox connect graphify\`), then run \`yad brain build\` again`);
   } else if (here.startError) {
-    warn(`Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)}), so the brain has no code layer: the work items only`);
-    if (!json) hand(`install it with uv, which makes a program that starts directly: \`uv tool install graphifyy==${GRAPHIFY_VERSION}\``);
+    warn(here.hung
+      ? `Graphify at ${forTerminal(here.bin)} did not answer \`--version\` within a minute, so the brain has no code layer this time: the work items only`
+      : `Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)}), so the brain has no code layer: the work items only`);
+    if (!json && !here.hung) hand(`install it with uv, which makes a program that starts directly: \`uv tool install graphifyy==${GRAPHIFY_VERSION}\``);
   } else {
     if (here.version !== GRAPHIFY_VERSION) warn(`Graphify ${forTerminal(here.version)} is installed; yadflow vetted ${GRAPHIFY_VERSION}. It is used anyway`);
     for (const r of usable.filter((x) => !repo || x.name === repo)) {
@@ -640,7 +637,7 @@ function brainBuild(root, { repo, json, runner, where }) {
   }
   const k = composed.brain.counts;
   if (json) {
-    return emitJSON({ file: posix(BRAIN_FILE), graphify: here?.version ?? null, vetted: GRAPHIFY_VERSION, built: results, skipped, counts: k, inputs: composed.inputs });
+    return emitJSON({ file: posix(BRAIN_FILE), graphify: here?.version ?? null, ...(here?.startError ? { graphifyError: here.startError } : {}), vetted: GRAPHIFY_VERSION, built: results, skipped, counts: k, inputs: composed.inputs });
   }
   ok(`wrote ${BRAIN_FILE} — ${k.nodes} nodes, ${k.edges} edges (${Object.entries(k.kinds).map(([a, b]) => `${b} ${a}`).join(', ') || 'empty'})`);
   info('it stays on this machine: .sdlc/brain/ ignores itself, and is never committed');
@@ -692,7 +689,7 @@ function brainStatus(root, { json, runner, where }) {
   const f = brainFreshness(root, { runner });
   // A brain that cannot be read is a failure, said with exit 1; behind or missing is a state, exit 0.
   if (f.state === 'unreadable') process.exitCode = 1;
-  if (json) return emitJSON({ ...(f.state === 'unreadable' ? { ok: false, error: f.why, code: CODE, hint: 'run `yad brain build`' } : {}), file: posix(BRAIN_FILE), ...f, graphify: here?.version ?? null, vetted: GRAPHIFY_VERSION });
+  if (json) return emitJSON({ ...(f.state === 'unreadable' ? { ok: false, error: f.why, code: CODE, hint: 'run `yad brain build`' } : {}), file: posix(BRAIN_FILE), ...f, graphify: here?.version ?? null, ...(here?.startError ? { graphifyError: here.startError } : {}), vetted: GRAPHIFY_VERSION });
   log(c.bold('\nyad brain status'));
   if (f.problem) warn(f.problem);
   if (f.state === 'current') ok(`${BRAIN_FILE} is current — ${f.counts?.nodes ?? 0} nodes, ${f.counts?.edges ?? 0} edges`);

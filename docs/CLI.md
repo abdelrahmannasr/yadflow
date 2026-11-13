@@ -2150,7 +2150,7 @@ is used, with a warning. A graph whose `schema_version` this yadflow does not re
 
 | `--json` | Keys |
 |---|---|
-| `brain build` | `file`, `graphify` (the version here, or `null`), `vetted`, `built[{name, ok, nodes?, edges?, why?}]`, `skipped[{name, why}]`, `counts{nodes, edges, kinds}`, `inputs` |
+| `brain build` | `file`, `graphify` (the version here, or `null`), `graphifyError?` (a `graphify` was found but did not start, or did not answer within a minute: `ETIMEDOUT`), `vetted`, `built[{name, ok, nodes?, edges?, why?}]`, `skipped[{name, why}]`, `counts{nodes, edges, kinds}`, `inputs` |
 | `brain query` | `query`, `codeBehind` (the repos whose code moved since the brain was built — the answer may be out of date there; `status` checks everything), `matches[{node{id, kind, label, repo?, file?, missing?}, neighbours[{relation, direction, confidence, node}], more}]` — up to 12 neighbours, the edges out first, then the edges in; `more` counts the rest |
 | `brain status` | `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`, `error`, `code` and `hint`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
