@@ -191,13 +191,22 @@ export function streamGuard(line, mode, api, zsh = false) {
     // A closer closes only its own opener: inside a `case`, a pattern spelled `done` or `fi` closes nothing
     // (#532 review 2), and a mismatched one is left alone rather than pairing with the wrong opener.
     const opened = [];
+    const patterns = new Set();
     for (let n = 0; n < parts.length; n++) {
       const w = headOf(parts[n]);
+      // Inside an open `case`, a part that is one reserved word is a pattern (`while)`, `done)`): it opens and
+      // closes nothing, and prints nothing (#532 review 3).
+      if (opened.at(-1)?.end === 'esac' && parts[n].length === 1 && w !== 'esac' && (OPENERS.has(w) || CLOSERS.has(w))) { patterns.add(n); continue; }
       if (OPENERS.has(w)) opened.push({ n, end: OPENERS.get(w) });
       else if (CLOSERS.has(w) && w !== '}' && opened.at(-1)?.end === w) addGroup({ from: opened.pop().n, to: n, writes: [], closer: true });
     }
+    // Each closing group reads every part inside it, so nests cost the square of their depth (`if …; then` × 10,000
+    // took 3 s, review 3). Past a straight-line multiple of the line's parts, the line is refused at once.
+    let groupWork = 0;
+    const GROUP_WORK = 64 * parts.length + 100000;
     const close = (n) => {
       for (const g of groups.get(n) ?? []) {
+        if ((groupWork += g.to - g.from) > GROUP_WORK) throw fail('groups nested too deep to read');
         // What reaches the group's own output: not what its parts wrote to files (#532 review 9).
         const output = join(stdout.slice(g.from, g.to).filter((s) => s !== undefined));
         before = output;
@@ -237,8 +246,9 @@ export function streamGuard(line, mode, api, zsh = false) {
       let out = '';
       const proc = procs.get(n) ?? [];
       const procOutputs = proc.map((p) => run(p.text ?? '', level, '', procLevel + 1));
-      // A closing part prints its group's output; one that closes none (a `case` pattern) prints nothing.
-      if (CLOSERS.has(parts[n][0])) out = (groups.get(n) ?? []).some((g) => g.brace || g.closer) ? before : '';
+      // A closing part prints its group's output. One that closes none prints what came before, as a group the
+      // finder missed would (`do { …; } done`, a quoted `'fi'`, review 3); only a `case` pattern prints nothing.
+      if (CLOSERS.has(parts[n][0])) out = patterns.has(n) && !(groups.get(n) ?? []).some((g) => g.brace || g.closer) ? '' : before;
       else if (prog === 'echo') {
         // zsh's `echo` always makes escapes, and its `-` ends the options; bash's makes them with -e.
         let k = 1, newline = true, decode = zsh;
@@ -337,7 +347,10 @@ export function streamGuard(line, mode, api, zsh = false) {
           const runs = p.viaStdin ? opts(words.slice(1)) : p.position > cmdAt && opts(parts[n].slice(cmdAt + 1, p.position));
           if (runs) body.push(procOutputs[i]);
         }
-        for (const t of body) { check(t); out = join([out, run(t, level + 1, '', procLevel)]); }
+        // The shell's stdin is the stdin of the text it runs (`bash -c bash < <(…)`, `echo … | bash -c bash`,
+        // review 3); a shell that reads its stdin as the script has it in `body` already.
+        const childIn = api.bareShell(words) ? '' : join([...proc.flatMap((p, i) => p.viaStdin ? [procOutputs[i]] : []), stdinText()]);
+        for (const t of body) { check(t); out = join([out, run(t, level + 1, childIn, procLevel)]); }
       }
       // Judge substituted commands too, but quote words so data arguments stay data.
       if (parts.subst[n]) check(words.map((w) => "'" + w.replace(/'/g, "'\\''") + "'").join(' '));

@@ -1783,6 +1783,9 @@ test('#532 review: the twins of the output gaps are refused, and text only print
   }
 });
 
+// No time limit under coverage, as in the other timing tests.
+const withinTime = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
+
 // Lines review 2 found that a real bash 3.2 or zsh 5.9 runs, and the output pass let through.
 const outputGapsReview2 = [
   // A file name with a backslash the shell keeps in double quotes is the file its redirect wrote (R1).
@@ -1815,7 +1818,27 @@ test('#532 review 2: holes the round-1 fixes opened are closed, and lines that r
   const deep = agentGuardDecision(`${'cat <('.repeat(1500)}echo hi${')'.repeat(1500)}`);
   assert.equal(deep.allow, false);
   assert.match(deep.message, /process substitutions/);
-  assert.ok(Date.now() - t < 2000, `took ${Date.now() - t} ms`);
+  assert.ok(Date.now() - t < withinTime(2000), `took ${Date.now() - t} ms`);
+});
+
+test('#532 review 3: a shell passes its stdin to the text it runs, and an unclosed or missed group keeps its output', () => {
+  for (const line of ["bash -c bash < <(echo 'gh pr merge 5')", "zsh -c zsh < <(echo 'gh pr merge 5')",
+    "bash -c 'cat | bash' < <(echo 'gh pr merge 5')", "echo bash > x; bash x < <(echo 'gh pr merge 5')",
+    "for i in 1; do { printf 'gh pr '; } done > f; echo merge 5 >> f; bash f",
+    "if true; then 'fi'; printf 'gh pr '; fi > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; while) : ;; esac > f; echo merge 5 >> f; bash f"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
+  }
+  for (const line of ["bash x < <(echo 'gh pr merge 5')", "bash -c 'echo hi' < <(echo 'gh pr merge 5')",
+    "bash -c cat < <(echo 'gh pr merge 5')", 'if true; then '.repeat(100) + 'echo hi' + '; fi'.repeat(100)]) {
+    assert.equal(agentGuardDecision(line).allow, true, line.slice(0, 80));
+  }
+  // Nests past a few hundred deep are refused at once, not read in time that grows with the square of the depth.
+  for (const open of ['if true; then ', 'for i in 1; do ']) {
+    const t = Date.now();
+    agentGuardDecision(open.repeat(10000) + 'echo hi' + (open.startsWith('if') ? '; fi' : '; done').repeat(10000));
+    assert.ok(Date.now() - t < withinTime(1500), `${open} took ${Date.now() - t} ms`);
+  }
 });
 
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
@@ -1825,7 +1848,9 @@ test('#532: differential output corpus against bash and zsh with harmless execut
   for (const name of ['gh', 'git']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf reached >> "$GUARD_STREAM_LOG"\n', { mode: 0o755 });
   }
-  const corpus = [...outputGaps, ...outputGapsReview, ...outputGapsReview2];
+  const corpus = [...outputGaps, ...outputGapsReview, ...outputGapsReview2,
+    "bash -c bash < <(echo 'gh pr merge 5')", "for i in 1; do { printf 'gh pr '; } done > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; while) : ;; esac > f; echo merge 5 >> f; bash f"];
   for (const printer of ["echo gh pr merge 5", "printf '%s ' gh pr merge 5", "printf '%b' '\\x67h pr merge 5\\n'"]) {
     for (const group of [`{ ${printer}; }`, `( ${printer} )`]) {
       for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);
