@@ -1699,3 +1699,206 @@ test('E167: nothing that creates, prints or changes a secret, token or variable 
     assert.match(PREAPPROVED.never, /secrets, tokens, variables/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #532: output readings stay separate from the historical positional readings.
+const outputGaps = [
+  '{ echo gh pr merge 5; } > f; bash f',
+  '( echo gh pr merge 5 ) > f; bash f',
+  '{ echo gh pr merge 5; } >! f; zsh f',
+  '{ echo gh pr merge 5; } | tee f; bash f',
+  "echo echo 'gh pr merge 5' | bash > g; bash g",
+  "echo 'echo gh pr merge 5' > f; eval \"$(<f)\" > g; bash g",
+  '$(echo $(echo gh >& 1 pr merge 5))',
+  "printf 'gh pr ' | cat - <(echo merge 5) | bash",
+  "{ printf '%s ' gh pr; echo merge 5; } | bash",
+  "printf 'gh pr ' > a; printf '%s\\n' 'merge 5' >> a; bash a",
+  "{ printf '%b\\n' 'gh pr \\c'; echo merge 5; } | bash",
+  "printf '\\x67h pr merge 5\\n' | bash",
+  "printf 'git push \\055-force\\n' | bash",
+  "{ printf 'gh pr\\n' | tr -d '\\n'; echo ' merge 5'; } | bash",
+  "{ printf 'gh prX' | head -c 5; echo ' merge 5'; } | bash",
+];
+test('#532: every reported output gap is refused, while text only printed stays allowed', () => {
+  for (const line of outputGaps) assert.equal(agentGuardDecision(line).allow, false, line);
+  for (const line of ["printf '%s ' gh pr merge 5", '{ echo gh pr merge 5; } > f',
+    "printf '\\x67h pr merge 5\\n'", "{ printf '%s ' echo; echo hello; } | bash",
+    "printf 'echo ' > a; printf '%s\\n' hello >> a; bash a"]) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+});
+
+test('#532 review 1: a group record never changes what main reads a part writes', () => {
+  // The `}` part's write list was shared with the group record, so a later redirect-only part (`> g`) was added
+  // to main's own reading of `{ :; } > f`, and `g` read as emptied by it: a refusal main makes was lost.
+  assert.deepEqual(shellParts('{ :; } > f; > g').writes.map((w) => w && w.map((x) => x.target)), [null, ['f']]);
+  assert.equal(agentGuardDecision("printf 'gh pr ' > g; { :; } > f; false && > g; echo merge 5 >> g; bash g").allow, false);
+  // A redirect-only part writes a subshell's output only straight after its `)`; later ones are other commands.
+  for (const line of ['( echo gh pr merge 5 ); > f; bash f', '{ echo gh pr merge 5; }; > f; bash f',
+    '( echo gh pr merge 5 ) && > f; bash f']) assert.equal(agentGuardDecision(line).allow, true, line);
+  for (const line of ['( echo gh pr merge 5 ) > f; bash f', '( ( echo gh pr merge 5 ) > f ); bash f'])
+    assert.equal(agentGuardDecision(line).allow, false, line);
+});
+
+test('#532 review: lines main allows stay allowed (group writes, process substitutions, long text)', () => {
+  // A part that writes to a file adds nothing to its group's output (review 9).
+  for (const line of ['{ echo gh pr merge 5 > g; echo hi; } > f; bash f', '( echo gh pr merge 5 > g ) > f; bash f'])
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  // Process substitutions are not nesting levels; main bounds them with its own walk (review 10).
+  assert.equal(agentGuardDecision('cat <(cat <(cat <(cat <(echo hi))))').allow, true);
+  assert.equal(agentGuardDecision('cat <(cat <(cat <(cat <(echo gh pr merge 5)))) | bash').allow, false);
+  // The output pass has its own text budget: a long message through a few `tee` stages (review 11).
+  const msg = 'fix: a line of text for the body\n'.repeat(27000);
+  assert.equal(agentGuardDecision(`printf '%s' '${msg}' | ${'tee -a log | '.repeat(8)}git commit -F -`).allow, true);
+});
+
+// Lines review 1 found that a real bash 3.2 or zsh 5.9 runs and the output pass let through (main did too).
+const outputGapsReview = [
+  // zsh's `echo` always makes escapes; double quotes keep the backslash (review 2).
+  "echo '\\x67h pr merge 5' | bash", "{ echo '\\0147h pr merge 5'; } | zsh", 'echo "\\x67h pr merge 5" | zsh',
+  // zsh's `print` options (review 3).
+  "{ print -r -- 'gh pr merge 5'; } > f; zsh f", "{ print -f '%s ' gh pr; print merge 5; } | zsh",
+  "print -l 'gh pr merge 5' | bash",
+  // A write that may not run hides no text before it (review 4).
+  '{ echo gh pr merge 5; } > f; false && echo hi > f; bash f', '( echo gh pr merge 5 ) > f; [ -e g ] && : > f; bash f',
+  // A format reads `\NNN` (review 5), and its other conversions.
+  "printf 'gh pr merge\\0405\\n' | bash", "printf '%c%c pr merge 5\\n' gx hx | bash", "printf '%.2s pr merge 5\\n' ghx | bash",
+  // A process substitution a shell runs (review 6).
+  "bash <(printf '\\x67h pr merge 5\\n')", "source <(printf '\\x67h pr merge 5\\n')", "bash < <(printf '\\x67h pr merge 5\\n')",
+  "zsh =(printf '\\x67h pr merge 5\\n')", "bash <(echo '{ echo gh pr merge 5; } > f; bash f')",
+  // Compound commands' output (review 7).
+  'if true; then echo gh pr merge 5; fi > f; bash f', 'for x in 1; do echo gh pr merge 5; done > f; bash f',
+  'while false; do :; done; { if true; then echo gh pr merge 5; fi; } | bash',
+  // Filters, as the shell spells their words (review 8).
+  "{ printf 'gh pr\\n' | tr -d \"\\n\"; echo ' merge 5'; } | bash", "{ printf 'gh pr\\r\\n' | tr -d '\\r\\n'; echo ' merge 5'; } | bash",
+  "{ printf 'gh pr\\n' | tr '\\n' ' '; echo merge 5; } | bash", "{ printf 'gh pr\\n' | head --bytes=5; echo ' merge 5'; } | bash",
+];
+
+test('#532 review: the twins of the output gaps are refused, and text only printed stays allowed', () => {
+  for (const line of outputGapsReview) assert.equal(agentGuardDecision(line).allow, false, line);
+  // bash reads `\0053` in a format as `\005` and `3`: a plain push, not `+main` (a wrong refusal before).
+  for (const line of ["printf 'git push origin \\0053main\\n' | bash", "echo '\\x67h pr merge 5'",
+    "print -r 'gh pr merge 5'", "printf -v x '%s' 'gh pr merge 5'; echo done | bash", 'if true; then echo gh pr merge 5; fi',
+    "bash script.sh <(echo gh pr merge 5)", "{ printf 'gh pr\\n' | tr a-z A-Z; } | bash"]) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+});
+
+// No time limit under coverage, as in the other timing tests.
+const withinTime = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
+
+// Lines review 2 found that a real bash 3.2 or zsh 5.9 runs, and the output pass let through.
+const outputGapsReview2 = [
+  // A file name with a backslash the shell keeps in double quotes is the file its redirect wrote (R1).
+  `{ printf 'gh pr '; echo merge 5; } > "a\\b"; bash "a\\b"`, `{ printf 'gh pr '; echo merge 5; } > "a\\b"; source "a\\b"`,
+  // Each text a file may hold is run on its own: an open quote in one hides no other (R2).
+  `echo "echo '" > f; test -n "$X" || { printf 'gh pr '; echo merge 5; } > f; bash f`,
+  // Compound commands after a reserved word, nested, and a `case` pattern spelled like a closer (R3).
+  "{ if true; then printf 'gh '; fi; printf 'pr '; } > f; echo merge 5 >> f; bash f",
+  "if true; then while false; do :; done; printf 'gh '; printf 'pr '; fi > f; echo merge 5 >> f; bash f",
+  "for i in 1; do for j in 1; do :; done; printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "time for i in 1; do printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "! for i in 1; do printf 'gh '; printf 'pr '; done > f; echo merge 5 >> f; bash f",
+  "case x in x) printf 'gh pr ' ;; done) : ;; esac > f; echo merge 5 >> f; bash f",
+  // A redirect after a process substitution, and `print` options with their value attached.
+  "cat <(printf 'gh pr ') > f; echo merge 5 >> f; bash f", 'print -u1 gh pr merge 5 | zsh', `print -f"%s " gh pr merge 5 | zsh`,
+];
+
+test('#532 review 2: holes the round-1 fixes opened are closed, and lines that run nothing stay allowed', () => {
+  for (const line of outputGapsReview2) assert.equal(agentGuardDecision(line).allow, false, line);
+  // A file written past 64 texts is refused only when it is read (B1); only the command word is the shell that
+  // runs a process substitution, and `bash x < <(…)` runs `x` (B2).
+  for (const line of [Array.from({ length: 65 }, (_, i) => `echo ${i} > out.txt`).join('; '),
+    "ls . <(printf 'gh pr '; echo merge 5)", "grep -n sh <(printf 'gh pr '; echo merge 5)",
+    "bash x < <(printf 'gh pr '; echo merge 5)", 'print -u2 gh pr merge 5 | zsh']) {
+    assert.equal(agentGuardDecision(line).allow, true, line);
+  }
+  assert.equal(agentGuardDecision(`${Array.from({ length: 65 }, (_, i) => `echo ${i} > f`).join('; ')}; bash f`).allow, false);
+  // A deep nest of process substitutions is refused at once, with the process substitution message (B3).
+  const t = Date.now();
+  const deep = agentGuardDecision(`${'cat <('.repeat(1500)}echo hi${')'.repeat(1500)}`);
+  assert.equal(deep.allow, false);
+  assert.match(deep.message, /process substitutions/);
+  assert.ok(Date.now() - t < withinTime(2000), `took ${Date.now() - t} ms`);
+});
+
+test('#532 review 3: a shell passes its stdin to the text it runs, and an unclosed or missed group keeps its output', () => {
+  for (const line of ["bash -c bash < <(echo 'gh pr merge 5')", "zsh -c zsh < <(echo 'gh pr merge 5')",
+    "bash -c 'cat | bash' < <(echo 'gh pr merge 5')", "echo bash > x; bash x < <(echo 'gh pr merge 5')",
+    "for i in 1; do { printf 'gh pr '; } done > f; echo merge 5 >> f; bash f",
+    "if true; then 'fi'; printf 'gh pr '; fi > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; while) : ;; esac > f; echo merge 5 >> f; bash f"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
+  }
+  for (const line of ["bash x < <(echo 'gh pr merge 5')", "bash -c 'echo hi' < <(echo 'gh pr merge 5')",
+    "bash -c cat < <(echo 'gh pr merge 5')", 'if true; then '.repeat(100) + 'echo hi' + '; fi'.repeat(100)]) {
+    assert.equal(agentGuardDecision(line).allow, true, line.slice(0, 80));
+  }
+  // A closed group is read once by the groups around it: deep nests cost their size (review 4).
+  for (const open of ['if true; then ', 'for i in 1; do ']) {
+    const t = Date.now();
+    const v = agentGuardDecision(open.repeat(10000) + 'echo hi' + (open.startsWith('if') ? '; fi' : '; done').repeat(10000));
+    assert.equal(v.allow, true, open);
+    assert.ok(Date.now() - t < withinTime(1500), `${open} took ${Date.now() - t} ms`);
+  }
+  const t = Date.now();
+  assert.equal(agentGuardDecision('if true; then '.repeat(80) + 'echo a;'.repeat(10000) + '; fi'.repeat(80)).allow, true);
+  assert.ok(Date.now() - t < withinTime(1500), `took ${Date.now() - t} ms`);
+});
+
+test('#532 review 4: inside a case, a one-word `if` may start a real block, and a lone pattern prints nothing', () => {
+  for (const line of ["case x in x)\nif\ntrue; then printf 'gh pr '; fi > f;; esac; echo merge 5 >> f; bash f",
+    "case x in x) if\ntrue; then printf 'gh pr '; fi > f;; esac; echo merge 5 >> f; bash f",
+    "case x in x)\nif\ntrue\nthen\nprintf 'gh pr '\nfi > f\n;;\nesac\necho merge 5 >> f\nbash f",
+    "case x in x) printf 'gh pr ' ;; if) : ;; esac > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; '}') : ;; esac > f; echo merge 5 >> f; bash f",
+    "( ( echo gh pr ) ; echo merge 5 ) | tr '\\n' ' ' | bash"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
+  }
+});
+
+test('#532 review 5: a block the finder pairs across a folded group, and a case under an open loop, keep their output', () => {
+  for (const line of ["for i in 1; do ( printf 'gh pr '; for j in 1; { echo merge 5; } ); done > f; bash f",
+    "for i in 1; do ( echo gh pr; for j in 1; { echo merge 5; } ); done | tr '\\n' ' ' | bash",
+    "case x in x) for j in 1; { :; }; printf 'gh pr merge 5';; esac > f; bash f",
+    "case x in x) for j in 1; { :; }; printf 'gh pr ';; esac > f; echo merge 5 >> f; bash f",
+    "case x in x) if true; then for j in 1; { :; }; printf 'gh pr merge 5'; fi > f;; esac; bash f"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
+  }
+});
+
+test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
+  const T = tmp();
+  const log = path.join(T, 'executed');
+  const bin = path.join(T, 'bin'); fs.mkdirSync(bin);
+  for (const name of ['gh', 'git']) {
+    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nprintf reached >> "$GUARD_STREAM_LOG"\n', { mode: 0o755 });
+  }
+  const corpus = [...outputGaps, ...outputGapsReview, ...outputGapsReview2,
+    "bash -c bash < <(echo 'gh pr merge 5')", "for i in 1; do { printf 'gh pr '; } done > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; while) : ;; esac > f; echo merge 5 >> f; bash f"];
+  for (const printer of ["echo gh pr merge 5", "printf '%s ' gh pr merge 5", "printf '%b' '\\x67h pr merge 5\\n'"]) {
+    for (const group of [`{ ${printer}; }`, `( ${printer} )`]) {
+      for (const sink of ['| bash', '> f; bash f', '| tee f; bash f']) corpus.push(`${group} ${sink}`);
+    }
+  }
+  // Each shell that is installed: macOS has bash 3.2 and zsh; a Linux runner has bash 5 and may have no zsh, so
+  // there this checks bash 5 only. The zsh-only lines are checked by the asserts above on every runner.
+  for (const shell of ['/bin/bash', '/bin/zsh']) {
+    if (!fs.existsSync(shell)) continue;
+    for (const line of corpus) {
+      fs.rmSync(log, { force: true });
+      try {
+        execFileSync(shell, ['-c', line], { cwd: T, timeout: 2000, stdio: 'ignore',
+          env: { PATH: `${bin}:/bin:/usr/bin`, HOME: T, GUARD_STREAM_LOG: log } });
+      } catch { /* A shell-specific syntax error is not an execution witness. */ }
+      if (fs.existsSync(log)) assert.equal(agentGuardDecision(line).allow, false, `${shell}: ${line}`);
+    }
+  }
+});
+
+test('#532: repeated cat stdin copies are charged before they exhaust the deadline', () => {
+  const line = `printf x > a; echo go | ${'cat - $(<a) | '.repeat(25)}bash`;
+  const v = agentGuardDecision(line);
+  assert.equal(v.allow, false);
+  assert.doesNotMatch(v.message, /took too long/);
+});
