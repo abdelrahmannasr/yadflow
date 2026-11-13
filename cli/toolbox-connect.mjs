@@ -47,6 +47,11 @@ export const RECIPES = Object.freeze({
     PT('in the Unity Editor, open the Package Manager (Window → Package Manager), choose + → Add (in Unity 6: Install) package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),
     PT('then open Window → MCP for Unity → Toggle MCP Window; under Per-client setup, with Claude Code chosen, set Client Project Dir to the folder your agent starts in (the Unity repo, unless you start it elsewhere); press Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings for that folder only, and an agent loads a new MCP server when it starts'),
   ],
+  'ai-game-developer': [
+    P('npx unity-mcp-cli@1.11.1 install-plugin .', 'run it in the Unity repo: it adds the plugin to that project\'s packages, which is yours to approve'),
+    PT('open the repo in the Unity Editor, then Window → AI Game Dev; set the connection mode to Custom, not Cloud', 'Custom runs the server on this machine; Cloud sends your Editor data to ai-game.dev after a sign-in, and that choice is yours'),
+    PT('in the same window, with Claude Code chosen, press Configure (Model Context Protocol), and restart your agent', 'the Editor writes the ai-game-developer server into your agent\'s settings, and an agent loads a new MCP server when it starts'),
+  ],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),
     PT('sign in to Figma in your agent (its Figma MCP server)', 'a sign-in is yours: it is your Figma account'),
