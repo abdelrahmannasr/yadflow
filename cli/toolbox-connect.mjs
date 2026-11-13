@@ -23,9 +23,10 @@ import {
 import { registerDesign, registerLearning, registerTesting } from './setup.mjs';
 
 // Each shipped tool's recipe. `null`: nothing to install here (the person's app, account or service — the
-// tool's `manual` says how). An agent step is a package-manager or plugin install, pinned to the vetted version
-// wherever one is vetted; `recipeProblems` checks it. The `claude` steps are Claude Code's: with another agent,
-// the connect-tool rule hands every step to the person.
+// tool's `manual` says how). An agent step is a package-manager or plugin install, or the tool's own config
+// writer, pinned to the vetted version wherever one is vetted; `recipeProblems` checks it. A step that names
+// `claude` or `claude-code` is Claude Code's: with another agent, the connect-tool rule hands every step to the
+// person.
 const A = (run) => ({ who: 'agent', run, scope: 'user' });
 // An agent step that changes the project folder it runs in, not the user account (E175: a Unity plugin).
 const AP = (run) => ({ who: 'agent', run, scope: 'project' });
@@ -51,12 +52,14 @@ export const RECIPES = Object.freeze({
   ],
   // E175: the default Unity tool. The agent installs the plugin (CLI and plugin both at the vetted version) and
   // writes a local stdio server (no cloud endpoint, no project key) for Claude Code, from the Unity repo; the
-  // connection mode is set in the Editor only, so Custom is the person's step.
+  // connection mode and transport are set in the Editor only, so Custom + stdio is the person's step: with the
+// plugin's default transport (streamableHttp) the Editor starts its own server on the project's port, and the
+// agent's stdio server cannot start ("address already in use").
   'ai-game-developer': [
     AP('npx unity-mcp-cli@1.11.1 install-plugin . --plugin-version 1.11.1'),
     AP('npx unity-mcp-cli@1.11.1 setup-mcp claude-code . --transport stdio'),
-    PT('open the repo in the Unity Editor, then Window → AI Game Dev; set the connection mode to Custom, not Cloud', 'Custom runs the server on this machine; Cloud sends your Editor data to ai-game.dev after a sign-in, and that choice is yours'),
-    PT('restart your agent', 'an agent loads a new MCP server when it starts'),
+    PT('open the repo in the Unity Editor, then Window → AI Game Dev; set the connection mode to Custom, not Cloud, and the transport to stdio', 'Custom runs the server on this machine (Cloud sends your Editor data to ai-game.dev after a sign-in, and that choice is yours); stdio lets your agent start that server, which the Editor\'s own server would otherwise block'),
+    PT('restart your agent, and approve the ai-game-developer server when it asks', 'an agent loads a new MCP server when it starts, and asks before it uses one a project folder adds'),
   ],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),

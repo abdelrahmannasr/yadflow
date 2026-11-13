@@ -143,28 +143,35 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
 - **None installed: ask, then help.** Ask the person once whether to install AI Game Developer, under the
   connect-tool rule: run `yad toolbox connect ai-game-developer --json` (or `yad toolbox connect unity-mcp
   --json` when that entry is `used: true` and `ai-game-developer`'s is not — the team chose it) and show its
-  `ask` word for word. On a yes, help the person through it: run its agent steps from the Unity repo, in order
+  `ask` word for word. On a yes, help the person through it: run its agent steps from the folder you edit (the Unity
+  repo, or its worktree — the plugin and the server are written for that folder), in order
   (AI Game Developer's add the plugin at the vetted version, then write a local stdio server for Claude Code —
   with another agent, hand both to the person, with that agent's id from `npx unity-mcp-cli@1.11.1 setup-mcp
   --list` in place of `claude-code`); hand over its person steps and wait for them (open the repo in Unity,
-  set the connection mode to Custom (local) in Window → AI Game Dev, since Cloud mode sends Editor data to
-  ai-game.dev; then restart the agent); then run its `verify` and check your session sees the server (in
-  Claude Code, `/mcp`). The plugin's files (`Packages/manifest.json`, `packages-lock.json`) stay out of the
-  task commit. On a no, or when a step fails (show its output; never try another way), use the fallback below.
+  set the connection mode to Custom (local) and the transport to stdio in Window → AI Game Dev — Cloud mode
+  sends Editor data to ai-game.dev, and with the default transport the Editor's own server blocks the
+  agent's; then restart the agent and approve the server); then run its `verify` and check your session sees
+  the server (in Claude Code, `/mcp`). The files these steps write (`Packages/manifest.json`,
+  `packages-lock.json`, and `.mcp.json`, which holds this machine's path to the server) stay out of the task
+  commit. On a no, or when a step fails (show its output; never try another way), use the fallback below.
 - **With AI Game Developer.** If your session does not see the server (in Claude Code, `/mcp`), ask the
   person to start the agent in the folder you edit, or run `npx unity-mcp-cli@1.11.1 setup-mcp claude-code .
   --transport stdio` there (with their yes) and restart the agent. Before its first use, ask the person to
-  confirm the AI Game Dev window shows connection mode **Custom** (yad cannot see it): on a no, they switch to
-  Custom, or you use the fallback below; record `AI Game Developer: Custom mode confirmed by <person>` in
-  `Decisions:`. Probe once by reading the console; if it fails, or the Editor is open on another folder than
+  confirm the AI Game Dev window shows connection mode **Custom** and transport **stdio** (yad cannot see
+  them): on a no, they switch both, or you use the fallback below; record `AI Game Developer: Custom mode and
+  stdio confirmed by <person>` in `Decisions:`. Probe once by reading the console; if it fails, or the Editor is open on another folder than
   the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor on the
   folder you edit and check Window → AI Game Dev shows it connected, or use the fallback. Only these tools:
   `rql-schema` (how to write a query), `rql-query` — to read the console (its `console` source) and to find
-  objects — and `tests-run` for the task's tests. After each edit, check it compiles with `npx
-  unity-mcp-cli@1.11.1 compile . --once --format json` from the folder you edit (it refreshes Unity's assets
-  and waits for the compile): exit 0 compiles; exit 6 lists the compile errors — fix every error your change
-  caused before you commit; exit 7 (no editor reached), 14 (timeout) or 18 (a dialog blocks the editor) — ask
-  the person to open the Editor or close the dialog, then run it again, or use the fallback. When the task
+  objects — and `tests-run` for the task's tests. After each edit, while the probe shows the person's Editor
+  open and connected on the folder you edit, check it compiles with `npx unity-mcp-cli@1.11.1 compile .
+  --format json` from that folder (it refreshes Unity's assets and waits for the compile). With no Editor open
+  it starts a hidden (batch) Unity of its own, so never run it then: ask the person to open the Editor. Read
+  the answer's `errors[0].code`, never its message: none (exit 0) compiles; `COMPILATION_FAILED` — fix every
+  error in `data.errors` your change caused before you commit; `NOT_AUTHENTICATED` — the project is in Cloud
+  mode: ask the person to switch to Custom; `BUSY` — run it once more; anything else (`UNREACHABLE`,
+  `TIMEOUT`, a dialog that blocks the editor, `TOOL_FAILED`) — ask the person to open the Editor or close the
+  dialog, then run it again, or use the fallback. When the task
   declares tests, run them with `tests-run`. Never `rql-mutate`, `script-execute`, `script-update-or-create`,
   `script-delete`, `package-add`, `package-remove`, `assetstore-add`, `tool-set-visibility`,
   `tool-set-enabled-state`, or a `screenshot-*` tool: they run code in the Editor, change or write files the
@@ -191,7 +198,8 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   ID): a declared file's own `.meta`, and the `.meta` of a folder made for it, go in the commit with it, and a
   declared file deleted or renamed takes its `.meta` with it. They do not count against the ≤3-file rule —
   `yad commit` counts a `.meta` only when its own file or folder is not staged. Any other file
-  the Editor writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*` — is left unstaged
+  the Editor or a tool's setup writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*`,
+  `.mcp.json` — is left unstaged
   and named to the person (AI Game Developer's `.ai-game-dev/` folder and any skill files its window
   generates too); whether the team commits the `com.coplaydev.unity-mcp` or `com.ivanmurzak.unity.mcp` package is theirs to decide,
   never part of a task commit.

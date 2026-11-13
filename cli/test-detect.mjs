@@ -1346,9 +1346,9 @@ test('E175 AI Game Developer: the default Unity tool for yad-implement, found by
     assert.equal(j.steps[0].run, `npx unity-mcp-cli@${r} install-plugin . --plugin-version ${r}`, 'the CLI and the plugin, both at the vetted release');
     assert.equal(j.steps[1].run, `npx unity-mcp-cli@${r} setup-mcp claude-code . --transport stdio`, 'a local stdio server');
     for (const s of j.steps.slice(0, 2)) assert.doesNotMatch(s.run, /--oauth|--token|--url|ai-game\.dev|--regenerate-key/, 'never a cloud endpoint or a key');
-    assert.match(j.steps[2].run, /set the connection mode to Custom, not Cloud$/);
+    assert.match(j.steps[2].run, /set the connection mode to Custom, not Cloud, and the transport to stdio$/, 'stdio, or the Editor\'s own server blocks the agent\'s');
     assert.match(j.steps[2].why, /Cloud sends your Editor data to ai-game\.dev/);
-    assert.equal(j.steps[3].run, 'restart your agent');
+    assert.equal(j.steps[3].run, 'restart your agent, and approve the ai-game-developer server when it asks');
     assert.match(j.ask, /^Connect Unity MCP \(AI Game Developer\)\? I will run `npx unity-mcp-cli@1\.11\.1 install-plugin \. --plugin-version 1\.11\.1`, then `npx unity-mcp-cli@1\.11\.1 setup-mcp claude-code \. --transport stdio` \(in this project folder: it changes the project's files and this folder's agent settings\); then you /);
     assert.equal(j.verify, 'yad toolbox connect ai-game-developer --verify --json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1357,9 +1357,10 @@ test('E175 AI Game Developer: the default Unity tool for yad-implement, found by
 test('E175: yad-implement uses one Unity tool — AI Game Developer by default — and helps install it when none is there', () => {
   const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8').replace(/\s+/g, ' ');
   for (const words of ['yad toolbox connect ai-game-developer --json', 'connection mode to Custom (local)', '`rql-schema`', '`rql-query`', '`tests-run`', '`com.ivanmurzak.unity.mcp`',
-    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode confirmed by <person>`', 'Work with that one tool for the whole task',
-    'Ask the person once whether to install AI Game Developer', 'run its agent steps from the Unity repo, in order', 'then run its `verify` and check your session sees the server',
-    '`npx unity-mcp-cli@1.11.1 compile . --once --format json`', 'exit 0 compiles; exit 6 lists the compile errors', 'exit 7 (no editor reached), 14 (timeout) or 18 (a dialog blocks the editor)']) {
+    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode and stdio confirmed by <person>`', 'transport **stdio**', 'Work with that one tool for the whole task',
+    'Ask the person once whether to install AI Game Developer', 'then run its `verify` and check your session sees the server',
+    '`npx unity-mcp-cli@1.11.1 compile . --format json`', 'With no Editor open it starts a hidden (batch) Unity of its own, so never run it then', "Read the answer's `errors[0].code`, never its message",
+    '`COMPILATION_FAILED` — fix every error in `data.errors`', '`NOT_AUTHENTICATED` — the project is in Cloud mode', '`BUSY` — run it once more', '`.mcp.json`, which holds this machine\'s path to the server', 'run its agent steps from the folder you edit']) {
     assert.ok(skill.includes(words), words);
   }
   // The order: AI Game Developer first (also when both are installed), then MCP for Unity, then one connect —
