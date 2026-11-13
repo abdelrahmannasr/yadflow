@@ -216,6 +216,32 @@ export const TOOLBOX = Object.freeze([
     usedBy: ['yad skill bind'],
   },
   {
+    // E176: the code half of the project brain. `yad brain build` runs it in each connected code repo, at the
+    // vetted version only (GRAPHIFY_VERSION in cli/brain.mjs), with its LLM pass off (GRAPHIFY_BACKEND=none):
+    // only the local tree-sitter parse runs, so no source leaves the machine. yadflow reads the work items
+    // itself. Recommended, not core: the brain works without it, as the work-item layer alone.
+    id: 'graphify', name: 'Graphify', tier: 'recommended', role: 'maps each code repo into a knowledge graph (files, symbols, calls, imports) for the project brain (`yad brain`)',
+    licence: 'Apache-2.0', source: 'https://github.com/Graphify-Labs/graphify', checked: '2026-11-13',
+    vetted: {
+      on: '2026-11-13', licenceFrom: 'https://github.com/Graphify-Labs/graphify/blob/v8/LICENSE',
+      source: 'https://github.com/Graphify-Labs/graphify', release: 'v0.9.108',
+      packages: [{ registry: 'pypi', name: 'graphifyy', version: '0.9.108' }],
+      note: 'The PyPI name has two y\'s (`graphifyy`); its project links name https://github.com/Graphify-Labs/graphify, and the README says it is the only official package. Other graphify* packages on PyPI are not this tool. The repository moved from safishamsi/graphify, which redirects. Its default branch is `v8`.',
+    },
+    install: [
+      { type: 'python', command: 'uv tool install graphifyy' },
+      { type: 'python', command: 'pipx install graphifyy' },
+    ],
+    manual: null,
+    detect: { bins: ['graphify'] },
+    versions: null,
+    fallback: 'no code graph. yad brain build writes the work-item layer alone (epics, stories, tasks, contract surfaces, ships), with a file node for each file a task declares',
+    // No skill writes a line when it is missing: `yad brain build` says so on the terminal.
+    records: null,
+    note: 'yad never runs `graphify install`, `hook install` or `watch`, and never starts its MCP server or its query commands: yad brain reads the graph file itself.',
+    usedBy: ['yad brain build'],
+  },
+  {
     // Not a pool of skills (#361): a gateway that runs other MCP servers, so no yad skill or command uses
     // it, and `yad skill recommend` never names it as a pool (recommend.mjs: POOLS).
     id: 'docker-mcp', name: 'Docker MCP Toolkit', tier: 'recommended', role: "a gateway that runs MCP servers from Docker's catalogue as containers",
