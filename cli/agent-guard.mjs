@@ -1179,10 +1179,13 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
   caseLeft.n = CASE_SCAN;
   built.n = 0;
   resetFiles();
+  // A reading of what a command writes or prints also stops at the deadline, and says "too much written": past
+  // the deadline, the refusal says what stopped it — the time (#535 CI: a slow runner got the wrong reason).
+  const timed = (d) => (d === TOO_MUCH_WRITTEN && Date.now() > deadline ? OUT_OF_TIME : d);
   try {
-    return judgeReadings(line, depth);
+    return timed(judgeReadings(line, depth));
   } catch (e) {
-    if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return TOO_MUCH_WRITTEN;
+    if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return timed(TOO_MUCH_WRITTEN);
     if (e?.code === 'YAD_GUARD_TOO_DEEP') return TOO_DEEP;
     if (e?.code === 'YAD_GUARD_TOO_MANY_PROCSUBS') return TOO_MANY_PROCSUBS;
     if (e?.code === 'YAD_GUARD_BLOCKS_DEEP') return { allow: false, message: 'yad agent guard: this command nests `if`, `for`, `while` or `( … )` blocks too deep to judge. Run it as separate commands.' };
