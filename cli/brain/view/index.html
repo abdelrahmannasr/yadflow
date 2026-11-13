@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Project brain</title>
+<link rel="stylesheet" href="style.css?t=__TOKEN__">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Project brain</h1>
+    <p id="summary" class="muted">Loading…</p>
+  </div>
+  <p id="fresh" class="banner warn" hidden></p>
+</header>
+<main class="layout">
+  <aside class="controls" aria-label="Find and filter">
+    <section>
+      <label for="search" class="label">Find a node</label>
+      <input id="search" type="search" placeholder="A name, a file or an id" autocomplete="off" spellcheck="false">
+      <ul id="results" class="results"></ul>
+    </section>
+    <section>
+      <h2 class="label">Show</h2>
+      <label class="check"><input type="checkbox" id="layer-work" checked> Work items</label>
+      <label class="check"><input type="checkbox" id="layer-code" checked> Code</label>
+      <label class="check"><input type="checkbox" id="all-code"> All the code, not only what the work names</label>
+    </section>
+    <section>
+      <label for="f-epic" class="label">Epic</label>
+      <select id="f-epic"><option value="">All epics</option></select>
+      <label for="f-story" class="label">Story</label>
+      <select id="f-story"><option value="">All stories</option></select>
+      <label for="f-repo" class="label">Repo</label>
+      <select id="f-repo"><option value="">All repos</option></select>
+      <button id="reset" type="button" class="button">Clear the filters</button>
+    </section>
+    <section>
+      <h2 class="label">Key</h2>
+      <ul id="legend" class="legend"></ul>
+      <p class="muted small">A solid line is read from a file (extracted). A faint line is a match yadflow inferred.</p>
+    </section>
+  </aside>
+  <section class="stage" aria-label="The graph">
+    <div id="graph" class="graph"></div>
+    <div id="notice" class="notice" hidden></div>
+  </section>
+  <aside id="details" class="details" aria-live="polite">
+    <p class="muted">Click a node to see what it is and what it links to.</p>
+  </aside>
+</main>
+<!--SCRIPTS-->
+<script src="vendor/graphology.umd.min.js?t=__TOKEN__"></script>
+<script src="vendor/graphology-library.min.js?t=__TOKEN__"></script>
+<script src="vendor/sigma.min.js?t=__TOKEN__"></script>
+<script src="app.js?t=__TOKEN__"></script>
+</body>
+</html>

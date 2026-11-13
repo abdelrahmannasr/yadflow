@@ -209,6 +209,10 @@ export const COMMAND_CLASS = {
   'brain build': { class: 'local-write' },
   'brain query': { class: 'read' },
   'brain status': { class: 'read' },
+  // E177: starts a local server (127.0.0.1, a one-time key), or with --html writes one file — the brain's own
+  // ignored folder, or any path named. Local only, so local-write; never pre-approved (a prefix rule would let
+  // `--html <file>` overwrite any file, as `standup --out` could).
+  'brain view': { class: 'local-write' },
   'repo list': { class: 'read' },
   'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   'repo sync': { class: 'local-write' },

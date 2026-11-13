@@ -159,7 +159,7 @@ const OWN_FLAGS = new Set(['--json', '--post', '--confirm', '--kind']);
 const withoutOwnFlags = (argv) => argv.filter((a) => !OWN_FLAGS.has(String(a).split('=')[0]));
 
 // ---- open a URL (best-effort) -------------------------------------------------------------------
-function openUrl(url, { runner = run } = {}) {
+export function openUrl(url, { runner = run } = {}) {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
   if (has(cmd)) runner(cmd, [url]);
 }

@@ -96,7 +96,7 @@ function readPlain(base, rel) {
 
 // Write a file by a temp file and a rename: a rename replaces a link where `writeFileSync` would follow it,
 // and a committed link (`files.txt -> ~/.zshrc`) would take every name from the code repo (E176 review 2).
-function writePlain(dir, name, data) {
+export function writePlain(dir, name, data) {
   const file = path.join(dir, name);
   const tmp = `${file}.${process.pid}.tmp`;
   // A temp left by a killed run under a reused pid is removed first; `rmSync` takes a link itself, never
@@ -585,19 +585,25 @@ export function queryBrain(brain, text, { limit = 10, neighbours = 12 } = {}) {
 
 // ---- the command ---------------------------------------------------------------------------------
 
-export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | status   (each with --json; the search text cannot start with -)';
-export const BRAIN_FLAGS = Object.freeze(['--repo', '--limit', '--json', '--dir']);
+export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | status | view [--open] [--html [<file>]]   (each with --json; the search text cannot start with -)';
+export const BRAIN_FLAGS = Object.freeze(['--repo', '--limit', '--json', '--dir', '--open', '--html']);
 
-export async function runBrain(root, { action = 'status', args = [], repo = null, limit = null, json = false, unknownFlags = [], runner = run, where = whereOnPath } = {}) {
+export async function runBrain(root, { action = 'status', args = [], repo = null, limit = null, json = false, open = false, html = false, unknownFlags = [], runner = run, where = whereOnPath } = {}) {
   if (unknownFlags.length) return refuse(`yad brain does not take ${unknownFlags.join(', ')}`, BRAIN_USAGE, { json });
   if (!fs.existsSync(productConfigPath(root))) {
     return refuse('no Product here (.sdlc/product.json) — run `yad brain` from the Product, or from a repo it registers', null, { json });
   }
+  // `--open` and `--html` belong to `view` (E177): given to another action they are refused, not ignored.
+  const viewOnly = [[open, '--open'], [html, '--html']].filter(([given]) => given && action !== 'view').map(([, flag]) => flag);
+  if (viewOnly.length) return refuse(`yad brain ${forTerminal(action)} does not take ${viewOnly.join(', ')}`, BRAIN_USAGE, { json });
+  // E177: the viewer is its own module, loaded only when asked for (it is the one that starts a server).
+  if (action === 'view' && (repo !== null || limit !== null)) return refuse(`yad brain view does not take ${[repo !== null ? '--repo' : null, limit !== null ? '--limit' : null].filter(Boolean).join(', ')}`, BRAIN_USAGE, { json });
+  if (action === 'view') return (await import('./brain-view.mjs')).runBrainView(root, { args, html, open, json, runner });
   if (action !== 'query' && args.length) return refuse(`unexpected argument(s): ${args.map(forTerminal).join(' ')}`, BRAIN_USAGE, { json });
   if (action === 'build') return brainBuild(root, { repo, json, runner, where });
   if (action === 'query') return brainQuery(root, { text: args.join(' '), limit, json, runner });
   if (action === 'status') return brainStatus(root, { json, runner, where });
-  return refuse(`unknown brain action: ${forTerminal(action)} (build, query, status)`, BRAIN_USAGE, { json });
+  return refuse(`unknown brain action: ${forTerminal(action)} (build, query, status, view)`, BRAIN_USAGE, { json });
 }
 
 function brainBuild(root, { repo, json, runner, where }) {
@@ -674,7 +680,7 @@ function brainQuery(root, { text, limit, json, runner }) {
 }
 
 // The repos whose HEAD moved since the brain recorded it.
-function codeBehind(root, brain, runner) {
+export function codeBehind(root, brain, runner = run) {
   const { registry } = readRegistry(root);
   const { usable } = brainRepos(root, registry);
   const out = [];

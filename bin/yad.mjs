@@ -442,6 +442,12 @@ ${c.bold('Build helpers')}
   yad brain query <text> [--limit <n>] [--json]
                                        The brain's nodes whose name holds <text>, each with its neighbours
   yad brain status [--json]            Is the brain current, and is each repo's code graph current
+  yad brain view [--open]              Draw the brain in a browser (E177): a local page on 127.0.0.1 with a
+                                       one-time key, the code and the work in one graph — filter, search, a
+                                       node's neighbours. Ctrl-C stops it
+  yad brain view --html [<file>] [--open]
+                                       The same page as one file that needs no server and no network
+                                       (default .sdlc/brain/view.html, never committed)
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -563,6 +569,7 @@ function parseArgs(argv) {
     else if (a === '--all') o.all = true;
     else if (a === '--brief') o.brief = true;
     else if (a === '--open') o.open = true;
+    else if (a === '--html') o.html = true;
     else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
@@ -654,7 +661,7 @@ const ACTIONS = {
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
-  brain: { known: ['build', 'query', 'status'], default: 'status' },
+  brain: { known: ['build', 'query', 'status', 'view'], default: 'status' },
   repo: { known: ['list', 'refresh', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
@@ -693,8 +700,9 @@ function writesProduct(cmd, o) {
   // `build merged` only asks the platform, unless --ship records what it found.
   if (cmd === 'build') return action === 'sync' ? !o.dryRun : action !== 'merged' || !!o.ship;
   if (cmd === 'check') return !!o.fix;
-  // `brain build` writes the brain into the Product: with no Product found, it gets the shared refusal (--dir or cd).
-  if (cmd === 'brain') return action === 'build';
+  // `brain build` writes the brain into the Product, and so does `brain view --html` with no file named (its
+  // .sdlc/brain/view.html): with no Product found, they get the shared refusal (--dir or cd).
+  if (cmd === 'brain') return action === 'build' || (action === 'view' && !!o.html);
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   if (cmd === 'dial') return o.to !== undefined;
@@ -1419,7 +1427,7 @@ async function main() {
         .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
         .map((t) => t.split('=')[0])
         .filter((f) => !BRAIN_OWN.has(f)))];
-      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json, unknownFlags });
+      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json, open: !!o.open, html: !!o.html, unknownFlags });
       break;
     }
     case 'repo': {
