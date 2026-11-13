@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The #280 guard (cli/test.mjs): printed lines go to stderr while the runner owns stdout.
 if (process.env.NODE_TEST_CONTEXT) {
@@ -798,14 +798,62 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
   }
 });
 
-test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async () => {
+// A copy of the guard whose deadline a test sets per call (`globalThis.YAD_TEST_BUDGET`, cleared after), with its
+// imports pointing back here (its SHIPPED_CHECKS path points nowhere, which agentGuardDecision never reads).
+async function guardCopy() {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const src = fs.readFileSync(path.join(dir, 'agent-guard.mjs'), 'utf8')
+    .replace('deadline = Date.now() + JUDGE_BUDGET_MS;', 'deadline = Date.now() + (globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS);')
+    .replace(/from '\.\/([\w-]+\.mjs)'/g, (_, f) => `from ${JSON.stringify(new URL(f, import.meta.url).href)}`);
+  assert.ok(src.includes('globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS'), 'the budget is set per call in the copy');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guard-copy-'));
+  const copy = path.join(T, 'agent-guard.mjs');
+  fs.writeFileSync(copy, src);
+  const mod = await import(pathToFileURL(copy).href);
+  const done = () => { delete globalThis.YAD_TEST_BUDGET; fs.rmSync(T, { recursive: true, force: true }); };
+  // A judgement with no deadline: a slow runner takes the real time, and the verdict never depends on it.
+  const uncut = (l) => { globalThis.YAD_TEST_BUDGET = Infinity; try { return mod.agentGuardDecision(l); } finally { delete globalThis.YAD_TEST_BUDGET; } };
+  return { mod, uncut, done };
+}
+
+test('#535 CI: a reading of what a command writes, stopped by the deadline, is refused as out of time, not as too much written', async () => {
+  // A slow runner, made on purpose, from the copy whose budget is set per call. Where the deadline lands depends
+  // on the machine's speed, so each line is timed with no deadline, then judged again at budgets from a tenth of
+  // that time to nearly all of it: every phase the deadline can stop is reached.
+  const { mod: slow, done } = await guardCopy();
+  try {
+    const half = (unit) => unit.repeat(Math.floor(slow.MAX_JUDGED / 2 / unit.length));
+    const steps = process.env.NODE_V8_COVERAGE ? [0.1, 0.3, 0.5, 0.7, 0.9] : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+    for (const unit of ['bash -c "$(echo x)";', 'echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
+      const line = half(unit);
+      globalThis.YAD_TEST_BUDGET = Infinity;
+      const t0 = Date.now();
+      assert.equal(slow.agentGuardDecision(line).allow, true, `${unit}: allowed in full time`);
+      const full = Date.now() - t0;
+      for (const f of steps) {
+        globalThis.YAD_TEST_BUDGET = Math.max(1, Math.round(full * f));
+        const d = slow.agentGuardDecision(line);
+        assert.ok(d.allow || /took too long to judge/.test(d.message), `${unit} at ${globalThis.YAD_TEST_BUDGET} of ${full} ms: ${d.message}`);
+      }
+      delete globalThis.YAD_TEST_BUDGET;
+    }
+  } finally { done(); }
+});
+
+test('#492: a line of many heredocs that never end is judged in bounded time; one too long to judge is refused', async (t) => {
   // A coverage run makes this work about seven times slower, which says nothing about the guard, so it is not
   // timed. The other runs are timed, but a shared CI machine has passed 3 s on work that takes 0.5 s here, so
   // every limit is 4.5 s: still under the guard's own 5 s cut-off, because a line refused at the cut-off would
   // otherwise pass this test and hide a slowdown. Nested tails keep 6 s; that case runs into the cut-off inside
-  // the brace expansion by design.
+  // the brace expansion by design. The lines read in full, with their output read too (#535), take about 1.2 s
+  // here, and a CI runner has been about four times slower: near the cut-off, which would refuse them. They are
+  // judged with no deadline (`uncut`), so the verdict is exact and the time is real, and get `SLOW`: a reading
+  // that has turned quadratic takes minutes on such a line, so it still shows.
   const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
   const { MAX_JUDGED, JUDGE_BUDGET_MS } = await import('./agent-guard.mjs');
+  const SLOW = JUDGE_BUDGET_MS + 1500;
+  const { uncut, done } = await guardCopy();
+  t.after(done);
   const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
   const t0 = Date.now();
   assert.equal(agentGuardDecision(line).allow, false);
@@ -842,8 +890,8 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   for (const [unit, tail] of [['$()', '$()'], ['$(a) ', '$(a) '], [':<<<x;', 'sh;'], [':<<E\nE\n', 'sh;']]) {
     const l = unit.repeat(Math.floor(495000 / unit.length)) + tail.repeat(Math.floor(495000 / tail.length));
     const t5 = Date.now();
-    agentGuardDecision(l);
-    assert.ok(Date.now() - t5 < within(4500), `${JSON.stringify(unit)} took ${Date.now() - t5} ms`);
+    uncut(l);
+    assert.ok(Date.now() - t5 < within(SLOW), `${JSON.stringify(unit)} took ${Date.now() - t5} ms`);
   }
   let inSub = 'echo $(';
   for (let i = 0; i < 10000; i++) inSub += `<<B${i}\n`;
@@ -860,14 +908,14 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // #498, rows 1, 2, 8: each new path is linear; a file run again after each of many appends is refused at its bound.
   // Half the cap (#498 CI): a shared runner has run two to four times slower than a laptop. The trade-off: a path
   // that scans every earlier part costs a quarter as much at half the length, so a mild one may only show near
-  // the limit. Under coverage the 5 s cut-off may also refuse; the other runs check each verdict.
+  // the limit. Judged with no deadline, so every run checks each verdict.
   const half = (unit) => unit.repeat(Math.floor(MAX_JUDGED / 2 / unit.length));
   for (const unit of ['bash <(echo x) ', 'bash <(', 'echo x > f; bash f;', 'echo x >> f; ', 'printf x >> f; ', 'x=$(echo a > f; bash f);', 'bash -c "$(echo x)";', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ', 'x <<< "$(echo a b)" ', '$(<f)']) {
     const l = half(unit);
     const t10 = Date.now();
-    const d = agentGuardDecision(l);
-    assert.ok(d.allow || (process.env.NODE_V8_COVERAGE && /took too long/.test(d.message)), `${unit}: ${d.message}`);
-    assert.ok(Date.now() - t10 < within(4500), `#498 ${JSON.stringify(unit)} took ${Date.now() - t10} ms`);
+    const d = uncut(l);
+    assert.ok(d.allow, `${unit}: ${d.message}`);
+    assert.ok(Date.now() - t10 < within(SLOW), `#498 ${JSON.stringify(unit)} took ${Date.now() - t10} ms`);
   }
   for (const unit of ['echo x >> f; bash f;', 'echo x | tee -a f; cat f | bash;', 'echo x > f; echo "$(cat f)$(cat f)" > f; cat f | bash;']) {
     const l = half(unit);
@@ -879,7 +927,8 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     assert.ok(/runs files it writes too many times|took too long/.test(m ?? ''), `${unit}: ${m}`);
     assert.ok(ms < within(JUDGE_BUDGET_MS + 1500), `#498 ${JSON.stringify(unit)} took ${ms} ms`);
   }
-  assert.equal(agentGuardDecision(`echo ${'$(echo x)'.repeat(100000)}`).allow, true);
+  const echoes = uncut(`echo ${'$(echo x)'.repeat(100000)}`);
+  assert.ok(echoes.allow, echoes.message);
   // CI review: many file names from a `$(…)`, each read joined to a long text, ran out of memory before the cut-off.
   for (const n of [60000, 150000]) {
     const t14 = Date.now();
@@ -889,8 +938,8 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // Review round 3: many files to one `cat`, many `>&f`, many parts in one process substitution stay linear.
   for (const l of [`echo -n a>f;cat ${'f '.repeat(490000)};gh pr merge 5`, `cat ${'x '.repeat(490000)};gh pr merge 5`, `echo hi ${'>&f '.repeat(245000)}`, `bash <(${'echo a;'.repeat(140000)})`]) {
     const t13 = Date.now();
-    agentGuardDecision(l);
-    assert.ok(Date.now() - t13 < within(4500), `#498 ${JSON.stringify(l.slice(0, 20))} took ${Date.now() - t13} ms`);
+    uncut(l);
+    assert.ok(Date.now() - t13 < within(SLOW), `#498 ${JSON.stringify(l.slice(0, 20))} took ${Date.now() - t13} ms`);
   }
   // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
   for (const d of [4000, 16000]) {
