@@ -1,0 +1,28 @@
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for the idea. Start with the problem, not the solution: the problem helps us find
+        the best fix. Check the [roadmap](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/roadmap-idea-1.md)
+        to see if it is already planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: Describe what slows your team down today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: What should yadflow do? Which step, skill, command or check would it touch?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Who decides?
+      description: >
+        Yadflow's core promise is that people own the decisions. Does this idea move any decision
+        from a person to a machine? If so, say what should stay with a person.

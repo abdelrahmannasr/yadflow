@@ -10,6 +10,9 @@ New to the workflow? Start with [`README.md`](README.md) (the introduction) and
 [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately per
 [`SECURITY.md`](SECURITY.md).
 
+Questions and ideas go to [GitHub Discussions](https://github.com/abdelrahmannasr/yadflow/discussions)
+(Q&A and Ideas). Bugs go to [Issues](https://github.com/abdelrahmannasr/yadflow/issues/new/choose).
+
 This repo **dogfoods its own conventions**: the PR template at
 [`.github/pull_request_template.md`](.github/pull_request_template.md) carries the same Impact & Risk
 block that `yad-pr-template` installs into your code repos. If you wouldn't ship a yadflow PR without
