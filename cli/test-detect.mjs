@@ -1351,7 +1351,7 @@ test('E175 AI Game Developer: a second Unity tool for yad-implement, found by it
 test('E175: yad-implement reaches AI Game Developer too, with read and test tools only', () => {
   const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8').replace(/\s+/g, ' ');
   for (const words of ['yad toolbox connect ai-game-developer --json', 'connection mode to Custom (local)', '`rql-schema`', '`rql-query`', '`tests-run`', '`com.ivanmurzak.unity.mcp`',
-    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode confirmed by <person>`', 'query `editor | select isCompiling` until it is false']) {
+    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode confirmed by <person>`', 'tell you when its progress bar has finished; then check `editor | select isCompiling` is false']) {
     assert.ok(skill.includes(words), words);
   }
   // The reach order: MCP for Unity first (also when both are installed), then AI Game Developer, then one connect.

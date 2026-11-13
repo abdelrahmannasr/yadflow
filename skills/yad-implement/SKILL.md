@@ -161,8 +161,8 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   edit, refresh, read the console and fix every error your change caused before you commit; when the task
   declares tests, run them (EditMode or PlayMode).
 - **With AI Game Developer instead.** If your session does not see the server (in Claude Code, `/mcp`), ask
-  the person to press Configure in Window → AI Game Dev for the agent and folder you work in, and restart the
-  agent. Before its first use, ask the person to confirm the AI Game Dev window shows connection mode
+  the person, with the Editor open on the folder you work in, to press Configure in Window → AI Game Dev for
+  your agent, and restart the agent. Before its first use, ask the person to confirm the AI Game Dev window shows connection mode
   **Custom** (yad cannot see it): on a no, they switch to Custom and press Configure again, or you use the
   fallback below; record `AI Game Developer: Custom mode confirmed by <person>` in `Decisions:`. Probe once by
   reading the console; if it fails, or the Editor is open on another folder than the one you edit, ask the
@@ -170,8 +170,9 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   the fallback. Only these tools: `rql-schema` (how to write a query), `rql-query` — to read the console (its
   `console` source) and to find objects — and `tests-run` for the task's tests. Unity compiles your edits
   only after it refreshes, usually when its window gains focus: after each edit, ask the person to bring the
-  Editor to the front, then query `editor | select isCompiling` until it is false, and only then read the
-  console and fix every error your change caused before you commit. Never `rql-mutate`, `script-execute`,
+  Editor to the front and tell you when its progress bar has finished; then check `editor | select
+  isCompiling` is false (if it stays true after a few checks, ask the person, or use the fallback), and only
+  then read the console and fix every error your change caused before you commit. Never `rql-mutate`, `script-execute`,
   `script-update-or-create`, `script-delete`, `package-add`, `package-remove`, `assetstore-add`,
   `tool-set-visibility`, `tool-set-enabled-state`, or a `screenshot-*` tool: they run code in the Editor,
   change or write files the task did not declare, or show the agent more tools, and the agent guard does not
