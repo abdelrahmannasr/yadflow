@@ -192,17 +192,18 @@ export function streamGuard(line, mode, api, zsh = false) {
     // (#532 review 2), and a mismatched one is left alone rather than pairing with the wrong opener.
     const opened = [];
     const patterns = new Set();
-    // How many real `case` blocks are open (a count, not a scan of `opened`: a scan made deep nests quadratic).
-    let cases = 0;
-    const push = (o) => { opened.push(o); if (o.end === 'esac' && !o.maybe) cases++; };
-    const pop = () => { const o = opened.pop(); if (o.end === 'esac' && !o.maybe) cases--; return o; };
+    // The real (not `maybe`) openers, kept beside `opened` so the innermost one is read in one step, not a scan
+    // (a scan made deep nests quadratic). A pattern stands only straight inside a `case` (review 5).
+    const real = [];
+    const push = (o) => { opened.push(o); if (!o.maybe) real.push(o); };
+    const pop = () => { const o = opened.pop(); if (!o.maybe) real.pop(); return o; };
     for (let n = 0; n < parts.length; n++) {
       const w = headOf(parts[n]);
       // Inside an open `case`, a part that is one reserved word may be a pattern (`while)`, `done)`), which opens
       // and closes nothing and prints nothing (#532 review 3). One-word `if`, `while` and `until` may also start a
       // real block (bash and zsh allow a newline after them, review 4), so they are kept as openers that may be
       // patterns: a closer that does not match one drops it, and it was a pattern after all.
-      const inCase = cases > 0;
+      const inCase = real.at(-1)?.end === 'esac';
       const alone = parts[n].length === 1;
       if (OPENERS.has(w)) {
         if (inCase && alone && !['if', 'while', 'until'].includes(w)) patterns.add(n);
@@ -213,7 +214,7 @@ export function streamGuard(line, mode, api, zsh = false) {
       } else if (CLOSERS.has(w)) {
         while (opened.at(-1)?.maybe && opened.at(-1).end !== w) patterns.add(pop().n);
         if (opened.at(-1)?.end === w) addGroup({ from: pop().n, to: n, writes: [], closer: true });
-        else if (inCase && alone) patterns.add(n);
+        else if (inCase && alone && w !== 'esac') patterns.add(n);
       }
     }
     // A closed group is folded into its first slot (`jump[from] = to`, its output, if it prints any, in
@@ -223,28 +224,36 @@ export function streamGuard(line, mode, api, zsh = false) {
     const foldedAt = new Map();
     let steps = 0;
     const STEPS = 64 * parts.length + 100000;
+    let left;
     const collect = (from, to) => {
       const xs = [];
+      left = undefined;
       for (let i = from; i < to;) {
         if (++steps > STEPS) throw fail('blocks nested too deep to read', 'YAD_GUARD_BLOCKS_DEEP');
+        if (i > from && foldedAt.get(i) < from) left = Math.min(left ?? from, foldedAt.get(i));
         if (stdout[i] !== undefined) xs.push(stdout[i]);
         const j = jump[i];
         i = j !== undefined && j > i && j <= to ? j : i + 1;
       }
+      if (foldedAt.get(to) < from) left = Math.min(left ?? from, foldedAt.get(to));
       return xs;
     };
     const close = (n) => {
       for (const g of groups.get(n) ?? []) {
         // What reaches the group's own output: not what its parts wrote to files (#532 review 9).
-        const output = join(collect(g.from, g.to));
+        let from = g.from, xs = collect(from, g.to);
+        while (left !== undefined) { from = left; xs = collect(from, g.to); }
+        const output = join(xs);
         before = output;
-        jump[g.from] = g.to;
-        foldedAt.set(g.to, g.from);
-        stdout[g.from] = '';
+        jump[from] = g.to;
+        // A walk that starts inside the group skips it too, and is sent back to `from` at its end.
+        if (from !== g.from) jump[g.from] = g.to;
+        foldedAt.set(g.to, Math.min(foldedAt.get(g.to) ?? from, from));
+        stdout[from] = '';
         // A group that ends in a part of its own (`}`, `fi`, `done`, `esac`): that part prints and writes it.
         if (g.brace || g.closer) continue;
         if (g.writes.length) for (const wr of g.writes) write(wr, output);
-        else stdout[g.from] = output;
+        else stdout[from] = output;
       }
     };
     for (let n = 0; n < parts.length; n++) {

@@ -1856,6 +1856,16 @@ test('#532 review 4: inside a case, a one-word `if` may start a real block, and 
   }
 });
 
+test('#532 review 5: a block the finder pairs across a folded group, and a case under an open loop, keep their output', () => {
+  for (const line of ["for i in 1; do ( printf 'gh pr '; for j in 1; { echo merge 5; } ); done > f; bash f",
+    "for i in 1; do ( echo gh pr; for j in 1; { echo merge 5; } ); done | tr '\\n' ' ' | bash",
+    "case x in x) for j in 1; { :; }; printf 'gh pr merge 5';; esac > f; bash f",
+    "case x in x) for j in 1; { :; }; printf 'gh pr ';; esac > f; echo merge 5 >> f; bash f",
+    "case x in x) if true; then for j in 1; { :; }; printf 'gh pr merge 5'; fi > f;; esac; bash f"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
+  }
+});
+
 test('#532: differential output corpus against bash and zsh with harmless executable stubs', () => {
   const T = tmp();
   const log = path.join(T, 'executed');
