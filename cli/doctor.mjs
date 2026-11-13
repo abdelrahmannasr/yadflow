@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
@@ -469,6 +469,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // Background capture (E43), on any Product in either ledger mode: is the post-edit hook wired, and will
   // a push to the `yad/wip/*` branches start the team's own CI?
   if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
+  if (exists(productPath)) activityChecks(root, checks, readJSON(productPath, null));
   docsWorkflowChecks(root, checks);
   if (exists(productPath)) lineEndingChecks(root, checks);
 
@@ -3005,6 +3006,47 @@ export function captureChecks(root, checks, cfg) {
     check(checks, 'capture', 'project', 'warn', `${noisy.join(', ')} ${noisy.length > 1 ? 'run' : 'runs'} on a push to ANY branch, so every \`yad capture\` push to yad/wip/* starts ${noisy.length > 1 ? 'them' : 'it'}`,
       'add `branches-ignore: ["yad/wip/**"]` under its `push:` trigger (yadflow\'s own workflows already do)');
   }
+}
+
+// The activity half (E178): off says so; on says whether the Product's own script and entries are wired, and
+// where the record is and how big. The code repos' entries are `yad check`'s to report, as the agent guard's are.
+export function activityChecks(root, checks, cfg) {
+  if (!(cfg && cfg.activity === true)) {
+    check(checks, 'activity', 'project', 'ok', 'the live activity record is off — `"activity": true` in the Product config turns it on, for `yad brain view --live`');
+    return;
+  }
+  const unwired = [];
+  for (const w of ACTIVITY_WIRING) if (!hookScriptReady(root, w.dest)) unwired.push(w.dest);
+  const safe = new Set(safeIdeTargetStateFor(root, ideTargetsFor(root)).targets);
+  for (const adapter of ACTIVITY_ADAPTERS) {
+    if (!safe.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    let settings = null;
+    if (exists(settingsPath)) {
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { settings = null; }
+    }
+    if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) {
+      const where = `${adapter.settings} (${adapter.event})`;
+      if (!unwired.includes(where)) unwired.push(where);
+    }
+  }
+  if (unwired.length) {
+    check(checks, 'activity', 'project', 'warn', `the live activity record is on but not wired: ${unwired.join(', ')}`,
+      'run `yad check --fix` — until then `yad brain view --live` sees nothing the agent does');
+    return;
+  }
+  const log = activityLogState(root);
+  check(checks, 'activity', 'project', 'ok', `the live activity record is wired${log ? ` — ${log}` : ''}`);
+}
+
+// Where this clone's record is, and its size, in words; null when git cannot say.
+function activityLogState(root) {
+  const r = run('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!r.ok || !r.stdout) return null;
+  const file = path.join(r.stdout, 'yad-activity.jsonl');
+  let size;
+  try { size = fs.statSync(file).size; } catch { return 'nothing recorded yet in this clone'; }
+  return `${file} holds ${size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(0)} KB`} (never committed: it is inside .git)`;
 }
 
 // The Pages workflow `yad docs sync --wire` wrote. Nothing else rewrites it, so a Product wired by yadflow

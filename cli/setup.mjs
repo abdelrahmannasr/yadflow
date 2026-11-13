@@ -10,7 +10,7 @@ import {
 import { err } from './errors.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, activityHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites, canonicalIdeTargets,
 } from './plan.mjs';
@@ -876,6 +876,13 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold('product')} ${c.dim('(wip capture)')}`);
     applyActions(captureWiring, { force: true });
     wired.push(...captureWiring);
+  }
+  // E178: the live activity record for `yad brain view --live` — only when the config says `"activity": true`.
+  const activityWiring = activityHookActions(root, ideTargets);
+  if (activityWiring.length) {
+    log(`  ${c.bold('product')} ${c.dim('(activity record)')}`);
+    applyActions(activityWiring, { force: true });
+    wired.push(...activityWiring);
   }
   // E158: the rules block in AGENTS.md (and CLAUDE.md importing it), which an AI agent reads first. The team's
   // own text in these files is kept; only the lines between yad's markers are written.

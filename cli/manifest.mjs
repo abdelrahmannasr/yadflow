@@ -829,6 +829,56 @@ export const agentGuardAdapters = (dest) => Object.freeze({
 });
 export const AGENT_GUARD_ADAPTERS = agentGuardAdapters(AGENT_GUARD_WIRING[0].dest);
 
+// The live activity record (E178): AFTER each tool an agent uses, `yad-activity.mjs` appends one line to the
+// repo's `<git common dir>/yad-activity.jsonl` — the kind of action (read, search, edit, run), the repo's files
+// it touched, the time — which `yad brain view --live` draws. OFF by default: wired only while the Product
+// config says `"activity": true`, in the Product and in each code repo cloned here. It never starts yad (it
+// fires on every read), writes only allowlisted fields, and always exits 0 with nothing on stdout.
+//
+// A LIST of adapters, not one per target: Cursor needs two events (an edit and a shell command each have their
+// own, and no read event exists that takes no answer — `beforeReadFile` must answer allow/deny), so Cursor
+// sessions show edits and runs only. Each adapter is merged and unmerged on its own event; the two Cursor ones
+// share one command, which `mergeHookSettings` matches per event.
+export const ACTIVITY_WIRING = [
+  { src: 'skills/yad-checks/templates/hooks/yad-activity.mjs', dest: 'hooks/yad-activity.mjs' },
+];
+// In a code repo the script goes in `checks/`, as the agent guard's does (REPO_AGENT_GUARD_DEST).
+export const REPO_ACTIVITY_DEST = 'checks/yad-activity.mjs';
+export const activityAdapters = (dest) => Object.freeze([
+  Object.freeze({
+    target: '.claude',
+    label: 'activity record',
+    settings: '.claude/settings.json',
+    event: 'PostToolUse',
+    nested: true,
+    preamble: null,
+    // Every tool the live view draws: reads, searches, edits and shell commands.
+    matcher: 'Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|Bash',
+    projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
+    // Quoted and anchored on the project root, and the format said, for the reasons capture's entry gives.
+    command: `node "$${CLAUDE_PROJECT_DIR_ENV}/${dest}" --format claude`,
+    observe: true,
+    wiring: Object.freeze([]),
+    legacyCommands: Object.freeze([]),
+  }),
+  ...['afterFileEdit', 'afterShellExecution'].map((event) => Object.freeze({
+    target: '.cursor',
+    label: 'activity record',
+    settings: '.cursor/hooks.json',
+    event,
+    nested: false,
+    preamble: Object.freeze({ version: 1 }),
+    matcher: null,
+    projectDirEnv: CURSOR_PROJECT_DIR_ENV,
+    // Relative and unquoted, for the reason the ledger guard's Cursor entry is (see above).
+    command: `node ${dest} --format cursor`,
+    observe: true,
+    wiring: Object.freeze([]),
+    legacyCommands: Object.freeze([]),
+  })),
+]);
+export const ACTIVITY_ADAPTERS = activityAdapters(ACTIVITY_WIRING[0].dest);
+
 // The Claude adapter's fields under their original names. Kept because they are what the shipped
 // error text and the existing tests name, and renaming a constant buys nothing; new code should read
 // the adapter, since these three describe ONE harness and the engine now supports two.

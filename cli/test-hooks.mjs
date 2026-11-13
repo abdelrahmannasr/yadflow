@@ -28,6 +28,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOOKS = path.join(ROOT, 'skills/yad-checks/templates/hooks');
 const IS_WINDOWS = process.platform === 'win32';
 const SCRIPTS = ['ledger-guard.mjs', 'ledger-guard-cursor.mjs', 'yad-capture.mjs', 'agent-guard.mjs'];
+// E178: the activity record writes its own line and never starts yad, so it carries no yad-resolve block; it is
+// held to the node-only rule with the others.
+const NODE_ONLY = [...SCRIPTS, 'yad-activity.mjs'];
 
 // A Product laid out the way a hook expects: `<T>/hooks/<script>.mjs`.
 function scaffold() {
@@ -85,7 +88,7 @@ test('E113: every hook script carries the SAME yad-resolve block, byte for byte'
 });
 
 test('E113: no hook script imports anything but Node itself — it runs where yadflow is not installed', () => {
-  for (const s of SCRIPTS) {
+  for (const s of NODE_ONLY) {
     const text = fs.readFileSync(path.join(HOOKS, s), 'utf8');
     for (const m of text.matchAll(/^import .* from '([^']+)';$/gm)) assert.match(m[1], /^node:/, `${s} imports ${m[1]}`);
   }
