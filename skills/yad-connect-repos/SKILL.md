@@ -196,6 +196,12 @@ locally only.
 Report the connected repo, its `platform`, the pack + code-map paths, the secret-scan result, and that
 the Shape phases will now load this repo's code-map. Nothing auto-advances; this is setup.
 
+Optionally, offer to build the **project brain** (E176) — one knowledge graph of the code and the work
+items, on this machine only: **`yad brain build`**. It runs Graphify in each connected repo with its LLM
+pass off (code is parsed locally; nothing leaves the machine), writes `.sdlc/brain/`, which ignores
+itself, and commits nothing. Without Graphify it builds the work items alone and says how to install it
+(`yad toolbox connect graphify`). Then `yad brain query <text>` answers "which story touches this file?".
+
 ## Other actions
 
 - **`refresh`** — re-run Steps 2–4 (including Step 3b) for an already-connected repo (after its code moves). A new directory gets an `unset` line and a guess; a `confirmed` line is only ever suggested against. Updates

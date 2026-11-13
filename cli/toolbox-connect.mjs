@@ -45,6 +45,7 @@ export const RECIPES = Object.freeze({
   'bmad-method': [P('npx bmad-method install', INTERACTIVE)],
   ecc: [P('npx ecc-universal install --guided', INTERACTIVE)],
   'mattpocock-skills': [P('claude plugin install mattpocock-skills', 'it comes from its own plugin marketplace, which you add in your agent first')],
+  graphify: [A('uv tool install graphifyy==0.9.108')],
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
   'unity-mcp': [
     PT('in the Unity Editor, open the Package Manager (Window → Package Manager), choose + → Add (in Unity 6: Install) package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),

@@ -43,7 +43,7 @@ export const INDEX_FORMAT = 'e111-1';
 // Line endings are made `\n` before anything else: a checkout with `core.autocrlf` (the Windows default)
 // holds CRLF where git stores LF, and the same Product must hash the same on every machine — and parse
 // the same, since the frontmatter reader expects `\n`. Nothing else in the bytes is touched.
-function readInput(file) {
+export function readInput(file) {
   try {
     const raw = fs.readFileSync(file);
     return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
