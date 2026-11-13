@@ -2231,7 +2231,9 @@ settings:
 | Cursor | `afterFileEdit` and `afterShellExecution` | edits and commands only. Cursor's only read event, `beforeReadFile`, must answer allow or deny, so yad does not use it |
 
 Setting `"activity": false` (or deleting the key) and running `yad check --fix` again takes the script and
-yad's entries out; the team's own hooks stay. `yad doctor` says whether it is off, on but not wired, or wired,
+yad's entries out; the team's own hooks stay. The script is removed only when it is yad's own copy (the
+sha `.sdlc/managed.json` recorded, or byte for byte the shipped one), and never through a linked folder: a
+`hooks/` or `checks/` folder that is a link is named and left unwired. `yad doctor` says whether it is off, on but not wired, or wired,
 and where this clone's record is.
 
 **What one record holds — and nothing else.** One JSON line per tool call, in
@@ -2248,12 +2250,16 @@ and where this clone's record is.
 | `yad` | for a command that is a yad command, its name and action from yad's own list (`ship`, `brain query`) |
 
 **Never recorded:** prompts, reasoning, file content, search patterns, command text, tool output, absolute
-paths, or any path outside the repo — including one reached through a link that leaves it. So the live view
+paths, or any path outside the repo — including one reached through a link that leaves it. Text that only
+looks like a relative path is dropped too: a `~` or a variable (`$HOME`, `%USERPROFILE%`), a URL, and, outside
+Windows, a drive letter or a backslash. A repo opened through a link (a linked projects folder, a Windows
+junction) is matched by its real path. So the live view
 **shows what the agent did, never why.**
 
 **Where the record lives.** Inside `.git`, so it can never be committed, and it stays on this machine. A worktree
 writes to the repo's shared git folder. Above 5 MB the file is renamed to `yad-activity.1.jsonl` (one old file
-is kept), and the view reads the last 14 days.
+is kept), and the view reads the last 14 days, at most the newest 20,000 actions. A log file that is a link, a
+folder or anything but a plain file is not read.
 
 **The hook never gets in the agent's way.** It writes the line itself (it never starts yad), always exits 0,
 prints nothing on stdout, and writes at most one line on stderr when something fails — a read-only `.git`, no
@@ -2269,15 +2275,17 @@ git, a payload that does not parse.
 - **Now.** What the agent is doing this moment ("Editing backend/src/order/index.js, 4 s ago"), and counts of
   files read, searches, edits and commands, each with a ten-minute bar chart.
 - **Plan and reality.** The task whose declared files the agent touched last, with each of its files marked
-  edited, read or not yet, and how many are edited. **Edited outside the plan** lists files the agent edited
-  that no task of that story declares — the scope check `yad-implement` asks of each task.
+  edited, read or not yet, and how many are edited. The task in hand moves only within its story: an edit to
+  a file only another story declares does not switch to it. **Edited outside the plan** lists files the agent
+  edited that no task of that story declares — the scope check `yad-implement` asks of each task.
 - **The timeline.** One lane per kind of action. Drag to replay; play at 1×, 4× or 16× (a quiet stretch is
   skipped); `Live` goes back to now. Keys: Space plays, ←/→ step, F follows, H toggles the heat, L goes live.
 - **Follow** moves the view to each node the agent touches, and pauses while you look around.
 
 The page is served behind the same guards as `yad brain view`. The stream is one more fixed route,
 `/events`, sent as Server-Sent Events (a one-way stream from the server to the browser): a status, then the
-recent past, then each new record as it lands. With reduced motion set in your system, comets and pulses are
+recent past, then each new record as it lands. Each page keeps the brain it opened with; when `yad brain build`
+changes it, the page says so and asks for a reload. With reduced motion set in your system, comets and pulses are
 replaced by a still highlight.
 
 | `--json` | Keys |

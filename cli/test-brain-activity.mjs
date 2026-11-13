@@ -424,7 +424,6 @@ test('the live stream: the key and Host guard it; status, then the backlog, then
     assert.equal(live.op, 'edit');
     assert.deepEqual(live.hits.map((h) => h.path), ['backend/src/routes.js']);
     assert.deepEqual(live.outside, ['backend/nope.md']);
-    assert.ok(live.brain.startsWith('sha256:'));
     const g = JSON.parse(await new Promise((resolve) => http.get({ host: '127.0.0.1', port: s.port, path: `/graph.json?t=${s.token}`, headers: { Host: `127.0.0.1:${s.port}` } }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve(b)); })));
     assert.equal(g.live, true);
     assert.ok(g.plan.some((p) => g.nodes[p.task].id === 'task:EP-checkout-S01:backend:T01' && p.files.map((f) => g.nodes[f].id).includes('file:backend:src/routes.js')));
@@ -464,4 +463,153 @@ test('--live belongs to view; view --live with activity off says how to turn it 
       assert.match(JSON.parse(r.stdout).error, /does not take --live/);
     }
   } finally { done(ws); }
+});
+
+// ---- review 1 -----------------------------------------------------------------------------------------
+
+test('review 1: text that only looks like a relative path is dropped; a repo opened through a link still matches', () => {
+  const real = tmp();
+  const via = path.join(tmp(), 'via');
+  try {
+    put(path.join(real, 'src', 'a.js'), 'x');
+    fs.symlinkSync(real, via);
+    const r = (p) => hook.recordOf({ tool_name: 'Grep', tool_input: { path: p } }, { root: real, realRoot: real }).paths;
+    for (const bad of ['~/.ssh/id_rsa', '$HOME/x', '%USERPROFILE%\\x', `file://${real}/src`]) assert.deepEqual(r(bad), [], bad);
+    if (process.platform !== 'win32') for (const bad of ['C:\\Users\\me\\secret.txt', 'a:b']) assert.deepEqual(r(bad), [], bad);
+    assert.deepEqual(r(path.join(via, 'src', 'a.js')), ['src/a.js'], 'the path the agent typed, through the link');
+    assert.deepEqual(r(path.join(via, 'src', 'new.js')), ['src/new.js'], 'a file not written yet, under a real folder');
+  } finally { done(real, path.dirname(via)); }
+});
+
+test('review 1: a Product in a subfolder of its git repo records into that repo\'s git folder', () => {
+  const top = tmp();
+  try {
+    git(top, 'init', '-q');
+    const sub = path.join(top, 'product');
+    put(path.join(sub, 'src', 'a.js'), 'x');
+    fs.mkdirSync(path.join(sub, 'checks'));
+    fs.copyFileSync(HOOK, path.join(sub, 'checks', 'yad-activity.mjs'));
+    const r = runHook(sub, { tool_name: 'Read', tool_input: { file_path: path.join(sub, 'src/a.js') } });
+    assert.equal(r.status, 0);
+    const lines = fs.readFileSync(path.join(top, '.git', hook.LOG_NAME), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual(lines.map((x) => x.paths), [['src/a.js']]);
+  } finally { done(top); }
+});
+
+test('review 1: the reader takes plain files only, keeps characters whole across reads, and drops an endless line', () => {
+  const dir = tmp();
+  const elsewhere = tmp();
+  try {
+    const line = (op, p = []) => `${JSON.stringify({ v: 1, op, ts: new Date().toISOString(), paths: p })}\n`;
+    put(path.join(elsewhere, 'big.jsonl'), line('read'));
+    fs.symlinkSync(path.join(elsewhere, 'big.jsonl'), path.join(dir, act.LOG_NAME));
+    assert.deepEqual(act.readBacklog([{ repo: null, dir, prefixes: [] }]), [], 'a link at the log is not followed');
+    fs.rmSync(path.join(dir, act.LOG_NAME));
+    if (process.platform !== 'win32') {
+      spawnSync('mkfifo', [path.join(dir, act.LOG_NAME)]);
+      assert.deepEqual(act.readBacklog([{ repo: null, dir, prefixes: [] }]), [], 'a FIFO is not opened (it would block)');
+      fs.rmSync(path.join(dir, act.LOG_NAME));
+    }
+    const file = path.join(dir, act.LOG_NAME);
+    fs.writeFileSync(file, '');
+    const got = [];
+    const f = act.follow({ repo: null, dir, prefixes: [] }, (src, r) => got.push(r.paths[0] ?? r.op), { watch: () => {}, unwatch: () => {} });
+    const bytes = Buffer.from(line('read', ['src/مرحبا.js']));
+    const cut = bytes.indexOf(Buffer.from('مرحبا')) + 1; // inside the first two-byte character
+    fs.appendFileSync(file, bytes.subarray(0, cut));
+    f.pump();
+    fs.appendFileSync(file, bytes.subarray(cut));
+    f.pump();
+    assert.deepEqual(got, ['src/مرحبا.js']);
+    fs.appendFileSync(file, 'x'.repeat(70 * 1024));
+    f.pump();
+    fs.appendFileSync(file, `\n${line('edit')}`);
+    f.pump();
+    assert.deepEqual(got, ['src/مرحبا.js', 'edit'], 'the endless part was dropped, the next whole line read');
+    // A rotation: what the old file gained after the last look is read before the new file.
+    fs.appendFileSync(file, line('search'));
+    fs.renameSync(file, path.join(dir, act.OLD_LOG_NAME));
+    fs.writeFileSync(file, line('run'));
+    f.pump();
+    assert.deepEqual(got.slice(-2), ['search', 'run']);
+    f.stop();
+  } finally { done(dir, elsewhere); }
+});
+
+test('review 1: turning activity off never removes a team\'s own copy, nor anything through a linked folder', () => {
+  const { ws, root } = wiredProduct({ activity: false });
+  const repo = tmp();
+  const outside = tmp();
+  try {
+    // A linked checks/: the file behind it is never removed, and nothing is installed through it.
+    put(path.join(outside, 'yad-activity.mjs'), fs.readFileSync(HOOK, 'utf8'));
+    fs.symlinkSync(outside, path.join(repo, 'checks'));
+    applyAll(plan.repoOrphanActivityActions(root, repo, ['.claude'], { scope: 'be' }));
+    assert.ok(fs.existsSync(path.join(outside, 'yad-activity.mjs')), 'the file behind the link is untouched');
+    const cfg = path.join(root, '.sdlc', 'hub.json');
+    const j = JSON.parse(fs.readFileSync(cfg, 'utf8'));
+    j.activity = true;
+    fs.writeFileSync(cfg, JSON.stringify(j));
+    fs.mkdirSync(path.join(repo, '.claude'));
+    assert.deepEqual(plan.repoActivityActions(root, repo, ['.claude'], { scope: 'be' }), [], 'nothing is written through it');
+    // The Product's own hooks/ with a team-edited copy: kept when activity goes off.
+    j.activity = false;
+    fs.writeFileSync(cfg, JSON.stringify(j));
+    put(path.join(root, 'hooks', 'yad-activity.mjs'), '// our own version\n');
+    assert.deepEqual(plan.orphanActivityHookActions(root, []).filter((a) => a.item.includes('removed') && a.item.startsWith('hooks/')), []);
+    // yad's own copy goes.
+    fs.copyFileSync(HOOK, path.join(root, 'hooks', 'yad-activity.mjs'));
+    applyAll(plan.orphanActivityHookActions(root, []));
+    assert.equal(fs.existsSync(path.join(root, 'hooks', 'yad-activity.mjs')), false);
+  } finally { done(ws, repo, outside); }
+});
+
+test('review 1: a second page gets no event twice; a page is told when the brain is rebuilt under it', async () => {
+  const { ws, root, be } = liveProduct();
+  const s = await startBrainServer(root, { runner: realRun, live: true, interval: 60_000, heartbeat: 60_000 });
+  const log = path.join(be, '.git', act.LOG_NAME);
+  const line = (op) => `${JSON.stringify({ v: 1, op, ts: new Date().toISOString(), paths: ['src/routes.js'] })}\n`;
+  const open = (onEvent) => new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port: s.port, path: `/events?t=${s.token}`, headers: { Host: `127.0.0.1:${s.port}` } }, (res) => {
+      let buf = '';
+      res.on('data', (d) => {
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const ev = /^event: (.*)$/m.exec(block)?.[1];
+          const data = /^data: (.*)$/m.exec(block)?.[1];
+          if (ev) onEvent(ev, data ? JSON.parse(data) : null);
+        }
+      });
+      resolve(req);
+    });
+    req.on('error', () => {});
+    req.end();
+  });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    fs.writeFileSync(log, '');
+    const first = [];
+    const a = await open((ev, d) => first.push([ev, d]));
+    await wait(200);
+    fs.appendFileSync(log, line('edit'));          // landed, not yet pumped (the interval is a minute)
+    const second = [];
+    const b = await open((ev, d) => second.push([ev, d]));
+    await wait(300);
+    const edits = (list) => list.flatMap(([ev, d]) => (ev === 'backlog' ? d : ev === 'activity' ? [d] : [])).filter((e) => e.op === 'edit').length;
+    assert.equal(edits(second), 1, 'the second page has the edit once, in its backlog');
+    assert.equal(edits(first), 1, 'the first page was sent it live, before the second read its backlog');
+    // The brain is rebuilt: the next event tells each page once.
+    const brainFile = path.join(root, '.sdlc', 'brain', 'graph.json');
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(brainFile, later, later);
+    fs.appendFileSync(log, line('read'));
+    // A new page connecting makes the server look at the files now (the open pages first).
+    await new Promise((r) => http.get({ host: '127.0.0.1', port: s.port, path: `/events?t=${s.token}`, headers: { Host: `127.0.0.1:${s.port}` } }, (res) => { res.destroy(); r(); }).on('error', r));
+    await wait(300);
+    assert.equal(first.filter(([ev]) => ev === 'rebuilt').length, 1);
+    a.destroy(); b.destroy();
+  } finally { await s.close(); done(ws); }
 });

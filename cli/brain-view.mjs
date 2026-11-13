@@ -208,31 +208,29 @@ function tokenMatches(given, token) {
 // ---- the live stream (E178) ----------------------------------------------------------------------
 
 // The `/events` stream: Server-Sent Events, one way, from this machine's activity records to the page.
-//   status    { activity, sources, brain } — whether the record is on, which repos are followed
+//   status    { activity, sources, brain } — whether the record is on, which repos are followed, which brain
 //   backlog   [event…] — the recent past (readBacklog), so the timeline can replay at once
 //   activity  one event — each new record, matched to the brain (matchEvent), as it lands
-// The files are followed only while a page is open, and a page that stops reading (its buffer passes 8 MB)
-// is dropped rather than held in memory.
+//   rebuilt   {} — the brain file changed since this page's model was read: its node numbers no longer hold
+// EACH PAGE KEEPS THE MODEL IT CONNECTED WITH: events are matched against it, so a rebuild (or a second tab
+// that loaded a newer brain) never sends a page node numbers from another model (E178 review 1). The files are
+// followed only while a page is open, and a page that stops reading (its buffer passes 8 MB) is dropped.
 function activityStream(root, { runner, heartbeat, interval }) {
-  const clients = new Set();
-  let current = null; // { model, index }
+  const clients = new Map(); // res -> { index, mtime, told }
   let followers = null;
   let sources = [];
-  const use = (model) => { current = { model, index: activityIndex(model) }; };
-  const ensureModel = () => {
-    if (!current) { const m = loadModel(root, runner, { live: true }); if (m.model) use(m.model); }
-    return current;
-  };
   const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   const send = (res, chunk) => {
     if (res.writableLength > 8 * 1024 * 1024) { res.destroy(); clients.delete(res); return; }
     res.write(chunk);
   };
+  const brainMtime = () => { try { return fs.statSync(path.join(root, BRAIN_FILE)).mtimeMs; } catch { return null; } };
   const broadcast = (src, r) => {
-    const c = ensureModel();
-    if (!c) return;
-    const chunk = frame('activity', { ...matchEvent(c.index, src, r), brain: c.model.meta.inputs });
-    for (const res of clients) send(res, chunk);
+    const mtime = brainMtime();
+    for (const [res, c] of clients) {
+      if (mtime !== c.mtime && !c.told) { c.told = true; send(res, frame('rebuilt', {})); }
+      send(res, frame('activity', matchEvent(c.index, src, r)));
+    }
   };
   const start = () => {
     if (followers) return;
@@ -240,22 +238,25 @@ function activityStream(root, { runner, heartbeat, interval }) {
     followers = sources.map((src) => follow(src, broadcast, { interval }));
   };
   const stop = () => { for (const f of followers || []) f.stop(); followers = null; };
-  const ping = setInterval(() => { for (const res of clients) send(res, ': ping\n\n'); }, heartbeat);
+  const ping = setInterval(() => { for (const res of clients.keys()) send(res, ': ping\n\n'); }, heartbeat);
   ping.unref?.();
   return {
-    use,
     attach(req, res, headers) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       start();
-      const c = ensureModel();
-      res.write(frame('status', { activity: activityWanted(root), sources: sources.map((x) => x.repo ?? 'product'), brain: c?.model.meta.inputs ?? null }));
-      const backlog = c ? readBacklog(sources).map(({ src, r }) => matchEvent(c.index, src, r)) : [];
-      res.write(frame('backlog', backlog));
-      clients.add(res);
+      // The pages already open get every line that landed since the last look FIRST, so the files' read
+      // position is now: this page's backlog then holds those lines once, and no later pump sends them again.
+      for (const f of followers) f.pump();
+      const mtime = brainMtime();
+      const m = loadModel(root, runner, { live: true });
+      const index = m.model ? activityIndex(m.model) : null;
+      res.write(frame('status', { activity: activityWanted(root), sources: sources.map((x) => x.repo ?? 'product'), brain: m.model?.meta.inputs ?? null }));
+      res.write(frame('backlog', index ? readBacklog(sources).map(({ src, r }) => matchEvent(index, src, r)) : []));
+      if (index) clients.set(res, { index, mtime, told: false });
       req.on('close', () => { clients.delete(res); if (!clients.size) stop(); });
       return undefined;
     },
-    close() { clearInterval(ping); stop(); for (const res of clients) res.end(); clients.clear(); },
+    close() { clearInterval(ping); stop(); for (const res of clients.keys()) res.end(); clients.clear(); },
   };
 }
 
@@ -277,7 +278,6 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
     ['/style.css', () => ({ type: TYPES.css, body: readView(page.css) })],
     ['/graph.json', () => {
       const m = loadModel(root, runner, { live });
-      if (m.model && stream) stream.use(m.model);
       return m.model
         ? { type: TYPES.json, body: JSON.stringify(m.model) }
         : { status: 404, type: TYPES.json, body: JSON.stringify({ error: m.problem, hint: m.hint }) };

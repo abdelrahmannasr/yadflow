@@ -87,6 +87,28 @@ test('E113: every hook script carries the SAME yad-resolve block, byte for byte'
   for (const [i, b] of rest.entries()) assert.equal(b, first, `${SCRIPTS[i + 1]} drifted from ${SCRIPTS[0]}`);
 });
 
+// E178: the activity record, run the way a harness runs it — here, so the Windows leg runs it too (its main
+// guard compares file URLs, and its paths are joined with the system's separator).
+test('E178: yad-activity.mjs, run as the hook, appends one repo-relative line and prints nothing', () => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-activity-hook-')));
+  try {
+    assert.equal(spawnSync('git', ['init', '-q'], { cwd: repo }).status, 0);
+    fs.mkdirSync(path.join(repo, 'checks'));
+    fs.mkdirSync(path.join(repo, 'src', 'order'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src', 'order', 'a.js'), 'x');
+    fs.copyFileSync(path.join(HOOKS, 'yad-activity.mjs'), path.join(repo, 'checks', 'yad-activity.mjs'));
+    const payload = { session_id: 's', tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', 'order', 'a.js') } };
+    const r = spawnSync(process.execPath, [path.join(repo, 'checks', 'yad-activity.mjs'), '--format', 'claude'], { input: JSON.stringify(payload), encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, '');
+    const lines = fs.readFileSync(path.join(repo, '.git', 'yad-activity.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual(lines.map((l) => [l.op, l.paths]), [['edit', ['src/order/a.js']]], 'forward slashes on every system');
+    const bad = spawnSync(process.execPath, [path.join(repo, 'checks', 'yad-activity.mjs')], { input: 'not json', encoding: 'utf8' });
+    assert.equal(bad.status, 0);
+    assert.equal(bad.stdout, '');
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
 test('E113: no hook script imports anything but Node itself — it runs where yadflow is not installed', () => {
   for (const s of NODE_ONLY) {
     const text = fs.readFileSync(path.join(HOOKS, s), 'utf8');

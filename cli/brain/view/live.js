@@ -141,12 +141,15 @@
         if (n && n.kind === 'file') {
           var was = S.fileState.get(h.node);
           if (ev.op === 'edit' || !was) S.fileState.set(h.node, ev.op === 'edit' ? 'edit' : 'read');
-          var tasks = tasksOfFile.get(h.node);
-          if (tasks && tasks.length) {
-            var pick = tasks.find(function (t) { return S.task !== null && plan[t].story === plan[S.task].story; });
-            S.task = pick !== undefined ? pick : tasks[0];
-          }
-          if (ev.op === 'edit' && !declaredByStory(h.node)) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
+          // The task in hand moves only within its story: an edit to a file only ANOTHER story declares is
+          // outside this plan, and is flagged, not followed (review 1). With no task yet, the first file a
+          // task declares picks it; a read never moves an active task (reading around is not changing course).
+          var tasks = tasksOfFile.get(h.node) || [];
+          var sameStory = S.task === null ? -1 : tasks.findIndex(function (t) { return plan[t].story === plan[S.task].story; });
+          if (ev.op === 'edit' && S.task !== null && sameStory === -1) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
+          else if (ev.op === 'edit' && S.task === null && !tasks.length) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
+          if (S.task === null && tasks.length) S.task = tasks[0];
+          else if (ev.op === 'edit' && sameStory !== -1) S.task = tasks[sameStory];
         }
         if (animate) launch(S.lastNode, h.node, ev);
         // Only the few nodes touched last carry a label, so the sky never fills with text.
@@ -173,13 +176,6 @@
         if (at !== null && at !== undefined) pulse(at, ev.yad ? YAD_RGB : OPS[ev.op].rgb, 1.3);
       }
     }
-    function declaredByStory(fileNode) {
-      var tasks = tasksOfFile.get(fileNode) || [];
-      if (S.task === null) return tasks.length > 0;
-      var story = plan[S.task].story;
-      return tasks.some(function (t) { return plan[t].story === story; });
-    }
-
     // ---- the effects layer: comets, pulses, the trail
     var fx = $('fx');
     var ctx = fx.getContext('2d');
@@ -654,11 +650,13 @@
       playhead = t;
       rebuild(t);
     }
+    // The events this view shows: every session, or the one picked.
+    function shownEvents() { return session ? events.filter(function (ev) { return ev.s === session; }) : events; }
     function advance(dt) {
       var from = playhead;
       var to = playhead + dt * speed;
       // A quiet stretch is skipped: replay jumps to just before the next event, so it never plays dead air.
-      var next = events.find(function (ev) { return ev.t > from && (!session || ev.s === session); });
+      var next = shownEvents().find(function (ev) { return ev.t > from; });
       if (next && next.t - from > 2500) { from = next.t - 600; to = from + dt * speed; }
       var launched = 0;
       events.forEach(function (ev) {
@@ -667,17 +665,19 @@
       playhead = to;
       if (launched) { paintNow(); paintCounts(); paintPlan(); }
       paintRiver();
-      var last = events.length ? events[events.length - 1].t : 0;
+      var shown = shownEvents();
+      var last = shown.length ? shown[shown.length - 1].t : 0;
       if (playhead >= last) {
         playing = false;
         if (!replayOnly) goLive(); else paintMode();
       }
     }
     function play() {
-      if (!events.length) return;
-      if (mode === 'live' || playhead === null || playhead >= events[events.length - 1].t) {
+      var shown = shownEvents();
+      if (!shown.length) return;
+      if (mode === 'live' || playhead === null || playhead >= shown[shown.length - 1].t) {
         var w = windowOf();
-        var first = events.find(function (ev) { return ev.t >= w.from; });
+        var first = shown.find(function (ev) { return ev.t >= w.from; });
         mode = 'replay';
         playhead = (first ? first.t : w.from) - 400;
         rebuild(playhead);
@@ -693,11 +693,12 @@
       rebuild(Infinity);
     }
     function step(dir) {
-      if (!events.length) return;
+      var list = shownEvents();
+      if (!list.length) return;
       var t = mode === 'live' ? Date.now() : playhead;
       var target = null;
-      if (dir < 0) { for (var i = events.length - 1; i >= 0; i--) if (events[i].t < t - 1) { target = events[i]; break; } }
-      else { for (var j = 0; j < events.length; j++) if (events[j].t > t + 1) { target = events[j]; break; } }
+      if (dir < 0) { for (var i = list.length - 1; i >= 0; i--) if (list[i].t < t - 1) { target = list[i]; break; } }
+      else { for (var j = 0; j < list.length; j++) if (list[j].t > t + 1) { target = list[j]; break; } }
       if (!target) return;
       mode = 'replay';
       playing = false;
@@ -721,7 +722,8 @@
       });
     });
     document.addEventListener('keydown', function (e) {
-      if (e.target && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
+      if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+      if (e.target && e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
       if (e.key === ' ') { e.preventDefault(); play(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
@@ -765,11 +767,8 @@
         if (st.brain && model.meta.inputs && st.brain !== model.meta.inputs) $('rebuilt').hidden = false;
       });
       source.addEventListener('backlog', function (m) { takeBacklog(JSON.parse(m.data)); });
-      source.addEventListener('activity', function (m) {
-        var ev = JSON.parse(m.data);
-        if (ev.brain && model.meta.inputs && ev.brain !== model.meta.inputs) $('rebuilt').hidden = false;
-        take(ev);
-      });
+      source.addEventListener('activity', function (m) { take(JSON.parse(m.data)); });
+      source.addEventListener('rebuilt', function () { $('rebuilt').hidden = false; });
       source.addEventListener('error', function () { $('mode').textContent = 'Reconnecting'; });
       source.addEventListener('open', function () { paintMode(); });
     }
