@@ -1833,11 +1833,26 @@ test('#532 review 3: a shell passes its stdin to the text it runs, and an unclos
     "bash -c cat < <(echo 'gh pr merge 5')", 'if true; then '.repeat(100) + 'echo hi' + '; fi'.repeat(100)]) {
     assert.equal(agentGuardDecision(line).allow, true, line.slice(0, 80));
   }
-  // Nests past a few hundred deep are refused at once, not read in time that grows with the square of the depth.
+  // A closed group is read once by the groups around it: deep nests cost their size (review 4).
   for (const open of ['if true; then ', 'for i in 1; do ']) {
     const t = Date.now();
-    agentGuardDecision(open.repeat(10000) + 'echo hi' + (open.startsWith('if') ? '; fi' : '; done').repeat(10000));
+    const v = agentGuardDecision(open.repeat(10000) + 'echo hi' + (open.startsWith('if') ? '; fi' : '; done').repeat(10000));
+    assert.equal(v.allow, true, open);
     assert.ok(Date.now() - t < withinTime(1500), `${open} took ${Date.now() - t} ms`);
+  }
+  const t = Date.now();
+  assert.equal(agentGuardDecision('if true; then '.repeat(80) + 'echo a;'.repeat(10000) + '; fi'.repeat(80)).allow, true);
+  assert.ok(Date.now() - t < withinTime(1500), `took ${Date.now() - t} ms`);
+});
+
+test('#532 review 4: inside a case, a one-word `if` may start a real block, and a lone pattern prints nothing', () => {
+  for (const line of ["case x in x)\nif\ntrue; then printf 'gh pr '; fi > f;; esac; echo merge 5 >> f; bash f",
+    "case x in x) if\ntrue; then printf 'gh pr '; fi > f;; esac; echo merge 5 >> f; bash f",
+    "case x in x)\nif\ntrue\nthen\nprintf 'gh pr '\nfi > f\n;;\nesac\necho merge 5 >> f\nbash f",
+    "case x in x) printf 'gh pr ' ;; if) : ;; esac > f; echo merge 5 >> f; bash f",
+    "case x in x) printf 'gh pr ' ;; '}') : ;; esac > f; echo merge 5 >> f; bash f",
+    "( ( echo gh pr ) ; echo merge 5 ) | tr '\\n' ' ' | bash"]) {
+    assert.equal(agentGuardDecision(line).allow, false, line);
   }
 });
 

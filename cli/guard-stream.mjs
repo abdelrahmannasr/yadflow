@@ -192,29 +192,59 @@ export function streamGuard(line, mode, api, zsh = false) {
     // (#532 review 2), and a mismatched one is left alone rather than pairing with the wrong opener.
     const opened = [];
     const patterns = new Set();
+    // How many real `case` blocks are open (a count, not a scan of `opened`: a scan made deep nests quadratic).
+    let cases = 0;
+    const push = (o) => { opened.push(o); if (o.end === 'esac' && !o.maybe) cases++; };
+    const pop = () => { const o = opened.pop(); if (o.end === 'esac' && !o.maybe) cases--; return o; };
     for (let n = 0; n < parts.length; n++) {
       const w = headOf(parts[n]);
-      // Inside an open `case`, a part that is one reserved word is a pattern (`while)`, `done)`): it opens and
-      // closes nothing, and prints nothing (#532 review 3).
-      if (opened.at(-1)?.end === 'esac' && parts[n].length === 1 && w !== 'esac' && (OPENERS.has(w) || CLOSERS.has(w))) { patterns.add(n); continue; }
-      if (OPENERS.has(w)) opened.push({ n, end: OPENERS.get(w) });
-      else if (CLOSERS.has(w) && w !== '}' && opened.at(-1)?.end === w) addGroup({ from: opened.pop().n, to: n, writes: [], closer: true });
+      // Inside an open `case`, a part that is one reserved word may be a pattern (`while)`, `done)`), which opens
+      // and closes nothing and prints nothing (#532 review 3). One-word `if`, `while` and `until` may also start a
+      // real block (bash and zsh allow a newline after them, review 4), so they are kept as openers that may be
+      // patterns: a closer that does not match one drops it, and it was a pattern after all.
+      const inCase = cases > 0;
+      const alone = parts[n].length === 1;
+      if (OPENERS.has(w)) {
+        if (inCase && alone && !['if', 'while', 'until'].includes(w)) patterns.add(n);
+        else push({ n, end: OPENERS.get(w), maybe: inCase && alone });
+      } else if (w === '}') {
+        // A lone `}` that closes no `{ … }` is a pattern inside a `case` too (`'}')`, review 4).
+        if (inCase && alone && !(groups.get(n) ?? []).some((g) => g.brace)) patterns.add(n);
+      } else if (CLOSERS.has(w)) {
+        while (opened.at(-1)?.maybe && opened.at(-1).end !== w) patterns.add(pop().n);
+        if (opened.at(-1)?.end === w) addGroup({ from: pop().n, to: n, writes: [], closer: true });
+        else if (inCase && alone) patterns.add(n);
+      }
     }
-    // Each closing group reads every part inside it, so nests cost the square of their depth (`if …; then` × 10,000
-    // took 3 s, review 3). Past a straight-line multiple of the line's parts, the line is refused at once.
-    let groupWork = 0;
-    const GROUP_WORK = 64 * parts.length + 100000;
+    // A closed group is folded into its first slot (`jump[from] = to`, its output, if it prints any, in
+    // `stdout[from]`), so an outer group reads each inner one once: nests cost their size, not the square of their
+    // depth (`if …; then` × 10,000 took 3 s, reviews 3 and 4). The step count stays as a backstop.
+    const jump = [];
+    const foldedAt = new Map();
+    let steps = 0;
+    const STEPS = 64 * parts.length + 100000;
+    const collect = (from, to) => {
+      const xs = [];
+      for (let i = from; i < to;) {
+        if (++steps > STEPS) throw fail('blocks nested too deep to read', 'YAD_GUARD_BLOCKS_DEEP');
+        if (stdout[i] !== undefined) xs.push(stdout[i]);
+        const j = jump[i];
+        i = j !== undefined && j > i && j <= to ? j : i + 1;
+      }
+      return xs;
+    };
     const close = (n) => {
       for (const g of groups.get(n) ?? []) {
-        if ((groupWork += g.to - g.from) > GROUP_WORK) throw fail('groups nested too deep to read');
         // What reaches the group's own output: not what its parts wrote to files (#532 review 9).
-        const output = join(stdout.slice(g.from, g.to).filter((s) => s !== undefined));
+        const output = join(collect(g.from, g.to));
         before = output;
-        for (let i = g.from; i < g.to; i++) stdout[i] = '';
+        jump[g.from] = g.to;
+        foldedAt.set(g.to, g.from);
+        stdout[g.from] = '';
         // A group that ends in a part of its own (`}`, `fi`, `done`, `esac`): that part prints and writes it.
         if (g.brace || g.closer) continue;
         if (g.writes.length) for (const wr of g.writes) write(wr, output);
-        else stdout[g.to - 1] = output;
+        else stdout[g.from] = output;
       }
     };
     for (let n = 0; n < parts.length; n++) {
@@ -238,7 +268,8 @@ export function streamGuard(line, mode, api, zsh = false) {
       words = api.stripPrefix(words);
       const prog = api.programOf(words[0] ?? '');
       const input = parts.piped.has(n) ? before : stdin;
-      if (parts.piped.has(n) && n > 0) stdout[n - 1] = '';
+      // Piped on: the part before (or the group folded up to here) prints nothing of its own.
+      if (parts.piped.has(n) && n > 0) { stdout[n - 1] = ''; if (foldedAt.has(n)) stdout[foldedAt.get(n)] = ''; }
       const fed = join([...((bodies.get(n) ?? []).map((b) => b.text)),
         ...((heres.get(n) ?? []).map((b) => b.text + '\n'))]);
       const redirected = join((parts.reads[n] ?? []).map(read));
@@ -362,7 +393,7 @@ export function streamGuard(line, mode, api, zsh = false) {
       if (proc.length) n = Math.max(...proc.map((p) => p.to)) - 1;
     }
     close(parts.length);
-    return join(stdout.filter((s) => s !== undefined));
+    return join(collect(0, parts.length));
   }
   run(line);
   return verdict;

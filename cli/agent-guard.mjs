@@ -1185,6 +1185,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
     if (e?.code === 'YAD_GUARD_OUTPUT_LIMIT') return TOO_MUCH_WRITTEN;
     if (e?.code === 'YAD_GUARD_TOO_DEEP') return TOO_DEEP;
     if (e?.code === 'YAD_GUARD_TOO_MANY_PROCSUBS') return TOO_MANY_PROCSUBS;
+    if (e?.code === 'YAD_GUARD_BLOCKS_DEEP') return { allow: false, message: 'yad agent guard: this command nests `if`, `for`, `while` or `( … )` blocks too deep to judge. Run it as separate commands.' };
     // A line the reader cannot judge is refused, never let through: the payload was read, so this is a bug here.
     return { allow: false, message: `yad agent guard: this command could not be judged (${e?.message ?? e}). Run it as separate commands, and report it with \`yad report\`.` };
   } finally {
