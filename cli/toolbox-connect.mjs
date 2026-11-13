@@ -23,10 +23,13 @@ import {
 import { registerDesign, registerLearning, registerTesting } from './setup.mjs';
 
 // Each shipped tool's recipe. `null`: nothing to install here (the person's app, account or service — the
-// tool's `manual` says how). An agent step is a package-manager or plugin install, pinned to the vetted version
-// wherever one is vetted; `recipeProblems` checks it. The `claude` steps are Claude Code's: with another agent,
-// the connect-tool rule hands every step to the person.
+// tool's `manual` says how). An agent step is a package-manager or plugin install, or the tool's own config
+// writer, pinned to the vetted version wherever one is vetted; `recipeProblems` checks it. A step that names
+// `claude` or `claude-code` is Claude Code's: with another agent, the connect-tool rule hands every step to the
+// person.
 const A = (run) => ({ who: 'agent', run, scope: 'user' });
+// An agent step that changes the project folder it runs in, not the user account (E175: a Unity plugin).
+const AP = (run) => ({ who: 'agent', run, scope: 'project' });
 const P = (run, why) => ({ who: 'person', run, why });
 // A person step that is a thing to do, not a command to type.
 const PT = (run, why) => ({ who: 'person', run, why, text: true });
@@ -46,6 +49,17 @@ export const RECIPES = Object.freeze({
   'unity-mcp': [
     PT('in the Unity Editor, open the Package Manager (Window → Package Manager), choose + → Add (in Unity 6: Install) package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),
     PT('then open Window → MCP for Unity → Toggle MCP Window; under Per-client setup, with Claude Code chosen, set Client Project Dir to the folder your agent starts in (the Unity repo, unless you start it elsewhere); press Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings for that folder only, and an agent loads a new MCP server when it starts'),
+  ],
+  // E175: the default Unity tool. The agent installs the plugin (CLI and plugin both at the vetted version) and
+  // writes a local stdio server (no cloud endpoint, no project key) for Claude Code, from the Unity repo; the
+  // connection mode and transport are set in the Editor only, so Custom + stdio is the person's step: with the
+// plugin's default transport (streamableHttp) the Editor starts its own server on the project's port, and the
+// agent's stdio server cannot start ("address already in use").
+  'ai-game-developer': [
+    AP('npx unity-mcp-cli@1.11.1 install-plugin . --plugin-version 1.11.1'),
+    AP('npx unity-mcp-cli@1.11.1 setup-mcp claude-code . --transport stdio'),
+    PT('open the repo in the Unity Editor, then Window → AI Game Dev; set the connection mode to Custom, not Cloud, and the transport to stdio', 'Custom runs the server on this machine (Cloud sends your Editor data to ai-game.dev after a sign-in, and that choice is yours); stdio lets your agent start that server, which the Editor\'s own server would otherwise block'),
+    PT('restart your agent, and approve the ai-game-developer server when it asks', 'an agent loads a new MCP server when it starts, and asks before it uses one a project folder adds'),
   ],
   figma: [
     A('claude plugin install figma@claude-plugins-official'),
@@ -140,12 +154,12 @@ function askText(tool, steps, { found, file, replaces, productRoot }) {
   const parts = [];
   for (const s of steps) {
     const last = parts[parts.length - 1];
-    if (last && last.who === s.who) last.runs.push(s);
-    else parts.push({ who: s.who, runs: [s] });
+    if (last && last.who === s.who && last.scope === s.scope) last.runs.push(s);
+    else parts.push({ who: s.who, scope: s.scope, runs: [s] });
   }
   const said = parts.map((p, i) => {
     const lead = i === 0 ? (p.who === 'person' ? 'first, ' : '') : 'then ';
-    if (p.who === 'agent') return `${lead}I will run ${p.runs.map((r) => `\`${r.run}\``).join(', then ')} (for your user account on this machine)`;
+    if (p.who === 'agent') return `${lead}I will run ${p.runs.map((r) => `\`${r.run}\``).join(', then ')} (${p.scope === 'project' ? 'in this project folder: it changes the project\'s files and this folder\'s agent settings' : 'for your user account on this machine'})`;
     return `${lead}you ${p.runs.map((r) => `${r.text ? r.run : `run \`${r.run}\``} (${r.why})`).join(', then ')}`;
   });
   said[0] = said[0][0].toUpperCase() + said[0].slice(1);

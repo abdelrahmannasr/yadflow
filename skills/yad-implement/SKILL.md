@@ -128,26 +128,65 @@ the frame links only, only when the person says so, and record that in the commi
 paragraph (Step 6) as `design tool not reachable: continued from the frame links, on <person>'s word`.
 `not-checkable` means there is nothing to probe: go on from the links. `preflight: null` means no frames.
 
-**In a Unity repo, check the build through Unity MCP (#321).** A Unity repo is one with
+**In a Unity repo, check the build through one Unity MCP server (#321, E175).** A Unity repo is one with
 `ProjectSettings/ProjectVersion.txt` and an `Assets/` folder at its root (a Unity project in a subfolder is
 not read as one).
 The CI build/test/lint gate skips a Unity repo with a note (#496), so this check, and the team's own Unity CI
 (such as GameCI), is where the build is checked.
 
-- **Reach.** Run the yad commands from inside the folder you edit — the Unity repo, or its worktree
-  (`<repo>--<epic>`) when there is one (`cd` there): `yad toolbox list --json`, then
-  find `unity-mcp` and use it when its `status.state` is `installed`. If it is not found, offer `yad toolbox
-  connect unity-mcp --json` once, under the connect-tool rule, and hand the person its steps (they are done in
-  the Unity Editor). Unity registers the server for its own project folder only, so its tools load only in an
-  agent started in that folder: if your session started elsewhere (the Product, say) or does not see the
-  server (in Claude Code, `/mcp`), tell the person to start the agent in the folder you edit — or to set
-  **Client Project Dir** in the MCP for Unity window to the folder the agent starts in, and press Configure
-  again (a worktree is a new folder, so it needs this too) — and restart it, then run this step again.
-- **Probe once.** Read the console (`read_console`). If it fails, or the Editor is open on another folder
+- **Use one Unity tool.** Run the yad commands from inside the folder you edit — the Unity repo, or its worktree
+  (`<repo>--<epic>`) when there is one (`cd` there): `yad toolbox list --json`, then find both Unity
+  servers, `ai-game-developer` (AI Game Developer, the default) and `unity-mcp` (MCP for Unity, kept for teams
+  already on it), and pick one, in this order: `ai-game-developer` when its `status.state` is `installed`
+  (also when both are); else `unity-mcp` when its `status.state` is `installed`; else offer one connect.
+  Work with that one tool for the whole task, and tell the person which one it is.
+- **None installed: ask, then help.** Ask the person once whether to install AI Game Developer, under the
+  connect-tool rule: run `yad toolbox connect ai-game-developer --json` (or `yad toolbox connect unity-mcp
+  --json` when that entry is `used: true` and `ai-game-developer`'s is not — the team chose it) and show its
+  `ask` word for word. On a yes, help the person through it: run its agent steps from the folder you edit (the Unity
+  repo, or its worktree — the plugin and the server are written for that folder), in order
+  (AI Game Developer's add the plugin at the vetted version, then write a local stdio server for Claude Code —
+  with another agent, hand both to the person, with that agent's id from `npx unity-mcp-cli@1.11.1 setup-mcp
+  --list` in place of `claude-code`); hand over its person steps and wait for them (open the repo in Unity,
+  set the connection mode to Custom (local) and the transport to stdio in Window → AI Game Dev — Cloud mode
+  sends Editor data to ai-game.dev, and with the default transport the Editor's own server blocks the
+  agent's; then restart the agent and approve the server); then run its `verify` and check your session sees
+  the server (in Claude Code, `/mcp`). The files these steps write (`Packages/manifest.json`,
+  `packages-lock.json`, and `.mcp.json`, which holds this machine's path to the server) stay out of the task
+  commit. On a no, or when a step fails (show its output; never try another way), use the fallback below.
+- **With AI Game Developer.** If your session does not see the server (in Claude Code, `/mcp`), ask the
+  person to start the agent in the folder you edit, or run `npx unity-mcp-cli@1.11.1 setup-mcp claude-code .
+  --transport stdio` there (with their yes) and restart the agent. Before its first use, ask the person to
+  confirm the AI Game Dev window shows connection mode **Custom** and transport **stdio** (yad cannot see
+  them): on a no, they switch both, or you use the fallback below; record `AI Game Developer: Custom mode and
+  stdio confirmed by <person>` in `Decisions:`. Probe once by reading the console; if it fails, or the Editor is open on another folder than
+  the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor on the
+  folder you edit and check Window → AI Game Dev shows it connected, or use the fallback. Only these tools:
+  `rql-schema` (how to write a query), `rql-query` — to read the console (its `console` source) and to find
+  objects — and `tests-run` for the task's tests. After each edit, while the probe shows the person's Editor
+  open and connected on the folder you edit, check it compiles with `npx unity-mcp-cli@1.11.1 compile .
+  --format json` from that folder (it refreshes Unity's assets and waits for the compile). With no Editor open
+  it starts a hidden (batch) Unity of its own, so never run it then: ask the person to open the Editor. Read
+  the answer's `errors[0].code`, never its message: none (exit 0) compiles; `COMPILATION_FAILED` — fix every
+  error in `data.errors` your change caused before you commit; `NOT_AUTHENTICATED` — the project is in Cloud
+  mode: ask the person to switch to Custom; `BUSY` — run it once more; anything else (`UNREACHABLE`,
+  `TIMEOUT`, a dialog that blocks the editor, `TOOL_FAILED`) — ask the person to open the Editor or close the
+  dialog, then run it again, or use the fallback. When the task
+  declares tests, run them with `tests-run`. Never `rql-mutate`, `script-execute`, `script-update-or-create`,
+  `script-delete`, `package-add`, `package-remove`, `assetstore-add`, `tool-set-visibility`,
+  `tool-set-enabled-state`, or a `screenshot-*` tool: they run code in the Editor, change or write files the
+  task did not declare, or show the agent more tools, and the agent guard does not see MCP calls.
+- **With MCP for Unity (`unity-mcp`).** Unity registers the server for its own project folder only, so its
+  tools load only in an agent started in that folder: if your session started elsewhere (the Product, say) or
+  does not see the server (in Claude Code, `/mcp`), tell the person to start the agent in the folder you edit
+  — or to set **Client Project Dir** in the MCP for Unity window to the folder the agent starts in, and press
+  Configure again (a worktree is a new folder, so it needs this too) — and restart it, then run this step
+  again.
+- **Probe once (MCP for Unity).** Read the console (`read_console`). If it fails, or the Editor is open on another folder
   than the one you edit (a worktree, `<repo>--<epic>`, is another folder), ask the person to open the Editor
   on the folder you edit and start the server from the MCP for Unity window; if they cannot, use the fallback
   below.
-- **With it, only these tools:** `refresh_unity` with `compile: "request"` (it does not compile unless asked),
+- **With MCP for Unity, only these tools:** `refresh_unity` with `compile: "request"` (it does not compile unless asked),
   `read_console`, `run_tests` with `get_test_job` (the run is started, then read by its job id), and the
   read-only finders `find_gameobjects` and `find_in_file`. If `run_tests` is not offered, its Testing group
   is off in the MCP for Unity window's Tools section: ask the person to turn it on, or use the fallback. Never `execute_code`, `execute_menu_item`, `manage_packages`, `manage_build`,
@@ -159,8 +198,10 @@ The CI build/test/lint gate skips a Unity repo with a note (#496), so this check
   ID): a declared file's own `.meta`, and the `.meta` of a folder made for it, go in the commit with it, and a
   declared file deleted or renamed takes its `.meta` with it. They do not count against the ≤3-file rule —
   `yad commit` counts a `.meta` only when its own file or folder is not staged. Any other file
-  the Editor writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*` — is left unstaged
-  and named to the person; whether the team commits the `com.coplaydev.unity-mcp` package is theirs to decide,
+  the Editor or a tool's setup writes — `Packages/manifest.json`, `packages-lock.json`, `ProjectSettings/*`,
+  `.mcp.json` — is left unstaged
+  and named to the person (AI Game Developer's `.ai-game-dev/` folder and any skill files its window
+  generates too); whether the team commits the `com.coplaydev.unity-mcp` or `com.ivanmurzak.unity.mcp` package is theirs to decide,
   never part of a task commit.
 - **Without it**, or on a no, the toolbox's fallback holds:
   `files only: yad-implement edits the C# and asks the person to open Unity and report its console errors`.
