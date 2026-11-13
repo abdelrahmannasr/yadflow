@@ -224,7 +224,8 @@ test('each vendored library is the copy its record names: the hash, the licence,
     assert.equal(v.licence, 'MIT');
     assert.match(fs.readFileSync(path.join(VENDOR, v.licenceFile), 'utf8'), /Permission is hereby granted, free of charge/);
     assert.deepEqual(vettingProblems(v), [], v.id);
-    assert.match(v.tarball, new RegExp(`^https://registry\\.npmjs\\.org/${v.vetted.packages[0].name}/-/${v.vetted.packages[0].name}-${v.vetted.packages[0].version.replace(/\./g, '\\.')}\\.tgz$`));
+    const pkg = v.vetted.packages[0];
+    assert.equal(v.tarball, `https://registry.npmjs.org/${pkg.name}/-/${pkg.name}-${pkg.version}.tgz`);
     assert.match(v.integrity, /^sha512-[A-Za-z0-9+/]+=*$/);
     const text = bytes.toString('utf8');
     assert.doesNotMatch(text, /\beval\(|new Function\(/, `${v.file} needs no eval, so the strict CSP holds`);
@@ -239,15 +240,17 @@ test('--html: one file, no network, a CSP that names each inline block, and no n
   assert.doesNotMatch(html, /<[a-z][^>]*\s(src|href)=/i, 'no tag loads anything from anywhere');
   assert.ok(!html.includes(evil) && !html.includes('</script><img'), 'the label never appears raw');
   assert.equal(html.includes(' '), false);
-  const data = /<script type="application\/json" id="yad-brain-data">([\s\S]*?)<\/script>/.exec(html)[1];
+  // The inline blocks, found by their exact tags (the file writes them exactly so).
+  const between = (open, close) => html.split(open).slice(1).map((part) => part.slice(0, part.indexOf(close)));
+  const [data] = between('<script type="application/json" id="yad-brain-data">', '</script>');
   assert.deepEqual(JSON.parse(data), JSON.parse(JSON.stringify(model)), 'the data reads back unchanged');
   const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)[1];
   assert.match(csp, /^default-src 'none'; /);
   assert.doesNotMatch(csp, /connect-src|'self'|unsafe/);
   const hashes = new Set([...csp.matchAll(/'sha256-([^']+)'/g)].map((x) => x[1]));
-  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((x) => x[1]);
+  const blocks = between('<script>', '</script>');
   assert.equal(blocks.length, VENDORED.length + 1, 'the vendored libraries and app.js');
-  for (const b of [...blocks, /<style>([\s\S]*?)<\/style>/.exec(html)[1]]) {
+  for (const b of [...blocks, ...between('<style>', '</style>')]) {
     assert.ok(hashes.has(createHash('sha256').update(b, 'utf8').digest('base64')), 'each inline block is allowed by its hash');
   }
   assert.equal(hashes.size, blocks.length + 1, 'and nothing else is');
