@@ -269,7 +269,7 @@ export const TOOLBOX = Object.freeze([
       on: '2026-11-13', licenceFrom: 'https://github.com/IvanMurzak/Unity-MCP/blob/main/LICENSE',
       source: 'https://github.com/IvanMurzak/Unity-MCP', release: '1.11.1',
       packages: [{ registry: 'npm', name: 'unity-mcp-cli', version: '1.11.1' }],
-      note: 'The Unity package is com.ivanmurzak.unity.mcp on OpenUPM (not a registry the toolbox names); unity-mcp-cli on npm adds it to a project, and the plugin downloads its own server binary into Library/mcp-server/. Its connection mode is Cloud by default: the Editor connects to https://ai-game.dev/mcp after a sign-in, so Editor data leaves the machine. Custom mode runs the server locally and keeps it there: yadflow recommends Custom. The server\'s analytics and authorization webhooks are off unless set.',
+      note: 'The Unity package is com.ivanmurzak.unity.mcp on OpenUPM (not a registry the toolbox names); unity-mcp-cli on npm adds it to a project (pinned with --plugin-version, since its default is the latest), and the plugin downloads its own server binary into Library/mcp-server/. Its connection mode is Cloud by default: the Editor connects to https://ai-game.dev/mcp after a sign-in, so Editor data leaves the machine. Custom mode runs the server locally and keeps it there: yadflow recommends Custom. The server\'s analytics and authorization webhooks are off unless set.',
     },
     // It is set up in the Unity project and its Editor: none of the four install types fits.
     install: [],
