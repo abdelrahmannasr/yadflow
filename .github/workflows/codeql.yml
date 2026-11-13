@@ -2,11 +2,12 @@ name: CodeQL
 
 # Static analysis (SAST): CodeQL reads the source for security bugs on every PR and on main, and
 # once a week so a new query catches old code. Results go to Security → Code scanning.
+# A PR into ANY branch is scanned, not only one into main: a stacked PR (based on another PR's
+# branch) was skipped before, and Scorecard's SAST check counted its commits as unscanned (#534).
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   schedule:
     - cron: '17 4 * * 2'
 
