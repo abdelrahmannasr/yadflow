@@ -6,6 +6,7 @@ flowchart TD
     classDef review fill:#fdebd0,stroke:#ca6f1e,color:#000
 
     rec[("Project record<br/>plans · decisions · contracts<br/>reviews · history")]:::knowledge
+    brain[("Project brain<br/>code + work graph<br/>yad brain")]:::knowledge
     ctx["People and AI assistants<br/>read the context"]:::work
     plan["Plan the change"]:::work
     rev{{"Human review<br/>approve or comment"}}:::review
@@ -14,6 +15,7 @@ flowchart TD
     out["Record the outcome<br/>ship log · follow-up changes"]:::knowledge
 
     rec --> ctx --> plan --> rev
+    rec -.->|yad brain build| brain -.->|yad brain query| ctx
     rev -->|approved| build --> chk
     rev -.->|changes asked| plan
     chk -->|merged| out
