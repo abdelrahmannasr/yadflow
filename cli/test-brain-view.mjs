@@ -288,13 +288,14 @@ test('yad brain view --html writes the ignored default file, or a named one, nev
   } finally { done(ws); }
 });
 
-// Run a --json command in-process and return what it printed.
+// Run a --json command in-process and return what it printed. It collects console.log, never stdout itself:
+// the test runner reports on stdout, and catching that would both break this parse and corrupt the run.
 async function captured(fn) {
-  const write = process.stdout.write;
-  let text = '';
-  process.stdout.write = (chunk) => { text += chunk; return true; };
-  try { await fn(); } finally { process.stdout.write = write; }
-  return JSON.parse(text);
+  const log = console.log;
+  const lines = [];
+  console.log = (...a) => { lines.push(a.join(' ')); };
+  try { await fn(); } finally { console.log = log; }
+  return JSON.parse(lines.join('\n'));
 }
 
 test('yad brain view refuses with no brain, extra words, and flags of other actions; --open is view\'s alone', () => {
@@ -365,6 +366,10 @@ test('review 1: --open finds a real opener on each system, explorer on Windows, 
     s = await runBrainView(root, { open: true, wait: false, runner: quiet, opener: (u) => { opened.push(u); return false; } });
     assert.equal(opened[0], s.url, 'the address with its key');
     assert.match(printed.join('\n'), /no browser opener was found here/);
+    console.log = log;
+    const asJSON = await captured(() => runBrainView(root, { args: [path.join(ws, 'v.html')], html: true, open: true, json: true, runner: quiet, opener: () => false }));
+    assert.equal(asJSON.opened, false, 'said under --json too (review 2)');
+    assert.equal((await captured(() => runBrainView(root, { html: true, json: true, runner: quiet }))).opened, undefined, 'absent without --open');
     assert.equal((await raw(s.port, { pathname: new URL(s.url).pathname + new URL(s.url).search })).status, 200);
   } finally { console.log = log; await s?.close(); done(ws); }
 });

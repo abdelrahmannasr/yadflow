@@ -326,7 +326,7 @@ export async function runBrainView(root, { args = [], html = false, open = false
     const risk = own && trackedRisk(file, gitRunner);
     const riskLine = risk ? `${forTerminal(file)} is in a git work tree and not ignored: it holds the names in your code — do not commit it` : null;
     const opened = open ? opener(file) : null;
-    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(riskLine ? { warning: riskLine } : {}) });
+    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}) });
     ok(`wrote ${forTerminal(own ? file : VIEW_FILE)} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges; open it in a browser (it needs no server and no network)`);
     if (behindLine) warn(behindLine);
     if (riskLine) warn(riskLine);
@@ -336,7 +336,7 @@ export async function runBrainView(root, { args = [], html = false, open = false
 
   const s = await startBrainServer(root, { runner });
   const opened = open ? opener(s.url) : null;
-  if (json) emitJSON({ url: s.url, port: s.port, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind });
+  if (json) emitJSON({ url: s.url, port: s.port, nodes: m.model.counts.nodes, edges: m.model.counts.edges, codeBehind: behind, ...(open ? { opened } : {}) });
   else {
     log(c.bold('\nyad brain view'));
     ok(`the brain is at ${s.url}`);
