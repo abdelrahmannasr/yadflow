@@ -448,6 +448,13 @@ ${c.bold('Build helpers')}
   yad brain view --html [<file>] [--open]
                                        The same page as one file that needs no server and no network
                                        (default .sdlc/brain/view.html, never committed)
+  yad brain view --live [--open]       Watch an agent work (E178): each file it reads, searches or edits and
+                                       each command it runs lights up the brain, with a Now card, Plan vs
+                                       reality and a timeline to replay. Needs "activity": true in the
+                                       Product config (then yad check --fix). Shows what, never why
+  yad brain view --html --live [<file>]
+                                       The recorded activity as an offline replay file
+                                       (default .sdlc/brain/live.html, never committed)
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -570,6 +577,7 @@ function parseArgs(argv) {
     else if (a === '--brief') o.brief = true;
     else if (a === '--open') o.open = true;
     else if (a === '--html') o.html = true;
+    else if (a === '--live') o.live = true;
     else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
@@ -1427,7 +1435,7 @@ async function main() {
         .filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t))
         .map((t) => t.split('=')[0])
         .filter((f) => !BRAIN_OWN.has(f)))];
-      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json, open: !!o.open, html: !!o.html, unknownFlags });
+      result = await commands.runBrain(o.dir, { action: action || 'status', args, repo: o.repo ?? null, limit: o.limit ?? null, json: !!o.json, open: !!o.open, html: !!o.html, live: !!o.live, unknownFlags });
       break;
     }
     case 'repo': {

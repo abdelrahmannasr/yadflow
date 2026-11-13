@@ -41,6 +41,8 @@ export default [
         window: 'readonly', document: 'readonly', location: 'readonly', fetch: 'readonly',
         URLSearchParams: 'readonly', Promise: 'readonly', Set: 'readonly', Number: 'readonly', String: 'readonly',
         Object: 'readonly', Date: 'readonly', JSON: 'readonly', Error: 'readonly',
+        EventSource: 'readonly', performance: 'readonly', getComputedStyle: 'readonly', Map: 'readonly',
+        setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly', Math: 'readonly', Array: 'readonly', parseInt: 'readonly',
       },
     },
     rules: {

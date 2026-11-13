@@ -128,7 +128,8 @@ test('the view model: two layers, a colour per kind, the work and the code it na
     const repoIds = repo.nodes.map((i) => m.nodes[i].id);
     assert.ok(repoIds.includes('file:backend:lib/util.js') && repoIds.includes('code:backend:lib_util_pad'), 'the file and its code; "All the code" decides whether they are drawn');
     assert.ok(m.filters.stories.some((f) => f.id === 'story:EP-checkout-S01'));
-    assert.deepEqual(m.meta, { format: 'yad-brain-1', builtAt: '2026-11-13T00:00:00.000Z', codeBehind: [] });
+    assert.deepEqual(m.meta, { format: 'yad-brain-1', inputs: brain.inputs, builtAt: '2026-11-13T00:00:00.000Z', codeBehind: [] });
+    assert.match(m.meta.inputs, /^sha256:/, 'the live view compares it, to say when the brain was rebuilt (E178)');
     assert.equal(m.warnAbove, WARN_ABOVE);
     assert.ok(m.legend.every((k) => /^#[0-9a-f]{6}$/.test(k.colour)));
   } finally { done(ws); }
