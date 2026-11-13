@@ -817,6 +817,8 @@ test('#535 CI: a reading of what a command writes, stopped by the deadline, is r
     const steps = process.env.NODE_V8_COVERAGE ? [0.1, 0.3, 0.5, 0.7, 0.9] : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
     for (const unit of ['bash -c "$(echo x)";', 'echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
       const line = half(unit);
+      // Timed with no deadline: on a slow (coverage) runner the full 5 s may not be enough, and the time is real.
+      globalThis.YAD_TEST_BUDGET = Infinity;
       const t0 = Date.now();
       assert.equal(slow.agentGuardDecision(line).allow, true, `${unit}: allowed in full time`);
       const full = Date.now() - t0;
