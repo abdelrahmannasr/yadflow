@@ -266,7 +266,8 @@ export const TOOLBOX = Object.freeze([
   {
     // #321 (E168): a Unity code repo's editor, for yad-implement. Recommended, not a connector: it is set up in
     // the Unity Editor of one repo, with no Product file, and yad-implement's "In a Unity repo" section says
-    // when to use it (a recommended tool has no generated "When a tool is missing" section).
+    // when to use it (a recommended tool has no generated "When a tool is missing" section). Since E175 it is the
+    // fallback: used only where it is installed and ai-game-developer (the default) is not.
     id: 'unity-mcp', name: 'Unity MCP (MCP for Unity)', tier: 'recommended', role: 'drives the Unity Editor in a Unity code repo: compile errors, the console, tests',
     licence: 'MIT', source: 'https://github.com/CoplayDev/unity-mcp', checked: '2026-11-08',
     vetted: {
@@ -284,6 +285,29 @@ export const TOOLBOX = Object.freeze([
     fallback: 'files only: yad-implement edits the C# and asks the person to open Unity and report its console errors',
     records: 'Unity not reachable: console checked by <person>',
     note: 'Needs Unity 2021.3 or newer, Python 3.10 or newer with uv, and the Unity Editor open on the repo while the agent works. Unity registers it for Claude Code for the Unity project folder only, so its tools load in an agent started there. Found by its server name only (yad never reads a server\'s settings).',
+    usedBy: ['yad-implement'],
+  },
+  {
+    // E175: the default Unity Editor server (the user, 2026-11-13), with MCP for Unity kept as the fallback.
+    // Recommended for the same reasons as unity-mcp; yad-implement's "In a Unity repo" section uses one of the
+    // two — this one when it is installed — and offers to connect this one when neither is.
+    id: 'ai-game-developer', name: 'Unity MCP (AI Game Developer)', tier: 'recommended', role: 'drives the Unity Editor in a Unity code repo: the console, tests',
+    licence: 'Apache-2.0', source: 'https://github.com/IvanMurzak/Unity-MCP', checked: '2026-11-13',
+    vetted: {
+      on: '2026-11-13', licenceFrom: 'https://github.com/IvanMurzak/Unity-MCP/blob/main/LICENSE',
+      source: 'https://github.com/IvanMurzak/Unity-MCP', release: '1.11.1',
+      packages: [{ registry: 'npm', name: 'unity-mcp-cli', version: '1.11.1' }],
+      note: 'The Unity package is com.ivanmurzak.unity.mcp on OpenUPM (not a registry the toolbox names); unity-mcp-cli on npm adds it to a project (pinned with --plugin-version, since its default is the latest), and the plugin downloads its own server binary into Library/mcp-server/. Its connection mode is Cloud by default: the Editor connects to https://ai-game.dev/mcp after a sign-in, so Editor data leaves the machine. Custom mode runs the server locally and keeps it there: yadflow recommends Custom. The server\'s analytics and authorization webhooks are off unless set.',
+    },
+    // It is set up in the Unity project and its Editor: none of the four install types fits.
+    install: [],
+    manual: 'https://github.com/IvanMurzak/Unity-MCP#quick-start',
+    // Its setup registers the server as ai-game-developer, for every agent: matched whatever its case.
+    detect: { mcp: ['ai-game-developer'] },
+    versions: null,
+    fallback: 'files only: yad-implement edits the C# and asks the person to open Unity and report its console errors',
+    records: 'Unity not reachable: console checked by <person>',
+    note: 'The default Unity tool. Needs the Unity Editor open on the repo while the agent works, and a project path with no spaces. Its connect writes a local stdio server for the agent; use its Custom (local) connection mode, since Cloud mode sends Editor data to ai-game.dev. Found by its server name only (yad never reads a server\'s settings).',
     usedBy: ['yad-implement'],
   },
 
