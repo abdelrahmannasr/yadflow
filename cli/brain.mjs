@@ -99,6 +99,9 @@ function readPlain(base, rel) {
 function writePlain(dir, name, data) {
   const file = path.join(dir, name);
   const tmp = `${file}.${process.pid}.tmp`;
+  // A temp left by a killed run under a reused pid is removed first; `rmSync` takes a link itself, never
+  // what it points at, and `wx` still refuses one made in between.
+  fs.rmSync(tmp, { force: true });
   try {
     fs.writeFileSync(tmp, data, { flag: 'wx' });
     fs.renameSync(tmp, file);
@@ -706,7 +709,11 @@ function brainStatus(root, { json, runner, where }) {
     if (r.state === 'current') ok(line); else if (r.state === 'behind' || r.state === 'unknown') warn(line); else info(line);
   }
   if (!here) info(`Graphify is not installed here (vetted: ${GRAPHIFY_VERSION}); the brain has the work items only`);
-  else if (here.startError) warn(`Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)})`);
+  else if (here.startError) {
+    warn(here.hung
+      ? `Graphify at ${forTerminal(here.bin)} did not answer \`--version\` within a minute`
+      : `Graphify was found at ${forTerminal(here.bin)} but cannot be started (${forTerminal(here.startError)})`);
+  }
   else if (here.version !== GRAPHIFY_VERSION) warn(`Graphify ${forTerminal(here.version)} is installed; yadflow vetted ${GRAPHIFY_VERSION}`);
   return undefined;
 }
