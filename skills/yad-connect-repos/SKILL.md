@@ -204,6 +204,9 @@ itself, and commits nothing. Without Graphify it builds the work items alone and
 and `yad brain view --open` draws the graph in the person's browser (E177): a local page only this machine
 can reach, until Ctrl-C. It keeps running, so start it for the person to open rather than waiting on it; or
 use `yad brain view --html --open`, which writes one offline file and returns.
+To watch an agent work through the brain live (E178), the Product sets `"activity": true` and runs
+`yad check --fix`; then `yad brain view --live --open` shows each file the agent reads, searches or edits
+against the task's declared files. It records what the agent did, never why.
 
 ## Other actions
 

@@ -158,7 +158,7 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
 | `yad tidy up [<epic>] [--push]` | Fold a **shipped story's** finished `trust-log`/`build-log` **shards** back into the single folded ledger file, as one `chore(product)` commit — the manual "pack it up" companion to the shard-then-fold storage (like `git gc` for its loose objects). Concurrent Build writers each write their own shard file (so parallel stories of one epic never conflict), and readers union the folded file + loose shards; `tidy up` is the on-demand compaction. A fold reads shards, merges them, then deletes them, so it holds the ledger's exclusive lock for that whole span — a ship written or stamped mid-fold can never be folded away without its change, or deleted without being folded (`YAD-STATE-006` if another writer holds it). Default branch only; `--push` lands it on `origin/<default>`; a **no-op** when nothing is foldable. |
 | `yad index [--json]` | **Rebuild the Product index, `.sdlc/index.json` (E19)** — one summary per work item, so a reader opens one file instead of walking `epics/*`. The index is **derived**: it is rebuilt from each item's own `.sdlc/state.json`, `epic.md` and `.sdlc/change.json`, and never edited by hand. It is written **on the default branch only**, with no override, and the command never commits it: commit it with the change it describes. On a **verified** Product it writes nothing, because CI rebuilds the index in the commit that records a merge. `--json` prints the index built live from the files, on any branch, and writes nothing. See [the Product index](#the-product-index-sdlcindexjson). |
 | `yad history [list\|show\|search]` | **What the Product has done (E20)**, read live from each work item's own files, on any branch, writing nothing. `list` shows every work item, open and shape-done (its Shape steps closed; Build is not counted), newest first, with `--type`, `--theme`, `--thread`, `--open` or `--done` to narrow it. `show <id>` prints one item's steps with their closing records and the approvals recorded for each review step. `search <text>` finds text in ids, titles, themes, types and repos, and in who closed or merged a step, its PR and its commit. `--json` on all three. See [Work-item history](#work-item-history-yad-history). |
-| `yad brain [build\|query\|status\|view]` | **The project brain (E176): one knowledge graph of the code and the work, on this machine.** `build` runs [Graphify](https://github.com/Graphify-Labs/graphify) in each connected code repo (local, no LLM: only the code is parsed), then merges its code graph — files, functions, classes, calls, imports — with the work items: epics, stories, each task and the files it declares, contract surfaces, and ships. It writes `.sdlc/brain/graph.json`, which is never committed. `query <text>` lists the nodes whose name holds the text, each with its neighbours. `status` says whether the brain and each repo's code graph are current. `view` draws it in a browser (E177): a local page on `127.0.0.1` with a one-time key, or with `--html` one file that needs no server. Without Graphify it builds the work items alone. `--json` on all four. See [the project brain](#the-project-brain-yad-brain). |
+| `yad brain [build\|query\|status\|view]` | **The project brain (E176): one knowledge graph of the code and the work, on this machine.** `build` runs [Graphify](https://github.com/Graphify-Labs/graphify) in each connected code repo (local, no LLM: only the code is parsed), then merges its code graph — files, functions, classes, calls, imports — with the work items: epics, stories, each task and the files it declares, contract surfaces, and ships. It writes `.sdlc/brain/graph.json`, which is never committed. `query <text>` lists the nodes whose name holds the text, each with its neighbours. `status` says whether the brain and each repo's code graph are current. `view` draws it in a browser (E177): a local page on `127.0.0.1` with a one-time key, or with `--html` one file that needs no server. `view --live` (E178) shows an agent working, live: what it reads, searches, edits and runs, against the plan — with `"activity": true` in the Product config. Without Graphify it builds the work items alone. `--json` on all four. See [the project brain](#the-project-brain-yad-brain). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, or **not cloned** on this machine (E81 — `yad repo clone` fetches it), and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. Both judge each entry before git runs, as `yad repo clone` does: a refused entry is named with its reason and git never runs in it. A registered folder inside a checkout with no `.git` of its own (`apps/web` in a monorepo) is present, unless a link inside a repo's tree is on its way or a folder on its way holds an entry named `HEAD` (of any kind, a link to nowhere too): git can take such a folder for a bare repo and read its `config`, whose settings can run a command. `refresh` also skips a checkout reached through a link inside a repo's tree, and one whose `contextPack` or `codeMap` is not a path under `.sdlc/code-context/` in the Product (the pack is written there, and `--push` commits the code-map); `--push` never stages a code-map outside it. An entry that is not an object is named and skipped. `list --json` gives each repo a `state`: `fresh`, `stale`, `no-pack`, `unreadable`, `missing` (not cloned here) or `refused` (with a `reason`), plus a top-level `missing` count. A `.sdlc/repos.json` that does not parse is named and **exits 1** — it is never read as "no repos", and `refresh` never writes an empty list over it. |
 | `yad repo preview <name> [<pattern>] [--clear]` | **A repo's preview address pattern (#359)**: the address of the live copy a service (Vercel, Netlify, a GitLab review app) deploys for each PR/MR. With no pattern it shows the recorded one; with one it checks it and writes `preview_url` into the repo's entry in `.sdlc/repos.json` (commit it in the Product — a team setting); `--clear` removes it. Placeholders: `{pr}` (the PR/MR number), `{branch}` and `{repo}` (lowercase, every run of other characters one `-` — yad's own slug, which may differ from the one your preview service uses; use `{pr}` when it does). The pattern must be https (or `http://localhost`), with no space, no `<>"'`\\` and no user or password in it; an unknown placeholder or a lone brace is refused and nothing is written. Used twice: `yad open-pr` writes the filled address in the PR/MR body's `**Preview:**` line under `## Testing` (a `{pr}` pattern is filled by editing the body once the PR exists; with no pattern the line says none is recorded and a live design check runs locally only; a pattern that cannot be filled says so, and `open-pr` warns when the recorded pattern cannot be used), and `yad review context` hands it to the review skills as `preview`. `yad doctor` warns `repos:preview` on a recorded pattern it cannot use. `--json`: `{name, preview_url, changed?, problems?}`. |
 | `yad repo clone [name]` | **Clone every registered repo that is missing on this machine** (E81), at its recorded `path` — `yad join`'s clone step, for the repo a teammate registered after you joined. Each entry is judged first, exactly as `join` judges it: a path outside the workspace, through a `.git` folder or through a link is refused; so is a missing `git_url`, one starting with `-`, one that is not a **network address** (`https://`, `http://`, `ssh://`, `git://`, `user@host:path`, or an ssh alias `host:path`, the host in letters, digits, `.`, `_` and `-`, each starting with a letter or digit, and a user or password in those plus `~` and `+` (and `%` for `https://` only) — ssh can put them in a shell command; a control character anywhere — or a line separator or bidi control — typed or `%`-encoded (`%0d`, `%1b`, `%c2%9b`), is refused too — git writes the decoded user and path to your credential helper, where a carriage return can make it hand a saved token to another host (CVE-2024-52006, unguarded before git 2.48.1); an IPv6 host goes in an `ssh://[…]/` URL, as `user@[::1]:path` is refused — a plain path, `file://` or any `<helper>::` URL could name a folder the Product itself commits, shaped as a repo whose config runs a command), and a folder in the way that is not a git repo. The clone also runs with git's file transport off — set by `GIT_ALLOW_PROTOCOL`, which git obeys over any `protocol.*.allow` setting you have — because git reads `name.example:x` as a local folder when one by that name exists. A team whose remotes really live on a disk sets `YAD_ALLOW_LOCAL_REMOTES=1`: then an absolute local path (or `file://` URL, without `%`) naming a folder that EXISTS outside the workspace is cloned too; git is handed that folder as resolved on disk, and only that clone gets the file transport. The same rule holds in `yad join`. **It never runs git in a repo that is already there** and never writes the registry. A repo it could not clone is named and the rest continue; the command then **exits 1** (unlike `join`, cloning is its only job). Works from inside any registered repo (E80). `--json`: `{ cloned, present, failed }`, each a list of `{ name, path, reason? }`. |
@@ -2209,11 +2209,82 @@ source, version, tarball integrity and sha256. The unit suite checks each file a
 release check refuses a record older than 180 days, as for the toolbox. sigma.js 4 is not used yet: 4.0.6
 was three days old on the day of vetting.
 
+### Watching an agent work: `yad brain view --live`
+
+`yad brain view --live` (E178) shows an agent working, while it works. Each file it reads, searches or edits,
+and each command it runs, lights up the brain. Engineers see where the agent is in the plan, and when it
+strays from it.
+
+```sh
+yad brain view --live --open          # watch now, until Ctrl-C
+yad brain view --html --live --open   # a replay file: .sdlc/brain/live.html, no server, no network
+```
+
+**Turning it on.** The activity record is **off by default**. To turn it on, set `"activity": true` in
+`.sdlc/product.json`, then run `yad check --fix`. That installs one hook script, `hooks/yad-activity.mjs`
+in the Product and `checks/yad-activity.mjs` in each code repo cloned here, with its entries in the agent's
+settings:
+
+| Agent | Event | What it records |
+|---|---|---|
+| Claude Code | `PostToolUse` on `Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash` | reads, searches, edits and commands |
+| Cursor | `afterFileEdit` and `afterShellExecution` | edits and commands only. Cursor's only read event, `beforeReadFile`, must answer allow or deny, so yad does not use it |
+
+Setting `"activity": false` (or deleting the key) and running `yad check --fix` again takes the script and
+yad's entries out; the team's own hooks stay. `yad doctor` says whether it is off, on but not wired, or wired,
+and where this clone's record is.
+
+**What one record holds — and nothing else.** One JSON line per tool call, in
+`<git common dir>/yad-activity.jsonl`:
+
+| Field | What it is |
+|---|---|
+| `ts` | when |
+| `s` | the first 12 characters of the sha256 of the session id, so sessions are told apart, never named |
+| `h` | `claude` or `cursor` |
+| `op` | `read`, `search`, `edit` or `run` |
+| `tool` | the agent's tool name (`Read`, `Edit`, `Bash`, `afterFileEdit`, …) |
+| `paths` | up to 20 paths, relative to the repo |
+| `yad` | for a command that is a yad command, its name and action from yad's own list (`ship`, `brain query`) |
+
+**Never recorded:** prompts, reasoning, file content, search patterns, command text, tool output, absolute
+paths, or any path outside the repo — including one reached through a link that leaves it. So the live view
+**shows what the agent did, never why.**
+
+**Where the record lives.** Inside `.git`, so it can never be committed, and it stays on this machine. A worktree
+writes to the repo's shared git folder. Above 5 MB the file is renamed to `yad-activity.1.jsonl` (one old file
+is kept), and the view reads the last 14 days.
+
+**The hook never gets in the agent's way.** It writes the line itself (it never starts yad), always exits 0,
+prints nothing on stdout, and writes at most one line on stderr when something fails — a read-only `.git`, no
+git, a payload that does not parse.
+
+**What the page shows — the Observatory.**
+
+- **The sky.** The brain on a dark sky: the work items bright, the code as faint stars. Each action sends a
+  comet from the last node touched to the next, and a pulse where it lands, in the action's colour: read cyan,
+  search amber, edit pink, run violet, a yad command mint. A searched folder lights the files under it softly.
+- **Heat.** Each node the agent touches glows, and the glow halves every 90 seconds, so the sky shows where
+  the agent has been working. The last few hops stay as a faint trail.
+- **Now.** What the agent is doing this moment ("Editing backend/src/order/index.js, 4 s ago"), and counts of
+  files read, searches, edits and commands, each with a ten-minute bar chart.
+- **Plan and reality.** The task whose declared files the agent touched last, with each of its files marked
+  edited, read or not yet, and how many are edited. **Edited outside the plan** lists files the agent edited
+  that no task of that story declares — the scope check `yad-implement` asks of each task.
+- **The timeline.** One lane per kind of action. Drag to replay; play at 1×, 4× or 16× (a quiet stretch is
+  skipped); `Live` goes back to now. Keys: Space plays, ←/→ step, F follows, H toggles the heat, L goes live.
+- **Follow** moves the view to each node the agent touches, and pauses while you look around.
+
+The page is served behind the same guards as `yad brain view`. The stream is one more fixed route,
+`/events`, sent as Server-Sent Events (a one-way stream from the server to the browser): a status, then the
+recent past, then each new record as it lands. With reduced motion set in your system, comets and pulses are
+replaced by a still highlight.
+
 | `--json` | Keys |
 |---|---|
 | `brain build` | `file`, `graphify` (the version here, or `null`), `graphifyError?` (a `graphify` was found but did not start, or did not answer within a minute: `ETIMEDOUT`), `vetted`, `built[{name, ok, nodes?, edges?, why?}]`, `skipped[{name, why}]`, `counts{nodes, edges, kinds}`, `inputs` |
 | `brain query` | `query`, `codeBehind` (the repos whose code moved since the brain was built — the answer may be out of date there; `status` checks everything), `matches[{node{id, kind, label, repo?, file?, missing?}, neighbours[{relation, direction, confidence, node}], more}]` — up to 12 neighbours, the edges out first, then the edges in; `more` counts the rest |
-| `brain view` | the server: `url` (it holds the key), `port`, `nodes`, `edges`, `codeBehind`, `opened?` (with `--open`: `false` when no opener was found) — printed once, then the server runs until stopped. `--html`: `file`, `nodes`, `edges`, `codeBehind`, `opened?`, `warning?` (the file is in a git work tree that does not ignore it) |
+| `brain view` | the server: `url` (it holds the key), `port`, `nodes`, `edges`, `codeBehind`, `opened?` (with `--open`: `false` when no opener was found) — printed once, then the server runs until stopped. `--html`: `file`, `nodes`, `edges`, `codeBehind`, `opened?`, `warning?` (the file is in a git work tree that does not ignore it). With `--live`, `--html` adds `events` (how many recorded events the replay holds) |
 | `brain status` | `graphifyError?` (as for `build`), `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`, `error`, `code` and `hint`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
 ## Work-item history: `yad history`
