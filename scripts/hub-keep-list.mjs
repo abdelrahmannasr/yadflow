@@ -36,6 +36,7 @@ export const FILE_RULES = [
   { rule: 'v3-fixture', why: 'a frozen v3 project — the golden test feeds it in unchanged', test: (f) => f.startsWith('cli/fixtures/golden-v3/') },
   { rule: 'v3-fixture', why: 'the ledger guard as 3.18.1 shipped it — tests run the old gate against new files', test: (f) => f === 'cli/fixtures/ledger-guard-v3.18.1.sh' },
   { rule: 'not-a-word', why: 'a lockfile hash — base64 that happens to spell hub', test: (f) => f.endsWith('package-lock.json') },
+  { rule: 'vendored', why: 'third-party browser libraries copied byte for byte (E177): a minified name that spells hub, and the unit suite holds each file to its sha256', test: (f) => /^cli\/brain\/vendor\/[^/]+$/.test(f) },
   { rule: 'keep-list', why: 'this script, which must spell every form it keeps', test: (f) => f === 'scripts/hub-keep-list.mjs' },
 ];
 

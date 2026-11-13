@@ -2191,7 +2191,7 @@ yad brain view --html ~/brain.html # one file, where you name it
 The key is in the address, so treat the address like a password while the page runs. Ctrl-C stops it.
 `--open` hands the address to `open` (macOS), `xdg-open` (Linux) or `explorer` (Windows), so on a machine
 other people log in to, they could see it in the process list for the moment that program runs; there,
-leave out `--open` and copy the address yourself. When none of those programs is found, yad says so.
+leave out `--open` and copy the address yourself. When none of those programs is found, yad says so (`opened: false` under `--json`).
 
 **The `--html` file** holds everything inline: the libraries, the page and the brain. It needs no server
 and no network, and its own Content-Security-Policy allows only the blocks it holds, by their hashes. Names
@@ -2213,7 +2213,7 @@ was three days old on the day of vetting.
 |---|---|
 | `brain build` | `file`, `graphify` (the version here, or `null`), `graphifyError?` (a `graphify` was found but did not start, or did not answer within a minute: `ETIMEDOUT`), `vetted`, `built[{name, ok, nodes?, edges?, why?}]`, `skipped[{name, why}]`, `counts{nodes, edges, kinds}`, `inputs` |
 | `brain query` | `query`, `codeBehind` (the repos whose code moved since the brain was built — the answer may be out of date there; `status` checks everything), `matches[{node{id, kind, label, repo?, file?, missing?}, neighbours[{relation, direction, confidence, node}], more}]` — up to 12 neighbours, the edges out first, then the edges in; `more` counts the rest |
-| `brain view` | the server: `url` (it holds the key), `port`, `nodes`, `edges`, `codeBehind` — printed once, then the server runs until stopped. `--html`: `file`, `nodes`, `edges`, `codeBehind`, `warning?` (the file is in a git work tree that does not ignore it) |
+| `brain view` | the server: `url` (it holds the key), `port`, `nodes`, `edges`, `codeBehind`, `opened?` (with `--open`: `false` when no opener was found) — printed once, then the server runs until stopped. `--html`: `file`, `nodes`, `edges`, `codeBehind`, `opened?`, `warning?` (the file is in a git work tree that does not ignore it) |
 | `brain status` | `graphifyError?` (as for `build`), `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`, `error`, `code` and `hint`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
 ## Work-item history: `yad history`
