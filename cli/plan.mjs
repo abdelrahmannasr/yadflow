@@ -1679,9 +1679,30 @@ export function activityWanted(root) {
   return !!(cfg && cfg.activity === true);
 }
 
+// Is any folder on the way to `rel` under `root` a link (or not a folder)? Then nothing is written or removed
+// there: it would land wherever the link points (E178 review 1).
+function linkOnTheWay(root, rel) {
+  let cur = root;
+  const parts = rel.split('/');
+  for (const part of parts.slice(0, -1)) {
+    cur = path.join(cur, part);
+    const st = lstatIfPresent(cur);
+    if (st && (st.isSymbolicLink() || !st.isDirectory())) return true;
+  }
+  const last = lstatIfPresent(path.join(root, rel));
+  return !!last && last.isSymbolicLink();
+}
+const linkSaid = new Set();
+function sayLinked(where, rel) {
+  if (linkSaid.has(`${where}\0${rel}`)) return;
+  linkSaid.add(`${where}\0${rel}`);
+  warn(`${where}: a folder on the way to ${rel} is a link (or not a folder) — the live activity record is not wired there; make it a plain folder, then re-run \`yad check --fix\``);
+}
+
 // The script and one entry per adapter whose target this Product uses. Landed together, as capture's are.
 export function activityHookActions(root, ideTargets = ideTargetsFor(root)) {
   if (!activityWanted(root)) return [];
+  if (linkOnTheWay(root, ACTIVITY_WIRING[0].dest)) { sayLinked('the Product', ACTIVITY_WIRING[0].dest); return []; }
   const ledger = readManagedLedger(root);
   const actions = ACTIVITY_WIRING.map((w) =>
     wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
@@ -1724,11 +1745,16 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
       },
     });
   }
-  if (removeScript) {
+  // ONLY A COPY YAD PROVABLY WROTE, reached with no link on the way (E178 review 1, the E113 rule): its sha is
+  // the one `.sdlc/managed.json` recorded, or it is byte for byte the script this release ships. A team's own
+  // edited copy is theirs — their hook may run it — and a `checks/` or `hooks/` that is a link would take the
+  // removal to wherever it points.
+  if (removeScript && !linkOnTheWay(root, dest)) {
     const file = path.join(root, dest);
     const st = lstatIfPresent(file);
-    // Only a plain file of ours is removed; a link is never followed to whatever it points at.
-    if (st && st.isFile()) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => fs.rmSync(file, { force: true }) });
+    const sha = st && st.isFile() ? contentSha(file) : null;
+    const ours = sha && (readManagedLedger(root)[dest] === sha || sha === contentSha(asset(ACTIVITY_WIRING[0].src)));
+    if (ours) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => fs.rmSync(file, { force: true }) });
   }
   return actions;
 }
@@ -1737,6 +1763,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
 // files, for the Product's targets, as the agent guard's are (`repoAgentGuardActions`).
 export function repoActivityActions(productRoot, repoRoot, ideTargets, { scope, ledger = readManagedLedger(repoRoot) }) {
   if (!activityWanted(productRoot)) return [];
+  if (linkOnTheWay(repoRoot, REPO_ACTIVITY_DEST)) { sayLinked(scope, REPO_ACTIVITY_DEST); return []; }
   const targets = new Set(repoTargets(repoRoot, ideTargets, scope));
   const settings = activityAdapters(REPO_ACTIVITY_DEST).filter((a) => targets.has(a.target))
     .map((a) => ({ ...hookSettingsAction(repoRoot, a, undefined, scope), scope, item: `${a.settings} (activity: ${a.event})` }));

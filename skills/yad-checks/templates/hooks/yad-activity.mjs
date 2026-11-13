@@ -76,19 +76,34 @@ const CURSOR_OPS = new Map([['afterFileEdit', 'edit'], ['afterShellExecution', '
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const short = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
 
-// A path the harness gave, as a path relative to `root`, or null when it is not inside it. A path that
-// exists is resolved through its links: a link inside the repo that points outside it is not the repo's.
-export function repoPath(given, root, realRoot = root) {
-  if (typeof given !== 'string' || !given || given.length > 1024 || given.includes('\0')) return null;
-  const abs = path.resolve(root, given);
-  const rel = path.relative(root, abs);
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  let real = null;
-  try { real = fs.realpathSync(abs); } catch { /* not there (deleted, or not yet written): judged by its name */ }
-  if (real !== null) {
-    const r = path.relative(realRoot, real);
-    if (!r || r.startsWith('..') || path.isAbsolute(r)) return null;
+// The real path of `abs`: its nearest part that exists, resolved through its links, with the rest (not
+// written yet, or deleted) added back by name. Null when nothing on the way exists.
+function realOf(abs) {
+  let head = abs;
+  const tail = [];
+  for (;;) {
+    try { return path.join(fs.realpathSync(head), ...tail); } catch { /* go up one */ }
+    const up = path.dirname(head);
+    if (up === head) return null;
+    tail.unshift(path.basename(head));
+    head = up;
   }
+}
+
+// Text no harness sends as a file path, but that would read as a relative name: a home (`~`), a variable
+// (`$HOME`, `%USERPROFILE%`), a URL (`file://…`), and — off Windows — a drive or a backslash path.
+const NOT_A_PATH = process.platform === 'win32' ? /^[~$%]|^[a-z][a-z0-9+.-]*:\/\//i : /^[~$%]|[:\\]/;
+
+// A path the harness gave, as a path relative to the repo, or null when it is not inside it. Judged on the
+// REAL path (links resolved), against the repo's real root: a link inside the repo that points out is not the
+// repo's, and a repo opened through a link (macOS /tmp, a linked projects folder, a Windows junction) still
+// matches what the agent typed (E178 review 1).
+export function repoPath(given, root, realRoot = root) {
+  if (typeof given !== 'string' || !given || given.length > 1024 || given.includes('\0') || NOT_A_PATH.test(given)) return null;
+  const real = realOf(path.resolve(root, given));
+  if (real === null) return null;
+  const rel = path.relative(realRoot, real);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   return rel.split(path.sep).join('/');
 }
 
@@ -147,7 +162,9 @@ export function lineOf(rec) {
 // no process started); for a worktree or a submodule, where `.git` is a file, git is asked.
 export function gitCommonDir(root) {
   const dotGit = path.join(root, '.git');
-  try { if (fs.lstatSync(dotGit).isDirectory()) return dotGit; } catch { return null; }
+  // No `.git` here at all is a repo whose root is ABOVE this folder (a Product in a subfolder, a monorepo
+  // app): git is asked, as for a worktree (E178 review 1).
+  try { if (fs.lstatSync(dotGit).isDirectory()) return dotGit; } catch { /* asked below */ }
   const r = spawnSync('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 2000 });
   const out = r.status === 0 ? String(r.stdout).trim() : '';
   return out && path.isAbsolute(out) ? out : null;

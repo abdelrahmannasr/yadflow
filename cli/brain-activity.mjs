@@ -11,6 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { run } from './lib.mjs';
 import { brainRepos } from './brain.mjs';
 import { readRegistry } from './workspace.mjs';
@@ -18,7 +19,7 @@ import { readRegistry } from './workspace.mjs';
 export const LOG_NAME = 'yad-activity.jsonl';
 export const OLD_LOG_NAME = 'yad-activity.1.jsonl';
 export const KEEP_DAYS = 14;
-export const BACKLOG_LIMIT = 5000;
+export const BACKLOG_LIMIT = 20000;
 const OPS = new Set(['read', 'search', 'edit', 'run']);
 const posix = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '');
 
@@ -71,7 +72,33 @@ export function parseRecord(line) {
   };
 }
 
-const readText = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+// A log is read only when it is a PLAIN FILE: a link could point the reader at any file, and a FIFO would
+// block it for ever (E178 review 1). The size is read from the open file itself.
+const MAX_READ = 8 * 1024 * 1024;
+const MAX_PART = 64 * 1024;
+function openPlain(file) {
+  try { if (!fs.lstatSync(file).isFile()) return null; } catch { return null; }
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) { fs.closeSync(fd); return null; }
+    return { fd, st };
+  } catch { if (fd !== undefined) fs.closeSync(fd); return null; }
+}
+
+// The last MAX_READ bytes of a plain file, from its first whole line; '' for anything else.
+function readTail(file) {
+  const o = openPlain(file);
+  if (!o) return '';
+  try {
+    const from = Math.max(0, o.st.size - MAX_READ);
+    const buf = Buffer.alloc(o.st.size - from);
+    const got = fs.readSync(o.fd, buf, 0, buf.length, from);
+    const text = buf.subarray(0, got).toString('utf8');
+    return from === 0 ? text : text.slice(text.indexOf('\n') + 1);
+  } catch { return ''; } finally { fs.closeSync(o.fd); }
+}
 
 // The recent past, for replay: every source's old and current file, newest KEEP_DAYS, oldest first, at most
 // `limit` events (the newest ones).
@@ -80,7 +107,7 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
   const all = [];
   for (const src of sources) {
     for (const name of [OLD_LOG_NAME, LOG_NAME]) {
-      for (const line of readText(path.join(src.dir, name)).split('\n')) {
+      for (const line of readTail(path.join(src.dir, name)).split('\n')) {
         const r = line ? parseRecord(line) : null;
         if (r && r.t >= since && r.t <= now + 60000) all.push({ src, r });
       }
@@ -91,31 +118,46 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
 }
 
 // Follow one source's current file: `onRecord(src, record)` for each whole new line. It starts at the end
-// (the backlog has the rest), restarts at 0 when the file shrank or was replaced (a rotation), and keeps a
-// part line until its end arrives. Returns stop().
+// (the backlog has the rest). At a rotation it first reads what the old file gained since the last look (now
+// renamed aside), then starts the new file at 0. Bytes are decoded as a stream, so a character split across
+// two reads arrives whole; a part line longer than MAX_PART (no newline ever comes) is dropped. Returns
+// { stop, pump }.
 export function follow(src, onRecord, { interval = 500, watch = fs.watchFile, unwatch = fs.unwatchFile } = {}) {
   const file = path.join(src.dir, LOG_NAME);
   let offset = 0;
   let ino = null;
   let rest = '';
-  try { const st = fs.statSync(file); offset = st.size; ino = st.ino; } catch { /* not there yet */ }
+  let decoder = new StringDecoder('utf8');
+  const first = openPlain(file);
+  if (first) { offset = first.st.size; ino = first.st.ino; fs.closeSync(first.fd); }
+  const take = (text) => {
+    const lines = (rest + text).split('\n');
+    rest = lines.pop();
+    if (rest.length > MAX_PART) rest = '';
+    for (const line of lines) { const r = line ? parseRecord(line) : null; if (r) onRecord(src, r); }
+  };
+  // Read `o` from `offset` to its end, at most 4 MB a tick.
+  const drain = (o) => {
+    const len = Math.min(o.st.size - offset, 4 * 1024 * 1024);
+    if (len <= 0) return;
+    const buf = Buffer.alloc(len);
+    const got = fs.readSync(o.fd, buf, 0, len, offset);
+    offset += got;
+    take(decoder.write(buf.subarray(0, got)));
+  };
   const pump = () => {
-    let st;
-    try { st = fs.statSync(file); } catch { offset = 0; ino = null; rest = ''; return; }
-    if (st.ino !== ino || st.size < offset) { offset = 0; rest = ''; ino = st.ino; }
-    if (st.size <= offset) return;
-    let fd;
+    const o = openPlain(file);
+    if (!o) { offset = 0; ino = null; rest = ''; decoder = new StringDecoder('utf8'); return; }
     try {
-      fd = fs.openSync(file, 'r');
-      const len = Math.min(st.size - offset, 4 * 1024 * 1024);
-      const buf = Buffer.alloc(len);
-      const got = fs.readSync(fd, buf, 0, len, offset);
-      offset += got;
-      const text = rest + buf.subarray(0, got).toString('utf8');
-      const lines = text.split('\n');
-      rest = lines.pop();
-      for (const line of lines) { const r = line ? parseRecord(line) : null; if (r) onRecord(src, r); }
-    } catch { /* read again on the next tick */ } finally { if (fd !== undefined) fs.closeSync(fd); }
+      if (ino !== null && o.st.ino !== ino) {
+        // Rotated: the old file is the renamed one when its inode is the one we were reading.
+        const old = openPlain(path.join(src.dir, OLD_LOG_NAME));
+        if (old) { try { if (old.st.ino === ino) drain(old); } catch { /* lost, as a rotation may lose a line */ } finally { fs.closeSync(old.fd); } }
+        offset = 0; rest = ''; decoder = new StringDecoder('utf8');
+      } else if (o.st.size < offset) { offset = 0; rest = ''; decoder = new StringDecoder('utf8'); }
+      ino = o.st.ino;
+      drain(o);
+    } catch { /* read again on the next tick */ } finally { fs.closeSync(o.fd); }
   };
   watch(file, { interval, persistent: false }, pump);
   return { stop: () => unwatch(file, pump), pump };
