@@ -10,6 +10,7 @@ import {
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS, REPO_AGENT_GUARD_DEST, agentGuardAdapters,
+  ACTIVITY_WIRING, ACTIVITY_ADAPTERS, REPO_ACTIVITY_DEST, activityAdapters,
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
 } from './manifest.mjs';
@@ -918,6 +919,8 @@ export function repoActions(root, repo) {
     actions.push(...agentFileActions(repoRoot, ideTargetsFor(root), { scope: repo.name, lines: pointerBlock(), relabel: false }));
     // E158b: the agent guard and the read-only allow list, so a session opened in the code repo has them too.
     actions.push(...repoAgentGuardActions(repoRoot, ideTargetsFor(root), { scope: repo.name, ledger }));
+    // E178: the live activity record, while the Product says `"activity": true`.
+    actions.push(...repoActivityActions(root, repoRoot, ideTargetsFor(root), { scope: repo.name, ledger }));
   }
   if (!wired) return actions;
   // The record is not a template: an absent one on a wired repo is always `new` (nothing to respect).
@@ -1662,6 +1665,94 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     }
   }
   return actions;
+}
+
+// ---- the live activity record (E178) -------------------------------------------------------------
+//
+// OFF by default: wired only while the Product config says `"activity": true` (`yad brain view --live` draws
+// it). The opposite polarity of capture's switch, read the same way: only the committed CONFIG decides, so two
+// people's `yad check` never disagree.
+export function activityWanted(root) {
+  const cfgPath = productConfigPath(root);
+  if (!exists(cfgPath)) return false;
+  const cfg = readJSON(cfgPath, null);
+  return !!(cfg && cfg.activity === true);
+}
+
+// The script and one entry per adapter whose target this Product uses. Landed together, as capture's are.
+export function activityHookActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!activityWanted(root)) return [];
+  const ledger = readManagedLedger(root);
+  const actions = ACTIVITY_WIRING.map((w) =>
+    wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  const targets = new Set(safeIdeTargetsFor(root, ideTargets));
+  for (const adapter of ACTIVITY_ADAPTERS) if (targets.has(adapter.target)) actions.push({ ...hookSettingsAction(root, adapter), item: `${path.basename(adapter.settings)} (activity: ${adapter.event})` });
+  return actions.map(asNew);
+}
+
+// Our entries for a target that left, or every entry and the script once `activity` is off.
+export function orphanActivityHookActions(root, ideTargets = ideTargetsFor(root)) {
+  if (!exists(productConfigPath(root))) return [];
+  const on = activityWanted(root);
+  const kept = on ? new Set(safeIdeTargetsFor(root, ideTargets)) : new Set();
+  return activityOrphans(root, kept, ACTIVITY_ADAPTERS, ACTIVITY_WIRING[0].dest, { removeScript: !on, scope: null });
+}
+
+// The entries to unmerge (every adapter whose target is not kept), and the script when asked.
+function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
+  const actions = [];
+  for (const adapter of adapters) {
+    if (kept.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    if (!exists(settingsPath)) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
+    actions.push({
+      scope: scope || adapter.target,
+      item: `${path.basename(adapter.settings)} (activity entry removed: ${adapter.event})`,
+      status: 'removed',
+      root,
+      paths: [],
+      apply: () => {
+        let current;
+        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        if (!isPlainObject(current)) return;
+        const { settings, changed } = unmergeHookSettings(current, adapter);
+        if (changed) writeJSON(settingsPath, settings);
+      },
+    });
+  }
+  if (removeScript) {
+    const file = path.join(root, dest);
+    const st = lstatIfPresent(file);
+    // Only a plain file of ours is removed; a link is never followed to whatever it points at.
+    if (st && st.isFile()) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => fs.rmSync(file, { force: true }) });
+  }
+  return actions;
+}
+
+// In a connected code repo cloned here: the script in `checks/` and the entries in the repo's own settings
+// files, for the Product's targets, as the agent guard's are (`repoAgentGuardActions`).
+export function repoActivityActions(productRoot, repoRoot, ideTargets, { scope, ledger = readManagedLedger(repoRoot) }) {
+  if (!activityWanted(productRoot)) return [];
+  const targets = new Set(repoTargets(repoRoot, ideTargets, scope));
+  const settings = activityAdapters(REPO_ACTIVITY_DEST).filter((a) => targets.has(a.target))
+    .map((a) => ({ ...hookSettingsAction(repoRoot, a, undefined, scope), scope, item: `${a.settings} (activity: ${a.event})` }));
+  if (!settings.length) return [];
+  return [wiredFileAction(scope, REPO_ACTIVITY_DEST, asset(ACTIVITY_WIRING[0].src), path.join(repoRoot, REPO_ACTIVITY_DEST), { root: repoRoot, ledger }), ...settings];
+}
+
+// The same, taken out of a code repo: a target that left, or everything once `activity` is off. A tool folder
+// that is a link or not a folder is never written through.
+export function repoOrphanActivityActions(productRoot, repoRoot, ideTargets, { scope }) {
+  if (!isDirectory(repoRoot)) return [];
+  const on = activityWanted(productRoot);
+  const kept = on ? new Set(repoTargets(repoRoot, ideTargets, null)) : new Set();
+  const linked = (ide) => { const st = lstatIfPresent(path.join(repoRoot, ide)); return !!st && (st.isSymbolicLink() || !st.isDirectory()); };
+  const adapters = activityAdapters(REPO_ACTIVITY_DEST).filter((a) => !linked(a.target));
+  return activityOrphans(repoRoot, kept, adapters, REPO_ACTIVITY_DEST, { removeScript: !on, scope });
 }
 
 // The read-only yad commands, pre-approved for Claude Code (E158, issue #353): `readAllowList` added to

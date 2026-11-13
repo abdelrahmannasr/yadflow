@@ -14,7 +14,7 @@ import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, orphanAgentGuardActions, allowListActions, orphanAllowListActions, repoOrphanAgentGuardActions,
-  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
+  legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, activityHookActions, orphanActivityHookActions, repoOrphanActivityActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
@@ -73,6 +73,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...gitHookActions(root), ...orphanGitHookActions(root),
     // E43: the post-edit capture hook, in both ledger modes.
     ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
+    // E178: the live activity record, only while the config says `"activity": true`.
+    ...activityHookActions(root, ideTargets), ...orphanActivityHookActions(root, ideTargets),
     // E113: the old shell-script hooks. LAST, so the entries above that named them are rewritten first.
     ...legacyHookScriptActions(root, ideTargets),
   ];
@@ -90,7 +92,11 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const repo of registry.repos) {
     const repoRoot = path.resolve(root, repo.path);
     // E158b: a target that left takes yad's guard and allow-list entries out of the repo's own settings too.
-    const orphans = samePath(repoRoot, path.resolve(root)) ? [] : repoOrphanAgentGuardActions(repoRoot, ideTargets, { scope: repo.name });
+    // E178: and the activity record's, when the Product turned `activity` off.
+    const orphans = samePath(repoRoot, path.resolve(root)) ? [] : [
+      ...repoOrphanAgentGuardActions(repoRoot, ideTargets, { scope: repo.name }),
+      ...repoOrphanActivityActions(root, repoRoot, ideTargets, { scope: repo.name }),
+    ];
     const own = withoutKeptRenames([...repoActions(root, repo), ...legacyRepoActions(root, repo)]).concat(orphans);
     // Set on the action itself: later steps compare actions by identity. `true`, not the name, which may be empty.
     for (const a of own) { a.fromRepo = true; if (repo.name === 'product') a.shownScope = repoShown(repo); }
