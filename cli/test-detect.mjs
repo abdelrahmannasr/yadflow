@@ -1315,7 +1315,7 @@ test('#321 Unity MCP: a recommended tool used by yad-implement, found by its Uni
   } finally { fs.rmSync(L, { recursive: true, force: true }); }
 });
 
-test('E175 AI Game Developer: a second Unity tool for yad-implement, found by its own server name only, set up in Custom (local) mode', () => {
+test('E175 AI Game Developer: the default Unity tool for yad-implement, found by its own server name only; connect installs it and writes a local server', () => {
   const t = TOOLBOX.find((x) => x.id === 'ai-game-developer');
   assert.equal(t.tier, 'recommended');
   assert.deepEqual([toolProblems(t), vettingProblems(t)], [[], []]);
@@ -1336,30 +1336,40 @@ test('E175 AI Game Developer: a second Unity tool for yad-implement, found by it
   assert.deepEqual(states('ai-game-developer'), ['installed', 'missing']);
   assert.deepEqual(states('AI-Game-Developer'), ['installed', 'missing']);
   assert.deepEqual(states('UnityMCP'), ['missing', 'installed']);
-  // Not found: connect hands the person the steps, the CLI pinned to the vetted release, Custom mode named.
+  // Not found: the agent adds the plugin and writes a local stdio server, both pinned to the vetted release,
+  // in this project folder; the person sets Custom mode in the Editor, then restarts the agent.
   const { T, p, home } = product();
   try {
     const j = JSON.parse(yad(['toolbox', 'connect', 'ai-game-developer', '--json'], { cwd: p, home }).stdout);
-    assert.ok(j.steps.length === 3 && j.steps.every((x) => x.who === 'person'), JSON.stringify(j.steps));
-    assert.equal(j.steps[0].run, `npx unity-mcp-cli@${t.vetted.release} install-plugin . --plugin-version ${t.vetted.release}`, 'the CLI and the plugin, both at the vetted release');
-    assert.match(j.steps[1].run, /set the connection mode to Custom, not Cloud$/);
-    assert.match(j.steps[1].why, /Cloud sends your Editor data to ai-game\.dev/);
+    const r = t.vetted.release;
+    assert.deepEqual(j.steps.map((x) => [x.who, x.scope ?? null]), [['agent', 'project'], ['agent', 'project'], ['person', null], ['person', null]], JSON.stringify(j.steps));
+    assert.equal(j.steps[0].run, `npx unity-mcp-cli@${r} install-plugin . --plugin-version ${r}`, 'the CLI and the plugin, both at the vetted release');
+    assert.equal(j.steps[1].run, `npx unity-mcp-cli@${r} setup-mcp claude-code . --transport stdio`, 'a local stdio server');
+    for (const s of j.steps.slice(0, 2)) assert.doesNotMatch(s.run, /--oauth|--token|--url|ai-game\.dev|--regenerate-key/, 'never a cloud endpoint or a key');
+    assert.match(j.steps[2].run, /set the connection mode to Custom, not Cloud$/);
+    assert.match(j.steps[2].why, /Cloud sends your Editor data to ai-game\.dev/);
+    assert.equal(j.steps[3].run, 'restart your agent');
+    assert.match(j.ask, /^Connect Unity MCP \(AI Game Developer\)\? I will run `npx unity-mcp-cli@1\.11\.1 install-plugin \. --plugin-version 1\.11\.1`, then `npx unity-mcp-cli@1\.11\.1 setup-mcp claude-code \. --transport stdio` \(in this project folder: it changes the project's files and this folder's agent settings\); then you /);
     assert.equal(j.verify, 'yad toolbox connect ai-game-developer --verify --json');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('E175: yad-implement reaches AI Game Developer too, with read and test tools only', () => {
+test('E175: yad-implement uses one Unity tool — AI Game Developer by default — and helps install it when none is there', () => {
   const skill = fs.readFileSync(path.join(ROOT, 'skills/yad-implement/SKILL.md'), 'utf8').replace(/\s+/g, ' ');
   for (const words of ['yad toolbox connect ai-game-developer --json', 'connection mode to Custom (local)', '`rql-schema`', '`rql-query`', '`tests-run`', '`com.ivanmurzak.unity.mcp`',
-    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode confirmed by <person>`', 'tell you when its progress bar has finished; then check `editor | select isCompiling` is false']) {
+    'confirm the AI Game Dev window shows connection mode **Custom**', '`AI Game Developer: Custom mode confirmed by <person>`', 'Work with that one tool for the whole task',
+    'Ask the person once whether to install AI Game Developer', 'run its agent steps from the Unity repo, in order', 'then run its `verify` and check your session sees the server',
+    '`npx unity-mcp-cli@1.11.1 compile . --once --format json`', 'exit 0 compiles; exit 6 lists the compile errors', 'exit 7 (no editor reached), 14 (timeout) or 18 (a dialog blocks the editor)']) {
     assert.ok(skill.includes(words), words);
   }
-  // The reach order: MCP for Unity first (also when both are installed), then AI Game Developer, then one connect.
-  const reach = skill.slice(skill.indexOf('- **Reach.**'), skill.indexOf('- **Probe once.**'));
-  const at = (w) => { const i = reach.indexOf(w); assert.notEqual(i, -1, w); return i; };
-  assert.ok(at('`unity-mcp` when its `status.state` is `installed` (also when both are)') < at('else `ai-game-developer` when its `status.state` is `installed`'), 'MCP for Unity is preferred');
-  assert.ok(at('else `ai-game-developer` when its `status.state` is `installed`') < at('else offer one connect'), 'a connect only when neither is installed');
-  assert.ok(at('`yad toolbox connect ai-game-developer --json` when that entry is `used: true`') < at('`yad toolbox connect unity-mcp --json` otherwise'), 'the team\'s choice picks the connect');
+  // The order: AI Game Developer first (also when both are installed), then MCP for Unity, then one connect —
+  // AI Game Developer's, unless the team chose MCP for Unity.
+  const pick = skill.slice(skill.indexOf('- **Use one Unity tool.**'), skill.indexOf('- **With AI Game Developer.**'));
+  const at = (w) => { const i = pick.indexOf(w); assert.notEqual(i, -1, w); return i; };
+  assert.ok(at('`ai-game-developer` when its `status.state` is `installed` (also when both are)') < at('else `unity-mcp` when its `status.state` is `installed`'), 'AI Game Developer is the default');
+  assert.ok(at('else `unity-mcp` when its `status.state` is `installed`') < at('else offer one connect'), 'a connect only when neither is installed');
+  assert.ok(at('run `yad toolbox connect ai-game-developer --json`') < at('`yad toolbox connect unity-mcp --json` when that entry is `used: true` and `ai-game-developer`\'s is not'), 'AI Game Developer is offered, unless the team chose the other');
+  assert.ok(!skill.includes('progress bar'), 'the compile is checked by the CLI, not by eye');
   // The tools that run code or change files are named only on the "never" line.
   const never = skill.match(/Never `rql-mutate`[^:]*:/);
   assert.ok(never, 'a never line for AI Game Developer');
