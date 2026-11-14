@@ -134,7 +134,12 @@ test('people: roles, never counts; one badge per person through the member files
   assert.deepEqual(twice.people.find((p) => p.name === 'Kit Ansel').ambiguous, ['kit', 'kit2']);
   // An email is never shown.
   const at = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'kit@example.com', repos: [] }] }), { now: NOW });
-  assert.doesNotMatch(JSON.stringify(at), /kit@/, 'the address is not in the name, nor in the key');
+  const addr = at.people.find((x) => x.key.startsWith('n:@'));
+  assert.match(addr.key, /^n:@[0-9a-f]{16}$/, 'the key is a fingerprint');
+  assert.equal(addr.name, 'a name with an @ in it');
+  assert.equal(JSON.stringify(at).split('example.com').length, 1, 'no part of the address, not even the domain');
+  const lead = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: '@example.com', repos: [] }] }), { now: NOW });
+  assert.equal(JSON.stringify(lead).split('example.com').length, 1, 'a leading @ is an address too');
 });
 
 test('--anonymous: Person A…, and no name, capture branch, PR link or host survives', () => {
@@ -260,7 +265,9 @@ test('the file: everything inline, hashed by the CSP, and no name can close its 
     assert.match(csp, /default-src 'none'/);
     const hashes = new Set([...csp.matchAll(/'sha256-([^']+)'/g)].map((x) => x[1]));
     // Every executable inline block (a <script> with no type) must be allowed by its hash; matched in any case.
-    for (const block of [...html.matchAll(/<script>([\s\S]*?)<\/script\s*>/gi)].map((x) => x[1])) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
+    const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script\s*>/gi)].map((x) => x[1]);
+    for (const block of blocks) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
+    assert.equal(html.split(/<script/i).length - 1, blocks.length + 1, 'every script tag is a bare inline block, plus the one data block');
     assert.ok(html.includes('id="yad-map-data"'));
   } finally { done(ws); }
 });

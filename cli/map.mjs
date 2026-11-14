@@ -111,7 +111,8 @@ export function makeResolver(members = []) {
       name = r;
       if (hit.ambiguous) ambiguous = hit.ambiguous.map((m) => m.primary.login);
     }
-    if (!people.has(key)) people.set(key, { key, name: shown(name), raws: new Set(), member: !!hit.member, ambiguous });
+    // Any @ (even a leading one, which `shown` lets through) means an address: it is never shown.
+    if (!people.has(key)) people.set(key, { key, name: String(name).includes('@') ? 'a name with an @ in it' : shown(name), raws: new Set(), member: !!hit.member, ambiguous });
     people.get(key).raws.add(r);
     cache.set(r.toLowerCase(), key);
     return key;
