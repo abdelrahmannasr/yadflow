@@ -306,10 +306,24 @@
     }
 
     // ---- sigma
+    // The node a person is holding or looking at: its links are drawn bright and its neighbours named, so all its
+    // connections can be seen while it is dragged into open space.
+    var held = null;
+    var heldNear = null;
+    function hold(i) {
+      held = i;
+      heldNear = null;
+      if (i !== null) {
+        heldNear = new Set([i]);
+        edges.forEach(function (e) { if (e.s === i) heldNear.add(e.t); else if (e.t === i) heldNear.add(e.s); });
+      }
+      if (renderer) renderer.refresh({ skipIndexation: true });
+    }
     function reducer(nodeKey, data) {
       var i = Number(nodeKey);
       var res = Object.assign({}, data);
       if (!nodes[i]) return res;
+      if (heldNear && heldNear.has(i)) { res.label = nodes[i].label; res.forceLabel = true; res.zIndex = 3; if (i === held) res.highlighted = true; return res; }
       if (nodes[i].layer !== 'work') res.label = '';
       if (!heatOn) return res;
       var h = heatOf(i, clock());
@@ -323,8 +337,9 @@
       return res;
     }
     function edgeReducer(edgeKey, data) {
-      if (!heatOn) return data;
       var e = edges[Number(edgeKey)];
+      if (held !== null && e && (e.s === held || e.t === held)) return Object.assign({}, data, { color: 'rgba(196,210,255,0.85)', size: 1.4, zIndex: 3 });
+      if (!heatOn) return data;
       var a = heatOf(e.s, clock());
       var b = heatOf(e.t, clock());
       if (!a || !b || a.total < 0.2 || b.total < 0.2) return data;
@@ -406,8 +421,48 @@
 
     // ---- inspecting a node
     if (renderer) {
-      renderer.on('clickNode', function (ev) { inspect(Number(ev.node)); });
-      renderer.on('clickStage', function () { $('inspect').hidden = true; });
+      renderer.on('clickNode', function (ev) { if (!justDragged) { hold(Number(ev.node)); inspect(Number(ev.node)); } });
+      renderer.on('clickStage', function () { if (!justDragged) { $('inspect').hidden = true; hold(null); } });
+      // Press and hold a node to drag it: its links light up and follow it, and the camera holds still until the
+      // button is let go. The node stays where it is dropped; comets fly to where it is now.
+      var dragged = null;
+      var justDragged = false;
+      renderer.on('downNode', function (ev) {
+        // The left button only: sigma never reports a right or middle button's release, so such a drag would
+        // never end.
+        var o = ev.event.original;
+        if (o && o.button !== undefined && o.button !== 0) return;
+        dragged = ev.node;
+        renderer.getContainer().style.cursor = 'grabbing';
+        justDragged = false;
+        if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
+        $('inspect').hidden = true;
+        hold(Number(ev.node));
+      });
+      renderer.on('moveBody', function (ev) {
+        if (dragged === null) return;
+        // The button came up where no mouseup reached the page (the window lost focus): the drag is over.
+        if (ev.event.original.buttons === 0 && !('touches' in ev.event.original)) { drop(); return; }
+        var at = renderer.viewportToGraph(ev.event);
+        graph.mergeNodeAttributes(dragged, { x: at.x, y: at.y });
+        justDragged = true;
+        ev.preventSigmaDefault();
+        if (ev.event.original.cancelable) ev.event.original.preventDefault();
+        ev.event.original.stopPropagation();
+      });
+      var drop = function () {
+        if (dragged === null) return;
+        dragged = null;
+        renderer.getContainer().style.cursor = '';
+        // No card after a drag: it would cover the links just pulled into view. A plain click opens it.
+        // The click that follows a drag must not open or close anything.
+        setTimeout(function () { justDragged = false; }, 0);
+      };
+      renderer.on('enterNode', function () { renderer.getContainer().style.cursor = 'grab'; });
+      renderer.on('leaveNode', function () { if (dragged === null) renderer.getContainer().style.cursor = ''; });
+      renderer.on('upNode', drop);
+      renderer.on('upStage', drop);
+      renderer.getMouseCaptor().on('mouseup', drop);
     }
     function inspect(i) {
       var box = $('inspect');
