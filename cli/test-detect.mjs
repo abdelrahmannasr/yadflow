@@ -1883,7 +1883,7 @@ test('E85: `yad setup` offers the tools in use after the tools step — a connec
 
     const human = run(['setup', '--solo', '--greenfield', '--monorepo', '--ide-targets', '.claude']);
     assert.equal(human.status, 0, human.stdout + human.stderr);
-    assert.match(human.stdout, /\[9\/10\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed without asking[\s\S]*`yad toolbox connect <id>` \(it asks you once first\)[\s\S]*\[10\/10\] Done/);
+    assert.match(human.stdout, /\[9\/11\] Toolbox \(external tools this project uses\)[\s\S]*– Playwright MCP: not found[\s\S]*nothing is installed without asking[\s\S]*`yad toolbox connect <id>` \(it asks you once first\)[\s\S]*\[10\/11\] Local setup script[\s\S]*\[11\/11\] Done/);
     // E165 PR 2: the agent is offered each tool to connect, in the AI-only steps, and reads `connect` in the JSON.
     assert.match(human.stdout, /AI-only steps[\s\S]*offer to connect Playwright MCP: `yad toolbox connect playwright --json` \(the connect-tool rule/);
     assert.equal(out.toolbox.findings.find((f) => f.id === 'playwright').connect, 'yad toolbox connect playwright --json');

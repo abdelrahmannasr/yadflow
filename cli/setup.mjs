@@ -18,6 +18,8 @@ import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
+import { localSetupActions } from './local-setup.mjs';
+import { LOCAL_SETUP_DOC } from './local-setup-steps.mjs';
 import { readAllowList } from './agent-rules.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
 import { repoGitUrl } from './protection.mjs';
@@ -495,7 +497,7 @@ export async function runSetup(root, opts = {}) {
   const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
   // Steps: interview, preflight, install, Product, tools (1 if deferred else 3), repos, wire, coderabbit,
   // toolbox, done.
-  const total = 9 + (configureTools ? 3 : 1);
+  const total = 10 + (configureTools ? 3 : 1);
   let _n = 0;
   const S = (title) => step(++_n, total, title);
 
@@ -930,6 +932,12 @@ export async function runSetup(root, opts = {}) {
   guide(['Each tool is optional and has a fallback. yad installs nothing: it prints how to get each one, and you choose.']);
   const toolbox = offerToolbox(root, root);
 
+  // E185: the local setup script each team member's agent follows on their machine. AFTER the toolbox step, so
+  // the tools chosen there are steps in it. The team's own steps in it are kept; yad's are rewritten.
+  S('Local setup script (for each team member\'s machine)');
+  guide(['Every team member\'s agent follows this script after they join and after each update. Each step says why it is needed and what it changes, so each person decides.']);
+  applyActions(localSetupActions(root), { force: true });
+
   // Summary + version stamp
   S('Done');
   writeJSON(path.join(root, PROJECT_FILES.version), { version: VERSION, ideTargets, updatedAt: opts.today ?? null });
@@ -948,6 +956,7 @@ export async function runSetup(root, opts = {}) {
     hand(`author your first epic: run \`${epicSkill}\``);
   }
   hand('your single next action, anytime: `yad next`');
+  hand(`get this machine ready: \`yad local-setup\` lists the steps in ${LOCAL_SETUP_DOC} that are not done here`);
   if (!solo) hand('reviewers need no setup: anyone with access approves on the platform; a gate needs one approval (not the author\'s own), resolved threads and the merge');
   log('');
   log(c.bold('Then — AI-only steps (run in your AI agent):'));

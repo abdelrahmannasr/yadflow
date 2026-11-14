@@ -36,6 +36,7 @@ import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetup
 import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
+import { localSetupActions } from './local-setup.mjs';
 import { runMemberAdd } from './members.mjs';
 import { linkedGitDir } from './worktree-record.mjs';
 
@@ -464,6 +465,8 @@ function installLocalSkills(product, ideTargets) {
   // E158: the rules block in AGENTS.md and CLAUDE.md is the team's shared file too: named, never written here.
   // A block yad cannot write (`writesNothing`: markers it cannot trust) is not one `yad update` brings up to date.
   for (const a of agentFileActions(product, ideTargets)) if (a.status !== 'ok' && !a.writesNothing) res.shared.push(a.item);
+  // E185: the local setup script is the team's shared file too.
+  for (const a of localSetupActions(product)) if (a.status !== 'ok' && !a.writesNothing) res.shared.push(a.item);
   return res;
 }
 

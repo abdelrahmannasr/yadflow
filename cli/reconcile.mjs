@@ -22,6 +22,7 @@ import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, 
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
+import { localSetupActions } from './local-setup.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
@@ -64,6 +65,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...withoutKeptRenames([...productActions(root), ...legacyProductActions(root)]), ...hookActions(root, ideTargets),
     // E158: the rules block in AGENTS.md (and CLAUDE.md importing it), which every agent reads first.
     ...agentFileActions(root, ideTargets),
+    // E185: the local setup script for each team member's machine — yad's steps rewritten, the team's kept.
+    ...localSetupActions(root),
     // E158: the agent guard, before every shell command the agent runs.
     ...agentGuardActions(root, ideTargets), ...orphanAgentGuardActions(root, ideTargets),
     // E158 (#353): the read-only yad commands, pre-approved for Claude Code.

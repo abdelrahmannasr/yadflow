@@ -278,6 +278,10 @@ ${c.bold('Where am I / what next')}
                                        are yours, and the question to ask. Runs nothing. --verify
                                        checks it is found here, then records it as the team's choice;
                                        --replace when that replaces the team's current tool
+  yad local-setup [list] [--json]      The local setup script (E185): the steps each team member's
+                                       machine needs (.sdlc/local-setup.json, shown in LOCAL-SETUP.md),
+                                       each with why and what it changes, and whether it is done here.
+                                       Runs only yad's own checks, never a step
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -712,6 +716,7 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove', 'connect'], default: 'list' },
+  'local-setup': { known: ['list'], default: 'list' },
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
@@ -730,7 +735,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
-  'story', 'brain', 'reports', 'map',
+  'story', 'brain', 'reports', 'map', 'local-setup',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -1031,6 +1036,16 @@ async function main() {
         : action === 'add'
         ? commands.runToolboxAdd(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json })
         : commands.runToolboxRemove(productRoot, { id, custom: o.custom, role: o.role, fallback: o.fallback, detect: o.detect, install: o.install, source: o.source, json: o.json });
+      break;
+    }
+    case 'local-setup': {
+      // E185. Reads the Product's committed script and runs yad's own checks for this machine; writes nothing.
+      const [, action = 'list', extra] = o._;
+      const usage = 'usage: yad local-setup [list] [--json] [--dir <the Product>]';
+      if (action !== 'list') { refuse(`unknown local-setup action: ${action} (list)`, usage); break; }
+      if (extra) { refuse(`yad local-setup list takes no more words (got: ${extra})`, usage); break; }
+      if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — the local setup script is the Product's .sdlc/local-setup.json`, 'run it from the Product, or from a repo it registers'); break; }
+      result = commands.runLocalSetupList(o.dir, { json: o.json });
       break;
     }
     case 'detect': {

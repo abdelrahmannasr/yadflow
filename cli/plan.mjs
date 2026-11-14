@@ -1305,15 +1305,16 @@ function blockState(dest, opts) {
   return { raw, state: now.status === 'ok' ? 'ok' : now.status === 'new' ? 'missing' : 'outdated', refused: null, exists: raw !== null };
 }
 
-function markedBlockAction(root, relDest, lines, { scope = 'product' } = {}) {
+// `markers` is AGENTS_MARKERS unless named: the local setup script's view (LOCAL-SETUP.md, E185) has its own.
+export function markedBlockAction(root, relDest, lines, { scope = 'product', markers = AGENTS_MARKERS, what = 'the yadflow rules block' } = {}) {
   const dest = path.join(root, relDest);
-  const opts = { ...AGENTS_MARKERS, lines };
+  const opts = { ...markers, lines };
   const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', mergeShared: (text) => applyMarkedBlock(text, opts) };
   const { state, refused } = blockState(dest, opts);
   // Never written, said once at plan time. Markers yad cannot trust are never guessed around: the team's
   // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).
   if (refused) {
-    warn(`${scope}/${relDest}: ${refused} — the yadflow rules block was left out; ${state === 'refused' ? 'fix the markers (or delete both to have the block added again)' : 'make it a plain file'}, then re-run \`yad check --fix\``);
+    warn(`${scope}/${relDest}: ${refused} — ${what} was left out; ${state === 'refused' ? 'fix the markers (or delete both to have the block added again)' : 'make it a plain file'}, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {

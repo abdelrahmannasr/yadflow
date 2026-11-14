@@ -92,6 +92,8 @@ export const COMMAND_CLASS = {
   // records the team's choice — a team-wide file, as `toolbox add` writes — so only on the person's yes to
   // the question the read gave (the connect-tool rule); --replace changes the team's current tool.
   'toolbox connect': { class: 'read', flags: { verify: 'on-request', replace: 'on-request' } },
+  // E185: reads the Product's local setup script and runs yad's own checks for this machine. Runs no step.
+  'local-setup list': { class: 'read' },
   'skill list': { class: 'read' },
   'skill recommend': { class: 'read' },
   'skill bind': { class: 'on-request' },
@@ -260,7 +262,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
   toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check', brain: 'status',
-  reports: 'list',
+  reports: 'list', 'local-setup': 'list',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
@@ -436,6 +438,11 @@ export const SHIPPED_ALLOW_LISTS = Object.freeze([
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
   // next release (E180): `reports list`
   ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+    'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
+    'worktree list', 'reports list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
+    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
+  // next release (E185): `local-setup list`
+  ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'local-setup list', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'reports list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
