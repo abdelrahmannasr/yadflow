@@ -21,16 +21,16 @@
 
 import fs from 'node:fs';
 import { setInterval, clearInterval } from 'node:timers';
-import http from 'node:http';
 import path from 'node:path';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { c, emitJSON, forTerminal, info, log, ok, refuse, run, warn } from './lib.mjs';
-import { BRAIN_FILE, codeBehind, readBrain, writePlain } from './brain.mjs';
+import { BRAIN_FILE, codeBehind, readBrain } from './brain.mjs';
+import { CSP, TYPES, startPageServer, inlineSnapshot, scriptSafeJSON, writeOwnFile, trackedRisk } from './local-page.mjs';
 import { saveReport } from './reports-dir.mjs';
 import { VENDORED } from './brain-vendor.mjs';
 import { openUrl } from './report.mjs';
+export { CSP, scriptSafeJSON };
 import { activityIndex, activitySources, follow, matchEvent, planOf, readBacklog } from './brain-activity.mjs';
 import { activityWanted } from './plan.mjs';
 
@@ -184,26 +184,6 @@ function loadModel(root, runner, { live = false } = {}) {
 
 // ---- the server ----------------------------------------------------------------------------------
 
-export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-const BASE_HEADERS = Object.freeze({
-  'Content-Security-Policy': CSP,
-  'X-Content-Type-Options': 'nosniff',
-  'Cache-Control': 'no-store',
-  'Referrer-Policy': 'no-referrer',
-  'Cross-Origin-Resource-Policy': 'same-origin',
-  'Cross-Origin-Opener-Policy': 'same-origin',
-  'X-Frame-Options': 'DENY',
-});
-const TYPES = Object.freeze({ html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8' });
-
-// Is `given` the token? A length check first: `timingSafeEqual` throws on buffers of different lengths.
-function tokenMatches(given, token) {
-  if (typeof given !== 'string') return false;
-  const a = Buffer.from(given);
-  const b = Buffer.from(token);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 // ---- the live stream (E178) ----------------------------------------------------------------------
 
 // The `/events` stream: Server-Sent Events, one way, from this machine's activity records to the page.
@@ -269,11 +249,10 @@ function recordedReplay(root, model, runner) {
 
 // Start the viewer's server: { url, token, port, close() }. `root` is the Product.
 export function startBrainServer(root, { runner = run, host = '127.0.0.1', port = 0, live = false, heartbeat = 15000, interval = 500 } = {}) {
-  const token = randomBytes(24).toString('hex');
   const page = live ? LIVE_PAGE : PAGE;
   const stream = live ? activityStream(root, { runner, heartbeat, interval }) : null;
   // The route table: a request path is only ever a KEY here. Nothing it says reaches the filesystem.
-  const routes = new Map([
+  const routes = (token) => new Map([
     ['/', () => ({ type: TYPES.html, body: readView(page.html).replaceAll('__TOKEN__', token) })],
     ['/app.js', () => ({ type: TYPES.js, body: readView(page.js) })],
     ['/style.css', () => ({ type: TYPES.css, body: readView(page.css) })],
@@ -285,104 +264,18 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
     }],
     ...VENDORED.map((v) => [`/vendor/${v.file}`, () => ({ type: TYPES.js, body: readVendor(v.file) })]),
   ]);
-  let expectedHost = null;
-  const server = http.createServer((req, res) => {
-    const send = (status, type, body, extra = {}) => {
-      res.writeHead(status, { ...BASE_HEADERS, 'Content-Type': type, ...extra });
-      res.end(req.method === 'HEAD' ? undefined : body);
-    };
-    const text = (status, msg, extra) => send(status, 'text/plain; charset=utf-8', `${msg}\n`, extra);
-    if (req.method !== 'GET' && req.method !== 'HEAD') return text(405, 'method not allowed', { Allow: 'GET, HEAD' });
-    if (req.headers.host !== expectedHost) return text(403, 'forbidden');
-    let url;
-    try { url = new URL(req.url, `http://${expectedHost}`); } catch { return text(400, 'bad request'); }
-    if (!tokenMatches(url.searchParams.get('t'), token)) return text(403, 'forbidden');
-    // E178: the live stream — Server-Sent Events, one way, read-only, behind the same key and Host check.
-    if (stream && url.pathname === '/events' && req.method === 'GET') return stream.attach(req, res, BASE_HEADERS);
-    const route = routes.get(url.pathname);
-    if (!route) return text(404, 'not found');
-    try {
-      const r = route();
-      return send(r.status || 200, r.type, r.body);
-    } catch {
-      return text(500, 'the viewer could not read its files');
-    }
-  });
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => {
-      const a = server.address();
-      expectedHost = `${host}:${a.port}`;
-      resolve({
-        url: `http://${expectedHost}/?t=${token}`, token, port: a.port, host, server,
-        close: () => new Promise((done) => { stream?.close(); server.closeAllConnections?.(); server.close(() => done()); }),
-      });
-    });
-  });
+  // E178: the live stream — Server-Sent Events, one way, read-only, behind the same key and Host check.
+  return startPageServer({ routes, stream: stream && { path: '/events', attach: stream.attach, close: stream.close }, host, port, failText: 'the viewer could not read its files' });
 }
 
 // ---- the self-contained file ---------------------------------------------------------------------
 
-// JSON that can sit inside a <script> element: nothing in it can end the element or start a comment.
-export const scriptSafeJSON = (value) => JSON.stringify(value)
-  .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
-  .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
-const sha256b64 = (s) => createHash('sha256').update(s, 'utf8').digest('base64');
-
-const SERVED_START = '<!--SERVED:start-->';
-const SERVED_END = '<!--SERVED:end-->';
-
 // One HTML file with everything inline, and a CSP that allows exactly the inline blocks it holds (by hash)
-// and no network at all.
+// and no network at all (cli/local-page.mjs).
 export function snapshotHTML(model, { live = false } = {}) {
   const page = live ? LIVE_PAGE : PAGE;
   const scripts = [...VENDORED.map((v) => readVendor(v.file).toString('utf8')), readView(page.js)];
-  const css = readView(page.css);
-  // A script's own text must not hold `</script`, or the file would end it early. The vendored files and
-  // app.js are checked here, so a future release that holds one fails loudly instead of breaking the page.
-  for (const s of scripts) if (/<\/script/i.test(s)) throw new Error('an inline script holds </script');
-  const csp = [
-    "default-src 'none'",
-    `script-src ${scripts.map((s) => `'sha256-${sha256b64(s)}'`).join(' ')}`,
-    `style-src 'sha256-${sha256b64(css)}'`,
-    "img-src data:", "base-uri 'none'", "form-action 'none'",
-  ].join('; ');
-  // The key placeholder goes before anything is spliced in: the brain's own names may hold the same text.
-  // The served page's <script src> tags sit between two markers and are cut out by them, never by matching
-  // HTML with a pattern.
-  const shell = readView(page.html).replaceAll('__TOKEN__', '');
-  const from = shell.indexOf(SERVED_START);
-  const to = shell.indexOf(SERVED_END);
-  if (from < 0 || to < from) throw new Error(`the page has no ${SERVED_START} … ${SERVED_END} block`);
-  const body = (shell.slice(0, from) + shell.slice(to + SERVED_END.length))
-    .replace(/<link rel="stylesheet"[^>]*>/, () => `<style>${css}</style>`)
-    .replace('<!--SCRIPTS-->', () => [
-      `<script type="application/json" id="yad-brain-data">${scriptSafeJSON(model)}</script>`,
-      ...scripts.map((s) => `<script>${s}</script>`),
-    ].join('\n'));
-  return body
-    .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, () => `<meta http-equiv="Content-Security-Policy" content="${csp}">`);
-}
-
-// Write `data` to the path the person named, by a temp file and a rename, refusing a link at the target (a
-// rename replaces a link, but a person who put one there means the file it points at).
-function writeOwnFile(file, data) {
-  let st = null;
-  try { st = fs.lstatSync(file); } catch { /* new file */ }
-  if (st && !st.isFile()) return `${file} is not a plain file (a link or a folder) — name another path`;
-  const dir = path.dirname(file);
-  if (!fs.existsSync(dir)) return `the folder ${dir} does not exist`;
-  writePlain(dir, path.basename(file), data);
-  return null;
-}
-
-// Is `file` inside a git work tree, and NOT ignored there? Then committing it is one `git add .` away.
-function trackedRisk(file, runner = spawnSync) {
-  const dir = path.dirname(file);
-  const inTree = runner('git', ['-C', dir, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8' });
-  if (inTree.status !== 0 || String(inTree.stdout).trim() !== 'true') return false;
-  const ignored = runner('git', ['-C', dir, 'check-ignore', '-q', '--', path.basename(file)], { encoding: 'utf8' });
-  return ignored.status === 1;
+  return inlineSnapshot({ shell: readView(page.html), scripts, css: readView(page.css), dataId: 'yad-brain-data', data: model });
 }
 
 // ---- the command ---------------------------------------------------------------------------------
