@@ -52,7 +52,9 @@ const yadGit = (cwd, ...a) => spawnSync(process.execPath, [YAD, ...a], {
 });
 const realRun = (cmd, args = [], opts = {}) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts });
-  return { ok: r.status === 0, code: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
+  // `error` as cli/lib.mjs run() gives it: an output past maxBuffer is ENOBUFS, which tracksHere counts as a
+  // yes. Without it the big-folder test passed only when git finished before node cut it off.
+  return { ok: r.status === 0, code: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim(), error: r.error };
 };
 
 // A repo with the hook installed where it lands in a code repo: `<repo>/checks/yad-activity.mjs`.

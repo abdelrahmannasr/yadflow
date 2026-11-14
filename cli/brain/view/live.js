@@ -315,7 +315,7 @@
       heldNear = null;
       if (i !== null) {
         heldNear = new Set([i]);
-        // At most 60 neighbours are named, so holding a hub does not bury the sky in labels; every link is still lit.
+        // At most 60 neighbours are named, so holding a node with hundreds of links does not bury the sky in labels; every link is still lit.
         edges.forEach(function (e) { if (heldNear.size > 60) return; if (e.s === i) heldNear.add(e.t); else if (e.t === i) heldNear.add(e.s); });
       }
       if (renderer) renderer.refresh({ skipIndexation: true });
