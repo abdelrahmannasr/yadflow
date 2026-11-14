@@ -156,11 +156,11 @@
             // and moving then is not leaving the plan (review 3).
             var settling = S.tentative && sameStory === -1 && tasks.length;
             if (!tasks.length || (S.task !== null && sameStory === -1 && !settling)) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
-            if (sameStory !== -1) { S.task = tasks[sameStory]; S.tentative = false; }
-            else if (tasks.length) {
-              S.task = tasks[0];
-              S.tentative = !settling && new Set(tasks.map(function (t) { return plan[t].story; })).size > 1;
-            }
+            // Still tentative while the file in hand belongs to several stories: only a file of ONE story
+            // settles it (review 4).
+            var stories = new Set(tasks.map(function (t) { return plan[t].story; })).size;
+            if (sameStory !== -1) { S.task = tasks[sameStory]; S.tentative = S.tentative && stories > 1; }
+            else if (tasks.length) { S.task = tasks[0]; S.tentative = stories > 1; }
           }
         }
         if (animate) launch(S.lastNode, h.node, ev);

@@ -702,3 +702,24 @@ test('review 3: the doctor asks the hook\'s question — a Product no repo track
     assert.match(JSON.stringify(checks), /not committed in a git repo of its own[\s\S]*commit the Product/);
   } finally { done(home); }
 });
+
+test('review 4: a rotation between the reader\'s position and a page\'s backlog sends no line twice', () => {
+  const dir = tmp();
+  try {
+    const file = path.join(dir, act.LOG_NAME);
+    const line = (op) => `${JSON.stringify({ v: 1, op, ts: new Date().toISOString(), paths: [] })}\n`;
+    fs.writeFileSync(file, line('read'));
+    const src = { repo: null, dir, prefixes: [] };
+    const live = [];
+    const f = act.follow(src, (s, r) => live.push(r.op), { watch: () => {}, unwatch: () => {} });
+    fs.appendFileSync(file, line('edit'));                 // after the reader's last look
+    const at = f.position();
+    fs.renameSync(file, path.join(dir, act.OLD_LOG_NAME)); // rotated before the page reads its backlog
+    fs.writeFileSync(file, line('search'));
+    const backlog = act.readBacklog([src], { upTo: () => at }).map((x) => x.r.op);
+    f.pump();
+    assert.deepEqual(backlog, ['read'], 'the old file up to the reader, nothing of the new one');
+    assert.deepEqual(live, ['edit', 'search'], 'the reader sends the old tail and the new file');
+    f.stop();
+  } finally { done(dir); }
+});
