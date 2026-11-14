@@ -351,3 +351,18 @@ test('review 4: on a disk with no hard links the lock falls back to a plain crea
     assert.equal(pruneReports(root, { days: 0, now: AT.getTime() + 864e5, apply: true, env: noEnv }).removed.length, 2, 'prune works there too');
   } finally { fs.linkSync = link; done(ws); }
 });
+
+test('review 5: a takeover that moved a fresh lock puts it back, also on a disk with no hard links', () => {
+  const ws = tmp();
+  const link = fs.linkSync, rename = fs.renameSync;
+  try {
+    const lock = path.join(ws, 'catalog.lock');
+    const fresh = `${process.pid} ${'c'.repeat(16)}`;
+    fs.writeFileSync(lock, `2147483646 ${'d'.repeat(16)}`);           // judged stale (its run is gone)…
+    fs.renameSync = (from, to) => { fs.writeFileSync(from, fresh); fs.renameSync = rename; return rename(from, to); };  // …but replaced before the move
+    fs.linkSync = () => { const e = new Error('no links'); e.code = 'ENOTSUP'; throw e; };
+    const r = withCatalogLock(ws, () => ({ ran: true }), { waitMs: 150 });
+    assert.equal(r.held, true, 'the live lock is waited on, never taken');
+    assert.equal(fs.readFileSync(lock, 'utf8'), fresh, 'and it is back in place');
+  } finally { fs.linkSync = link; fs.renameSync = rename; done(ws); }
+});

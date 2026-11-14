@@ -169,7 +169,11 @@ export function withCatalogLock(dir, fn, { waitMs = 5000 } = {}) {
       const aside = `${lock}.${randomBytes(6).toString('hex')}.stale`;
       try { fs.renameSync(lock, aside); } catch { continue; }   // another run moved it first
       let moved = null; try { moved = fs.readFileSync(aside, 'utf8'); } catch { /* gone */ }
-      if (moved !== held) { try { fs.linkSync(aside, lock); } catch { /* a newer lock is there */ } }
+      if (moved !== held && moved !== null) {
+        // Put the fresh lock back, exclusively: by a link, or on a disk with no hard links by writing its
+        // content again. Either fails when a newer lock is already there.
+        try { fs.linkSync(aside, lock); } catch (e) { if (NO_LINKS.has(e.code)) { try { fs.writeFileSync(lock, moved, { flag: 'wx' }); } catch { /* a newer lock is there */ } } }
+      }
       fs.rmSync(aside, { force: true });
       continue;
     }
