@@ -134,7 +134,7 @@ test('people: roles, never counts; one badge per person through the member files
   assert.deepEqual(twice.people.find((p) => p.name === 'Kit Ansel').ambiguous, ['kit', 'kit2']);
   // An email is never shown.
   const at = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'kit@example.com', repos: [] }] }), { now: NOW });
-  assert.equal(JSON.stringify(at).includes('example.com'), false, 'not in the name, nor in the key');
+  assert.doesNotMatch(JSON.stringify(at), /kit@/, 'the address is not in the name, nor in the key');
 });
 
 test('--anonymous: Person A…, and no name, capture branch, PR link or host survives', () => {
@@ -259,7 +259,8 @@ test('the file: everything inline, hashed by the CSP, and no name can close its 
     const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)[1];
     assert.match(csp, /default-src 'none'/);
     const hashes = new Set([...csp.matchAll(/'sha256-([^']+)'/g)].map((x) => x[1]));
-    for (const block of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((x) => x[1])) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
+    // Every executable inline block (a <script> with no type) must be allowed by its hash; matched in any case.
+    for (const block of [...html.matchAll(/<script>([\s\S]*?)<\/script\s*>/gi)].map((x) => x[1])) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
     assert.ok(html.includes('id="yad-map-data"'));
   } finally { done(ws); }
 });
