@@ -510,6 +510,23 @@ test('review 7: a branch name holding an address shows "an-address" in every map
     assert.equal(JSON.stringify(m).split('example.com').length, 1, `anonymous: ${anonymous}`);
   }
   const named = mapModel({ ...i, members: [member] }, { now: NOW });
-  assert.ok(named.branches.some((b) => b.name === 'an-address/EP-login-S02-try' && b.story === 'EP-login-S02'), 'the rest of the name still links it');
+  assert.ok(named.branches.some((b) => /^an-address-[0-9a-f]{6}\/EP-login-S02-try$/.test(b.name) && b.story === 'EP-login-S02'), 'the rest of the name still links it');
+  assert.equal(JSON.stringify(named).includes('rawName'), false, 'the raw name never reaches the model');
   assert.match(named.people.find((p) => p.name === 'Kit Ansel').key, /^m:@[0-9a-f]{16}$/);
+});
+
+test('review 8: two address branches keep apart; the epic is read before masking; the checkout branch and a link with an address are masked', () => {
+  const i = baseInputs({ product: { name: 'Orchard', branch: 'feat/kit@example.com', sha: 'a'.repeat(40) } });
+  i.branches.push(
+    { repo: 'api', name: 'feat/a@example.com', sha: 'a'.repeat(40), date: daysAgo(1), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'feat/b@example.com', sha: 'b'.repeat(40), date: daysAgo(1), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'EP-login-S02@bo', sha: 'c'.repeat(40), date: daysAgo(1), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+  i.tasks[0].pr = 'https://kit@example.com@git.example.org/orchard/api/pull/4';
+  const m = mapModel(i, { now: NOW });
+  assert.equal(JSON.stringify(m).split('example.com').length, 1);
+  const ids = m.branches.map((b) => b.id);
+  assert.equal(new Set(ids).size, ids.length, 'no two branches share an id');
+  assert.equal(m.branches.find((b) => b.name.startsWith('an-address') && b.repo === 'api' && b.sha === 'c'.repeat(10)).story, 'EP-login-S02');
+  assert.equal(m.tasks[0].pr, null);
+  assert.match(m.product.branch, /^feat\/an-address-[0-9a-f]{6}$/);
 });

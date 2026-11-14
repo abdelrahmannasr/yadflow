@@ -136,12 +136,16 @@ export function makeResolver(members = []) {
 //   waits [{ epic, step, kind, owner (raw name) | null }]
 // A branch name can hold an address (git allows `@`): each part of it that does is shown as `an-address`, in
 // every map, named or not — before anything else reads the name, so ids and matches agree.
-export const noAddress = (name) => (typeof name === 'string' && name.includes('@') ? name.split('/').map((seg) => (seg.includes('@') ? 'an-address' : seg)).join('/') : name);
+// Each masked part keeps a short fingerprint, so two address branches never share a name or an id.
+export const noAddress = (name) => (typeof name === 'string' && name.includes('@') ? name.split('/').map((seg) => (seg.includes('@') ? `an-address-${hueKey(seg).slice(0, 6)}` : seg)).join('/') : name);
 function withoutAddresses(inputs) {
   const via = (r) => (r && r.via ? { ...r, via: { ...r.via, branch: noAddress(r.via.branch) } } : r);
   return { ...inputs,
-    branches: (inputs.branches || []).map((b) => ({ ...b, name: noAddress(b.name) })),
-    tasks: (inputs.tasks || []).map((t) => ({ ...t, branch: noAddress(t.branch), reach: via(t.reach) })),
+    // The raw name is kept beside it only to find the epic, story and group; it never reaches the model.
+    branches: (inputs.branches || []).map((b) => ({ ...b, rawName: b.name, name: noAddress(b.name) })),
+    // A link holding an address (in its user part, say) is dropped, never shown.
+    tasks: (inputs.tasks || []).map((t) => ({ ...t, branch: noAddress(t.branch), reach: via(t.reach), pr: typeof t.pr === 'string' && t.pr.includes('@') ? null : t.pr })),
+    product: inputs.product ? { ...inputs.product, branch: noAddress(inputs.product.branch) } : inputs.product,
     epics: (inputs.epics || []).map((e) => ({ ...e, ...(e.sourceBranch ? { sourceBranch: noAddress(e.sourceBranch) } : {}), ...(e.productBranches ? { productBranches: e.productBranches.map(noAddress) } : {}) })) };
 }
 
@@ -186,9 +190,10 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
   const branches = inputs.branches.map((b) => {
     const ageDays = Math.max(0, Math.floor((now - Date.parse(b.date)) / 864e5));
     const state = b.inProd ? 'live' : b.inInteg ? 'merged' : ageDays > staleDays ? 'idle' : 'active';
-    const epic = epicIdsLong.find((id) => new RegExp(`(?:^|[^A-Za-z0-9])${reEsc(id)}(?![A-Za-z0-9])`).test(b.name)) || null;
-    const sm = epic ? new RegExp(`${reEsc(epic)}-(S\\d+)`).exec(b.name) : null;
-    const group = epic ? null : (groups.find((g) => !g.re || g.re.test(b.name)) || groups[groups.length - 1]).id;
+    const raw = b.rawName ?? b.name;   // the epic, story and group are read from the name as it was
+    const epic = epicIdsLong.find((id) => new RegExp(`(?:^|[^A-Za-z0-9])${reEsc(id)}(?![A-Za-z0-9])`).test(raw)) || null;
+    const sm = epic ? new RegExp(`${reEsc(epic)}-(S\\d+)`).exec(raw) : null;
+    const group = epic ? null : (groups.find((g) => !g.re || g.re.test(raw)) || groups[groups.length - 1]).id;
     const author = resolve(b.author);
     role(author, 'builder');
     return { id: `${b.repo}:${b.name}`, repo: b.repo, name: b.name, sha: String(b.sha || '').slice(0, 10), date: b.date, state, ageDays, epic,
