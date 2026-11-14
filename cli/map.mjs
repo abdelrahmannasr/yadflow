@@ -347,6 +347,17 @@ function anonymize(model, people) {
   return out;
 }
 
+// Delivered straight to Production on a branch of its own (a merge on the Production branch's first-parent
+// line): a branch that names this TASK after the story id counts for it — the task read by its number (T1
+// and T01 are one task), after any of - _ . / ; a branch that names only the story (the whole story rebuilt,
+// no task id after it) counts for each of its tasks. → { date, branch } | null
+export function portFor(direct, story, task) {
+  const num = /^T0*(\d+)$/i.exec(String(task))?.[1];
+  const taskRe = num ? new RegExp(`${reEsc(story)}[-_./]T0*${num}(?![A-Za-z0-9])`, 'i') : new RegExp(`${reEsc(story)}[-_./]${reEsc(String(task))}(?![A-Za-z0-9])`);
+  const storyRe = new RegExp(`${reEsc(story)}(?![\\d])(?![-_./]T\\d)`, 'i');
+  return direct.find((d) => taskRe.test(d.branch)) || direct.find((d) => storyRe.test(d.branch)) || null;
+}
+
 // ---- gathering (git and files) -------------------------------------------------------------------
 
 const gitIn = (runner) => (cwd, args, o = {}) => {
@@ -539,12 +550,7 @@ export function gatherMap(root, { fetch = false, runner = spawnSync, now = Date.
     };
     for (const t of mine) {
       if (!t.mergeCommit || !/^[0-9a-f]{4,64}$/i.test(t.mergeCommit) || !g(p, ['cat-file', '-e', `${t.mergeCommit}^{commit}`]).ok) { t.reach = { found: false }; continue; }
-      // Delivered straight to Production on a branch of its own: a branch that names this TASK counts for it;
-      // one that names only the story (no task id: the whole story rebuilt) counts for each of its tasks.
-      const names = (d, re) => re.test(d.branch);
-      const taskRe = new RegExp(`${reEsc(t.story)}-${reEsc(t.task)}(?![A-Za-z0-9])`);
-      const storyRe = new RegExp(`${reEsc(t.story)}(?![\\d])(?!-T\\d)`);
-      const via = direct.find((d) => names(d, taskRe)) || direct.find((d) => names(d, storyRe) && !/-T\d/.test(d.branch.slice(d.branch.indexOf(t.story) + t.story.length))) || null;
+      const via = portFor(direct, t.story, t.task);
       t.reach = { found: true, prod: !!(prod && reach(t.mergeCommit, prod)), integ: !!(integ && reach(t.mergeCommit, integ)), via };
       // The builder: the author of the merged branch's tip (the merge's second parent), else of the commit.
       const parents = g(p, ['rev-list', '--parents', '-n', '1', t.mergeCommit]).out.trim().split(/\s+/);

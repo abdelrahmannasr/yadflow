@@ -176,7 +176,8 @@ export const COMMAND_CLASS = {
   'worktree remove': { class: 'local-write' },
   standup: { class: 'read' },
   // E181: `yad map` starts a local server and runs until Ctrl-C (as `brain view` does); --html writes one file into
-  // the local reports folder (or the path named), --fetch downloads. Local only, so local-write.
+  // the local reports folder — or `--html <file>`, ANY path named, replacing a plain file there — and --fetch
+  // downloads. Local only, so local-write; never on the read allow list, so the prompt still covers the path.
   map: { class: 'local-write' },
   // E180: the local reports folder. `list` reads; `open` starts the browser; `prune` alone is a dry run, and
   // `prune --apply` deletes saved reports, so only when the person asks.

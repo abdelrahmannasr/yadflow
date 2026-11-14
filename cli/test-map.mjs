@@ -19,7 +19,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { mapModel, gatherMap, digestOf, initials, personLetter, hueOf, storyTitle } = await import('./map.mjs');
+const { mapModel, gatherMap, digestOf, initials, personLetter, hueOf, storyTitle, portFor } = await import('./map.mjs');
 const { runMap, mapSnapshot, startMapServer, buildMap } = await import('./map-view.mjs');
 const { classify, readAllowList } = await import('./agent-rules.mjs');
 const { endJSON } = await import('./lib.mjs');
@@ -426,4 +426,65 @@ test('review 1: gathering says when a group pattern is invalid, and reads a stor
     assert.equal(t('T02').reach.via?.branch, 'feat/EP-login-S01-T02-production', 'its own port');
     assert.equal(t('T01').reach.via, null, 'a port named for T02 is not T01\'s');
   } finally { done(ws); }
+});
+
+// ---- review 2 ------------------------------------------------------------------------------------
+
+test('review 2: a port names a task by any separator and by its number; a story-only port is every task\'s', () => {
+  const d = (branch) => [{ date: '2026-11-01T00:00:00Z', branch }];
+  const is = (branch, task) => !!portFor(d(branch), 'EP-login-S01', task);
+  for (const b of ['feat/EP-login-S01-T01', 'fix/EP-login-S01-T01-redo', 'EP-login-S01_T01', 'EP-login-S01.T1', 'EP-login-S01/T01']) assert.equal(is(b, 'T01'), true, b);
+  for (const b of ['feat/EP-login-S01-T02', 'EP-login-S01_T02', 'EP-login-S01.T02', 'EP-login-S01/T2', 'EP-login-S010', 'EP-login-S01-T010']) assert.equal(is(b, 'T01'), false, b);
+  for (const b of ['feat/EP-login-S01-hotfix', 'EP-login-S01', 'EP-login-S01-production']) { assert.equal(is(b, 'T01'), true, b); assert.equal(is(b, 'T02'), true, b); }
+  assert.equal(is('EP-login-S01-T1', 'T1'), true);
+  assert.equal(portFor([], 'EP-login-S01', 'T01'), null);
+});
+
+test('review 2: gathering reads a story-only port for every task of that story', () => {
+  const { ws, root, api } = workspace({ production: { api: 'main' } });
+  try {
+    git(api, ['checkout', '-q', '-b', 'feat/EP-login-S01-production', 'main']);
+    put(path.join(api, 'p.txt'), 'p');
+    git(api, ['add', '-A']); git(api, ['commit', '-q', '-m', 'port'], PEOPLE.bo, daysAgo(2));
+    git(api, ['checkout', '-q', 'main']);
+    git(api, ['merge', '-q', '--no-ff', 'feat/EP-login-S01-production', '-m', "Merge branch 'feat/EP-login-S01-production' into 'main'"], PEOPLE.mae, daysAgo(2));
+    git(api, ['checkout', '-q', 'dev']);
+    git(api, ['push', '-q', 'origin', '--all']); git(api, ['fetch', '-q', 'origin']);
+    const m = mapModel(gatherMap(root, { now: NOW }).inputs, { now: NOW });
+    const t = m.tasks.find((x) => x.task === 'T01');
+    assert.equal(t.state, 'live');
+    assert.equal(t.via, 'feat/EP-login-S01-production');
+  } finally { done(ws); }
+});
+
+test('review 2: where a recursive watch is not offered, each folder is watched; with nothing to watch, yad says so', async () => {
+  const { ws, root } = workspace();
+  const watch = fs.watch;
+  let recursiveAsked = 0, plain = 0;
+  fs.watch = (p, opts, cb) => { if (opts && opts.recursive) { recursiveAsked++; const e = new Error('no recursive watch'); e.code = 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM'; throw e; } plain++; return watch(p, opts, cb); };
+  const s = await startMapServer(root, { live: true, debounce: 50, env: { [REPORTS_ENV]: path.join(ws, 'r') } });
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: s.port, path: `/events?t=${s.token}`, headers: { Host: `127.0.0.1:${s.port}` } }, (res) => {
+        res.on('data', (c) => { if (String(c).includes('event: status')) { req.destroy(); resolve(String(c)); } });
+      });
+      req.on('error', (e) => { if (e.code !== 'ECONNRESET') reject(e); });
+      req.end();
+    });
+    assert.ok(recursiveAsked >= 1);
+    assert.ok(plain > 2, 'each folder of the record is watched on its own');
+    assert.match(status, /"live":true/);
+  } finally { fs.watch = watch; await s.close(); }
+  // A folder with nothing to watch: the server still starts, and says the page will not change by itself.
+  const bare = path.join(ws, 'bare');
+  put(path.join(bare, 'x.txt'), 'x');
+  const out = [];
+  const log = console.log;
+  console.log = (x) => out.push(String(x));
+  try {
+    const srv = await runMap(bare, { live: true, wait: false, env: { [REPORTS_ENV]: path.join(ws, 'r') } });
+    await srv.close();
+  } finally { console.log = log; done(ws); }
+  assert.match(out.join('\n'), /nothing here can be watched/);
+  process.exitCode = 0;
 });
