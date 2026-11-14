@@ -509,6 +509,7 @@ test('a failed read of a merge already on file, or on a read-only run, stays a w
     openFresh(T, reviewId, 9);
     const out = await said(() => gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', local: true, reader: mergedPr(), contentAt: () => ({ ok: false, reason: 'shallow clone' }) }));
     assert.equal(process.exitCode || 0, 0, out); reset();
+    assert.match(out, /a later sweep tries again/, 'it reached the warning, not an early return');
   }
 });
 
