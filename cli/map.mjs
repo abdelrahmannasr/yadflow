@@ -332,9 +332,13 @@ function anonymize(model, people) {
   // (`bobbuilder`), so `bob.builder/x`, `feat/bob_builder` and `bobbuilder-fix` are all masked.
   const parts = new Set(raws.flatMap((r) => [r, r.replace(/[\s._-]+/g, ''), ...r.split(/[\s._-]+/).filter((x) => x.length >= 3)]));
   const k = (key) => (key && alias.has(key) ? alias.get(key).key : null);
+  // A masked address part carries a fingerprint (a hash of the address): in an anonymous map that hash could be
+  // matched against a list of the team's emails, so each one is renumbered in the order it is met.
+  const addressNo = new Map();
+  const renumber = (n) => n.replace(/an-address-[0-9a-f]{6}/g, (fp) => { if (!addressNo.has(fp)) addressNo.set(fp, addressNo.size + 1); return `an-address-${addressNo.get(fp)}`; });
   const maskBranch = (name) => {
     if (!name) return name;
-    let n = String(name).replace(/^yad\/wip\/[^/]+\//, 'yad/wip/someone/');
+    let n = renumber(String(name)).replace(/^yad\/wip\/[^/]+\//, 'yad/wip/someone/');
     n = n.split('/').map((seg) => (parts.has(seg.toLowerCase()) || parts.has(seg.toLowerCase().replace(/[._-]+/g, '')) ? 'someone'
       : seg.split(/([._-])/).map((w) => (parts.has(w.toLowerCase()) ? 'someone' : w)).join(''))).join('/');
     return parts.has(n.toLowerCase()) ? 'someone' : n;
@@ -363,6 +367,7 @@ function anonymize(model, people) {
     if (r.integration) r.integration.by = k(r.integration.by);
   }
   out.waiting = out.waiting.map((w) => ({ ...w, person: k(w.person) }));
+  if (out.product?.branch) out.product.branch = maskBranch(out.product.branch);
   return out;
 }
 

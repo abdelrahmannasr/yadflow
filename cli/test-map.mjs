@@ -530,3 +530,15 @@ test('review 8: two address branches keep apart; the epic is read before masking
   assert.equal(m.tasks[0].pr, null);
   assert.match(m.product.branch, /^feat\/an-address-[0-9a-f]{6}$/);
 });
+
+test('review 9: an anonymous map numbers masked addresses, so no hash of an address is left to match', () => {
+  const i = baseInputs({ product: { name: 'Orchard', branch: 'kit-ansel/notes', sha: 'a'.repeat(40) } });
+  i.branches.push(
+    { repo: 'api', name: 'feat/a@example.com', sha: 'a'.repeat(40), date: daysAgo(1), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'feat/b@example.com', sha: 'b'.repeat(40), date: daysAgo(1), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 });
+  const m = mapModel(i, { now: NOW, anonymous: true });
+  const names = m.branches.filter((b) => b.name.includes('an-address')).map((b) => b.name).sort();
+  assert.deepEqual(names, ['feat/an-address-1', 'feat/an-address-2']);
+  assert.doesNotMatch(JSON.stringify(m), /an-address-[0-9a-f]{6}/);
+  assert.equal(m.product.branch, 'someone/notes', 'the checkout branch is masked too');
+});
