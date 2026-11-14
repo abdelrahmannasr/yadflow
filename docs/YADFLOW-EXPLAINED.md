@@ -458,7 +458,7 @@ not signed, and would be refused.
   | --- | --- |
   | No GitHub or GitLab | The person runs `yad gate approve EP-foundation foundation/ --by <name>`. |
   | Team mode | A fresh review PR/MR of the Foundation as it stands; its approvals cover it. |
-  | Solo mode | The same fresh PR/MR; its merge covers it. `yad gate sync` (local record) or CI at the merge (verified record) adds the merge to the review step's `rereviews` list. The first approval record is kept. |
+  | Solo mode | The same fresh PR/MR; its merge covers it. `yad gate sync` (local record) or CI at the merge (verified record) adds the merge to the review step's `rereviews` list. The step's first close record is kept. |
 
   A solo merge covers only what that PR merged: a later edit blocks publish again.
 
@@ -930,7 +930,8 @@ Every command except `yad hook` supports `--json`: one object on standard output
 
 Because everything is saved, you can ask questions later: "what did we build last quarter?", "who
 approved the payments design?", "what is the current truth about checkout?". None of these commands
-changes anything.
+changes the record. Some write files: `yad index` and `yad docs build` rebuild generated files, and the
+report commands save a report on your machine.
 
 Two of them make pictures for people:
 
@@ -940,8 +941,8 @@ Two of them make pictures for people:
   rankings.
 - **Saved reports** (`yad reports`). A report — the standup, the usage report, the issues page, the
   brain picture, the progress map — shows the work at one moment and goes out of date as soon as the
-  work moves on. So yadflow keeps every saved report on your own machine, in one folder beside the
-  Product. It never commits or pushes one. `yad reports` lists them and says which are still fresh.
+  work moves on. So, unless you name a file yourself, yadflow saves each report on your own machine, in
+  one folder beside the Product. It never commits or pushes one. `yad reports` lists them and says which are still fresh.
 
 ### How it works (for technical readers)
 
@@ -977,7 +978,7 @@ yad map --fetch --html         # git fetch first (downloads, never uploads)
 | The ring around it | **Development**: each repo's integration branch, with the commits waiting for release |
 | Pills / big dots / small dots / diamonds | Epics (or groups of branches) / stories / shipped tasks / open branches |
 | Blue / pink / amber / hollow | In Production / merged, waiting for release / in progress / not started |
-| Small grey | A branch with no commits for 60 days that was never merged |
+| Small grey | A branch with no commits for 60 days (`map.staleDays` changes it) that was never merged |
 
 - **People are shown as roles:** owner (from `owner` and `yad assign`), built by (the author of the merged
   branch, not the person who pressed merge), reviewed by (engineer reviews in the build log) and approved
@@ -989,9 +990,12 @@ yad map --fetch --html         # git fetch first (downloads, never uploads)
   what changed and says "N moved since <date>".
 - **Sharing:** `--anonymous` turns each name into "Person A", "Person B" and so on, masks branch names that
   hold a person's name, and drops pull request links. Titles are shown as written, so a title that names
-  someone still shows the name.
+  someone still shows the name. An anonymous map keeps no "what moved" summary and does not show what
+  moved.
 - **Production branch:** set it per repo with `map.production` in `product.json`. Without it, yad tries
-  `Production`, `production`, `prod`, `release`, `main` and `master`, and the page says it **guessed**.
+  `Production`, `production`, `prod`, `release`, `main` and `master`, but never the repo's default
+  branch, and the page says it **guessed**. If you name a branch that origin does not have, yad says so
+  and guesses nothing for that repo.
 - **Read-only and locked down**, like `yad brain view`: it only reads (only `--fetch` downloads), and the
   page answers only on `127.0.0.1` with a one-time key. No commit subject and no machine path reaches it.
 
@@ -1002,13 +1006,14 @@ With no `--out <file>`, these commands save into the reports folder: `yad standu
 
 - **Where:** `<product>--reports/`, beside the Product's main folder (a run from a worktree or a code repo
   lands in the same place). `YAD_REPORTS_DIR` picks another folder; `--out <file>` still writes exactly
-  that file.
+  that file, which is then not in the catalog, so `yad reports` does not list it.
 - **Names you can read:** `<date>-<time>--<kind>--<scope>--<state>.<ext>`, for example
   `2026-11-14-0900--standup--team--3-waiting.md`. Local time comes first, so sorting by name sorts by time.
 - **Never committed:** the folder holds its own `.gitignore` (`*`), plus `catalog.json` and an `index.html`
   page listing every report.
 - **Fresh or stale:** each report records the Product commit it was made at. It is **stale** once the
-  Product's `epics/` or `.sdlc/` changed in a later commit.
+  Product's `epics/` or `.sdlc/` changed in a later commit. Changes not yet committed do not count, and
+  the comparison is with the commit of the checkout you run `yad reports` in.
 
 ```bash
 yad reports                            # list them, newest first, fresh or stale
@@ -1569,7 +1574,7 @@ proposals, not yet decided:
 | E127 | An explicit `superseded` status |
 | E128 | One combined freshness report |
 | E129 | A browsable example project |
-| E182 | Docs sites, timelines, defect sites and tutorials made in the local reports folder; `--in-product` to publish a docs site (a breaking change) |
+| E182 | Docs sites, timelines, defect sites and tutorials made in the local reports folder; `--in-product` to publish a docs site. A breaking change: a new epic's docs no longer publish without that flag |
 | E183 | `--save` on `status`, `history`, `claims` and `doctor`, into the local reports folder |
 | E108 | Enforcing the risk-based approver count (parked) |
 <!-- explainer:end id=limits -->
