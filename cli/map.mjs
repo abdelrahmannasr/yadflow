@@ -96,6 +96,7 @@ const AT_NAME = 'a name with an @ in it';
 
 // The resolver: a raw name from the record → one person key. Members first (E131); else the name itself,
 // compared without case. A name with an @ is never shown.
+
 export function makeResolver(members = []) {
   const people = new Map();   // key -> { key, name, raws:Set, member: bool, ambiguous: [logins] | null }
   const cache = new Map();
@@ -336,7 +337,9 @@ function anonymize(model, people) {
   const raws = [...people.values()].filter((p) => alias.has(p.key))
     .flatMap((p) => [...p.raws, ...(p.name === AT_NAME ? [] : [p.name])])
     .map((r) => String(r).toLowerCase())
-    .map((r) => (r.lastIndexOf('@') > 0 ? r.slice(0, r.lastIndexOf('@')).replace(/@/g, '') : r.replace(/@/g, '')))
+    // Cut each word that holds an address on its own, so the name words beside it (`kit@x.com Kit Marsh`) stay;
+    // the @ signs left inside become spaces, so `bob@builder@x.com` gives `bob`, `builder` and `bobbuilder`.
+    .map((r) => r.split(/\s+/).map((t) => (t.lastIndexOf('@') > 0 ? t.slice(0, t.lastIndexOf('@')) : t)).join(' ').replace(/@/g, ' ').trim())
     .filter((r) => r.length >= 2);
   // Each name, each of its words (3 letters or more), and the name with its separators taken out
   // (`bobbuilder`), so `bob.builder/x`, `feat/bob_builder` and `bobbuilder-fix` are all masked.

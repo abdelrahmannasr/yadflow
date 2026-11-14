@@ -384,16 +384,35 @@ test('review 1: --anonymous masks names joined by dots, underscores or nothing, 
 
 test('review 7: under --anonymous an address hides the part before its @, never the placeholder words or the domain', () => {
   const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'zed@example.com', repos: [] },
-    { id: 'EP-login-S08', epic: 'EP-login', status: 'draft', owner: '@quinn', repos: [] }] });
+    { id: 'EP-login-S08', epic: 'EP-login', status: 'draft', owner: '@quinn', repos: [] },
+    { id: 'EP-login-S07', epic: 'EP-login', status: 'draft', owner: 'ula@example.com Ula Marsh', repos: [] },
+    { id: 'EP-login-S06', epic: 'EP-login', status: 'draft', owner: 'vic@nash@example.com', repos: [] }] });
   i.branches.push(
     { repo: 'api', name: 'feat/sign-in-with-google', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'fix/com-name-zed', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
-    { repo: 'api', name: 'quinn/try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+    { repo: 'api', name: 'quinn/try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/marsh-x', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/nash-y', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
   const m = mapModel(i, { now: NOW, anonymous: true });
   const names = m.branches.map((b) => b.name);
   assert.ok(names.includes('feat/sign-in-with-google'), 'the words of the placeholder are not names');
   assert.ok(names.includes('fix/com-name-someone'), 'the local part is masked, the domain is not');
   assert.ok(names.includes('someone/try'), 'a handle is masked without its @');
+  assert.ok(names.includes('fix/someone-x'), 'a name written after an address is masked');
+  assert.ok(names.includes('fix/someone-y'), 'each part between two @ signs is masked');
+  // A leading-@ value may be a handle or a domain: it is masked whole, on purpose, even when that over-masks.
+  const dom = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: '@example.com', repos: [] }],
+    branches: [{ repo: 'api', name: 'fix/com-z', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 }] }), { now: NOW, anonymous: true });
+  assert.ok(dom.branches.some((b) => b.name === 'fix/someone-z'), 'a leading-@ domain is masked, on purpose');
+});
+
+test('review 10: under --anonymous the words of the address placeholder are never masked; the raw values still are', () => {
+  const branch = (name) => ({ repo: 'api', name, sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+  const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'ula@example.com Ula Marsh', repos: [] }] });
+  i.branches.push(branch('feat/sign-in-with-google'), branch('fix/marsh-x'));
+  const names = mapModel(i, { now: NOW, anonymous: true }).branches.map((b) => b.name);
+  assert.ok(names.includes('feat/sign-in-with-google'), 'the placeholder words are not names');
+  assert.ok(names.includes('fix/someone-x'), 'a name in the raw value is still masked');
 });
 
 test('review 1: the person a gate waits on, and who released last, are on the people list', () => {
