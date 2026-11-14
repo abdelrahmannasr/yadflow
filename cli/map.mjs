@@ -103,13 +103,14 @@ export function makeResolver(members = []) {
     const hit = whose(members, { login: r, name: r });
     let key, name, ambiguous = null;
     if (hit.member) {
-      key = `m:${hit.member.primary.login.toLowerCase()}`;
+      const login = hit.member.primary.login.toLowerCase();
+      key = login.includes('@') ? `m:@${hueKey(login)}` : `m:${login}`;
       name = hit.member.names.find((n) => !n.includes('@')) || hit.member.primary.login;
     } else {
       // A raw value with an @ is an email: its key is a fingerprint, so the address never rides in the data.
       key = r.includes('@') ? `n:@${hueKey(r.toLowerCase())}` : `n:${r.toLowerCase()}`;
       name = r;
-      if (hit.ambiguous) ambiguous = hit.ambiguous.map((m) => m.primary.login);
+      if (hit.ambiguous) ambiguous = hit.ambiguous.map((m) => (m.primary.login.includes('@') ? 'a login with an @ in it' : m.primary.login));
     }
     // Any @ (even a leading one, which `shown` lets through) means an address: it is never shown.
     if (!people.has(key)) people.set(key, { key, name: String(name).includes('@') ? 'a name with an @ in it' : shown(name), raws: new Set(), member: !!hit.member, ambiguous });
@@ -133,7 +134,19 @@ export function makeResolver(members = []) {
 //            productionAhead, production:{date,author}|null, integration:{date,author}|null, fetchedAt }]
 //   branches [{ repo, name, sha, date, author, inProd, inInteg, ahead }]
 //   waits [{ epic, step, kind, owner (raw name) | null }]
+// A branch name can hold an address (git allows `@`): each part of it that does is shown as `an-address`, in
+// every map, named or not — before anything else reads the name, so ids and matches agree.
+export const noAddress = (name) => (typeof name === 'string' && name.includes('@') ? name.split('/').map((seg) => (seg.includes('@') ? 'an-address' : seg)).join('/') : name);
+function withoutAddresses(inputs) {
+  const via = (r) => (r && r.via ? { ...r, via: { ...r.via, branch: noAddress(r.via.branch) } } : r);
+  return { ...inputs,
+    branches: (inputs.branches || []).map((b) => ({ ...b, name: noAddress(b.name) })),
+    tasks: (inputs.tasks || []).map((t) => ({ ...t, branch: noAddress(t.branch), reach: via(t.reach) })),
+    epics: (inputs.epics || []).map((e) => ({ ...e, ...(e.sourceBranch ? { sourceBranch: noAddress(e.sourceBranch) } : {}), ...(e.productBranches ? { productBranches: e.productBranches.map(noAddress) } : {}) })) };
+}
+
 export function mapModel(inputs, { anonymous = false, previous = null, now = Date.now() } = {}) {
+  inputs = withoutAddresses(inputs);
   const staleDays = Number.isInteger(inputs.staleDays) && inputs.staleDays > 0 ? inputs.staleDays : DEFAULT_STALE_DAYS;
   // A group whose pattern does not compile is left out (gatherMap says so) — never a catch-all by mistake.
   const usable = (inputs.groups || []).filter((g) => !g.pattern || compiles(g.pattern));

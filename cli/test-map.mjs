@@ -496,3 +496,20 @@ test('review 2: where a recursive watch is not offered, each folder is watched; 
   } finally { console.log = log; done(ws); }
   assert.match(out.join('\n'), /nothing here can be watched/);
 });
+
+// ---- review 7 ------------------------------------------------------------------------------------
+
+test('review 7: a branch name holding an address shows "an-address" in every map; a login with an @ is fingerprinted', () => {
+  const i = baseInputs();
+  i.branches.push({ repo: 'api', name: 'kit@example.com/EP-login-S02-try', sha: 'a'.repeat(40), date: daysAgo(1), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 });
+  i.tasks[0].branch = 'feat/kit@example.com';
+  i.tasks[0].reach = { found: true, prod: false, integ: false, via: { branch: 'port/kit@example.com', date: daysAgo(1) } };
+  const member = { primary: { platform: 'github', host: 'github.com', login: 'kit@example.com' }, accounts: [{ platform: 'github', host: 'github.com', login: 'kit@example.com' }], names: ['Kit Ansel'], emails: [], matchLogins: ['kit@example.com'] };
+  for (const anonymous of [false, true]) {
+    const m = mapModel({ ...i, members: [member] }, { now: NOW, anonymous });
+    assert.equal(JSON.stringify(m).split('example.com').length, 1, `anonymous: ${anonymous}`);
+  }
+  const named = mapModel({ ...i, members: [member] }, { now: NOW });
+  assert.ok(named.branches.some((b) => b.name === 'an-address/EP-login-S02-try' && b.story === 'EP-login-S02'), 'the rest of the name still links it');
+  assert.match(named.people.find((p) => p.name === 'Kit Ansel').key, /^m:@[0-9a-f]{16}$/);
+});
