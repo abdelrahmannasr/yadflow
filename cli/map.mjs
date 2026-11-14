@@ -355,7 +355,11 @@ export function portFor(direct, story, task) {
   const num = /^T0*(\d+)$/i.exec(String(task))?.[1];
   const taskRe = num ? new RegExp(`${reEsc(story)}[-_./]T0*${num}(?![A-Za-z0-9])`, 'i') : new RegExp(`${reEsc(story)}[-_./]${reEsc(String(task))}(?![A-Za-z0-9])`);
   const storyRe = new RegExp(`${reEsc(story)}(?![\\d])(?![-_./]T\\d)`, 'i');
-  return direct.find((d) => taskRe.test(d.branch)) || direct.find((d) => storyRe.test(d.branch)) || null;
+  const storyOnly = (branch) => {
+    const m = storyRe.exec(branch);
+    return !!m && !/[-_./]T\d/i.test(branch.slice(m.index + story.length));   // no task id anywhere after it
+  };
+  return direct.find((d) => taskRe.test(d.branch)) || direct.find((d) => storyOnly(d.branch)) || null;
 }
 
 // ---- gathering (git and files) -------------------------------------------------------------------

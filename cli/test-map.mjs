@@ -434,7 +434,7 @@ test('review 2: a port names a task by any separator and by its number; a story-
   const d = (branch) => [{ date: '2026-11-01T00:00:00Z', branch }];
   const is = (branch, task) => !!portFor(d(branch), 'EP-login-S01', task);
   for (const b of ['feat/EP-login-S01-T01', 'fix/EP-login-S01-T01-redo', 'EP-login-S01_T01', 'EP-login-S01.T1', 'EP-login-S01/T01']) assert.equal(is(b, 'T01'), true, b);
-  for (const b of ['feat/EP-login-S01-T02', 'EP-login-S01_T02', 'EP-login-S01.T02', 'EP-login-S01/T2', 'EP-login-S010', 'EP-login-S01-T010']) assert.equal(is(b, 'T01'), false, b);
+  for (const b of ['feat/EP-login-S01-T02', 'EP-login-S01_T02', 'EP-login-S01.T02', 'EP-login-S01/T2', 'EP-login-S010', 'EP-login-S01-T010', 'feat/EP-login-S01-fix-T02', 'EP-login-S01-v2.T3']) assert.equal(is(b, 'T01'), false, b);
   for (const b of ['feat/EP-login-S01-hotfix', 'EP-login-S01', 'EP-login-S01-production']) { assert.equal(is(b, 'T01'), true, b); assert.equal(is(b, 'T02'), true, b); }
   assert.equal(is('EP-login-S01-T1', 'T1'), true);
   assert.equal(portFor([], 'EP-login-S01', 'T01'), null);
@@ -462,8 +462,9 @@ test('review 2: where a recursive watch is not offered, each folder is watched; 
   const watch = fs.watch;
   let recursiveAsked = 0, plain = 0;
   fs.watch = (p, opts, cb) => { if (opts && opts.recursive) { recursiveAsked++; const e = new Error('no recursive watch'); e.code = 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM'; throw e; } plain++; return watch(p, opts, cb); };
-  const s = await startMapServer(root, { live: true, debounce: 50, env: { [REPORTS_ENV]: path.join(ws, 'r') } });
+  let s = null;
   try {
+    s = await startMapServer(root, { live: true, debounce: 50, env: { [REPORTS_ENV]: path.join(ws, 'r') } });
     const status = await new Promise((resolve, reject) => {
       const req = http.request({ host: '127.0.0.1', port: s.port, path: `/events?t=${s.token}`, headers: { Host: `127.0.0.1:${s.port}` } }, (res) => {
         res.on('data', (c) => { if (String(c).includes('event: status')) { req.destroy(); resolve(String(c)); } });
@@ -474,7 +475,7 @@ test('review 2: where a recursive watch is not offered, each folder is watched; 
     assert.ok(recursiveAsked >= 1);
     assert.ok(plain > 2, 'each folder of the record is watched on its own');
     assert.match(status, /"live":true/);
-  } finally { fs.watch = watch; await s.close(); }
+  } finally { fs.watch = watch; if (s) await s.close(); }
   // A folder with nothing to watch: the server still starts, and says the page will not change by itself.
   const bare = path.join(ws, 'bare');
   put(path.join(bare, 'x.txt'), 'x');
@@ -486,5 +487,4 @@ test('review 2: where a recursive watch is not offered, each folder is watched; 
     await srv.close();
   } finally { console.log = log; done(ws); }
   assert.match(out.join('\n'), /nothing here can be watched/);
-  process.exitCode = 0;
 });
