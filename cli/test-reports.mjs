@@ -211,6 +211,15 @@ test('yad reports list | open | prune answer in JSON, and refuse what they do no
     assert.match(bad.error, /--older-than <days>/);
     const prune = await captured(() => runReports(root, { action: 'prune', olderThan: '0', json: true, env }));
     assert.equal(prune.applied, false);
+    // review 2: --missing drops only entries whose file is gone, and deletes no report.
+    const kept = path.join(ws, 'chosen', list.entries[0].file);
+    saveReport(root, { kind: 'issues', scope: 'all repos', state: 'gone', ext: 'md', content: 'x', at: AT, env });
+    const goner = listReports(root, { env }).entries.find((e) => e.state === 'gone');
+    fs.rmSync(path.join(ws, 'chosen', goner.file));
+    const miss = await captured(() => runReports(root, { action: 'prune', missing: true, apply: true, json: true, env }));
+    assert.deepEqual(miss.removed.map((e) => e.reason), ['missing']);
+    assert.ok(fs.existsSync(kept), 'the report whose file is there stays');
+    assert.equal((await captured(() => runReports(root, { action: 'prune', missing: true, olderThan: '3', json: true, env }))).ok, false, 'not both');
     assert.equal((await captured(() => runReports(root, { action: 'frob', json: true, env }))).ok, false);
     process.exitCode = 0;
   } finally { done(ws); }
@@ -230,7 +239,7 @@ test('yad reports runs from the CLI, and agents may list but must be asked to de
   } finally { done(ws); }
 });
 
-test('review 1: a linked kind folder, a linked reports folder or a bare file name never lets prune, list or open leave the folder', () => {
+test('review 1: a linked kind folder, a linked reports folder or a bare file name never lets prune, list or open leave the folder', { skip: process.platform === 'win32' && 'making a folder link needs extra rights on Windows' }, () => {
   const { ws, root } = product();
   try {
     const dir = path.join(ws, 'product--reports');
@@ -267,9 +276,10 @@ test('review 1: a folder that cannot be written is a refusal with the way out, n
     const locked = path.join(ws, 'locked');
     fs.mkdirSync(locked);
     fs.chmodSync(locked, 0o500);
-    const r = saveReport(root, { kind: 'usage', scope: 't', state: 's', ext: 'md', content: 'x', env: { [REPORTS_ENV]: path.join(locked, 'reports') } });
-    assert.match(r.problem, /cannot save the report .* set YAD_REPORTS_DIR .* or pass --out/);
-    fs.chmodSync(locked, 0o700);
+    try {
+      const r = saveReport(root, { kind: 'usage', scope: 't', state: 's', ext: 'md', content: 'x', env: { [REPORTS_ENV]: path.join(locked, 'reports') } });
+      assert.match(r.problem, /cannot save the report .* set YAD_REPORTS_DIR .* or pass --out/);
+    } finally { fs.chmodSync(locked, 0o700); }
   } finally { done(ws); }
 });
 
@@ -281,17 +291,19 @@ test('review 1: a name already taken is never overwritten, and a held catalog lo
     const b = saveReport(root, { kind: 'usage', scope: 'team', state: 's', ext: 'md', content: 'second', at: AT, env: noEnv });
     assert.equal(fs.readFileSync(a.file, 'utf8'), 'first');
     assert.equal(fs.readFileSync(b.file, 'utf8'), 'second');
-    // A fresh lock held by another run: the report is saved, the catalog is left, and the lock is named.
-    fs.writeFileSync(path.join(dir, 'catalog.lock'), '1');
+    // A lock held by a run that is still going (this test's own pid): the report is saved, the catalog is
+    // left, and the warning says where the report is — never "try again", which would save a second copy.
+    fs.writeFileSync(path.join(dir, 'catalog.lock'), `${process.pid} theirs`);
     const held = saveReport(root, { kind: 'usage', scope: 'team', state: 'held', ext: 'md', content: 'x', at: AT, env: noEnv });
     assert.ok(fs.existsSync(held.file));
-    assert.match(held.warnings[0], /catalog\.lock is held by another yad run/);
+    assert.match(held.warnings[0], /the report was saved at .*held.*not added to the catalog: .*catalog\.lock is held by another yad run that is still going/);
     assert.equal(readCatalog(dir).entries.length, 2);
-    // An old lock (a killed run) is taken over.
-    const old = new Date(Date.now() - 60000);
-    fs.utimesSync(path.join(dir, 'catalog.lock'), old, old);
+    assert.equal(fs.readFileSync(path.join(dir, 'catalog.lock'), 'utf8'), `${process.pid} theirs`, 'a lock that is not ours is never removed');
+    // A lock whose run is gone (no such process) is taken over at once, and ours is removed after.
+    fs.writeFileSync(path.join(dir, 'catalog.lock'), '2147483646 gone');
     saveReport(root, { kind: 'usage', scope: 'team', state: 'after', ext: 'md', content: 'x', at: AT, env: noEnv });
     assert.equal(readCatalog(dir).entries.length, 3);
     assert.equal(fs.existsSync(path.join(dir, 'catalog.lock')), false);
+    assert.deepEqual(fs.readdirSync(dir).filter((n) => n.includes('.stale')), [], 'the set-aside lock is gone too');
   } finally { done(ws); }
 });

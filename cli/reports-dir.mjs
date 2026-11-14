@@ -30,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { readJSONStrict, writeJSON } from './lib.mjs';
 
 export const REPORTS_SUFFIX = '--reports';
@@ -116,21 +117,34 @@ function writeFresh(dir, name, content) {
 }
 
 // Hold `catalog.lock` while the catalog is read, changed and written, so a run at the same moment never
-// loses an entry. A lock older than 30 s was left by a killed run and is taken over.
+// loses an entry. The lock holds `<pid> <token>`. It is taken over only when the run that made it is no
+// longer alive, or it is older than 5 minutes; a takeover first RENAMES the old lock to a name of its own
+// (only one run can win that rename), so two runs never both take it. On the way out a run removes the
+// lock only while it still holds its own token, never a lock another run took over.
 const LOCK_FILE = 'catalog.lock';
-function withCatalogLock(dir, fn) {
+const LOCK_STALE_MS = 5 * 60 * 1000;
+const alive = (pid) => { if (!Number.isInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+function withCatalogLock(dir, fn, { waitMs = 5000 } = {}) {
   const lock = path.join(dir, LOCK_FILE);
-  const until = Date.now() + 5000;
+  const token = `${process.pid} ${randomBytes(8).toString('hex')}`;
+  const until = Date.now() + waitMs;
   for (;;) {
-    try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; } catch (e) {
+    try { fs.writeFileSync(lock, token, { flag: 'wx' }); break; } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      let age; try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
-      if (age > 30000) { fs.rmSync(lock, { force: true }); continue; }
-      if (Date.now() > until) return { problem: `${lock} is held by another yad run — try again, or remove it if no yad is running` };
+      let held, age;
+      try { held = fs.readFileSync(lock, 'utf8'); age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
+      if (!alive(Number(String(held).split(' ')[0])) || age > LOCK_STALE_MS) {
+        const aside = `${lock}.${randomBytes(6).toString('hex')}.stale`;
+        try { fs.renameSync(lock, aside); fs.rmSync(aside, { force: true }); } catch { /* another run took it first */ }
+        continue;
+      }
+      if (Date.now() > until) return { problem: `${lock} is held by another yad run that is still going`, held: true };
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
   }
-  try { return fn(); } finally { fs.rmSync(lock, { force: true }); }
+  try { return fn(); } finally {
+    try { if (fs.readFileSync(lock, 'utf8') === token) fs.rmSync(lock, { force: true }); } catch { /* already gone */ }
+  }
 }
 
 // Make `dir` (and its parents), refusing a path that exists and is not a plain folder.
@@ -237,7 +251,7 @@ export function saveReport(root, { kind, scope, state, ext, content, command = n
       writeNew(path.join(dir, INDEX_FILE), renderIndex(entries));
       return {};
     });
-    if (done.problem) warnings.push(done.problem);
+    if (done.problem) warnings.push(done.held ? `the report was saved at ${file}, but not added to the catalog: ${done.problem}. It is in the folder; open it by that path` : done.problem);
   } catch (e) { warnings.push(`the report was saved, but the catalog was not updated (${e.code || e.message})`); }
   return { file, dir, name, warnings };
 }
@@ -288,7 +302,8 @@ function linkedDir(dir) {
 }
 
 // The entries `prune` would remove: older than `days`, or whose file is gone.
-export function pruneReports(root, { days, apply = false, now = Date.now(), env = process.env, runner = spawnSync } = {}) {
+// `days: null` drops only entries whose file is missing or not a report path — it deletes no file.
+export function pruneReports(root, { days = null, apply = false, now = Date.now(), env = process.env, runner = spawnSync } = {}) {
   const { dir } = reportsDir(root, { env, runner });
   if (!fs.existsSync(dir)) return { dir, removed: [], kept: 0 };
   const linked = linkedDir(dir);
@@ -297,7 +312,7 @@ export function pruneReports(root, { days, apply = false, now = Date.now(), env 
     const cat = readCatalog(dir);
     if (cat.problem) return { problem: cat.problem };
     const cut = now - days * 864e5;
-    const old = (e) => { const t = Date.parse(e.createdAt); return Number.isFinite(t) && t < cut; };
+    const old = (e) => { if (days === null) return false; const t = Date.parse(e.createdAt); return Number.isFinite(t) && t < cut; };
     // The reason is decided BEFORE anything is deleted.
     const marked = cat.entries.map((e) => ({ e, reason: !insideDir(dir, e.file) ? 'outside' : !fs.existsSync(path.join(dir, e.file)) ? 'missing' : old(e) ? 'old' : null }));
     return { removed: marked.filter((m) => m.reason), kept: marked.filter((m) => !m.reason).map((m) => m.e) };

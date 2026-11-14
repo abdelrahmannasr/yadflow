@@ -170,8 +170,9 @@ ${c.bold('Saved reports')} ${c.dim('(E180 — on this machine only, never commit
                                        $YAD_REPORTS_DIR. Reports land there when no --out is given:
                                        standup, usage, issues list --format, brain view --html
   yad reports open <n|file>            Open one in the browser
-  yad reports prune --older-than <days> [--apply]
-                                       Remove saved reports older than that (a dry run without --apply)
+  yad reports prune --older-than <days> | --missing [--apply]
+                                       Remove saved reports older than that, or with --missing only drop
+                                       catalog entries whose file is gone (a dry run without --apply)
 
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
@@ -592,6 +593,7 @@ function parseArgs(argv) {
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
     else if (a === '--brief') o.brief = true;
+    else if (a === '--missing') o.missing = true;
     else if (a === '--open') o.open = true;
     else if (a === '--html') o.html = true;
     else if (a === '--live') o.live = true;
@@ -1382,7 +1384,7 @@ async function main() {
     case 'reports': {
       // E180. The local reports folder; nothing here touches the Product or any repo.
       const [, action, ...args] = o._;
-      result = await commands.runReports(o.dir, { action: action || 'list', args, olderThan: o['older-than'] ?? null, apply: !!o.apply, json: !!o.json });
+      result = await commands.runReports(o.dir, { action: action || 'list', args, olderThan: o['older-than'] ?? null, missing: !!o.missing, apply: !!o.apply, json: !!o.json });
       break;
     }
     case 'claims': {

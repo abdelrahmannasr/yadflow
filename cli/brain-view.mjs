@@ -420,7 +420,7 @@ export async function runBrainView(root, { args = [], html = false, open = false
     const riskLine = risk ? `${forTerminal(file)} is in a git work tree and not ignored: it holds the names in your code — do not commit it` : null;
     const opened = open ? opener(file) : null;
     const events = live ? { events: m.model.replay.length } : {};
-    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, ...events, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}) });
+    if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, ...events, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}), ...(saveWarnings.length ? { warnings: saveWarnings } : {}) });
     for (const w of saveWarnings) warn(w);
     ok(`wrote ${forTerminal(file)} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges${live ? `, ${m.model.replay.length} recorded events to replay` : ''}; open it in a browser (it needs no server and no network)`);
     if (behindLine) warn(behindLine);

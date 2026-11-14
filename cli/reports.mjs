@@ -6,11 +6,11 @@ import { c, log, ok, info, warn, refuse, emitJSON, forTerminal } from './lib.mjs
 import { listReports, pruneReports, REPORTS_ENV } from './reports-dir.mjs';
 import { openUrl } from './report.mjs';
 
-export const REPORTS_USAGE = 'usage: yad reports [list] [--json] · yad reports open <n|file> · yad reports prune --older-than <days> [--apply] [--json]';
+export const REPORTS_USAGE = 'usage: yad reports [list] [--json] · yad reports open <n|file> · yad reports prune --older-than <days> | --missing [--apply] [--json]';
 
 const FRESH = { fresh: 'fresh', stale: 'stale — the Product changed since', unknown: 'unknown' };
 
-export async function runReports(root, { action = 'list', args = [], olderThan = null, apply = false, json = false, env = process.env, runner = spawnSync, opener = openUrl } = {}) {
+export async function runReports(root, { action = 'list', args = [], olderThan = null, missing = false, apply = false, json = false, env = process.env, runner = spawnSync, opener = openUrl } = {}) {
   if (action === 'list') {
     if (args.length) return refuse(`yad reports list takes no words (got: ${args.map(forTerminal).join(' ')})`, REPORTS_USAGE, { json });
     const r = listReports(root, { env, runner });
@@ -34,7 +34,7 @@ export async function runReports(root, { action = 'list', args = [], olderThan =
     const want = String(args[0]);
     const hit = /^\d+$/.test(want) ? r.entries.find((e) => e.n === Number(want)) : r.entries.find((e) => e.file === want || path.posix.basename(e.file) === want);
     if (!hit) return refuse(`no saved report ${forTerminal(want)}`, 'see them with: yad reports list', { json });
-    if (!hit.present) return refuse(`${forTerminal(hit.file)} is in the catalog but its file is gone`, 'drop it from the catalog with: yad reports prune --older-than 0 --apply', { json });
+    if (!hit.present) return refuse(`${forTerminal(hit.file)} is in the catalog but its file is gone`, 'drop it from the catalog with: yad reports prune --missing --apply (it deletes no report)', { json });
     const file = path.join(r.dir, hit.file);
     const opened = opener(file);
     if (json) return emitJSON({ file, opened, freshness: hit.freshness });
@@ -46,13 +46,14 @@ export async function runReports(root, { action = 'list', args = [], olderThan =
 
   if (action === 'prune') {
     if (args.length) return refuse(`yad reports prune takes no words (got: ${args.map(forTerminal).join(' ')})`, REPORTS_USAGE, { json });
-    const days = Number(olderThan);
-    if (olderThan === null || olderThan === true || !Number.isInteger(days) || days < 0) return refuse('say how old: --older-than <days> (a whole number, 0 or more)', REPORTS_USAGE, { json });
+    if (missing && olderThan !== null) return refuse('pass --older-than <days> or --missing, not both', REPORTS_USAGE, { json });
+    const days = missing ? null : Number(olderThan);
+    if (!missing && (olderThan === null || olderThan === true || !Number.isInteger(days) || days < 0)) return refuse('say how old: --older-than <days> (a whole number, 0 or more), or --missing to drop only entries whose file is gone', REPORTS_USAGE, { json });
     const r = pruneReports(root, { days, apply, env, runner });
     if (r.problem) return refuse(r.problem, null, { json });
     if (json) return emitJSON({ dir: r.dir, applied: !!apply, removed: r.removed, kept: r.kept });
     log(c.bold(`\nyad reports prune${apply ? '' : ' (dry run)'}`));
-    if (!r.removed.length) { info(`nothing older than ${days} day(s) — ${r.kept} kept`); return r; }
+    if (!r.removed.length) { info(`${missing ? 'no entry is missing its file' : `nothing older than ${days} day(s)`} — ${r.kept} kept`); return r; }
     for (const e of r.removed) log(`  ${apply ? c.red('removed') : 'would remove'}  ${forTerminal(e.file)}${e.reason === 'missing' ? c.dim(' (file already gone)') : e.reason === 'outside' ? c.dim(' (not a report path inside the folder — only dropped from the catalog)') : ''}`);
     if (apply) ok(`removed ${r.removed.length}, kept ${r.kept}`);
     else info(`nothing was deleted — add --apply to remove these ${r.removed.length}`);
