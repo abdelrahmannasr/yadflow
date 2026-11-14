@@ -38,6 +38,30 @@
   var EDGE = 'rgba(71, 85, 105, 0.6)';
   var EDGE_INFERRED = 'rgba(100, 116, 139, 0.3)';
 
+  // Label colours come from the page's theme (style.css), so a label is light on the dark theme and dark on the
+  // light one. Sigma's own default is black text, and a white box on hover.
+  function theme() {
+    var css = getComputedStyle(document.documentElement);
+    var get = function (name, fallback) { return (css.getPropertyValue(name) || '').trim() || fallback; };
+    return { text: get('--text', '#0f172a'), panel: get('--panel', '#ffffff'), line: get('--line', '#e2e8f0') };
+  }
+  function drawHover(context, d, s) {
+    var t = theme();
+    var size = s.labelSize;
+    context.font = s.labelWeight + ' ' + size + 'px ' + s.labelFont;
+    var w = context.measureText(d.label || '').width;
+    var x = d.x + d.size + 4;
+    var y = d.y;
+    context.fillStyle = t.panel;
+    context.strokeStyle = t.line;
+    context.lineWidth = 1;
+    context.beginPath();
+    if (context.roundRect) context.roundRect(x - 6, y - size / 2 - 5, w + 12, size + 10, 6); else context.rect(x - 6, y - size / 2 - 5, w + 12, size + 10);
+    context.fill(); context.stroke();
+    context.fillStyle = t.text;
+    context.fillText(d.label || '', x, y + size / 3);
+  }
+
   function start(model) {
     var nodes = model.nodes;
     var edges = model.edges;
@@ -125,6 +149,9 @@
         renderer = new Sigma(graph, $('graph'), {
           defaultEdgeType: 'arrow',
           labelRenderedSizeThreshold: 7,
+          labelColor: { color: theme().text },
+          labelFont: getComputedStyle(document.body).fontFamily,
+          defaultDrawNodeHover: drawHover,
           zIndex: true,
           nodeReducer: function (key, data) {
             var i = Number(key);
@@ -304,6 +331,8 @@
 
     build();
     draw();
+    // The system switched between light and dark while the page is open: draw again with the new label colour.
+    try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (renderer) draw(); }); } catch { /* an old browser keeps its first colours */ }
   }
 
   load().then(start, function (err) {
