@@ -434,7 +434,7 @@ test('review 2: a port names a task by any separator and by its number; a story-
   const d = (branch) => [{ date: '2026-11-01T00:00:00Z', branch }];
   const is = (branch, task) => !!portFor(d(branch), 'EP-login-S01', task);
   for (const b of ['feat/EP-login-S01-T01', 'fix/EP-login-S01-T01-redo', 'EP-login-S01_T01', 'EP-login-S01.T1', 'EP-login-S01/T01']) assert.equal(is(b, 'T01'), true, b);
-  for (const b of ['feat/EP-login-S01-T02', 'EP-login-S01_T02', 'EP-login-S01.T02', 'EP-login-S01/T2', 'EP-login-S010', 'EP-login-S01-T010', 'feat/EP-login-S01-fix-T02', 'EP-login-S01-v2.T3']) assert.equal(is(b, 'T01'), false, b);
+  for (const b of ['feat/EP-login-S01-T02', 'EP-login-S01_T02', 'EP-login-S01.T02', 'EP-login-S01/T2', 'EP-login-S010', 'EP-login-S01-T010', 'feat/EP-login-S01-fix-T02', 'EP-login-S01-v2.T3', 'EP-login-S01-T02/EP-login-S01-hotfix']) assert.equal(is(b, 'T01'), false, b);
   for (const b of ['feat/EP-login-S01-hotfix', 'EP-login-S01', 'EP-login-S01-production']) { assert.equal(is(b, 'T01'), true, b); assert.equal(is(b, 'T02'), true, b); }
   assert.equal(is('EP-login-S01-T1', 'T1'), true);
   assert.equal(portFor([], 'EP-login-S01', 'T01'), null);

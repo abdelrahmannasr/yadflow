@@ -355,9 +355,11 @@ export function portFor(direct, story, task) {
   const num = /^T0*(\d+)$/i.exec(String(task))?.[1];
   const taskRe = num ? new RegExp(`${reEsc(story)}[-_./]T0*${num}(?![A-Za-z0-9])`, 'i') : new RegExp(`${reEsc(story)}[-_./]${reEsc(String(task))}(?![A-Za-z0-9])`);
   const storyRe = new RegExp(`${reEsc(story)}(?![\\d])(?![-_./]T\\d)`, 'i');
+  // From the FIRST place the story id appears (any later one too), no task id anywhere after it.
+  const firstRe = new RegExp(`${reEsc(story)}(?!\\d)`, 'i');
   const storyOnly = (branch) => {
-    const m = storyRe.exec(branch);
-    return !!m && !/[-_./]T\d/i.test(branch.slice(m.index + story.length));   // no task id anywhere after it
+    const m = firstRe.exec(branch);
+    return !!m && storyRe.test(branch) && !/[-_./]T\d/i.test(branch.slice(m.index + story.length));
   };
   return direct.find((d) => taskRe.test(d.branch)) || direct.find((d) => storyOnly(d.branch)) || null;
 }
