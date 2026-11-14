@@ -183,13 +183,20 @@
       var dragged = null;
       var justDragged = false;
       renderer.on('downNode', function (ev) {
+        // The left button only: sigma never reports a right or middle button's release, so such a drag would
+        // never end.
+        var o = ev.event.original;
+        if (o && o.button !== undefined && o.button !== 0) return;
         dragged = ev.node;
+        renderer.getContainer().style.cursor = 'grabbing';
         justDragged = false;
         if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
         if (state.selected !== Number(ev.node)) select(Number(ev.node));
       });
       renderer.on('moveBody', function (ev) {
         if (dragged === null) return;
+        // The button came up where no mouseup reached the page (the window lost focus): the drag is over.
+        if (ev.event.original.buttons === 0 && !('touches' in ev.event.original)) { drop(); return; }
         var at = renderer.viewportToGraph(ev.event);
         graph.mergeNodeAttributes(dragged, { x: at.x, y: at.y });
         justDragged = true;
