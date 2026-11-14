@@ -723,7 +723,7 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
   // Review 2: the question has a place to go; the stale record keeps its fields; the light spec is re-judged.
   assert.match(brainBlockLines('yad-stories').join('\n'), /ask the person before you write it.*Step 7 report/);
   for (const s of ['yad-architecture', 'yad-stories']) assert.match(brainBlockLines(s).join('\n'), /repos: \[\.\.\.\], loaded: <date>, stale: true, brain: <state>/);
-  assert.match(brainBlockLines('yad-spec').join('\n'), /no longer qualifies for a light spec/);
+  assert.match(brainBlockLines('yad-spec').join('\n'), /no longer qualifies for a light spec: say so and ask .* do not write `link\.md`/);
   assert.match(brainBlockLines('yad-spec').join('\n'), /`tasks` leg, which writes nothing, only report/);
   // yad-spec's block comes after its tasks are written (Step 5), not before.
   const spec = fs.readFileSync(path.join(SKILLS, 'yad-spec', 'SKILL.md'), 'utf8');
