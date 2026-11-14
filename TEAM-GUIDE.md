@@ -870,6 +870,7 @@ descriptions of all 41 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 ## 13. Want more detail?
 
+- **[`docs/YADFLOW-EXPLAINED.md`](docs/YADFLOW-EXPLAINED.md)** — every part of yadflow in plain words, for technical and non-technical readers.
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
 - **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 41 agent skills.

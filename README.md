@@ -319,8 +319,9 @@ The record is worth trusting because people approve what goes into it.
 
 ## Documentation
 
-- **Learn:** the [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/) (setup to
-  your first shipped feature) · the [team guide](TEAM-GUIDE.md) · the
+- **Learn:** [yadflow, explained](docs/YADFLOW-EXPLAINED.md) (every part in plain words, for technical
+  and non-technical readers) · the [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)
+  (setup to your first shipped feature) · the [team guide](TEAM-GUIDE.md) · the
   [terminology and workflow report](https://abdelrahmannasr.github.io/yadflow/)
 - **Talk:** [GitHub Discussions](https://github.com/abdelrahmannasr/yadflow/discussions) — ask
   questions in Q&A, suggest ideas, and share what you build. Bugs go to
