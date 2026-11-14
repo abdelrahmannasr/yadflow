@@ -2669,14 +2669,24 @@ export function reopenStampDue(state, reviewStepId) {
 // So a re-sync of the same or an older merge writes nothing. Mutates `state`; true when it wrote.
 export function recordSoloRereview(state, reviewStepId, { pr, platform = null, hash, by = null, date = null, commit = null, mergedBy = null } = {}) {
   const step = state?.steps?.find((s) => s?.id === reviewStepId);
-  if (!isPlainObject(step) || step.type !== 'review+approve' || stepStatus(step) !== 'done') return false;
-  if (!Number.isInteger(pr) || pr <= 0 || typeof hash !== 'string' || !hash.startsWith('sha256:')) return false;
-  if (step.closed?.pr === pr) return false;
+  if (!soloRereviewDue(step, { pr, platform, commit })) return false;
+  if (typeof hash !== 'string' || !hash.startsWith('sha256:')) return false;
   const earlier = Array.isArray(step.rereviews) ? step.rereviews : [];
-  const samePlatform = earlier.filter((r) => isPlainObject(r) && (r.platform ?? null) === (platform ?? null) && Number.isInteger(r.pr));
-  if (samePlatform.some((r) => r.pr >= pr)) return false;
   step.rereviews = [...earlier, { pr, platform, hash, by, date, commit, mergedBy, via: 'merged', waived: 'solo' }];
   return true;
+}
+
+// Whether a merged PR/MR is one `recordSoloRereview` would still add — the one rule, read by the gate too,
+// so a run fails for a merge it could not read only when that merge was still waiting to be recorded.
+// The first close's PR/MR is told apart by its merge commit when both are known: `closed` records no
+// platform, and after a move to another platform the same number is another PR/MR.
+export function soloRereviewDue(step, { pr, platform = null, commit = null } = {}) {
+  if (!isPlainObject(step) || step.type !== 'review+approve' || stepStatus(step) !== 'done') return false;
+  if (!Number.isInteger(pr) || pr <= 0) return false;
+  const closed = isPlainObject(step.closed) ? step.closed : null;
+  if (closed?.pr === pr && (closed.commit == null || commit == null || closed.commit === commit)) return false;
+  const earlier = Array.isArray(step.rereviews) ? step.rereviews : [];
+  return !earlier.some((r) => isPlainObject(r) && (r.platform ?? null) === (platform ?? null) && Number.isInteger(r.pr) && r.pr >= pr);
 }
 
 // Whether a solo re-review covers the content as it stands (`accepted`, from `acceptedHashes`).

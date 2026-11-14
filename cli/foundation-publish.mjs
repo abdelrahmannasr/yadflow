@@ -11,7 +11,7 @@ import path from 'node:path';
 import { run, forTerminal, readJSON, readJSONStrict, writeJSON, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { err } from './errors.mjs';
 import { isVerifiedLedger, productConfigPath, epicFiles } from './manifest.mjs';
-import { acceptedHashes, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, reviewAsItStands, roadmapFeatures, soloRereviewCovers } from './epic-state.mjs';
+import { acceptedHashes, artifactBase, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, reviewAsItStands, roadmapFeatures, soloRereviewCovers } from './epic-state.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { isSolo } from './gate.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
@@ -63,7 +63,7 @@ export function foundationReviewAgain(root, ledger) {
   const fresh = reviewAsItStands(FOUNDATION_EPIC, artifact, resolveDefaultBranch(productGit(root), productConfig));
   if (!isSolo(productConfig)) return `${fresh}; once it is approved and merged, its approvals cover the Foundation`;
   return isVerifiedLedger(productConfig)
-    ? `${fresh}; merge it yourself (solo mode) — CI records the merge as the new review (CI must run this yadflow release or later; if that run failed, run it again: \`yad gate ci --branch review/${FOUNDATION_EPIC}/foundation --pr <n> --merged\`)`
+    ? `${fresh}; merge it yourself (solo mode) — CI records the merge as the new review (CI must run this yadflow release or later; if that run failed, run it again: \`yad gate ci --branch review/${FOUNDATION_EPIC}/${artifactBase(artifact)} --pr <n> --merged\`)`
     : `${fresh}; merge it yourself (solo mode), then \`yad gate sync ${FOUNDATION_EPIC}\` records the merge as the new review`;
 }
 

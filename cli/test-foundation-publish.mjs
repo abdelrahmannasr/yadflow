@@ -276,6 +276,14 @@ const captureJSON = async (fn) => {
   try { await fn(); } finally { process.stdout.write = orig; }
   return JSON.parse(lines.join(''));
 };
+const said = async (fn) => {
+  const out = [];
+  const keep = { log: console.log, error: console.error };
+  console.log = (...a) => out.push(a.join(' '));
+  console.error = (...a) => out.push(a.join(' '));
+  try { await fn(); } finally { console.log = keep.log; console.error = keep.error; }
+  return out.join('\n');
+};
 const publishes = async (T) => { const f = fake(); await P.runFoundationPublish(T, { env, runner: f.runner }); const n = f.created.length; reset(); return n > 0; };
 const refusal = async (T) => { const f = fake(); const doc = await captureJSON(() => P.runFoundationPublish(T, { json: true, env, runner: f.runner })); reset(); return doc; };
 const { artifactHash: hashOf } = await import('./epic-state.mjs');
@@ -380,7 +388,7 @@ test('a solo Product that moved platform: numbering starts again, and a lower MR
   assert.deepEqual(state.steps[0].rereviews.map((r) => [r.platform, r.pr]), [['github', 41], ['gitlab', 2]]);
 });
 
-test('after a solo re-review, `yad next`, `yad status` and `yad doctor` stop saying the Foundation changed', async () => {
+test('after a solo re-review, doneStepUnapproved — the check `yad next`, `yad status` and `yad doctor` share — stops saying the Foundation changed', async () => {
   const { T, sp, reviewId } = await changedFoundation({ solo: true });
   fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: reviewId, status: 'approved', approver: 'bob', artifactHash: 'sha256:old' }]));
   const { doneStepUnapproved } = await import('./epic-state.mjs');
@@ -402,15 +410,12 @@ test('a verified solo Product: a failed read of what the fresh PR/MR merged fail
   const git = (...a) => execFileSync('git', a, { cwd: T, stdio: 'pipe' });
   git('init', '-q'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 'x'); git('add', '-A'); git('commit', '-q', '-m', 'seed');
   const { gateCi } = await import('./gate.mjs');
-  const errs = [];
-  const orig = console.error;
-  console.error = (...a) => errs.push(a.join(' '));
-  try {
-    await gateCi(T, { branch: 'review/EP-foundation/foundation', pr: 9, merged: true, today: '2026-11-12', push: false, reader: mergedPr(),
-      branchOf: () => ({ ok: false, reason: 'not asked in tests' }), contentAt: () => ({ ok: false, reason: 'shallow clone' }) });
-  } finally { console.error = orig; }
+  const errs = await said(() => gateCi(T, { branch: 'review/EP-foundation/foundation', pr: 9, merged: true, today: '2026-11-12', push: false, reader: mergedPr(),
+    branchOf: () => ({ ok: false, reason: 'not asked in tests' }), contentAt: () => ({ ok: false, reason: 'shallow clone' }) }));
   assert.equal(process.exitCode, 1, 'the run goes red');
   reset();
+  assert.match(errs, /could not read what PR #9 merged \(shallow clone\)/);
+  assert.match(errs, /yad gate ci --branch review\/EP-foundation\/foundation --pr 9 --merged/);
   assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId).rereviews, undefined);
 });
 
@@ -485,6 +490,45 @@ test('a verified solo Product: CI at the merge records the solo re-review, and p
   assert.equal(review.rereviews?.length, 1);
   assert.equal(review.closed.hash, 'sha256:old');
   assert.equal(await publishes(T), true);
+});
+
+test('a failed read of a merge already on file, or on a read-only run, stays a warning: the run is not failed', async () => {
+  const { gateSync } = await import('./gate.mjs');
+  // The first close's own PR, read again by a later sync: nothing new could be recorded.
+  {
+    const { T } = await changedFoundation({ solo: true });
+    fs.writeFileSync(path.join(T, 'foundation/.sdlc/product-prs.json'),
+      JSON.stringify([{ step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 3, branch: 'review/EP-foundation/foundation', lastSyncedAt: null }]));
+    const out = await said(() => gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr(), contentAt: () => ({ ok: false, reason: 'shallow clone' }) }));
+    assert.equal(process.exitCode || 0, 0, out); reset();
+    assert.match(out, /a later sweep tries again/);
+  }
+  // A fresh merge, but on a verified ledger's advisory local sync, which writes nothing.
+  {
+    const { T, reviewId } = await changedFoundation({ solo: true, ledger: 'verified' });
+    openFresh(T, reviewId, 9);
+    const out = await said(() => gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', local: true, reader: mergedPr(), contentAt: () => ({ ok: false, reason: 'shallow clone' }) }));
+    assert.equal(process.exitCode || 0, 0, out); reset();
+  }
+});
+
+test('the first close\'s PR number on another platform is another PR/MR: its merge commit tells them apart', async () => {
+  const { soloRereviewDue, recordSoloRereview } = await import('./epic-state.mjs');
+  const step = () => ({ id: 'foundation-review', type: 'review+approve', status: 'done', closed: { pr: 3, commit: 'gh-merge' } });
+  assert.equal(soloRereviewDue(step(), { pr: 3, platform: 'github', commit: 'gh-merge' }), false, 'the first close itself');
+  assert.equal(soloRereviewDue(step(), { pr: 3, platform: 'github', commit: null }), false, 'no commit to compare: treated as the first close');
+  const state = { steps: [step()] };
+  assert.equal(recordSoloRereview(state, 'foundation-review', { pr: 3, platform: 'gitlab', commit: 'gl-merge', hash: 'sha256:b' }), true);
+});
+
+test('an old-spelling Foundation review (artifact `discovery/`) is told its own review branch, never `/foundation`', async () => {
+  const { T, sp } = await changedFoundation({ solo: true, ledger: 'verified' });
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  for (const s of st.steps) if (s.artifact === 'foundation/') s.artifact = 'discovery/';
+  const hint = P.foundationReviewAgain(T, { state: st });
+  assert.match(hint, /git switch -C review\/EP-foundation\/discovery /);
+  assert.match(hint, /yad gate ci --branch review\/EP-foundation\/discovery --pr <n> --merged/);
+  assert.doesNotMatch(hint, /review\/EP-foundation\/foundation/);
 });
 
 test('E174 review 2: a near-miss parked heading is published and said', () => {

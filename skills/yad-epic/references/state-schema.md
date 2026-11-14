@@ -414,12 +414,15 @@ human decision, so the merge of a fresh review PR/MR of the Foundation is added 
 - `hash` is the content at the PR/MR's approved head, never the default branch's: an edit merged after it
   is not covered.
 - An entry covers only the content it merged, so adding one never covers more than was reviewed. To
-  keep the list short, the PR/MR of the first close is not added again, and a PR/MR is added only when it
+  keep the list short, the PR/MR of the first close is not added again (told apart by its merge commit when
+  both are known, since `closed` records no platform), and a PR/MR is added only when it
   is newer than every earlier entry **from the same platform** (a Product that moved from GitHub to
   GitLab numbers again from 1). So a re-sync of the same or an older merge writes nothing.
 - On a verified Product only the run a merge triggers records it (the scheduled sweep reads no passed
-  step). If that run cannot read what the PR/MR merged, it fails, and names
-  `yad gate ci --branch review/EP-foundation/foundation --pr <n> --merged` to run again.
+  step). If that run cannot read what a merge still waiting to be recorded merged, it fails, and names
+  `yad gate ci --branch review/EP-foundation/<artifact> --pr <n> --merged` to run again (`foundation`, or
+  `discovery` on a review step that kept the old spelling). A merge already on file, or a read-only run,
+  only warns.
 - `yad next`, `yad status` and `yad doctor` read it too, so they stop reporting the Foundation as
   changed once a re-review covers it.
 - `yad foundation publish` and `yad foundation status` read it first: when an entry's `hash` is the

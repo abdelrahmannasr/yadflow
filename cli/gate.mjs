@@ -14,7 +14,7 @@ import {
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
-  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards, recordSoloRereview,
+  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards, recordSoloRereview, soloRereviewDue,
   reopenStep, retiredPr, epicLineage, heldByReopen, reopenStampDue, stampPassed, isGateStep,
 } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
@@ -823,11 +823,14 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // New approvals bind to what the review approved (#366); see headContentHash. Unknown is never
     // taken as approved: nothing is bound, and the run goes red so CI tries again.
     const at = approvedContent(contentAt, { root, epic, epicDir, artifact: pr.artifact, platform, number: pr.number, headOid: pull.headOid });
-    if (!at?.ok && alreadyDone && solo && epic === FOUNDATION_EPIC && pull.merged) {
-      // A solo Foundation's fresh review merged, and this run is the only one that records it: the sweep
-      // never reads a passed step. So the read failing is a failed run, as for an open step, never a warning.
+    if (!at?.ok && alreadyDone && !readOnly && solo && epic === FOUNDATION_EPIC && pull.merged
+      && soloRereviewDue(step, { pr: Number(pr.number), platform, commit: pull.mergeCommit || null })) {
+      // A solo Foundation's fresh review merged and is still waiting to be recorded, and this run is the only
+      // one that records it: the sweep never reads a passed step. So the read failing is a failed run, as for
+      // an open step. A merge already on file (the first close, an earlier re-review) keeps the warning below,
+      // and so does a read-only run, which could not record it anyway.
       fail(`${pr.artifact}: could not read what PR #${pr.number} merged (${at?.reason || 'no answer'}) — the Foundation's solo re-review was not recorded`);
-      hand(`run it again with the full history (fetch-depth: 0, or GIT_DEPTH: "0"), able to fetch the PR/MR: \`yad gate ci --branch review/${FOUNDATION_EPIC}/foundation --pr ${pr.number} --merged\` in CI, or \`yad gate sync ${FOUNDATION_EPIC}\` on a local ledger`);
+      hand(`run it again with the full history (fetch-depth: 0, or GIT_DEPTH: "0"), able to fetch the PR/MR: \`yad gate ci --branch review/${FOUNDATION_EPIC}/${artifactBase(step.artifact)} --pr ${pr.number} --merged\` in CI, or \`yad gate sync ${FOUNDATION_EPIC}\` on a local ledger`);
       process.exitCode = 1;
       continue;
     }
