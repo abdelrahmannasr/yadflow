@@ -335,3 +335,19 @@ test('review 3: a young lock yad cannot judge is waited on, never taken; a lock 
     assert.deepEqual(fs.readdirSync(ws).filter((n) => /\.(new|stale)$/.test(n)), [], 'no temp lock files left');
   } finally { done(ws); }
 });
+
+test('review 4: on a disk with no hard links the lock falls back to a plain create, and the catalog still updates', () => {
+  const { ws, root } = product();
+  const link = fs.linkSync;
+  fs.linkSync = () => { const e = new Error('operation not permitted'); e.code = 'EPERM'; throw e; };
+  try {
+    saveReport(root, { kind: 'usage', scope: 'team', state: 'a', ext: 'md', content: 'x', at: AT, env: noEnv });
+    const b = saveReport(root, { kind: 'usage', scope: 'team', state: 'b', ext: 'md', content: 'y', at: AT, env: noEnv });
+    assert.deepEqual(b.warnings, []);
+    const dir = path.join(ws, 'product--reports');
+    assert.equal(readCatalog(dir).entries.length, 2);
+    assert.equal(fs.existsSync(path.join(dir, 'catalog.lock')), false);
+    assert.deepEqual(fs.readdirSync(dir).filter((n) => /\.(new|stale)$/.test(n)), [], 'no temp lock file left');
+    assert.equal(pruneReports(root, { days: 0, now: AT.getTime() + 864e5, apply: true, env: noEnv }).removed.length, 2, 'prune works there too');
+  } finally { fs.linkSync = link; done(ws); }
+});

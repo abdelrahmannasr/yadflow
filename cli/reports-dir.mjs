@@ -137,10 +137,21 @@ function lockStale(held, age) {
   const m = LOCK_RE.exec(String(held));
   return !!m && !alive(Number(m[1]));
 }
+// A disk with no hard links (FAT, exFAT, some network shares) says so with one of these; there the lock is
+// made with a plain exclusive create, which brings back the small "empty for an instant" window — a young
+// lock yad cannot judge is waited on, never taken over, so that window costs a wait, not an entry.
+const NO_LINKS = new Set(['EPERM', 'ENOTSUP', 'ENOSYS', 'EXDEV', 'EOPNOTSUPP']);
 function tryLock(lock, token) {
   const tmp = `${lock}.${randomBytes(6).toString('hex')}.new`;
-  fs.writeFileSync(tmp, token, { flag: 'wx' });
-  try { fs.linkSync(tmp, lock); return true; } catch (e) { if (e.code === 'EEXIST') return false; throw e; } finally { fs.rmSync(tmp, { force: true }); }
+  try {
+    fs.writeFileSync(tmp, token, { flag: 'wx' });
+    fs.linkSync(tmp, lock);
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    if (!NO_LINKS.has(e.code)) throw e;
+    try { fs.writeFileSync(lock, token, { flag: 'wx' }); return true; } catch (e2) { if (e2.code === 'EEXIST') return false; throw e2; }
+  } finally { fs.rmSync(tmp, { force: true }); }
 }
 export function withCatalogLock(dir, fn, { waitMs = 5000 } = {}) {
   const lock = path.join(dir, LOCK_FILE);
