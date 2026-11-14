@@ -724,7 +724,8 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
   assert.match(brainBlockLines('yad-stories').join('\n'), /ask the person before you write it.*Step 7 report/);
   for (const s of ['yad-architecture', 'yad-stories']) assert.match(brainBlockLines(s).join('\n'), /repos: \[\.\.\.\], loaded: <date>, stale: true, brain: <state>/);
   assert.match(brainBlockLines('yad-spec').join('\n'), /touches the contract surface ends the light spec: it must be redone as a full spec/);
-  assert.match(brainBlockLines('yad-spec').join('\n'), /`high` is the person's choice.*do not write `link\.md`/);
+  assert.match(brainBlockLines('yad-spec').join('\n'), /Never write the light spec's `link\.md` \(Step 6\) for it, whatever the answer/);
+  assert.match(brainBlockLines('yad-spec').join('\n'), /`high` is the person's choice.*until they answer, do not write `link\.md`.*- Q: the brain added a high-risk file/);
   assert.match(brainBlockLines('yad-spec').join('\n'), /`tasks` leg, which writes nothing, only report/);
   // yad-spec's block comes after its tasks are written (Step 5), not before.
   const spec = fs.readFileSync(path.join(SKILLS, 'yad-spec', 'SKILL.md'), 'utf8');
