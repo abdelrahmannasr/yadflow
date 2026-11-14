@@ -162,9 +162,10 @@ test('prune is a dry run until --apply, and only ever deletes what the catalog l
     fs.writeFileSync(path.join(dir, CATALOG_FILE), JSON.stringify(cat));
     const now = AT.getTime() + 864e5;
     const dry = pruneReports(root, { days: 30, now, env: noEnv });
-    assert.deepEqual(dry.removed.map((e) => e.file).sort(), ['../keep-me.txt', path.posix.join('usage', path.basename(old.file))].sort());
+    assert.deepEqual(dry.removed.map((e) => [e.file, e.reason]).sort(), [['../keep-me.txt', 'outside'], [path.posix.join('usage', path.basename(old.file)), 'old']].sort());
     assert.ok(fs.existsSync(old.file), 'a dry run deletes nothing');
-    pruneReports(root, { days: 30, now, apply: true, env: noEnv });
+    const applied = pruneReports(root, { days: 30, now, apply: true, env: noEnv });
+    assert.equal(applied.removed.find((e) => e.reason === 'old').file, path.posix.join('usage', path.basename(old.file)), 'review 1: the reason is decided before the delete, so a removed file reads "old"');
     assert.equal(fs.existsSync(old.file), false);
     assert.ok(fs.existsSync(recent.file));
     assert.equal(fs.readFileSync(outside, 'utf8'), 'keep', 'a path that leaves the folder is dropped from the catalog, never deleted');
@@ -224,7 +225,73 @@ test('yad reports runs from the CLI, and agents may list but must be asked to de
     assert.equal(out.command, 'reports list');
     assert.deepEqual(out.entries, []);
     assert.equal(classify(['reports', 'list']), 'read');
-    assert.equal(classify(['reports', 'prune']), 'local-write');
+    assert.equal(classify(['reports', 'prune']), 'read', 'a dry run');
     assert.equal(classify(['reports', 'prune'], ['apply']), 'on-request');
+  } finally { done(ws); }
+});
+
+test('review 1: a linked kind folder, a linked reports folder or a bare file name never lets prune, list or open leave the folder', () => {
+  const { ws, root } = product();
+  try {
+    const dir = path.join(ws, 'product--reports');
+    saveReport(root, { kind: 'usage', scope: 'team', state: 's', ext: 'md', content: 'x', at: AT, env: noEnv });
+    const outside = path.join(ws, 'outside');
+    put(path.join(outside, 'keep.txt'), 'keep');
+    fs.symlinkSync(outside, path.join(dir, 'standup'));
+    const cat = JSON.parse(fs.readFileSync(path.join(dir, CATALOG_FILE), 'utf8'));
+    cat.entries.push({ file: 'standup/keep.txt', kind: 'standup', scope: 'x', state: 'x', createdAt: '2000-01-01T00:00:00.000Z' });
+    cat.entries.push({ file: '.gitignore', kind: 'usage', scope: 'x', state: 'x', createdAt: '2000-01-01T00:00:00.000Z' });
+    cat.entries.push({ file: 'catalog.json', kind: 'usage', scope: 'x', state: 'x', createdAt: '2000-01-01T00:00:00.000Z' });
+    fs.writeFileSync(path.join(dir, CATALOG_FILE), JSON.stringify(cat));
+    const listed = listReports(root, { env: noEnv }).entries;
+    assert.equal(listed.find((e) => e.file === 'standup/keep.txt').present, false, 'a file through a linked folder is not "present"');
+    const r = pruneReports(root, { days: 1, now: AT.getTime() + 864e5, apply: true, env: noEnv });
+    assert.deepEqual(r.removed.map((e) => e.reason).sort(), ['outside', 'outside', 'outside']);
+    assert.equal(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8'), 'keep', 'never deleted through the link');
+    assert.ok(fs.existsSync(path.join(dir, '.gitignore')), 'the folder\'s own files are never pruned');
+    assert.equal(readCatalog(dir).entries.length, 1);
+    // The reports folder itself a link: said, and nothing read or changed through it.
+    const real = path.join(ws, 'real-reports');
+    fs.mkdirSync(real);
+    const env = { [REPORTS_ENV]: path.join(ws, 'linked-reports') };
+    fs.symlinkSync(real, env[REPORTS_ENV]);
+    assert.match(listReports(root, { env }).problem, /not a plain folder/);
+    assert.match(pruneReports(root, { days: 0, apply: true, env }).problem, /not a plain folder/);
+    assert.match(saveReport(root, { kind: 'usage', scope: 't', state: 's', ext: 'md', content: 'x', env }).problem, /not a plain folder/);
+  } finally { done(ws); }
+});
+
+test('review 1: a folder that cannot be written is a refusal with the way out, never a crash', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
+  const { ws, root } = product();
+  try {
+    const locked = path.join(ws, 'locked');
+    fs.mkdirSync(locked);
+    fs.chmodSync(locked, 0o500);
+    const r = saveReport(root, { kind: 'usage', scope: 't', state: 's', ext: 'md', content: 'x', env: { [REPORTS_ENV]: path.join(locked, 'reports') } });
+    assert.match(r.problem, /cannot save the report .* set YAD_REPORTS_DIR .* or pass --out/);
+    fs.chmodSync(locked, 0o700);
+  } finally { done(ws); }
+});
+
+test('review 1: a name already taken is never overwritten, and a held catalog lock waits, then is said', () => {
+  const { ws, root } = product();
+  try {
+    const dir = path.join(ws, 'product--reports');
+    const a = saveReport(root, { kind: 'usage', scope: 'team', state: 's', ext: 'md', content: 'first', at: AT, env: noEnv });
+    const b = saveReport(root, { kind: 'usage', scope: 'team', state: 's', ext: 'md', content: 'second', at: AT, env: noEnv });
+    assert.equal(fs.readFileSync(a.file, 'utf8'), 'first');
+    assert.equal(fs.readFileSync(b.file, 'utf8'), 'second');
+    // A fresh lock held by another run: the report is saved, the catalog is left, and the lock is named.
+    fs.writeFileSync(path.join(dir, 'catalog.lock'), '1');
+    const held = saveReport(root, { kind: 'usage', scope: 'team', state: 'held', ext: 'md', content: 'x', at: AT, env: noEnv });
+    assert.ok(fs.existsSync(held.file));
+    assert.match(held.warnings[0], /catalog\.lock is held by another yad run/);
+    assert.equal(readCatalog(dir).entries.length, 2);
+    // An old lock (a killed run) is taken over.
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(path.join(dir, 'catalog.lock'), old, old);
+    saveReport(root, { kind: 'usage', scope: 'team', state: 'after', ext: 'md', content: 'x', at: AT, env: noEnv });
+    assert.equal(readCatalog(dir).entries.length, 3);
+    assert.equal(fs.existsSync(path.join(dir, 'catalog.lock')), false);
   } finally { done(ws); }
 });

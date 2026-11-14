@@ -2411,18 +2411,31 @@ yad reports prune --older-than 30 --apply
 
 **Fresh or stale.** The catalog records the Product commit each report was made at. A report is **stale**
 when the Product's `epics/` or `.sdlc/` changed in a commit since then. Changes not yet committed do not count.
-Run the command again for a current one.
+The comparison is with the commit of the checkout you run `yad reports` in, so a worktree on another branch
+answers for that branch. Run the command again for a current one.
 
-**Safety.** The catalog is read strictly: a broken `catalog.json` is never overwritten. The report is still
-saved, and yad names the problem. `prune` deletes only files the catalog lists inside the folder. A catalog
-path that leads out of the folder is dropped from the list and never deleted. `prune --apply` deletes, so an
-agent runs it only when you ask.
+**Safety.**
+
+- The catalog is read strictly: a broken `catalog.json` is never overwritten. The report is still saved, and
+  yad names the problem.
+- Two runs at the same moment never write the same file (each name is taken with an exclusive create), and
+  `catalog.lock` keeps them from losing a catalog entry. A lock left by a killed run is taken over after 30 s.
+- A folder yad cannot write is a refusal that says what to do (`YAD_REPORTS_DIR` or `--out`), never a crash.
+- `prune` deletes only a catalog entry of the exact shape `<kind>/<file name>`, in a kind folder that is a
+  real folder inside the reports folder. A path that leads out of it, a linked kind folder, or one of the
+  folder's own files (`.gitignore`, `catalog.json`) is dropped from the list with the reason `outside`, and
+  never deleted. A reports folder that is itself a link is refused.
+- `prune` alone is a dry run (an agent may run it); `prune --apply` deletes, so an agent runs it only when
+  you ask.
+
+`yad usage --json` with no `--out` prints its answer and saves no file, as before; `--format html|md` without
+`--json` saves the report.
 
 | `--json` | Keys |
 |---|---|
 | `reports list` | `dir`, `via` (`env` or `beside`), `entries[{n, file, kind, scope, state, createdAt, productSha, productBranch, anonymous, command, present, freshness}]` — `freshness` is `fresh`, `stale` or `unknown` |
 | `reports open` | `file`, `opened` (`false` when no browser opener was found), `freshness` |
-| `reports prune` | `dir`, `applied`, `removed[{file, createdAt, reason}]` (`reason` is `old` or `missing`), `kept` |
+| `reports prune` | `dir`, `applied`, `removed[{file, createdAt, reason}]` (`reason` is `old`, `missing` or `outside`), `kept` |
 
 ## Work-item history: `yad history`
 

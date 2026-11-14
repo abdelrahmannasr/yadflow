@@ -103,12 +103,34 @@ export function reportName({ kind, scope, state, at = new Date(), ext }) {
   return `${stamp(at)}--${kind}--${slug(scope, 40)}--${slug(state, 40)}.${ext}`;
 }
 
-// A free name in `dir`: `name`, else `name-2`, `name-3`… before the extension.
-function freeName(dir, name) {
-  if (!fs.existsSync(path.join(dir, name))) return name;
+// Write `content` as a NEW file in `dir`: `name`, else `name-2`, `name-3`… before the extension. Each name
+// is taken with an exclusive create (`wx`), so two runs at the same moment never write the same file.
+function writeFresh(dir, name, content) {
   const dot = name.lastIndexOf('.');
   const [base, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
-  for (let i = 2; ; i++) { const n = `${base}-${i}${ext}`; if (!fs.existsSync(path.join(dir, n))) return n; }
+  for (let i = 1; i < 1000; i++) {
+    const n = i === 1 ? name : `${base}-${i}${ext}`;
+    try { fs.writeFileSync(path.join(dir, n), content, { flag: 'wx' }); return n; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+  throw new Error(`no free name for ${name} in ${dir}`);
+}
+
+// Hold `catalog.lock` while the catalog is read, changed and written, so a run at the same moment never
+// loses an entry. A lock older than 30 s was left by a killed run and is taken over.
+const LOCK_FILE = 'catalog.lock';
+function withCatalogLock(dir, fn) {
+  const lock = path.join(dir, LOCK_FILE);
+  const until = Date.now() + 5000;
+  for (;;) {
+    try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let age; try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
+      if (age > 30000) { fs.rmSync(lock, { force: true }); continue; }
+      if (Date.now() > until) return { problem: `${lock} is held by another yad run — try again, or remove it if no yad is running` };
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try { return fn(); } finally { fs.rmSync(lock, { force: true }); }
 }
 
 // Make `dir` (and its parents), refusing a path that exists and is not a plain folder.
@@ -148,6 +170,8 @@ export function readCatalog(dir) {
   return { entries: rec.entries.filter((e) => e && typeof e.file === 'string') };
 }
 
+// The local date and time a report was made, as its file name spells it (`2026-11-14 09:05`).
+const madeAt = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? stamp(d).replace(/^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})$/, '$1 $2:$3') : '—'; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 // The catalog page. Static: no script, no network; links are relative, so the folder can be moved.
@@ -155,8 +179,8 @@ export function renderIndex(entries) {
   const kinds = [...new Set(entries.map((e) => e.kind))].sort((a, b) => (KINDS[a] || a).localeCompare(KINDS[b] || b));
   const section = (k) => {
     const rows = entries.filter((e) => e.kind === k).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    return `<h2>${esc(KINDS[k] || k)} <small>${rows.length}</small></h2>\n<table><tr><th>Report</th><th>Scope</th><th>State</th><th>Made</th><th>Product at</th></tr>\n${rows.map((e) =>
-      `<tr><td><a href="${esc(e.file.split('/').map(encodeURIComponent).join('/'))}">${esc(path.posix.basename(e.file))}</a>${e.anonymous ? ' <span class="tag">anonymous</span>' : ''}</td><td>${esc(e.scope)}</td><td>${esc(e.state)}</td><td>${esc(String(e.createdAt).replace('T', ' ').slice(0, 16))}</td><td><code>${esc(e.productSha ? e.productSha.slice(0, 10) : '—')}</code> ${esc(e.productBranch || '')}</td></tr>`).join('\n')}\n</table>`;
+    return `<h2>${esc(KINDS[k] || k)} <small>${rows.length}</small></h2>\n<table><tr><th>Report</th><th>Scope</th><th>State</th><th>Made (local time)</th><th>Product at</th></tr>\n${rows.map((e) =>
+      `<tr><td><a href="${esc(e.file.split('/').map(encodeURIComponent).join('/'))}">${esc(path.posix.basename(e.file))}</a>${e.anonymous ? ' <span class="tag">anonymous</span>' : ''}</td><td>${esc(e.scope)}</td><td>${esc(e.state)}</td><td>${esc(madeAt(e.createdAt))}</td><td><code>${esc(e.productSha ? e.productSha.slice(0, 10) : '—')}</code> ${esc(e.productBranch || '')}</td></tr>`).join('\n')}\n</table>`;
   };
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -192,21 +216,29 @@ function productAt(root, runner) {
 export function saveReport(root, { kind, scope, state, ext, content, command = null, anonymous = false, at = new Date(), env = process.env, runner = spawnSync } = {}) {
   const { dir } = reportsDir(root, { env, runner });
   const sub = path.join(dir, kind);
-  const problem = ownDir(dir) || ownDir(sub);
-  if (problem) return { problem };
-  ensureIgnored(dir);
-  const name = freeName(sub, reportName({ kind, scope, state, at, ext }));
-  const file = path.join(sub, name);
-  writeNew(file, content);
+  // A folder that cannot be made or written (a read-only parent, say) is a refusal, never a crash.
+  const cannot = (e) => ({ problem: `cannot save the report in ${dir} (${e.code || e.message}) — set ${REPORTS_ENV} to a folder you can write, or pass --out <file>` });
+  let file, name;
+  try {
+    const problem = ownDir(dir) || ownDir(sub);
+    if (problem) return { problem };
+    ensureIgnored(dir);
+    name = writeFresh(sub, reportName({ kind, scope, state, at, ext }), content);
+    file = path.join(sub, name);
+  } catch (e) { return cannot(e); }
   const warnings = [];
-  const cat = readCatalog(dir);
-  if (cat.problem) warnings.push(cat.problem);
-  else {
-    const entry = { file: `${kind}/${name}`, kind, scope: String(scope ?? ''), state: String(state ?? ''), createdAt: at.toISOString(), ...productAt(root, runner), anonymous: !!anonymous, command };
-    const entries = [...cat.entries, entry];
-    writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries });
-    writeNew(path.join(dir, INDEX_FILE), renderIndex(entries));
-  }
+  try {
+    const done = withCatalogLock(dir, () => {
+      const cat = readCatalog(dir);
+      if (cat.problem) return cat;
+      const entry = { file: `${kind}/${name}`, kind, scope: String(scope ?? ''), state: String(state ?? ''), createdAt: at.toISOString(), ...productAt(root, runner), anonymous: !!anonymous, command };
+      const entries = [...cat.entries, entry];
+      writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries });
+      writeNew(path.join(dir, INDEX_FILE), renderIndex(entries));
+      return {};
+    });
+    if (done.problem) warnings.push(done.problem);
+  } catch (e) { warnings.push(`the report was saved, but the catalog was not updated (${e.code || e.message})`); }
   return { file, dir, name, warnings };
 }
 
@@ -223,43 +255,70 @@ export function freshness(root, sha, { runner = spawnSync } = {}) {
 export function listReports(root, { env = process.env, runner = spawnSync } = {}) {
   const { dir, via } = reportsDir(root, { env, runner });
   if (!fs.existsSync(dir)) return { dir, via, entries: [] };
+  const linked = linkedDir(dir);
+  if (linked) return { dir, via, problem: linked };
   const cat = readCatalog(dir);
   if (cat.problem) return { dir, via, problem: cat.problem };
+  const seen = new Map();   // one git run per commit, however many reports were made at it
+  const fresh = (sha) => { if (!seen.has(sha)) seen.set(sha, freshness(root, sha, { runner })); return seen.get(sha); };
   const entries = [...cat.entries]
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-    .map((e, i) => ({ n: i + 1, ...e, present: insideDir(dir, e.file) && fs.existsSync(path.join(dir, e.file)), freshness: freshness(root, e.productSha, { runner }) }));
+    .map((e, i) => ({ n: i + 1, ...e, present: insideDir(dir, e.file) && fs.existsSync(path.join(dir, e.file)), freshness: fresh(e.productSha) }));
   return { dir, via, entries };
 }
 
-// A catalog path must stay inside the folder: a hand-edited `../x` is never opened or deleted.
+// A catalog path must be exactly `<kind>/<file name>`, with the kind folder a plain folder (not a link)
+// inside the real reports folder: a hand-edited `../x`, `.gitignore` or a linked kind folder is never
+// opened or deleted.
+const NAME_RE = /^[a-z0-9][a-z0-9-]*\.[a-z0-9]{1,8}$/;
 function insideDir(dir, rel) {
-  if (typeof rel !== 'string' || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) return false;
-  const full = path.resolve(dir, rel);
-  return full.startsWith(path.resolve(dir) + path.sep);
+  if (typeof rel !== 'string') return false;
+  const parts = rel.split('/');
+  if (parts.length !== 2 || !Object.hasOwn(KINDS, parts[0]) || !NAME_RE.test(parts[1])) return false;
+  const sub = path.join(dir, parts[0]);
+  let st; try { st = fs.lstatSync(sub); } catch { return false; }
+  if (!st.isDirectory()) return false;
+  try { return fs.realpathSync(sub) === path.join(fs.realpathSync(dir), parts[0]); } catch { return false; }
+}
+
+// The folder itself must be a plain folder: a link there is said, never followed for a delete.
+function linkedDir(dir) {
+  let st; try { st = fs.lstatSync(dir); } catch { return null; }
+  return st.isDirectory() ? null : `${dir} is not a plain folder (a link or a file) — yad does not read or change it; set ${REPORTS_ENV} to a real folder`;
 }
 
 // The entries `prune` would remove: older than `days`, or whose file is gone.
 export function pruneReports(root, { days, apply = false, now = Date.now(), env = process.env, runner = spawnSync } = {}) {
   const { dir } = reportsDir(root, { env, runner });
   if (!fs.existsSync(dir)) return { dir, removed: [], kept: 0 };
-  const cat = readCatalog(dir);
-  if (cat.problem) return { dir, problem: cat.problem };
-  const cut = now - days * 864e5;
-  const old = (e) => { const t = Date.parse(e.createdAt); return Number.isFinite(t) && t < cut; };
-  const gone = (e) => !insideDir(dir, e.file) || !fs.existsSync(path.join(dir, e.file));
-  const removed = cat.entries.filter((e) => old(e) || gone(e));
-  const kept = cat.entries.filter((e) => !removed.includes(e));
-  if (apply && removed.length) {
-    for (const e of removed) {
-      if (!insideDir(dir, e.file)) continue;
+  const linked = linkedDir(dir);
+  if (linked) return { dir, problem: linked };
+  const plan = () => {
+    const cat = readCatalog(dir);
+    if (cat.problem) return { problem: cat.problem };
+    const cut = now - days * 864e5;
+    const old = (e) => { const t = Date.parse(e.createdAt); return Number.isFinite(t) && t < cut; };
+    // The reason is decided BEFORE anything is deleted.
+    const marked = cat.entries.map((e) => ({ e, reason: !insideDir(dir, e.file) ? 'outside' : !fs.existsSync(path.join(dir, e.file)) ? 'missing' : old(e) ? 'old' : null }));
+    return { removed: marked.filter((m) => m.reason), kept: marked.filter((m) => !m.reason).map((m) => m.e) };
+  };
+  const act = () => {
+    const p = plan();
+    if (p.problem || !apply || !p.removed.length) return p;
+    for (const { e, reason } of p.removed) {
+      if (reason !== 'old') continue;                    // only a file proved inside the folder is deleted
       const f = path.join(dir, e.file);
       let st = null; try { st = fs.lstatSync(f); } catch { /* already gone */ }
       if (st && (st.isFile() || st.isSymbolicLink())) fs.rmSync(f, { force: true });
     }
-    writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries: kept });
-    writeNew(path.join(dir, INDEX_FILE), renderIndex(kept));
-  }
-  return { dir, removed: removed.map((e) => ({ file: e.file, createdAt: e.createdAt, reason: gone(e) ? 'missing' : 'old' })), kept: kept.length };
+    writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries: p.kept });
+    writeNew(path.join(dir, INDEX_FILE), renderIndex(p.kept));
+    return p;
+  };
+  let r;
+  try { r = apply ? withCatalogLock(dir, act) : plan(); } catch (e) { return { dir, problem: `cannot change ${dir} (${e.code || e.message})` }; }
+  if (r.problem) return { dir, problem: r.problem };
+  return { dir, removed: r.removed.map(({ e, reason }) => ({ file: e.file, createdAt: e.createdAt, reason })), kept: r.kept.length };
 }
 
 // A command's report: to `out` when the person named a file (exactly as before E180, no catalog), else

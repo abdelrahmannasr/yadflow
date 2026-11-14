@@ -9,7 +9,7 @@
 //   - a GitLab confidential item keeps its number and facts, and its title is never read into the model.
 // Status is worked out from facts (open or closed, and later the linked epic). A `status:` label is never read.
 import fs from 'node:fs';
-import { run, readJSON, forTerminal, c, log, fail, hand, info, note } from './lib.mjs';
+import { run, readJSON, forTerminal, c, log, fail, hand, info, note, warn } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { platformLogin } from './platform.mjs';
 import { readMembers, productIdentity } from './members.mjs';
@@ -439,7 +439,7 @@ export async function runIssuesList(root, { priority = null, type = null, status
     const scope = repo ? list(repo).join(' ') : 'all repos';
     const saved = writeOrSave(root, { out, kind: 'issues', scope, state: `${items.length} items`, ext: format, content: format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules), command: 'issues list', env });
     if (saved.problem) return refuse(saved.problem);
-    for (const w of saved.warnings) note(c.yellow(w));
+    for (const w of saved.warnings) warn(w);
     const dest = saved.file;
     if (json) note(`wrote ${format.toUpperCase()} report → ${dest}`); else info(`wrote ${format.toUpperCase()} report → ${c.bold(dest)}`);
     for (const g of gaps(model)) if (!json) note(c.yellow(g));

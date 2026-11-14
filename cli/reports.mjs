@@ -53,7 +53,7 @@ export async function runReports(root, { action = 'list', args = [], olderThan =
     if (json) return emitJSON({ dir: r.dir, applied: !!apply, removed: r.removed, kept: r.kept });
     log(c.bold(`\nyad reports prune${apply ? '' : ' (dry run)'}`));
     if (!r.removed.length) { info(`nothing older than ${days} day(s) — ${r.kept} kept`); return r; }
-    for (const e of r.removed) log(`  ${apply ? c.red('removed') : 'would remove'}  ${forTerminal(e.file)}${e.reason === 'missing' ? c.dim(' (file already gone)') : ''}`);
+    for (const e of r.removed) log(`  ${apply ? c.red('removed') : 'would remove'}  ${forTerminal(e.file)}${e.reason === 'missing' ? c.dim(' (file already gone)') : e.reason === 'outside' ? c.dim(' (not a report path inside the folder — only dropped from the catalog)') : ''}`);
     if (apply) ok(`removed ${r.removed.length}, kept ${r.kept}`);
     else info(`nothing was deleted — add --apply to remove these ${r.removed.length}`);
     return r;

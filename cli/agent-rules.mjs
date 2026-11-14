@@ -175,11 +175,11 @@ export const COMMAND_CLASS = {
   'worktree list': { class: 'read' },
   'worktree remove': { class: 'local-write' },
   standup: { class: 'read' },
-  // E180: the local reports folder. `list` reads; `open` starts the browser; `prune --apply` deletes saved
-  // reports, so only when the person asks.
+  // E180: the local reports folder. `list` reads; `open` starts the browser; `prune` alone is a dry run, and
+  // `prune --apply` deletes saved reports, so only when the person asks.
   'reports list': { class: 'read' },
   'reports open': { class: 'local-write' },
-  'reports prune': { class: 'local-write', flags: { apply: 'on-request' } },
+  'reports prune': { class: 'read', flags: { apply: 'on-request' } },
   'issues list': { class: 'read' },
   // Adds labels on the team's repos: asked for, never a side effect.
   'issues labels': { class: 'on-request' },
