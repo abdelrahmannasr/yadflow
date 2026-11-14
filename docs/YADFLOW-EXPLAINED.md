@@ -450,6 +450,17 @@ not signed, and would be refused.
   linked change epic (section 11).
 - **Changed since approved.** If a reviewed file changes after its review passed, `yad next`,
   `yad status` and `yad doctor` warn about it. The way out is a fresh review PR.
+- **A changed Foundation.** `yad gate reopen` never takes the Foundation. If the Foundation changes after
+  its review, `yad foundation publish` refuses, and it and `yad foundation status` print the step that
+  clears it for your setup:
+
+  | Setup | What clears it |
+  | --- | --- |
+  | No GitHub or GitLab | The person runs `yad gate approve EP-foundation foundation/ --by <name>`. |
+  | Team mode | A fresh review PR/MR of the Foundation as it stands; its approvals cover it. |
+  | Solo mode | The same fresh PR/MR; its merge covers it. `yad gate sync` (local record) or CI at the merge (verified record) adds the merge to the review step's `rereviews` list. The first approval record is kept. |
+
+  A solo merge covers only what that PR merged: a later edit blocks publish again.
 
 **What the AI may never do.** In Claude Code and Cursor, an **agent guard** hook (a small script the
 assistant runs before each shell command) refuses four kinds of command:
@@ -845,11 +856,13 @@ The usual job titles are useful as **lenses** — a way to see which parts matte
 | `yad fold <epic> <step>` | Ends a writing step with one clean commit of only that step's files. The skills run it for you. |
 | `yad assign <epic> <step> --to <name>` | Names the owner of a writing step ("Bob writes the architecture"). Advice only. `yad owners` lists them. |
 | `yad member add` / `list` / `remove` | One file per person with their GitHub/GitLab accounts and verified emails (stored as fingerprints, not plain text). Gives no access. `list` shows each as active, idle, left or unknown. |
-| `yad standup` | For each member: what they did since the last working day, what they are on now, what is waiting. Rebuilt from git, the records and the platform each time. Facts only. `--me`, `--format html`. |
+| `yad standup` | For each member: what they did since the last working day, what they are on now, what is waiting. Rebuilt from git, the records and the platform each time. Facts only. `--me`, `--format html` (saved in the local reports folder). |
 | `yad status --brief` | Where things stand in about 20 lines — for picking up after a break, or after the AI's memory of the chat was reset. |
 | `yad worktree add <epic> --all` | Gives an epic its own folders beside the Product and each code repo, so AI agents on different epics never share a checkout. `remove` refuses while anything there is unsaved. |
 | `yad usage` | An HTML report of what each member wrote, commented, approved and shipped — for a team lead. |
 | `yad issues` | The team's GitHub issues and GitLab work items, as a list or a sortable HTML page. Items link to epics and update from epic status. |
+| `yad map` | The progress map: everything on its road to Production, with who owns, built, reviewed and approved each part. `--anonymous` for a copy without names. |
+| `yad reports` | The reports saved on this machine (standup, usage, issues, brain view, map), each marked fresh or stale. Never committed. |
 
 A **worktree** is a second working folder for the same git repository, so two pieces of work can be open
 at once without getting in each other's way.
@@ -893,10 +906,10 @@ Run yadflow here: run `npx -y yadflow@4 guide --json` and follow the yad-guide r
 
 | Kind | Examples | The agent… |
 | --- | --- | --- |
-| Read | `next`, `guide`, `status`, `history`, `thread`, `doctor` | runs freely |
-| Writes locally as part of the step | `fold`, `build …`, `commit`, `update` | runs as part of the work |
+| Read | `next`, `guide`, `status`, `history`, `thread`, `doctor`, `reports list` | runs freely |
+| Writes locally as part of the step | `fold`, `build …`, `commit`, `update`, `map`, `reports open` | runs as part of the work |
 | Pushes or posts, then tells you | `capture`, `gate open`, `gate sync`, `gate trailer`, `review nudge`, `member add`, `join`, `update --open-pr`, `scan file` | runs without asking and says what it did |
-| Only if you asked for exactly that | `setup`, `skip`/`defer`, `mode solo\|team`, `kill`, `dial --to`, `skill bind`, `toolbox add`/`remove`, issue writes, `--force` | waits for your request |
+| Only if you asked for exactly that | `setup`, `skip`/`defer`, `mode solo\|team`, `kill`, `dial --to`, `skill bind`, `toolbox add`/`remove`, issue writes, `reports prune --apply`, `--force` | waits for your request |
 | Asks every time | anything that pushes to the default branch (`--push`), `report --post` | asks you first |
 | Task PRs | `open-pr`, `ship` | asks first, unless `yad dial open-pr` is `auto` |
 | **Never** | `gate approve/comment/advance/reopen`, `commit --manual`, approving or merging a PR, `--no-verify`, force push | is blocked by the agent guard (section 6) |
@@ -919,6 +932,17 @@ Because everything is saved, you can ask questions later: "what did we build las
 approved the payments design?", "what is the current truth about checkout?". None of these commands
 changes anything.
 
+Two of them make pictures for people:
+
+- **The progress map** (`yad map`) shows every piece of work on its road to **Production** (the version
+  real users have). Epics, stories, tasks and branches flow through Development toward a glowing core.
+  It also shows who owns, built, reviewed and approved each part. It shows roles, never counts or
+  rankings.
+- **Saved reports** (`yad reports`). A report — the standup, the usage report, the issues page, the
+  brain picture, the progress map — shows the work at one moment and goes out of date as soon as the
+  work moves on. So yadflow keeps every saved report on your own machine, in one folder beside the
+  Product. It never commits or pushes one. `yad reports` lists them and says which are still fresh.
+
 ### How it works (for technical readers)
 
 | Command | Answers |
@@ -932,8 +956,69 @@ changes anything.
 | `yad foundation status` | Each roadmap feature: planned, in shape, in build, or shipped. |
 | `yad issues list` / `show` | The backlog, filtered by priority, type, status, assignee. |
 | `yad docs list` / `build` / `deploy` / `sync` | The generated documentation sites (one per epic, and a project overview). |
+| `yad map` | The progress map: how close each piece of work is to Production, and who did which part. |
+| `yad reports` | The reports saved on this machine, newest first, each marked fresh or stale. |
 
 A **theme** tag in `epic.md` groups related epics; a child epic copies its parent's theme.
+
+**The progress map (`yad map`)**
+
+```bash
+yad map --open                 # a local page, until Ctrl-C
+yad map --html --open          # one file, saved in the local reports folder
+yad map --live --open          # the page draws itself again as the work moves
+yad map --html --anonymous     # a copy with no names, to share outside the team
+yad map --fetch --html         # git fetch first (downloads, never uploads)
+```
+
+| On the map | Means |
+| --- | --- |
+| The glowing core | **Production**: each code repo's Production branch |
+| The ring around it | **Development**: each repo's integration branch, with the commits waiting for release |
+| Pills / big dots / small dots / diamonds | Epics (or groups of branches) / stories / shipped tasks / open branches |
+| Blue / pink / amber / hollow | In Production / merged, waiting for release / in progress / not started |
+| Small grey | A branch with no commits for 60 days that was never merged |
+
+- **People are shown as roles:** owner (from `owner` and `yad assign`), built by (the author of the merged
+  branch, not the person who pressed merge), reviewed by (engineer reviews in the build log) and approved
+  by (the gate approvals). The **People** list lights up one person's work. There is no count, no score
+  and no ranking, and emails are never shown.
+- **Waiting on whom:** an open gate draws a dashed amber ring around the person it waits on — the same
+  rule `yad standup` uses.
+- **What moved:** each map saved with `--html` keeps a small summary beside it, so the next one lights up
+  what changed and says "N moved since <date>".
+- **Sharing:** `--anonymous` turns each name into "Person A", "Person B" and so on, masks branch names that
+  hold a person's name, and drops pull request links. Titles are shown as written, so a title that names
+  someone still shows the name.
+- **Production branch:** set it per repo with `map.production` in `product.json`. Without it, yad tries
+  `Production`, `production`, `prod`, `release`, `main` and `master`, and the page says it **guessed**.
+- **Read-only and locked down**, like `yad brain view`: it only reads (only `--fetch` downloads), and the
+  page answers only on `127.0.0.1` with a one-time key. No commit subject and no machine path reaches it.
+
+**Saved reports (`yad reports`)**
+
+With no `--out <file>`, these commands save into the reports folder: `yad standup --format md|html`,
+`yad usage`, `yad issues list --format md|html`, `yad brain view --html` and `yad map --html`.
+
+- **Where:** `<product>--reports/`, beside the Product's main folder (a run from a worktree or a code repo
+  lands in the same place). `YAD_REPORTS_DIR` picks another folder; `--out <file>` still writes exactly
+  that file.
+- **Names you can read:** `<date>-<time>--<kind>--<scope>--<state>.<ext>`, for example
+  `2026-11-14-0900--standup--team--3-waiting.md`. Local time comes first, so sorting by name sorts by time.
+- **Never committed:** the folder holds its own `.gitignore` (`*`), plus `catalog.json` and an `index.html`
+  page listing every report.
+- **Fresh or stale:** each report records the Product commit it was made at. It is **stale** once the
+  Product's `epics/` or `.sdlc/` changed in a later commit.
+
+```bash
+yad reports                            # list them, newest first, fresh or stale
+yad reports open 1                     # open the newest in the browser
+yad reports prune --older-than 30      # only says what it would remove
+yad reports prune --older-than 30 --apply
+```
+
+`prune` deletes only catalog files inside the folder, never through a link. An AI agent may run `prune`
+on its own, but `prune --apply` only when you ask.
 <!-- explainer:end id=reading-the-record -->
 
 ---
@@ -974,6 +1059,8 @@ yad brain view --live --open         # watch an agent work, against the plan
 - Every link says how it is known: `EXTRACTED` (a file states it) or `INFERRED` (a name matched a name).
 - A file a task declares that is not in the repo is marked `missing` — planned, but not there.
 - Stored in `.sdlc/brain/graph.json`; the folder ignores itself, so it is never committed.
+- `yad brain view --html` writes one self-contained file. With no file named, it is saved in the local
+  reports folder (section 14), not in the Product.
 - Without Graphify, `build` writes the work layer alone.
 - The planning and building skills ask `yad brain file` and `yad brain story` before they plan or edit,
   when a brain is built.
@@ -1217,8 +1304,10 @@ table is here so you can look one up.
 | `yad reconcile check` / `refresh` / `wire` | Drift, orphans, hotfix debt. | check: no | A |
 | `yad history list` / `show` / `search` | What the Product has done. | No | P, A |
 | `yad index` | Rebuild `.sdlc/index.json`. | Yes | A, CI |
-| `yad usage` | HTML report per member. | Writes the report | P |
-| `yad standup` | Daily status per member. | No | P, A |
+| `yad usage` | HTML report per member. | Saves the report locally | P |
+| `yad standup` | Daily status per member. | `--format`: saves locally | P, A |
+| `yad map` | The progress map, with who did which part. | `--html`: saves locally | P, A |
+| `yad reports` / `open` / `prune` | The saved reports; open one; remove old ones. | `prune --apply`: yes | P, A (`--apply`: A?) |
 | `yad issues …` | List, show, and (when asked) create, assign, label, edit, comment, close, reopen. | Writes: yes | P, A? |
 | `yad docs list` / `build` / `deploy` / `sync` | The documentation sites. | build/deploy: yes | A |
 | `yad brain …` | The project brain (section 15). | build/view: local only | A, P |
@@ -1258,6 +1347,7 @@ database. The tables below are a map, for when you want to look.
 acme/
 ├── .yad-workspace.json      # names the Product folder, so yad finds it from any listed repo
 ├── product/                 # the Product repository
+├── product--reports/        # saved reports, on this machine only (never committed)
 ├── backend/                 # a code repository
 └── mobile/                  # another code repository
 ```
@@ -1479,6 +1569,8 @@ proposals, not yet decided:
 | E127 | An explicit `superseded` status |
 | E128 | One combined freshness report |
 | E129 | A browsable example project |
+| E182 | Docs sites, timelines, defect sites and tutorials made in the local reports folder; `--in-product` to publish a docs site (a breaking change) |
+| E183 | `--save` on `status`, `history`, `claims` and `doctor`, into the local reports folder |
 | E108 | Enforcing the risk-based approver count (parked) |
 <!-- explainer:end id=limits -->
 
@@ -1533,8 +1625,11 @@ proposals, not yet decided:
 | **Platform** | GitHub, GitLab, or none. |
 | **PR / MR** | Pull request (GitHub) / merge request (GitLab): a proposed change others review. |
 | **Product (repository)** | The repo that holds the project record. |
+| **Production** | The version of the code real users run; on the progress map, each repo's Production branch. |
+| **Progress map** | A moving picture of all work on its road to Production, with who did which part (`yad map`). |
 | **Project brain** | A local knowledge graph of your code and your work (`yad brain`). |
 | **Reconcile debt** | What a hotfix owes its thread: updated documents and a regression test. |
+| **Reports folder** | `<product>--reports/`, beside the Product: saved reports, on your machine only, each fresh or stale (`yad reports`). |
 | **Repository (repo)** | One project folder tracked by git. |
 | **Risk map** | An optional file giving a risk level per folder, used to suggest how many approvers a change needs. |
 | **Route (profile)** | The fixed list of steps an epic walks: classic, analysis-first, chore, spike, foundation. |
@@ -1594,6 +1689,7 @@ a "try it" panel.
 | **Change sorter** | Section 11 | Describe a change, pick its kind, and see which documents are inherited and which are rewritten. |
 | **Thread viewer** | Section 11 | See the checkout feature, the fix and the change, and which epic each document comes from today. |
 | **Dial board** | Section 10 | Turn Build dials to auto, trigger a failing check and watch the run halt, then pull the kill switch. |
+| **Progress map** | Section 14 | Already built: `yad map --html --anonymous` gives a self-contained, name-free page to embed or record. |
 | **"Who may do this?" quiz** | Section 13 | Guess whether the AI may run a command; reveal the answer. |
 | **Set-up advisor** | Section 22 | Answer the six team questions and get a recommended configuration. |
 | **Terminal replay** | Sections 4, 6, 11 | Replay `docs/media/feature-change.gif` and `setup-wizard.gif` command by command. |
