@@ -163,10 +163,20 @@ ${c.bold('Daily standup')} ${c.dim('(derived live, read-only, facts only — no 
                                        flags: --since <YYYY-MM-DD>|<N>h|<N>d, --tz <zone> (default UTC),
                                        --member <login> | --me, --format md|html, --out <file>, --json
 
+${c.bold('Saved reports')} ${c.dim('(E180 — on this machine only, never committed)')}
+  yad reports [list] [--json]          Every report saved in the local reports folder, newest first, each
+                                       marked fresh or stale (the Product changed since it was made).
+                                       The folder is <product>--reports beside the Product, or
+                                       $YAD_REPORTS_DIR. Reports land there when no --out is given:
+                                       standup, usage, issues list --format, brain view --html
+  yad reports open <n|file>            Open one in the browser
+  yad reports prune --older-than <days> [--apply]
+                                       Remove saved reports older than that (a dry run without --apply)
+
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
                                        (derived, read-only — writes no tracked state)
-                                       flags: --out <path> (default ./usage-report.html),
+                                       flags: --out <path> (default: the local reports folder),
                                        --since <YYYY-MM-DD> --until <YYYY-MM-DD> | --all,
                                        --member <name>, --format html|json|md, --repos (code commits)
 
@@ -454,14 +464,14 @@ ${c.bold('Build helpers')}
                                        node's neighbours. Ctrl-C stops it
   yad brain view --html [<file>] [--open]
                                        The same page as one file that needs no server and no network
-                                       (default .sdlc/brain/view.html, never committed)
+                                       (default: the local reports folder, never committed)
   yad brain view --live [--open]       Watch an agent work (E178): each file it reads, searches or edits and
                                        each command it runs lights up the brain, with a Now card, Plan vs
                                        reality and a timeline to replay. Needs "activity": true in the
                                        Product config (then yad check --fix). Shows what, never why
   yad brain view --html --live [<file>]
                                        The recorded activity as an offline replay file
-                                       (default .sdlc/brain/live.html, never committed)
+                                       (default: the local reports folder, never committed)
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -693,6 +703,7 @@ const ACTIONS = {
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
+  reports: { known: ['list', 'open', 'prune'], default: 'list' },
 };
 // E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
@@ -702,7 +713,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
-  'story', 'brain',
+  'story', 'brain', 'reports',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -715,8 +726,8 @@ function writesProduct(cmd, o) {
   // `build merged` only asks the platform, unless --ship records what it found.
   if (cmd === 'build') return action === 'sync' ? !o.dryRun : action !== 'merged' || !!o.ship;
   if (cmd === 'check') return !!o.fix;
-  // `brain build` writes the brain into the Product, and so does `brain view --html` with no file named (its
-  // .sdlc/brain/view.html): with no Product found, they get the shared refusal (--dir or cd).
+  // `brain build` writes the brain into the Product. `brain view --html` with no file named saves into the
+  // Product's local reports folder (E180), so it needs the Product found too: else the shared refusal.
   if (cmd === 'brain') return action === 'build' || (action === 'view' && !!o.html);
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
@@ -1366,6 +1377,12 @@ async function main() {
         since: o.since ?? null, tz: o.tz ?? 'UTC', member: o.member ?? null, me: !!o.me,
         format: o.format ?? null, out: o.out ?? null, json: !!o.json,
       });
+      break;
+    }
+    case 'reports': {
+      // E180. The local reports folder; nothing here touches the Product or any repo.
+      const [, action, ...args] = o._;
+      result = await commands.runReports(o.dir, { action: action || 'list', args, olderThan: o['older-than'] ?? null, apply: !!o.apply, json: !!o.json });
       break;
     }
     case 'claims': {

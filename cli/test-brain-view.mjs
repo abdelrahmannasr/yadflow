@@ -18,7 +18,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { viewModel, startBrainServer, snapshotHTML, scriptSafeJSON, runBrainView, CSP, WARN_ABOVE, VIEW_FILE } = await import('./brain-view.mjs');
+const { viewModel, startBrainServer, snapshotHTML, scriptSafeJSON, runBrainView, CSP, WARN_ABOVE } = await import('./brain-view.mjs');
 const { VENDORED } = await import('./brain-vendor.mjs');
 const { composeBrain, buildRepoGraph, writeBrain, BRAIN_FILE, GRAPHIFY_VERSION } = await import('./brain.mjs');
 const { vettingProblems } = await import('./toolbox.mjs');
@@ -260,16 +260,18 @@ test('--html: one file, no network, a CSP that names each inline block, and no n
   assert.equal(scriptSafeJSON({ a: '<>&  ' }), '{"a":"\\u003c\\u003e\\u0026\\u2028\\u2029"}');
 });
 
-test('yad brain view --html writes the ignored default file, or a named one, never through a link', async () => {
+test('yad brain view --html saves into the local reports folder, or a named file, never through a link', async () => {
   const { ws, root } = product();
   try {
     const r = yad(root, 'brain', 'view', '--html', '--json');
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
-    assert.equal(out.file, path.join(root, VIEW_FILE));
+    const reports = path.join(path.dirname(fs.realpathSync(root)), `${path.basename(root)}--reports`);
+    assert.equal(path.dirname(fs.realpathSync(out.file)), path.join(reports, 'brain-view'), 'E180: beside the Product, in its kind\'s folder');
+    assert.match(path.basename(out.file), /^\d{4}-\d{2}-\d{2}-\d{4}--brain-view--code-and-work--\d+-nodes\.html$/);
     assert.equal(out.warning, undefined);
     assert.match(fs.readFileSync(out.file, 'utf8'), /^<!doctype html>/);
-    assert.equal(fs.readFileSync(path.join(root, '.sdlc', 'brain', '.gitignore'), 'utf8'), '*\n', 'never committed');
+    assert.match(fs.readFileSync(path.join(reports, '.gitignore'), 'utf8'), /^\*$/m, 'never committed');
 
     // A named file inside a git work tree that does not ignore it: written, with a warning.
     const repo = tmp();

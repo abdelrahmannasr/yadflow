@@ -57,7 +57,7 @@ export const YAD_COMMANDS = Object.freeze([
   'issues show', 'issues sync', 'issues unlink', 'join', 'kill', 'member add', 'member list',
   'member remove', 'migrate', 'mode', 'mode solo', 'mode team', 'new', 'next', 'open-pr', 'owners',
   'reconcile check', 'reconcile refresh', 'reconcile wire', 'repo clone', 'repo list', 'repo preview',
-  'repo refresh', 'repo sync', 'report', 'review cards', 'review chat', 'review context', 'review nudge',
+  'repo refresh', 'repo sync', 'report', 'reports list', 'reports open', 'reports prune', 'review cards', 'review chat', 'review context', 'review nudge',
   'review reconcile', 'review trailer', 'review walkthrough', 'risk-map check', 'risk-map draft', 'roster',
   'run checks', 'scan file', 'setup', 'ship', 'signing check', 'skill bind', 'skill list', 'skill recommend',
   'skill unbind', 'skip', 'standup', 'status', 'story frames', 'sync-status', 'thread', 'tidy up',

@@ -16,7 +16,8 @@ import { readMembers, productIdentity } from './members.mjs';
 import { prTarget } from './pr-list.mjs';
 import { repoSources, whoseAccount } from './standup.mjs';
 import { api, httpStatus, shown, whyFailed, PAGE, TIMEOUT } from './protection.mjs';
-import { esc, writeReport } from './usage.mjs';
+import { esc } from './usage.mjs';
+import { writeOrSave } from './reports-dir.mjs';
 import { allLinks, combinedStage, epicStage, itemKey } from './issue-links.mjs';
 
 export const MAX_ITEMS = 1000;
@@ -434,8 +435,12 @@ export async function runIssuesList(root, { priority = null, type = null, status
   const model = { ...whole, items, summary: summarize(items), unfiltered: whole.items.length };
   const rules = labelRules(readJSON(productConfigPath(root), null));
   if (format) {
-    const dest = out || `issues-report.${format}`;
-    writeReport(dest, format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules));
+    // E180: with no --out, saved in the local reports folder, named by the repos it covers and its count.
+    const scope = repo ? list(repo).join(' ') : 'all repos';
+    const saved = writeOrSave(root, { out, kind: 'issues', scope, state: `${items.length} items`, ext: format, content: format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules), command: 'issues list', env });
+    if (saved.problem) return refuse(saved.problem);
+    for (const w of saved.warnings) note(c.yellow(w));
+    const dest = saved.file;
     if (json) note(`wrote ${format.toUpperCase()} report → ${dest}`); else info(`wrote ${format.toUpperCase()} report → ${c.bold(dest)}`);
     for (const g of gaps(model)) if (!json) note(c.yellow(g));
     return { ...model, out: dest };

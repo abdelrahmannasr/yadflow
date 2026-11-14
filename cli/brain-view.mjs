@@ -3,7 +3,7 @@
 // The brain (`.sdlc/brain/graph.json`, E176) is one graph of the code and the work. This draws it, two ways:
 //
 //   yad brain view [--open]                  a local server, until Ctrl-C
-//   yad brain view --html [<file>] [--open]  one self-contained file (default .sdlc/brain/view.html)
+//   yad brain view --html [<file>] [--open]  one self-contained file (default: the local reports folder, E180)
 //
 // THE RULES, decided with the row:
 //   1. ZERO DEPENDENCIES STILL. The server is `node:http`. The page draws with sigma.js, graphology and its
@@ -27,7 +27,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { c, emitJSON, forTerminal, info, log, ok, refuse, run, warn } from './lib.mjs';
-import { BRAIN_DIR, BRAIN_FILE, codeBehind, ensureBrainDir, readBrain, writePlain } from './brain.mjs';
+import { BRAIN_FILE, codeBehind, readBrain, writePlain } from './brain.mjs';
+import { saveReport } from './reports-dir.mjs';
 import { VENDORED } from './brain-vendor.mjs';
 import { openUrl } from './report.mjs';
 import { activityIndex, activitySources, follow, matchEvent, planOf, readBacklog } from './brain-activity.mjs';
@@ -37,8 +38,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VIEW_DIR = path.join(HERE, 'brain', 'view');
 const VENDOR_DIR = path.join(HERE, 'brain', 'vendor');
 
-export const VIEW_FILE = path.join(BRAIN_DIR, 'view.html');
-export const LIVE_FILE = path.join(BRAIN_DIR, 'live.html');
 // Above this many nodes the page asks before drawing everything: a WebGL layout of tens of thousands of
 // nodes can stall a laptop's browser for a minute.
 export const WARN_ABOVE = 5000;
@@ -390,7 +389,7 @@ function trackedRisk(file, runner = spawnSync) {
 
 export const VIEW_USAGE = 'usage: yad brain view [--live] [--open]  |  yad brain view --html [<file>] [--live] [--open]   (--json prints what was done)';
 
-export async function runBrainView(root, { args = [], html = false, open = false, live = false, json = false, runner = run, opener = openUrl, gitRunner = spawnSync, wait = true } = {}) {
+export async function runBrainView(root, { args = [], html = false, open = false, live = false, json = false, runner = run, opener = openUrl, gitRunner = spawnSync, wait = true, env = process.env } = {}) {
   if (args.length > (html ? 1 : 0) || args.some((a) => String(a).startsWith('-'))) {
     return refuse(`unexpected argument(s): ${args.map(forTerminal).join(' ')}`, VIEW_USAGE, { json });
   }
@@ -401,21 +400,29 @@ export async function runBrainView(root, { args = [], html = false, open = false
 
   if (html) {
     const own = args.length === 1;
-    const file = own ? path.resolve(args[0]) : path.join(ensureBrainDir(root), live ? 'live.html' : 'view.html');
+    let file = own ? path.resolve(args[0]) : null;
     // E178: `--live` with `--html` is a REPLAY file — the recorded activity embedded, played back offline.
     if (live) m.model.replay = recordedReplay(root, m.model, runner);
     let page;
     try { page = snapshotHTML(m.model, { live }); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
+    const saveWarnings = [];
     if (own) {
       const problem = writeOwnFile(file, page);
       if (problem) return refuse(problem, null, { json });
-    } else writePlain(path.dirname(file), path.basename(file), page);
+    } else {
+      // E180: saved in the local reports folder beside the Product, named by what it shows.
+      const saved = saveReport(root, { kind: 'brain-view', scope: live ? 'live replay' : 'code and work', state: `${m.model.counts.nodes} nodes`, ext: 'html', content: page, command: live ? 'brain view --html --live' : 'brain view --html', env });
+      if (saved.problem) return refuse(saved.problem, null, { json });
+      file = saved.file;
+      saveWarnings.push(...saved.warnings);
+    }
     const risk = own && trackedRisk(file, gitRunner);
     const riskLine = risk ? `${forTerminal(file)} is in a git work tree and not ignored: it holds the names in your code — do not commit it` : null;
     const opened = open ? opener(file) : null;
     const events = live ? { events: m.model.replay.length } : {};
     if (json) return emitJSON({ file, nodes: m.model.counts.nodes, edges: m.model.counts.edges, ...events, codeBehind: behind, ...(open ? { opened } : {}), ...(riskLine ? { warning: riskLine } : {}) });
-    ok(`wrote ${forTerminal(own ? file : (live ? LIVE_FILE : VIEW_FILE))} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges${live ? `, ${m.model.replay.length} recorded events to replay` : ''}; open it in a browser (it needs no server and no network)`);
+    for (const w of saveWarnings) warn(w);
+    ok(`wrote ${forTerminal(file)} — ${m.model.counts.nodes} nodes, ${m.model.counts.edges} edges${live ? `, ${m.model.replay.length} recorded events to replay` : ''}; open it in a browser (it needs no server and no network)`);
     if (behindLine) warn(behindLine);
     if (riskLine) warn(riskLine);
     if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — open the file yourself');

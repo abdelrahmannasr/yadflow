@@ -43,7 +43,8 @@ import { gitAuthors, personKey } from './people.mjs';
 import { isBot } from './riskmap.mjs';
 import { accountId, buildIssues, mdEscape, mdUrl } from './issues.mjs';
 import { readMembers, memberStatuses, memberMatches, productIdentity, ttlDays, accountLabel, accessCheck } from './members.mjs';
-import { ledgerEvents, esc, mdText, writeReport } from './usage.mjs';
+import { ledgerEvents, esc, mdText } from './usage.mjs';
+import { writeOrSave } from './reports-dir.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { listPrs, prTarget } from './pr-list.mjs';
 import { shown, configuredGitUrl } from './protection.mjs';
@@ -537,6 +538,9 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
   };
 }
 
+// How many things wait, across every person in the model — the state word in a saved report's name.
+export const waitingCount = (model) => [...(model.team || []), ...(model.unlisted || []), ...(model.left || [])].reduce((n, p) => n + (Array.isArray(p.waiting) ? p.waiting.length : 0), 0);
+
 // Narrow the report to one member: by any of their logins (any account), case-insensitive.
 export function onlyMember(model, login) {
   const want = String(login).toLowerCase();
@@ -724,11 +728,13 @@ export async function runStandup(root, { now = Date.now(), tz = 'UTC', since = n
   if (model.error) return refuse(model.error, model.hint);
   if (who) model = onlyMember(model, who);
   if (format) {
-    const dest = out || `standup-report.${format}`;
-    writeReport(dest, format === 'md' ? renderMarkdown(model) : renderHtml(model));
-    if (json) note(`wrote ${format.toUpperCase()} report → ${dest}`);
-    else info(`wrote ${format.toUpperCase()} report → ${c.bold(dest)}`);
-    return { ...model, out: dest };
+    // E180: with no --out, saved in the local reports folder, named by who it covers and how much waits.
+    const saved = writeOrSave(root, { out, kind: 'standup', scope: who || 'team', state: `${waitingCount(model)} waiting`, ext: format, content: format === 'md' ? renderMarkdown(model) : renderHtml(model), command: 'standup', env });
+    if (saved.problem) return refuse(saved.problem);
+    for (const w of saved.warnings) warn(w);
+    if (json) note(`wrote ${format.toUpperCase()} report → ${saved.file}`);
+    else info(`wrote ${format.toUpperCase()} report → ${c.bold(saved.file)}`);
+    return { ...model, out: saved.file };
   }
   if (!json) renderText(model);
   return { ...model, out: null };
