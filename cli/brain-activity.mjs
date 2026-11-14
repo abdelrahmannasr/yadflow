@@ -103,7 +103,7 @@ function readTail(file, upTo = null) {
   const o = openPlain(file);
   if (!o) return '';
   try {
-    if (upTo !== null && upTo.ino !== o.st.ino) return '';
+    if (upTo !== null && upTo.ino && upTo.ino !== o.st.ino) return '';
     const end = upTo === null ? o.st.size : Math.min(o.st.size, upTo.offset);
     const from = Math.max(0, end - MAX_READ);
     const buf = Buffer.alloc(end - from);
@@ -115,14 +115,27 @@ function readTail(file, upTo = null) {
 
 // The recent past, for replay: every source's old and current file, newest KEEP_DAYS, oldest first, at most
 // `limit` events (the newest ones).
-const oldIs = (src, at) => { try { return fs.lstatSync(path.join(src.dir, OLD_LOG_NAME)).ino === at.ino; } catch { return false; } };
+// Is the old file the one the live reader stood in? Only when file numbers can be trusted: a file system that
+// gives every file 0 (FAT, exFAT, some network shares) or the same number to two files (a 64-bit NTFS id past
+// what a JavaScript number holds) cannot tell — then the old file is read whole (E178 review 5).
+const oldIs = (src, at) => {
+  if (!at || !at.ino) return false;
+  try {
+    const old = fs.lstatSync(path.join(src.dir, OLD_LOG_NAME)).ino;
+    let cur = null;
+    try { cur = fs.lstatSync(path.join(src.dir, LOG_NAME)).ino; } catch { /* no current file */ }
+    return old === at.ino && old !== cur;
+  } catch { return false; }
+};
 // `upTo(src)` gives where the live reader of a source stands ({ ino, offset }): the current file is read only
 // up to there, so a line is either in the backlog or sent live, never both (E178 review 3).
 export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit = BACKLOG_LIMIT, upTo = () => null } = {}) {
   const since = now - days * 86400000;
   const all = [];
   for (const src of sources) {
-    for (const name of [OLD_LOG_NAME, LOG_NAME]) {
+    // The CURRENT file first: a rotation between the two reads then repeats a line (it is in both) rather than
+    // losing one (in neither) (E178 review 5).
+    for (const name of [LOG_NAME, OLD_LOG_NAME]) {
       // The current file stops at the reader. The OLD file does too when it is the one the reader stood in
       // (rotated since): its tail is the reader's to send at its next look (E178 review 4).
       const at = upTo(src);
