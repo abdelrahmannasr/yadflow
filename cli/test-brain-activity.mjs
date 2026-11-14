@@ -723,3 +723,29 @@ test('review 4: a rotation between the reader\'s position and a page\'s backlog 
     f.stop();
   } finally { done(dir); }
 });
+
+test('review 6: file numbers that cannot tell files apart never cost a line', () => {
+  const dir = tmp();
+  try {
+    const file = path.join(dir, act.LOG_NAME);
+    const old = path.join(dir, act.OLD_LOG_NAME);
+    const line = (op) => `${JSON.stringify({ v: 1, op, ts: new Date().toISOString(), paths: [] })}\n`;
+    const src = { repo: null, dir, prefixes: [] };
+    const ops = (upTo) => act.readBacklog([src], { upTo }).map((x) => x.r.op).sort();
+    // Every file numbered 0 (FAT, exFAT): the current log is cut where the reader stands, not dropped.
+    fs.writeFileSync(file, line('read') + line('edit'));
+    assert.deepEqual(ops(() => ({ ino: 0, offset: Buffer.byteLength(line('read')) })), ['read']);
+    // A rotation between the backlog's two reads: every line is there at least once.
+    fs.writeFileSync(file, line('read'));
+    fs.rmSync(old, { force: true });
+    let calls = 0;
+    const rotating = () => { calls += 1; if (calls === 2) { fs.renameSync(file, old); fs.writeFileSync(file, ''); } return null; };
+    assert.ok(ops(rotating).includes('read'));
+    // Two names for one file (one number for both): the old file is read whole.
+    fs.rmSync(old, { force: true });
+    fs.writeFileSync(file, line('read') + line('search'));
+    fs.linkSync(file, old);
+    const at = { ino: fs.statSync(file).ino, offset: 0 };
+    assert.ok(ops(() => at).includes('search'));
+  } finally { done(dir); }
+});
