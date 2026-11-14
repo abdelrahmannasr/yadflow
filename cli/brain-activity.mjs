@@ -97,11 +97,14 @@ function openPlain(file) {
 }
 
 // The last MAX_READ bytes of a plain file, from its first whole line; '' for anything else.
+// With `upTo` ({ ino, offset } of the live reader), the file is read only up to there — and not at all when it
+// is not the file the reader stands in (rotated in between, or made since): the reader sends all of it.
 function readTail(file, upTo = null) {
   const o = openPlain(file);
   if (!o) return '';
   try {
-    const end = upTo === null || upTo.ino !== o.st.ino ? o.st.size : Math.min(o.st.size, upTo.offset);
+    if (upTo !== null && upTo.ino !== o.st.ino) return '';
+    const end = upTo === null ? o.st.size : Math.min(o.st.size, upTo.offset);
     const from = Math.max(0, end - MAX_READ);
     const buf = Buffer.alloc(end - from);
     const got = fs.readSync(o.fd, buf, 0, buf.length, from);
@@ -112,6 +115,7 @@ function readTail(file, upTo = null) {
 
 // The recent past, for replay: every source's old and current file, newest KEEP_DAYS, oldest first, at most
 // `limit` events (the newest ones).
+const oldIs = (src, at) => { try { return fs.lstatSync(path.join(src.dir, OLD_LOG_NAME)).ino === at.ino; } catch { return false; } };
 // `upTo(src)` gives where the live reader of a source stands ({ ino, offset }): the current file is read only
 // up to there, so a line is either in the backlog or sent live, never both (E178 review 3).
 export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit = BACKLOG_LIMIT, upTo = () => null } = {}) {
@@ -119,7 +123,11 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
   const all = [];
   for (const src of sources) {
     for (const name of [OLD_LOG_NAME, LOG_NAME]) {
-      for (const line of readTail(path.join(src.dir, name), name === LOG_NAME ? upTo(src) : null).split('\n')) {
+      // The current file stops at the reader. The OLD file does too when it is the one the reader stood in
+      // (rotated since): its tail is the reader's to send at its next look (E178 review 4).
+      const at = upTo(src);
+      const cut = at === null ? null : name === LOG_NAME ? at : (oldIs(src, at) ? at : null);
+      for (const line of readTail(path.join(src.dir, name), cut).split('\n')) {
         const r = line ? parseRecord(line) : null;
         if (r && r.t >= since && r.t <= now + 60000) all.push({ src, r });
       }
@@ -136,7 +144,7 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
 // in the backlog of the next page that opens (E178 review 2). At a rotation it first reads what the old file gained since the last look (now
 // renamed aside), then starts the new file at 0. Bytes are decoded as a stream, so a character split across
 // two reads arrives whole; a part line longer than MAX_PART (no newline ever comes) is dropped. Returns
-// { stop, pump }.
+// { stop, pump, position }.
 export function follow(src, onRecord, { interval = 500, watch = fs.watchFile, unwatch = fs.unwatchFile } = {}) {
   const file = path.join(src.dir, LOG_NAME);
   let offset = 0;
