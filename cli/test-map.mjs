@@ -265,7 +265,7 @@ test('the file: everything inline, hashed by the CSP, and no name can close its 
     assert.match(csp, /default-src 'none'/);
     const hashes = new Set([...csp.matchAll(/'sha256-([^']+)'/g)].map((x) => x[1]));
     // Every executable inline block (a <script> with no type) must be allowed by its hash; matched in any case.
-    const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script\s*>/gi)].map((x) => x[1]);
+    const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script[^>]*>/gi)].map((x) => x[1]);
     for (const block of blocks) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
     assert.equal(html.split(/<script/i).length - 1, blocks.length + 1, 'every script tag is a bare inline block, plus the one data block');
     assert.ok(html.includes('id="yad-map-data"'));
