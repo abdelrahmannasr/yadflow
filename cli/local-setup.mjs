@@ -17,7 +17,7 @@ import { markedBlockAction } from './plan.mjs';
 import { productConfigPath, SCHEMA_VERSION } from './manifest.mjs';
 import {
   LOCAL_SETUP_CATALOGUE_VERSION, LOCAL_SETUP_VERSION, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC, STEP_ID, WHEN, BUILTIN_CHECKS,
-  yadflowSteps, stepHash, runBuiltinCheck, localSetupPath,
+  yadflowSteps, cliMinimum, stepHash, runBuiltinCheck, localSetupPath,
 } from './local-setup-steps.mjs';
 import { detectInstalled } from './detect.mjs';
 
@@ -34,23 +34,44 @@ const isTextList = (v) => Array.isArray(v) && v.length > 0 && v.every(isText);
 
 // What is wrong with one step, as words (empty when it is sound). Used for both lists: a yadflow step in a
 // committed file was written by yad, but the file is the team's to edit, so it is read with the same care.
+// A comment marker anywhere in a step could become one of yad's marker lines in LOCAL-SETUP.md, and no amount of
+// removing text makes that safe (taking out one `<!--` can join the letters around it into another). So a step
+// holding one is refused, and every command is shown exactly as written.
+const MARKER = /<!--|-->/;
+// eslint-disable-next-line no-control-regex -- a command must be one plain line
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const oneLine = (v) => isText(v) && !CONTROL.test(v);
+
 export function stepProblems(s, source) {
   const p = [];
   if (!isPlainObject(s)) return ['it is not an object'];
   if (typeof s.id !== 'string' || !STEP_ID.test(s.id)) p.push('its id should be lowercase letters, digits and dashes');
   for (const k of ['title', 'purpose', 'impact']) if (!isText(s[k])) p.push(`it has no ${k}`);
   if (!isTextList(s.commands)) p.push('it has no commands');
+  else if (!s.commands.every(oneLine)) p.push('each command should be one line');
   if (!WHEN.includes(s.when)) p.push('its `when` should be "required" or "optional"');
+  if (s.verify != null && !oneLine(s.verify)) p.push('its verify should be one line');
   if (s.check != null) {
     if (!isPlainObject(s.check)) p.push('its check should be an object');
     else if (source === 'yadflow' && !BUILTIN_CHECKS.includes(s.check.builtin)) p.push('its check is not one yad knows');
-    else if (source === 'team' && !isText(s.check.run)) p.push('its check should be `{ "run": "<command>" }`');
+    // A team's check is a command and nothing else: a `builtin` beside it would hide the command in the view.
+    else if (source === 'team' && (!oneLine(s.check.run) || Object.keys(s.check).length !== 1)) p.push('its check should be `{ "run": "<one command>" }`');
   }
+  const words = [s.title, s.purpose, s.impact, s.verify, s.addedBy, ...(Array.isArray(s.commands) ? s.commands : []), s.check?.run];
+  if (words.some((w) => typeof w === 'string' && MARKER.test(w))) p.push('it holds `<!--` or `-->`, which LOCAL-SETUP.md cannot show safely');
   return p;
 }
 
+// A file's text as JSON, a byte-order mark (some Windows editors add one) read past.
+export const parseJSON = (text) => JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+
 // The two lists, each step checked. `problems` names every step left out and why; the file still answers.
-export function readSteps(doc) {
+//
+// VETTED IS NEVER READ FROM THE FILE. Anyone who can merge to the Product can write a step under `yadflow`. A
+// yadflow step counts as yadflow's own (`known`, and `vetted` unless it is a team's tool) only when its id and hash
+// are what this yadflow writes for this Product (`ours`: id → { hash, vetted }). Any other one is shown as not
+// vetted, and `yad update` rewrites it.
+export function readSteps(doc, { ours = null } = {}) {
   const problems = [];
   const steps = [];
   const seen = new Set();
@@ -64,7 +85,10 @@ export function readSteps(doc) {
       if (p.length) { problems.push(`${LOCAL_SETUP_FILE}: ${source} step ${label} is ignored — ${p.join('; ')}`); continue; }
       if (seen.has(s.id)) { problems.push(`${LOCAL_SETUP_FILE}: step ${label} is listed twice — the first one is used`); continue; }
       seen.add(s.id);
-      steps.push({ ...s, source, vetted: source === 'yadflow' && s.vetted !== false, hash: stepHash(s) });
+      const hash = stepHash(s);
+      const mine = source === 'yadflow' ? ours?.get(s.id) : null;
+      const known = !!mine && mine.hash === hash;
+      steps.push({ ...s, source, known: source === 'yadflow' ? known : false, vetted: known && mine.vetted !== false, hash });
     }
   }
   return { steps, problems };
@@ -79,7 +103,7 @@ export function readCommittedLocalSetup(root) {
     try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch { return { doc: null, committed: false, error: null }; }
   }
   try {
-    const doc = JSON.parse(text);
+    const doc = parseJSON(text);
     if (!isPlainObject(doc)) return { doc: null, committed, error: 'is not a JSON object' };
     return { doc, committed, error: null };
   } catch { return { doc: null, committed, error: 'does not parse' }; }
@@ -89,6 +113,10 @@ export function readCommittedLocalSetup(root) {
 
 // yad's part of the file merged into what is there: `yadflow[]` and the two version numbers replaced, every
 // other key (the team's list first of all) kept as it is. The shape `reconcile` asks of a shared JSON file.
+const cliStepOf = (doc) => (Array.isArray(doc?.yadflow) ? doc.yadflow.find((s) => isPlainObject(s) && s.id === 'yadflow-cli') : null);
+// What this yadflow writes for this Product, given the file there now: id → { hash, vetted } (readSteps).
+export const oursFor = (doc, root) => new Map(mergeLocalSetup(isPlainObject(doc) ? doc : {}, root).settings.yadflow.map((s) => [s.id, { hash: stepHash(s), vetted: s.vetted }]));
+
 export function mergeLocalSetup(current, root) {
   if (!isPlainObject(current)) return { unreadable: 'it is not a JSON object' };
   if (current.team !== undefined && !Array.isArray(current.team)) return { unreadable: '`team` is not a list' };
@@ -99,7 +127,7 @@ export function mergeLocalSetup(current, root) {
     ...current,
     localSetupVersion: LOCAL_SETUP_VERSION,
     catalogueVersion: LOCAL_SETUP_CATALOGUE_VERSION,
-    yadflow: yadflowSteps(root),
+    yadflow: yadflowSteps(root, { cliMin: cliMinimum(cliStepOf(current)?.check?.min) }),
     team: current.team ?? [],
   };
   return { settings, changed: JSON.stringify(settings) !== JSON.stringify(current) };
@@ -112,7 +140,7 @@ function localSetupJsonAction(root) {
   let raw = null;
   try { raw = fs.readFileSync(dest, 'utf8'); } catch { /* missing */ }
   let parsed = null;
-  if (raw !== null) { try { parsed = JSON.parse(raw); } catch { parsed = undefined; } }
+  if (raw !== null) { try { parsed = parseJSON(raw); } catch { parsed = undefined; } }
   const merged = raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
   // Never rebuilt from nothing: that would delete every step the team wrote (memory: read strictly before a write).
   if (merged.unreadable) {
@@ -126,7 +154,7 @@ function localSetupJsonAction(root) {
     apply: () => {
       let now = {};
       if (fs.existsSync(dest)) {
-        try { now = JSON.parse(fs.readFileSync(dest, 'utf8')); } catch { warn(`${LOCAL_SETUP_FILE} does not parse — left untouched`); return; }
+        try { now = parseJSON(fs.readFileSync(dest, 'utf8')); } catch { warn(`${LOCAL_SETUP_FILE} does not parse — left untouched`); return; }
       }
       const next = mergeLocalSetup(now, root);
       if (next.unreadable) { warn(`${LOCAL_SETUP_FILE}: ${next.unreadable} — left untouched`); return; }
@@ -136,33 +164,47 @@ function localSetupJsonAction(root) {
   };
 }
 
-// One line of the Markdown view from a file's words: on one line, with nothing that could close a comment or
-// open one, so a step cannot end yad's block early or hide text in it.
-const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/<!--|-->/g, '').replace(/`/g, "'");
-const CHECK_WORDS = {
-  'cli-version': (k) => `\`yad --version\` is ${md(k.min)} or later`,
-  'platform-login': () => 'the platform CLI is signed in to the Product\'s host',
-  'ledger-hook': () => '`yad doctor` shows the pre-commit hook as installed',
-  'commit-signing': () => '`yad signing check` finds nothing to set up',
-  tool: (k) => `\`yad toolbox check\` finds ${md(k.tool)}`,
+// The view's words. Every step that reaches here passed stepProblems: it holds no comment marker, and its commands
+// are single lines. Prose is put on one line; code is shown exactly as written, in a span or fence longer than any
+// run of backticks inside it, so an agent that copies from LOCAL-SETUP.md runs what the JSON says.
+const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim();
+const longestTicks = (s) => Math.max(0, ...[...String(s).matchAll(/`+/g)].map((m) => m[0].length));
+const code = (s) => {
+  const t = String(s);
+  const fence = '`'.repeat(longestTicks(t) + 1);
+  const pad = t.startsWith('`') || t.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${t}${pad}${fence}`;
 };
-const checkWords = (s) => (s.check?.builtin ? (CHECK_WORDS[s.check.builtin]?.(s.check) ?? 'yad checks it')
-  : s.check?.run ? `this command succeeds (ask the person before running it): \`${md(s.check.run)}\`` : null);
+const CHECK_WORDS = {
+  'cli-version': (k) => `${code('yad --version')} is ${md(k.min)} or later`,
+  'platform-login': () => 'the platform CLI is signed in to the Product\'s host',
+  'ledger-hook': () => `${code('yad doctor')} shows the pre-commit hook as installed`,
+  'commit-signing': () => `${code('yad signing check')} finds nothing to set up`,
+  tool: (k) => `${code('yad toolbox check')} finds ${md(k.tool)}`,
+};
+const checkWords = (s) => (s.source === 'team'
+  ? (s.check?.run ? `this command succeeds (ask the person before running it): ${code(s.check.run)}` : null)
+  : s.check?.builtin ? (CHECK_WORDS[s.check.builtin]?.(s.check) ?? 'yad checks it') : null);
 
 function stepLines(s) {
-  const lines = [`### ${md(s.title)}`, '', `- **Id:** \`${md(s.id)}\` · **${s.when}**${s.source === 'team' ? ` · added by your team${s.addedBy ? ` (${md(s.addedBy)})` : ''}, not vetted by yadflow` : s.vetted === false ? ' · a tool your team added, not vetted by yadflow' : ''}${s.person ? ' · **the person does this step, not the agent**' : ''}`];
-  lines.push(`- **Why:** ${md(s.purpose)}`, `- **What it changes for you:** ${md(s.impact)}`, '- **Run:**', '', '  ```sh', ...s.commands.map((cmd) => `  ${md(cmd)}`), '  ```', '');
+  const who = s.source === 'team' ? ` · added by your team${s.addedBy ? ` (${md(s.addedBy)})` : ''}, not vetted by yadflow`
+    : !s.known ? ' · **not what this yadflow writes — not vetted; `yad update` rewrites it**'
+      : !s.vetted ? ' · a tool your team added, not vetted by yadflow' : '';
+  const fence = '`'.repeat(Math.max(3, ...s.commands.map((cmd) => longestTicks(cmd) + 1)));
+  const lines = [`### ${md(s.title)}`, '', `- **Id:** ${code(s.id)} · **${s.when}**${who}${s.person ? ' · **the person does this step, not the agent**' : ''}`];
+  lines.push(`- **Why:** ${md(s.purpose)}`, `- **What it changes for you:** ${md(s.impact)}`, '- **Run:**', '', `  ${fence}sh`, ...s.commands.map((cmd) => `  ${cmd}`), `  ${fence}`, '');
   const done = checkWords(s);
   if (done) lines.push(`- **Already done when:** ${done}`);
-  if (s.verify) lines.push(`- **Confirm with:** \`${md(s.verify)}\``);
+  if (s.verify) lines.push(`- **Confirm with:** ${code(s.verify)}`);
   lines.push('');
   return lines;
 }
 
-// The block yad writes into LOCAL-SETUP.md, from the file's steps.
+// The block yad writes into LOCAL-SETUP.md, from a file yad has just merged (so its yadflow steps are yad's own).
 export function localSetupDocLines(doc) {
-  const { steps } = readSteps(doc);
-  const ours = steps.filter((s) => s.source === 'yadflow');
+  const ours = new Map((doc?.yadflow ?? []).filter(isPlainObject).map((s) => [s.id, { hash: stepHash(s), vetted: s.vetted }]));
+  const { steps } = readSteps(doc, { ours });
+  const mine = steps.filter((s) => s.source === 'yadflow');
   const theirs = steps.filter((s) => s.source === 'team');
   return [
     '# Local setup',
@@ -170,18 +212,25 @@ export function localSetupDocLines(doc) {
     'This is the script that gets a team member\'s machine ready for this project, and keeps it ready after each update.',
     'Each step says why it is needed and what it changes for you, so you decide whether to do it.',
     '',
-    '**For the agent:** run `yad local-setup --json` to see which steps this machine still needs.',
+    `**For the agent:** run ${code('yad local-setup list --json')} to see which steps this machine still needs.`,
     'For each one, tell the person its "Why" and "What it changes for you", and run its commands only after they say yes.',
     'A step marked "the person does this step" is theirs: give them the command and wait.',
-    'If `yad local-setup` is not a command your yad knows, do the "Install the yadflow CLI" step first.',
+    `If ${code('yad local-setup')} is not a command your yad knows, do the "Install the yadflow CLI" step first.`,
     '',
     '## Steps from yadflow',
     '',
-    ...(ours.length ? ours.flatMap(stepLines) : ['None.', '']),
+    ...(mine.length ? mine.flatMap(stepLines) : ['None.', '']),
     '## Steps from your team',
     '',
     ...(theirs.length ? theirs.flatMap(stepLines) : ['None yet.', '']),
   ].map((l) => l.replace(/\s+$/, ''));
+}
+
+// The team's list as committed, or undefined when HEAD has no readable file.
+function committedTeam(root) {
+  const r = spawnSync('git', ['show', `HEAD:${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  if (r.status !== 0) return undefined;
+  try { const d = parseJSON(r.stdout); return isPlainObject(d) ? (d.team ?? []) : undefined; } catch { return undefined; }
 }
 
 // The two actions setup, update and check --fix apply: the JSON, then its Markdown view built from what the
@@ -191,25 +240,35 @@ export function localSetupActions(root) {
   if (!fs.existsSync(productConfigPath(root))) return [];
   const json = localSetupJsonAction(root);
   let doc = null;
+  let now = {};
   if (!json.writesNothing) {
-    let now = {};
-    try { now = JSON.parse(fs.readFileSync(localSetupPath(root), 'utf8')); } catch { /* new */ }
+    try { now = parseJSON(fs.readFileSync(localSetupPath(root), 'utf8')); } catch { /* new */ }
     doc = mergeLocalSetup(isPlainObject(now) ? now : {}, root).settings;
   }
   const actions = [json];
-  if (doc) actions.push(markedBlockAction(root, LOCAL_SETUP_DOC, localSetupDocLines(doc), { markers: LOCAL_SETUP_MARKERS, what: 'the local setup steps' }));
+  if (doc) {
+    const view = markedBlockAction(root, LOCAL_SETUP_DOC, localSetupDocLines(doc), { markers: LOCAL_SETUP_MARKERS, what: 'the local setup steps' });
+    // The view shows the team steps on disk. While those differ from the committed ones (a person's own edit, not
+    // committed), the view is theirs too: `--open-pr` must not carry it, or the PR's LOCAL-SETUP.md would list a
+    // step its JSON lacks. It goes with the person's own commit of the JSON, which the JSON row asks for.
+    const head = committedTeam(root);
+    const ownEdit = head !== undefined && JSON.stringify(head) !== JSON.stringify(isPlainObject(now) ? (now.team ?? []) : []);
+    actions.push(ownEdit ? { ...view, shared: undefined, mergeShared: undefined } : view);
+  }
   // A file with no block is `missing`; this one is yad's to add on every Product, so it is `new` for an update.
   return actions.map((a) => (a.status === 'missing' ? { ...a, status: 'new' } : a));
 }
 
 // ---- this machine -----------------------------------------------------------------------------------
 
-// Every step with its state here: `ok` (its check passed), `pending` (its check failed), or `ask` (a team step:
-// its check is a command yad does not run, so the agent asks the person).
+// Every step with its state here: `ok` (yad's own check passed), `pending` (it failed), or `ask` (a team step, or
+// one with no check: yad runs no team command, so the agent asks the person).
 export function localSetupState(root, { items = null } = {}) {
   const read = readCommittedLocalSetup(root);
-  if (!read.doc) return { exists: false, committed: read.committed, error: read.error, steps: [], problems: [] };
-  const { steps, problems } = readSteps(read.doc);
+  if (!read.doc) return { exists: read.error !== null, committed: read.committed, error: read.error, steps: [], problems: [] };
+  const { steps, problems } = readSteps(read.doc, { ours: oursFor(read.doc, root) });
+  const unknown = steps.filter((s) => s.source === 'yadflow' && !s.known).map((s) => s.id);
+  if (unknown.length) problems.push(`${LOCAL_SETUP_FILE}: ${unknown.length} yadflow step(s) are not what this yadflow writes (${unknown.join(', ')}) — shown as not vetted; \`yad update\` rewrites them`);
   let found = items;
   const out = steps.map((s) => {
     if (s.source !== 'yadflow' || !s.check?.builtin) return { ...s, state: 'ask', why: s.check?.run ? 'yad does not run a team\'s check' : 'it has no check' };
@@ -221,53 +280,57 @@ export function localSetupState(root, { items = null } = {}) {
 }
 
 const MARK = { ok: () => c.green('✓'), pending: () => c.yellow('•'), ask: () => c.cyan('?') };
+const counts = (steps) => ({ pending: steps.filter((s) => s.state === 'pending').length, ask: steps.filter((s) => s.state === 'ask').length });
 
-// `yad local-setup [list] [--json]`. Reads only: runs the built-in checks, never a step.
+// `yad local-setup [list] [--json]`. Reads only: runs yad's own checks, never a step.
 export function runLocalSetupList(root, { json = false } = {}) {
   const st = localSetupState(root);
   const where = { product: root, file: LOCAL_SETUP_FILE };
-  if (!st.exists) {
+  if (!st.steps.length && (st.error || !st.exists)) {
     const why = st.error ? `${LOCAL_SETUP_FILE} ${st.error}` : `this Product has no ${LOCAL_SETUP_FILE} yet`;
     const hint = st.error ? 'fix the file, or restore it from git' : 'run `yad update` (it writes the script), then commit it through review';
-    if (json) return emitJSON({ ok: true, ...where, exists: false, committed: false, steps: [], pending: 0, problems: st.error ? [why] : [], hint });
-    info(why);
+    if (json) return emitJSON({ ok: true, ...where, exists: st.exists, committed: st.committed, error: st.error, steps: [], pending: 0, ask: 0, problems: st.error ? [why] : [], hint });
+    (st.error ? warn : info)(why);
     info(hint);
     return undefined;
   }
-  const pending = st.steps.filter((s) => s.state !== 'ok');
+  const n = counts(st.steps);
   if (json) {
     return emitJSON({
-      ok: true, ...where, exists: true, committed: st.committed,
-      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, vetted, addedBy = null, hash, state, why }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, vetted, addedBy, hash, state, why })),
-      pending: pending.length, problems: st.problems,
+      ok: true, ...where, exists: true, committed: st.committed, error: null,
+      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, known, vetted, addedBy = null, hash, state, why }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, known, vetted, addedBy, hash, state, why })),
+      ...n, problems: st.problems,
     });
   }
   for (const p of st.problems) warn(p);
-  log(c.bold(`\nyad local-setup — ${st.steps.length} step(s), ${pending.length} not done here`));
+  log(c.bold(`\nyad local-setup — ${st.steps.length} step(s): ${n.pending} not done here, ${n.ask} to check with you`));
   if (!st.committed) warn(`${LOCAL_SETUP_FILE} is not committed yet — this is the copy on disk`);
   for (const s of st.steps) {
-    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : ''})`)}`);
+    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? ', not vetted' : ''})`)}`);
     if (s.state === 'ok') continue;
     log(`      ${c.dim(`why: ${forTerminal(s.purpose)}`)}`);
     log(`      ${c.dim(`changes for you: ${forTerminal(s.impact)}`)}`);
     for (const cmd of s.commands) log(`      ${c.dim(`run: ${forTerminal(cmd)}`)}`);
     if (s.state === 'ask' && s.check?.run) log(`      ${c.dim(`already done if this succeeds: ${forTerminal(s.check.run)}`)}`);
   }
-  info(`the steps, with what each changes, are in ${LOCAL_SETUP_DOC}; \`yad local-setup --json\` gives them to an agent`);
+  info(`the steps, with what each changes, are in ${LOCAL_SETUP_DOC}; \`yad local-setup list --json\` gives them to an agent`);
   return undefined;
 }
 
-// The few lines setup, update and join print about this machine: how many steps are not done here.
+// The few lines setup, update, check and join print about this machine. Never fails the command it is part of.
+// Returns the part of that command's --json answer it adds: `{ pending, ask }` (step ids).
 export function localSetupSection(root) {
   let st;
-  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [] }; }
-  if (!st.exists) return { pending: [] };
-  const pending = st.steps.filter((s) => s.state !== 'ok');
+  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], error: 'could not read' }; }
+  if (!st.steps.length) return { pending: [], ask: [] };
+  const pending = st.steps.filter((s) => s.state === 'pending');
+  const ask = st.steps.filter((s) => s.state === 'ask');
   log(c.bold('\nLocal setup (this machine)'));
-  if (!pending.length) log(`  ${c.green('✓')} all ${st.steps.length} step(s) are done here`);
+  if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length} step(s) are done here`);
   else {
-    log(`  ${c.yellow('•')} ${pending.length} of ${st.steps.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
+    if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
+    if (ask.length) log(`  ${c.cyan('?')} ${ask.length} step(s) from your team, to check with you: ${ask.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
-  return { pending: pending.map((s) => s.id) };
+  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id) };
 }

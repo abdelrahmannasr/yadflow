@@ -22,7 +22,7 @@ import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, 
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
-import { localSetupActions } from './local-setup.mjs';
+import { localSetupActions, localSetupSection } from './local-setup.mjs';
 
 const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
@@ -266,7 +266,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
     const toolbox = toolboxSection(root, toolboxAt);
-    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox };
+    const localSetup = localSetupSection(root);
+    return { fix: false, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: [], workspaceFile, toolbox, localSetup };
   }
 
   // Each repo's default branch and platform, for --push and --open-pr.
@@ -303,7 +304,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       fail(`--open-pr: ${stop.length} repo(s) cannot take the update as a PR/MR now — nothing was written; fix the above, then run it again`);
       process.exitCode = 1;
       const toolbox = toolboxSection(root, toolboxAt);
-      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: stop.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
+      const localSetup = localSetupSection(root);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: stop.map(([r, b]) => row(r, b)), workspaceFile, toolbox, localSetup };
     }
     held = new Set(checks.filter(([, b]) => b).map(([r]) => r));
     heldRows = checks.filter(([, b]) => b).map(([r, b]) => row(r, b));
@@ -311,7 +313,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (held.size === checks.length) {
       info('every repo\'s update is already merged or on review — nothing written');
       const toolbox = toolboxSection(root, toolboxAt);
-      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox };
+      const localSetup = localSetupSection(root);
+      return { fix: true, counts, gaps, items: itemsOf(actions), applied: 0, modified: modified.length, commits: checks.map(([r, b]) => row(r, b)), workspaceFile, toolbox, localSetup };
     }
     fixable = fixable.filter((a) => (!a.root || reached.has(a.root)) && !held.has(a.root) && (!a.managed?.root || reached.has(a.managed.root)) && !held.has(a.managed?.root));
   }
@@ -488,7 +491,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     });
   }
   const toolbox = toolboxSection(root, toolboxAt);
-  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox };
+  const localSetup = localSetupSection(root);
+  return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox, localSetup };
 }
 
 // E85: `yad check` and `yad update` end with the toolbox check — the tools this Product uses that are not

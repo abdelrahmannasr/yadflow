@@ -47,17 +47,27 @@ export function stepHash(step) {
 
 const step = (s) => ({ source: 'yadflow', vetted: true, verify: null, since: null, ...s });
 
-// yadflow's steps for this Product, in the order a person would do them.
-export function yadflowSteps(root) {
+// The CLI version the script asks for: this release, or the one the file already asks for when that is newer. An
+// older yad rewriting the file (any member's `yad check --fix`) must never lower it, or the members who are behind
+// would stop being told to upgrade.
+export function cliMinimum(current) {
+  const have = parseVersion(VERSION);
+  const was = typeof current === 'string' ? parseVersion(current) : null;
+  return was && have && compare(was, have) > 0 ? current : VERSION;
+}
+
+// yadflow's steps for this Product, in the order a person would do them. `cliMin` is the version the CLI step asks
+// for (cliMinimum).
+export function yadflowSteps(root, { cliMin = VERSION } = {}) {
   const config = readJSON(productConfigPath(root), {}) || {};
   const steps = [];
 
   steps.push(step({
-    id: 'yadflow-cli', title: `Install the yadflow CLI, version ${VERSION} or later`, when: 'required',
+    id: 'yadflow-cli', title: `Install the yadflow CLI, version ${cliMin} or later`, when: 'required',
     purpose: 'yad is the command every step of this project runs. The project was last set up or updated with this version, and an older yad on your machine can misread its files.',
     impact: 'Replaces the yad command on your machine for every project that uses it. Nothing in any repo changes.',
-    commands: [`npm install -g yadflow@${VERSION}`],
-    check: { builtin: 'cli-version', min: VERSION },
+    commands: [`npm install -g yadflow@${cliMin}`],
+    check: { builtin: 'cli-version', min: cliMin },
     verify: 'yad --version',
   }));
 
@@ -99,7 +109,9 @@ export function yadflowSteps(root) {
   for (const tool of [...TOOLBOX, ...choices.custom]) {
     if (!toolUse(tool, choices).used) continue;
     const own = tool.tier === 'project';
-    const commands = (tool.install ?? []).slice(0, 1).map((i) => i.command);
+    // A shipped tool has a recipe (E165): `yad toolbox connect` gives the agent its exact, pinned steps and the
+    // one question to ask. A team's own tool has no recipe: its install commands are the team's.
+    const commands = own ? (tool.install ?? []).map((i) => i.command) : [`yad toolbox connect ${tool.id} --json`];
     steps.push(step({
       id: `tool-${tool.id}`, title: `Install ${tool.name}`, when: 'optional',
       purpose: `Your team uses ${tool.name}: it ${tool.role}.`,

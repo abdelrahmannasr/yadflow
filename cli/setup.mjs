@@ -18,7 +18,7 @@ import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
-import { localSetupActions } from './local-setup.mjs';
+import { localSetupActions, localSetupSection } from './local-setup.mjs';
 import { LOCAL_SETUP_DOC } from './local-setup-steps.mjs';
 import { readAllowList } from './agent-rules.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
@@ -496,7 +496,7 @@ export async function runSetup(root, opts = {}) {
   // 0. Profile interview — branch the wizard to the user's situation (solo/team, code, repo layout).
   const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
   // Steps: interview, preflight, install, Product, tools (1 if deferred else 3), repos, wire, coderabbit,
-  // toolbox, done.
+  // toolbox, local setup script (E185), done.
   const total = 10 + (configureTools ? 3 : 1);
   let _n = 0;
   const S = (title) => step(++_n, total, title);
@@ -937,6 +937,7 @@ export async function runSetup(root, opts = {}) {
   S('Local setup script (for each team member\'s machine)');
   guide(['Every team member\'s agent follows this script after they join and after each update. Each step says why it is needed and what it changes, so each person decides.']);
   applyActions(localSetupActions(root), { force: true });
+  const localSetup = localSetupSection(root);
 
   // Summary + version stamp
   S('Done');
@@ -983,7 +984,7 @@ export async function runSetup(root, opts = {}) {
   // refused (YAD-CLI-001, with `questions`) before anything was written (E159, `assertSetupAnswered`).
   return {
     profile: { solo, team_size, codebase, repo_layout }, ideTargets,
-    repos: registry.repos.map((r) => r.name ?? null), next: epicSkill, toolbox,
+    repos: registry.repos.map((r) => r.name ?? null), next: epicSkill, toolbox, localSetup,
     ...(notes.length ? { notes } : {}),
   };
 }

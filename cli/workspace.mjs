@@ -36,7 +36,7 @@ import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetup
 import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
-import { localSetupActions } from './local-setup.mjs';
+import { localSetupActions, localSetupSection } from './local-setup.mjs';
 import { runMemberAdd } from './members.mjs';
 import { linkedGitDir } from './worktree-record.mjs';
 
@@ -522,6 +522,8 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   log('');
   log(c.bold('Toolbox'));
   const toolbox = offerToolbox(product, product, { canRemove: false });
+  // E185: the steps this machine still needs, from the Product's local setup script.
+  const localSetup = localSetupSection(product);
 
   // E131: the person's member file — proven by the platform, on its own branch and PR/MR. Never fatal.
   log('');
@@ -538,6 +540,6 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   return {
     workspace, product,
     repos, skills: { installed: skills.installed, stale: skills.stale.length, shared: skills.shared.length },
-    hook: hook.length ? 'installed' : 'unchanged', toolbox, member,
+    hook: hook.length ? 'installed' : 'unchanged', toolbox, localSetup, member,
   };
 }
