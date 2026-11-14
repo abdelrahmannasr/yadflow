@@ -941,27 +941,36 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
     uncut(l);
     assert.ok(Date.now() - t13 < within(SLOW), `#498 ${JSON.stringify(l.slice(0, 20))} took ${Date.now() - t13} ms`);
   }
+  // From here on, each check expects one exact verdict: an allow, or a refusal for a named reason. The guard's own
+  // 5 s cut-off would turn any of them into "took too long" on a slow enough runner: the coverage leg runs the
+  // near-limit `case` line in about 1.8 s on a laptop, and a CI runner has been about four times slower. So each
+  // is judged with no deadline (`uncut`), and timed: the verdict is exact, and a slowdown still shows.
   // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
   for (const d of [4000, 16000]) {
     const t12 = Date.now();
-    assert.match(agentGuardDecision(`${'bash <('.repeat(d)}echo hi${')'.repeat(d)}`).message, /too many process substitutions/);
+    assert.match(uncut(`${'bash <('.repeat(d)}echo hi${')'.repeat(d)}`).message, /too many process substitutions/);
     assert.ok(Date.now() - t12 < within(4500), `#498 nested <( took ${Date.now() - t12} ms`);
   }
-  assert.equal(agentGuardDecision(Array(60).fill("echo 'echo hi' >> f").join('; ') + '; bash f').allow, true);
+  assert.equal(uncut(Array(60).fill("echo 'echo hi' >> f").join('; ') + '; bash f').allow, true);
   // #498 review round 7: each budget refuses past its limit, and a line well under it stays allowed.
-  assert.match(agentGuardDecision(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
+  const t15 = Date.now();
+  assert.match(uncut(`echo $(${' case ${'.repeat(120000)})`).message, /too many `case` words/);
+  assert.ok(Date.now() - t15 < within(SLOW), `#498 many case words took ${Date.now() - t15} ms`);
   // Near the limit: 240 `case` words of 4,000 characters read about 960,000 of the 1,048,576 allowed. The line
   // must also stay under MAX_JUDGED, or it is refused as too long rather than for its words.
   const nearCase = `echo $(${` case ${'x'.repeat(4000)} in x) :;; esac;`.repeat(240)})`;
   assert.ok(nearCase.length < MAX_JUDGED, `the near-limit line is ${nearCase.length} characters`);
-  assert.equal(agentGuardDecision(nearCase).allow, true);
-  assert.match(agentGuardDecision(`echo ${'{x}'.repeat(1300)},y`).message, /brace lists expand to too many words/);
-  assert.equal(agentGuardDecision(`echo ${'{x}'.repeat(150)},y`).allow, true);
+  const t16 = Date.now();
+  const near = uncut(nearCase);
+  assert.equal(near.allow, true, near.message);
+  assert.ok(Date.now() - t16 < within(SLOW), `#498 near-limit case words took ${Date.now() - t16} ms`);
+  assert.match(uncut(`echo ${'{x}'.repeat(1300)},y`).message, /brace lists expand to too many words/);
+  assert.equal(uncut(`echo ${'{x}'.repeat(150)},y`).allow, true);
   // #498 review: the kept spelling of a long double-quoted word with many backslashes is built in one pass.
   const n = Math.floor((MAX_JUDGED - 100) / 2);
   for (const [l, allow] of [[`bash -c "${'\\x'.repeat(n)}; gh pr merge 5"`, false], [`echo "${'\\x'.repeat(n)}"`, true]]) {
     const t9 = Date.now();
-    assert.equal(agentGuardDecision(l).allow, allow, l.slice(0, 20));
+    assert.equal(uncut(l).allow, allow, l.slice(0, 20));
     assert.ok(Date.now() - t9 < within(4500), `#498 kept backslashes took ${Date.now() - t9} ms`);
   }
   const long = agentGuardDecision(`echo ${'x'.repeat(MAX_JUDGED)}`);
