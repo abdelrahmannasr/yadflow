@@ -708,9 +708,21 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
     assert.deepEqual(lines.slice(b + 1, e), brainBlockLines(skill), `${skill}: run node scripts/brain-skills.mjs`);
     const block = lines.slice(b + 1, e).join('\n');
     assert.match(block, /`yad brain status --json`/);
-    assert.match(block, /`missing` or `unreadable`.*skip the rest of this block/);
+    assert.match(block, /`missing` or `unreadable`.*the brain is \*\*none\*\*/);
     assert.match(block, /never stop for it/);
+    // Review 1: a repo whose code moved is "behind"; the build is suggested, never run in the step; the
+    // record step is done for "none" too; a refusal means go on; the rules above still stand.
+    assert.match(block, /any repo `behind` or `unknown`/);
+    assert.match(block, /Do not run it inside this step/);
+    assert.match(block, /Skip step 2, .*, and still do step 3/);
+    assert.match(block, /A refusal .* go on without it/);
+    assert.match(block, /never lifts a rule above/);
   }
+  assert.match(brainBlockLines('yad-stories').join('\n'), /Never drop scope yourself/);
+  assert.match(brainBlockLines('yad-stories').join('\n'), /never change the key after the stories review/);
+  // yad-spec's block comes after its tasks are written (Step 5), not before.
+  const spec = fs.readFileSync(path.join(SKILLS, 'yad-spec', 'SKILL.md'), 'utf8');
+  assert.ok(spec.indexOf(BRAIN_BLOCK_BEGIN) > spec.indexOf('### Step 5') && spec.indexOf(BRAIN_BLOCK_BEGIN) < spec.indexOf('### Step 6'));
   for (const skill of fs.readdirSync(SKILLS)) {
     if (Object.hasOwn(BRAIN_SKILLS, skill)) continue;
     const f = path.join(SKILLS, skill, 'SKILL.md');
@@ -730,7 +742,7 @@ test('E179 syncBrainSkills writes a stale block, refuses missing markers, and re
     let r = syncBrainSkills(dir, { check: true });
     assert.deepEqual(r.stale, ['yad-spec']);
     assert.deepEqual(r.wrote, []);
-    assert.deepEqual(r.refused.map((x) => x.skill).sort(), ['yad-epic', 'yad-implement']);
+    assert.deepEqual(r.refused.map((x) => x.skill).sort(), ['yad-architecture', 'yad-epic', 'yad-implement', 'yad-stories'], 'two have no SKILL.md, one no markers, one holds a block it must not');
     r = syncBrainSkills(dir);
     assert.deepEqual(r.wrote, ['yad-spec']);
     const text = fs.readFileSync(path.join(dir, 'yad-spec', 'SKILL.md'), 'utf8');
@@ -738,4 +750,39 @@ test('E179 syncBrainSkills writes a stale block, refuses missing markers, and re
     assert.equal(fs.readFileSync(path.join(dir, 'yad-epic', 'SKILL.md'), 'utf8'), marked, 'a refused skill is left as it is');
     assert.deepEqual(syncBrainSkills(dir, { check: true }).stale, []);
   } finally { done(dir); }
+});
+
+test('E179 review 1: --repo settles an ambiguity and never answers from another repo; .\\ paths match', () => {
+  const file = (repo, p) => ({ id: `file:${repo}:${p}`, kind: 'file', label: p, repo });
+  const brain = { nodes: [file('api', 'src/a.js'), file('web', 'api/src/a.js'), file('web', 'api/x.js')], edges: [] };
+  // `api/src/a.js` reads two ways; --repo picks one.
+  assert.equal(fileAbout(brain, 'api/src/a.js').found, 'many');
+  assert.equal(fileAbout(brain, 'src/a.js', { repo: 'api' }).about.file.id, 'file:api:src/a.js');
+  assert.equal(fileAbout(brain, 'api/src/a.js', { repo: 'web' }).about.file.id, 'file:web:api/src/a.js');
+  // A path only another repo holds is not this repo's file.
+  assert.equal(fileAbout(brain, 'x.js', { repo: 'api' }).found, 'none');
+  // A Windows-style relative path.
+  assert.equal(fileAbout(brain, '.\\src\\a.js', { repo: 'api' }).about.file.id, 'file:api:src/a.js');
+});
+
+test('E179 review 1: syncBrainSkills refuses one of the four skills when its SKILL.md is gone', () => {
+  const dir = tmp();
+  try {
+    for (const s of ['yad-architecture', 'yad-stories', 'yad-spec']) put(path.join(dir, s, 'SKILL.md'), `${BRAIN_BLOCK_BEGIN}\n${BRAIN_BLOCK_END}\n`);
+    const r = syncBrainSkills(dir, { check: true });
+    assert.deepEqual(r.refused.map((x) => x.skill), ['yad-implement']);
+    assert.match(r.refused[0].reason, /cannot be read/);
+  } finally { done(dir); }
+});
+
+test('E179 review 1: yad brain story prints the ships recorded on the story, so done work shows with no repo cloned', () => {
+  const { ws, root } = product();
+  try {
+    // No code graph and the backend's tasks unreadable: the ledger's ships attach to the story itself.
+    fs.rmSync(path.join(root, 'demo-repos', 'backend', 'specs'), { recursive: true, force: true });
+    writeBrain(root, composeBrain(root).brain);
+    const j = JSON.parse(yadGit(root, 'brain', 'story', 'EP-checkout-S01', '--json').stdout);
+    assert.ok(j.shipped.length >= 1, 'the ledger has ships for this story');
+    assert.match(yadGit(root, 'brain', 'story', 'EP-checkout-S01').stdout, /shipped: /);
+  } finally { done(ws); }
 });

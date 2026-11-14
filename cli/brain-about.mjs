@@ -35,9 +35,11 @@ const taskShort = (id) => id.slice(id.lastIndexOf(':') + 1);
 
 // The file nodes `target` names: `<repo>/<path>` when the first word is a repo the brain holds, and a bare
 // `<path>` matched in every repo. Both readings are taken, so a repo named like a folder cannot hide a file.
-export function fileCandidates(brain, target) {
-  const t = String(target).trim().replace(/\\/g, '/').replace(/^\.\//, '');
+// With `repo`, `target` is a path in that repo only (review 1: `--repo` must settle an ambiguity, never add one).
+export function fileCandidates(brain, target, { repo = null } = {}) {
+  const t = String(target).trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
   const files = brain.nodes.filter((n) => n.kind === 'file' && typeof n.repo === 'string');
+  if (repo !== null) return files.filter((n) => n.repo === repo && filePath(n) === t);
   const found = new Map();
   const slash = t.indexOf('/');
   if (slash > 0) {
@@ -52,7 +54,7 @@ export function fileCandidates(brain, target) {
 // The "did you mean" list for a file the brain does not hold: files with the same name in any folder, then the
 // files in the folder named (a typo in the name).
 export function fileSuggestions(brain, target, max = 5) {
-  const t = String(target).trim().replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  const t = String(target).trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').toLowerCase();
   const cutAt = t.lastIndexOf('/');
   const name = t.slice(cutAt + 1);
   const folder = cutAt > 0 ? t.slice(0, cutAt) : null;
@@ -64,9 +66,9 @@ export function fileSuggestions(brain, target, max = 5) {
 }
 
 // `{ found: 'none' | 'many' | 'one', candidates?, about? }`.
-export function fileAbout(brain, target, { limit = 25 } = {}) {
-  const candidates = fileCandidates(brain, target);
-  if (!candidates.length) return { found: 'none', suggestions: fileSuggestions(brain, target) };
+export function fileAbout(brain, target, { limit = 25, repo: inRepo = null } = {}) {
+  const candidates = fileCandidates(brain, target, { repo: inRepo });
+  if (!candidates.length) return { found: 'none', suggestions: fileSuggestions(brain, inRepo !== null ? `${inRepo}/${target}` : target) };
   if (candidates.length > 1) return { found: 'many', candidates: candidates.map((n) => `${n.repo}/${filePath(n)}`) };
   const f = candidates[0];
   const ix = indexOf(brain);

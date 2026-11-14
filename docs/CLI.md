@@ -2193,17 +2193,25 @@ reads its code context:
 | Skill | What it asks |
 |---|---|
 | `yad-architecture` | What is already in the area (`query`), and which files call the files a contract change lands in (`file`) |
-| `yad-stories` | Past stories and ships in the area (`query`), and the main users of the files a story's notes name (`file`) |
-| `yad-spec` | The files the story's tasks already declare (`story`), and the files that must change with each file a task touches (`file`), so the Files lists are complete |
+| `yad-stories` | Past stories and ships in the area (`query`; a story that looks shipped goes to the person), and the main users of the files a story's notes name (`file`) |
+| `yad-spec` | The story's tasks in its other repos (`story`), and, once the tasks are written, the files that must change with each file a task declares (`file`), so the Files lists are complete |
 | `yad-implement` | What each declared file's edit can reach (`file`). A user outside the declared files is named in the hand-off, never edited: the file-boundary rule stands |
 
 The brain is optional. Each skill first runs `yad brain status --json`:
-- `current`: it uses the brain.
-- `behind`: it uses the brain and says so, and suggests `yad brain build`.
-- `missing` or `unreadable`: it goes on as before, from the code-maps. A step never stops for the brain.
+- `current`, with no repo `behind` or `unknown`: it uses the brain.
+- `behind`, or a repo whose code moved since the build: it uses the brain, says so, and suggests
+  `yad brain build` to the person. It never runs the build inside its step: that runs Graphify in every
+  connected repo.
+- `missing` or `unreadable`: it goes on as before. A step never stops for the brain, and a refusal (a
+  new file the brain does not hold yet) or a declined permission prompt also means "go on".
 
-`yad-architecture` and `yad-stories` record the state as `brain:` inside their `code-context:`
-frontmatter. `yad-spec` and `yad-implement` say it in their hand-off.
+The brain never lifts a skill's own rules: a stale code-map still means flag and stop, `yad-implement`
+still edits only the task's declared files, and `yad-stories` asks the person about a story that looks
+already shipped instead of dropping it.
+
+`yad-architecture` and `yad-stories` record the state (`current`, `behind` or `none`) as `brain:` inside
+their `code-context:` frontmatter. A story file is part of the stories approval hash, so a story writes it
+once, when it is authored. `yad-spec` and `yad-implement` say it in their report.
 
 ### Seeing the brain: `yad brain view`
 

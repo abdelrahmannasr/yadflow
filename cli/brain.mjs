@@ -701,8 +701,10 @@ function brainFile(root, { target, repo, limit, json, runner }) {
   const opened = openBrain(root, { limit, fallback: 25, json, runner });
   if (!opened.brain) return opened.refused;
   const { brain, n, behind } = opened;
-  const asked = repo !== null && repo !== undefined ? `${repo}/${String(target).replace(/^\.?\//, '')}` : target;
-  const r = fileAbout(brain, asked, { limit: n });
+  const inRepo = repo !== null && repo !== undefined ? String(repo) : null;
+  const path1 = String(target).replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+  const asked = inRepo !== null ? `${inRepo}/${path1}` : target;
+  const r = fileAbout(brain, inRepo !== null ? path1 : target, { limit: n, repo: inRepo });
   if (r.found === 'none') {
     return refuse(`the brain holds no file ${forTerminal(asked)}`, r.suggestions.length
       ? `did you mean: ${r.suggestions.map(forTerminal).join(', ')}`
@@ -755,6 +757,9 @@ function brainStory(root, { id, limit, json, runner }) {
     for (const f of t.files) log(`    ${forTerminal(f.path)}${f.missing ? c.yellow('  (not in the code yet)') : ''}`);
   }
   if (a.more.tasks) log(c.dim(`  … and ${a.more.tasks} more tasks`));
+  // Ships recorded on the story itself (its repo is not cloned here, so its tasks have no node): the work is
+  // done even when no task shows it (review 1).
+  if (a.shipped.length) ok(`shipped: ${a.shipped.map((x) => forTerminal(x.label)).join(', ')}`);
   for (const r2 of a.reposWithoutTasks) info(`${forTerminal(r2)}: no tasks in the brain — the repo is not cloned here, or its tasks.md is not written yet`);
   return undefined;
 }
