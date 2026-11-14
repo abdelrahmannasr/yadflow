@@ -1218,6 +1218,22 @@ yad detect                  # skills, agents, MCP servers and plugins installed 
   `speckit: not-installed`), so the record shows what was not used.
 - `yad setup`, `check`, `update` and `join` print the same list and never install anything without
   asking.
+
+### Getting each machine ready: the local setup script
+
+The Product also holds a **local setup script**: the steps that get each team member's machine ready, and
+keep it ready after every update (E185). It is two committed files: `.sdlc/local-setup.json` (the steps as
+data) and `LOCAL-SETUP.md` (the same steps as text).
+
+- Each step says **why** it is needed and **what it changes** for the person, so they decide whether to do it.
+- yadflow writes its own steps (install yad at this release, sign in, the tools your team uses). Your team
+  adds its own. An update rewrites yadflow's steps and never touches your team's.
+- `yad local-setup` says which steps are done on this machine. yad runs no step: the agent runs a step
+  only after the person says yes.
+
+```bash
+yad local-setup             # the steps this machine still needs, with why and what each changes
+```
 <!-- explainer:end id=toolbox -->
 
 ---
