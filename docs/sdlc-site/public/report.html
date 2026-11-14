@@ -1418,6 +1418,15 @@ yad usage --member carol --format md       # one member, Markdown
 yad usage --format json --all              # machine-readable, to stdout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> A team lead wants to see how the team actually uses the flow. <em>Note:</em> ledger events (approve/comment/ship) name the platform login. A GitHub/GitLab noreply commit address carries the login, so those commits join the same row; a person whose git name and login differ may appear on more than one row, and the report says so.</div>
   </div>
+  <div class="skillcard" id="cmd-map">
+    <h4><code>yad map</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The progress map (E181): one moving picture of how close the work is to Production. Epics, stories, tasks and branches flow through each code repo's Development branch into Production, read from the ledger and read-only git. Each part names <strong>who</strong> owns, built, reviewed and approved it — initials badges, a People lens, the person each open gate waits on — as roles, never counts or rankings.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad map --open                 # a local page, until Ctrl-C
+yad map --html --open          # one file in the local reports folder; the next lights what moved
+yad map --html --anonymous     # no names, for sharing outside the team</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> A lead or the team wants to see at a glance what is live, what waits for release, what is stuck, and who is on it. Set each repo's Production branch with <code>map.production</code> in the Product config; without it the page says the branch was guessed.</div>
+  </div>
   <div class="skillcard" id="cmd-reports">
     <h4><code>yad reports</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The reports saved on <strong>this machine only</strong> (E180). A report shows the work at one moment and goes stale, so when no <code>--out</code> is given the standup, usage and issues reports and the brain view page are saved in <code>&lt;product&gt;--reports/</code> beside the Product, one subfolder per kind, each file named <code>&lt;date&gt;-&lt;time&gt;--&lt;kind&gt;--&lt;scope&gt;--&lt;state&gt;</code>. A catalog page lists them all. Nothing there is ever committed or pushed.</div>

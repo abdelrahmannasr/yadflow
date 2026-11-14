@@ -29,7 +29,7 @@ The commands, by what they are for:
 | Build | `commit`, `open-pr`, `ship`, `review`, `checkpoint`, `tidy up`, `story frames` |
 | Code repos | `repo` (`list`, `clone`, `refresh`, `sync`), `risk-map`, `codeowners` |
 | Feature threads | `thread`, `reconcile` |
-| Read the record | `history`, `index`, `usage`, `standup`, `issues`, `docs`, `reports` |
+| Read the record | `history`, `index`, `usage`, `standup`, `issues`, `docs`, `map`, `reports` |
 | Keep healthy | `doctor`, `check`, `update`, `migrate`, `report`, `sync-status` |
 
 **Where a command runs (E80).** A **workspace** is the folder that holds the Product and the code repos
@@ -2364,6 +2364,93 @@ replaced by a still highlight.
 | `brain view` | the server: `url` (it holds the key), `port`, `nodes`, `edges`, `codeBehind`, `opened?` (with `--open`: `false` when no opener was found) — printed once, then the server runs until stopped. `--html`: `file`, `nodes`, `edges`, `codeBehind`, `opened?`, `warning?` (the file is in a git work tree that does not ignore it). With `--live`, `--html` adds `events` (how many recorded events the replay holds) |
 | `brain status` | `graphifyError?` (as for `build`), `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`, `error`, `code` and `hint`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
+## The progress map: `yad map`
+
+`yad map` (E181) draws the road to Production as one moving picture. It answers two questions: how close
+is each piece of work to the people who use it, and who is doing which part.
+
+```
+yad map --open                 # a local page, until Ctrl-C
+yad map --html --open          # one file, saved in the local reports folder
+yad map --live --open          # the page draws itself again as the work moves
+yad map --html --anonymous     # a copy with no names, to share outside the team
+yad map --fetch --html         # git fetch origin first (downloads, never uploads)
+```
+
+**What you see.**
+
+| On the map | What it means |
+|---|---|
+| The glowing core | **Production**: each code repo's Production branch |
+| The ring around it | **Development**: each repo's integration branch (`default_branch` in `repos.json`), with the commits waiting for release |
+| Pills | Epics, and groups of branches that name no epic |
+| Big dots | Stories, with their number beside them |
+| Small dots | Shipped tasks (from the build log) |
+| Diamonds | Open branches of a story |
+| Blue | In Production |
+| Pink | Merged into Development, waiting for release |
+| Pink ring with a dot | Shipped, but this machine cannot check Production (the repo is not cloned here) |
+| Amber | In progress |
+| Hollow ring | Not started |
+| Small grey | A branch with no commits for 60 days that was never merged |
+
+Particles flow from each item toward the centre. Hover for details, click to pin a side panel, drag to move,
+use the wheel to zoom, and press **List** for the same picture as a table.
+
+**People: roles, never counts.** Each story and epic shows an initials badge for its owner once you zoom
+in. The tooltip and side panel name every role:
+
+| Role | Read from |
+|---|---|
+| Owner | the story's and the epic's `owner`, and step owners (`yad assign`) |
+| Built by | the author of the merged branch, read from the code repo (not the person who pressed merge) |
+| Reviewed by | the engineer reviews in the build log |
+| Approved by | the gate approvals, per step |
+
+- **People** in the footer lists everyone with the roles they hold, by name. Pick one to light only their
+  work; pick a role to narrow it. There is no count, no score and no ranking.
+- **Waiting on whom:** an open gate puts a dashed amber ring around the badge of the person it waits on (the
+  same rule `yad standup` reads).
+- **One person:** an epic where every part so far came from one person says so in its panel. It is a fact,
+  not a judgement.
+- **One badge per person.** A name is matched to a member file (`yad member`), as the standup matches it. A
+  git name and a login with no member file to join them stay two badges: yad never guesses. Emails are never
+  shown.
+
+**What moved.** Each map saved with `--html` keeps a small digest beside it in the reports folder. The next
+map compares itself with the newest one and lights each item whose state changed for a few seconds; the
+header says "N moved since <date>" and lists them.
+
+**Sharing.** The file holds the team's names. `--anonymous` names each person "Person A", "Person B" and so
+on, masks the capture-branch name and any branch part that is a person's name, and drops pull request
+links. The file name says `anonymous`, and no digest is kept for it.
+
+**Production branch.** Set it per repo in the Product config:
+
+```json
+{ "map": { "production": { "api": "Production" }, "staleDays": 60,
+           "groups": [{ "id": "chores", "label": "Chores", "pattern": "^chore/" }, { "id": "other", "label": "Other branches" }] } }
+```
+
+Without `map.production`, yad tries `Production`, `production`, `prod`, `release`, `main` and `master`
+(never the repo's default branch), and the page says the branch was **guessed**. A name origin does not
+have is reported and nothing is guessed for that repo.
+
+**Read-only.** The ledger is read from this checkout (the header says when it is behind origin), and the
+code repos with read-only git. Only `--fetch` changes anything, and it only downloads. No commit subject and
+no path on this machine reaches the page. A repo that is not cloned here shows its shipped tasks as
+"shipped, unchecked".
+
+**The page is locked down** the same way as `yad brain view`: 127.0.0.1 only, a one-time key, the Host
+checked, GET only, and a strict Content-Security-Policy. The `--html` file holds everything inline and
+needs no network.
+
+| `--json` | Keys |
+|---|---|
+| `map` | `model` — `product`, `repos`, `groups`, `epics`, `stories`, `tasks`, `branches`, `people[{key, name, initials, hue, roles}]`, `waiting`, `notes.onePerson`, `moved`, `since`, `summary`, `anonymous` |
+| `map --html` | `file`, `epics`, `stories`, `people`, `moved`, `anonymous`, `opened?` |
+| `map` (server) | `url` (it holds the key), `port`, `live`, `anonymous`, `opened?` |
+
 ## Saved reports: `yad reports`
 
 A **report** shows the state of the work at one moment, and goes stale as soon as the work moves on. So
@@ -2378,6 +2465,7 @@ These commands save into the folder when you do not name a file with `--out`:
 | `yad usage` (HTML or Markdown) | `usage` |
 | `yad issues list --format md\|html` | `issues` |
 | `yad brain view --html` (and `--live`) | `brain-view` |
+| `yad map --html` | `progress-map` |
 
 **Where the folder is.** The first of these wins:
 

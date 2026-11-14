@@ -665,6 +665,10 @@ Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge 
   window is in UTC unless `--tz` names a zone; `--member <login>` or `--me` narrows it to one person, and
   `--format md|html` writes it as a report. A repo the platform cannot be asked about says
   "platform not read", never "nothing".
+- **The progress map:** `yad map --open` shows how close each epic, story, task and branch is to
+  Production, and who owns, built, reviewed and approved each part. `--html` saves one file you can open
+  anywhere; the next one lights what moved since. `--anonymous` takes the names out before you share it
+  outside the team. Set each repo's Production branch with `map.production` in the Product config.
 - **Saved reports stay on your machine:** a report shows the work at one moment and goes stale, so with no
   `--out` the standup, usage and issues reports and the brain view page are saved in one folder beside the
   Product, `<product>--reports/`, named by date, kind, scope and state (for example
@@ -741,6 +745,7 @@ Short notes on the commands a team uses every day. Each one is covered in full i
 | `yad fold <epic> <step>` | Ends an authoring step with one clean commit, `docs(<epic, lowercase>): author <step>`, holding only that step's files. The authoring skills run it for you. |
 | `yad member add` / `yad member list` / `yad member remove` | Records who is on the team: one file per person with their GitHub and GitLab accounts and verified emails (as fingerprints). `list` shows each member as active, idle (quiet, still has access), left (no access any more) or unknown. A member who comes back with a commit is active again. |
 | `yad standup` | Today's standup: for each member, what they did since the previous working day, what they are on now, and what is waiting. Read-only and rebuilt each time; facts only. |
+| `yad map` / `yad map --html` / `yad map --live` | The progress map: everything on its road to Production, with who did which part (roles, never counts). Read-only; `--anonymous` for a copy without names. |
 | `yad reports` / `yad reports open <n>` / `yad reports prune --older-than <days>` | The reports saved on this machine, in `<product>--reports/` beside the Product: newest first, each marked fresh or stale. Never committed. `prune` only says what it would remove until you add `--apply`. |
 | `yad assign <epic> <step> [--to <name>]` / `yad unassign` / `yad owners` | Names one person as the owner of an authoring step (for example "Bob writes the architecture"). Advice only: it never blocks an edit or a review. |
 
