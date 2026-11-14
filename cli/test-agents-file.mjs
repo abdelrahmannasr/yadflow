@@ -944,8 +944,8 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // From here on, each check expects one exact verdict: an allow, or a refusal for a named reason. The guard's own
   // 5 s cut-off would turn any of them into "took too long" on a slow enough runner: the coverage leg runs the
   // near-limit `case` line in about 1.8 s on a laptop, and a CI runner has been about four times slower. So
-  // `exact` always runs the real guard, and its verdict is the one checked, timed against the real budget (4.5 s,
-  // under the 5 s cut-off), on every run but coverage. Under coverage (not timed) the real guard still runs, so
+  // `exact` always runs the real guard, and on every run but coverage its verdict is the one checked, and the long
+  // lines are timed against the real budget (4.5 s, under the 5 s cut-off). Under coverage (not timed) the real guard still runs, so
   // its lines are counted, and the verdict checked is the copy's with no deadline (`uncut`), which never depends
   // on the runner's speed.
   const exact = (l) => { const real = agentGuardDecision(l); return process.env.NODE_V8_COVERAGE ? uncut(l) : real; };
