@@ -14,7 +14,7 @@ import {
   advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateCapFor, gateReach, uniqueReach, peopleWord, capSeat, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase, legacyLogins,
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
-  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
+  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards, recordSoloRereview,
   reopenStep, retiredPr, epicLineage, heldByReopen, reopenStampDue, stampPassed, isGateStep,
 } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
@@ -948,7 +948,20 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       // done … the rule no longer holds" would describe a pass that never happened. Say what is true: the
       // review is still owed, and what it still needs (E37). The approvals themselves are kept either way:
       // a sync of a step that reads as passed only ever adds to its record (`upsertBridge`'s `closed`).
-      if (stepStatus(step) === 'deferred') {
+      // A solo Foundation reviewed again on a fresh PR/MR (E174 follow-up): solo mode counts no approvals, so
+      // without this record nothing could ever clear "changed after its review", and `yad foundation publish`
+      // would refuse for good. Bound to what the PR/MR merged (`approvedHash`), never to the default branch
+      // as it stands: an edit merged after this review is not covered by it. Not on a read-only run.
+      const rereviewed = !readOnly && solo && epic === FOUNDATION_EPIC && stepStatus(step) === 'done' && !!pull.merged && pred.passed
+        && typeof approvedHash === 'string' && approvedHash !== NOTHING_AT_HEAD
+        && recordSoloRereview(state, step.id, {
+          pr: Number.isInteger(pr.number) ? pr.number : Number(pr.number), hash: approvedHash, by,
+          date: (typeof pull.mergedAt === 'string' && pull.mergedAt.slice(0, 10)) || today,
+          commit: pull.mergeCommit || null, mergedBy: pull.mergedBy || null,
+        });
+      if (rereviewed) {
+        ok(`${step.id}: PR #${pr.number} merged in solo mode — recorded as a review of ${step.artifact} as that PR merged it (the first close is kept)`);
+      } else if (stepStatus(step) === 'deferred') {
         info(`${step.id} is deferred — approvals re-synced, chain not re-advanced; its review is still owed`);
         for (const m of pred.missing) hand(`still owed: ${m}`);
       } else if (changedSinceApproved) {

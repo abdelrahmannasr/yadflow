@@ -2653,6 +2653,32 @@ export function reopenStampDue(state, reviewStepId) {
 // approvals were given before the step they rest on was approved again, so each later step is reviewed afresh,
 // on a new PR/MR. Recorded per walked-back review (`passes[]`), so a reopen of `epic` closes its hold step by
 // step. Mutates `state`; true when it recorded one.
+// A solo Foundation reviewed again (E174 follow-up). Solo mode counts no approvals, so once the Foundation
+// changes after its review nothing could ever say the new text was reviewed: a sync of an already-done
+// step only re-syncs approvals, and the first close wins. In solo mode the merge IS the human decision, so
+// the merge of a FRESH review PR/MR is recorded beside the first close, never over it, in the review
+// step's `rereviews` list: the PR/MR, what it merged (`hash`, the content at its approved head — never the
+// default branch's, so an edit merged after it is not covered) and who and when. Only a PR/MR newer than
+// every one the step already holds (`closed.pr` and earlier re-reviews) is recorded, so a re-sync of the
+// same or an older merge writes nothing. Mutates `state`; true when it wrote.
+export function recordSoloRereview(state, reviewStepId, { pr, hash, by = null, date = null, commit = null, mergedBy = null } = {}) {
+  const step = state?.steps?.find((s) => s?.id === reviewStepId);
+  if (!isPlainObject(step) || step.type !== 'review+approve' || stepStatus(step) !== 'done') return false;
+  if (!Number.isInteger(pr) || pr <= 0 || typeof hash !== 'string' || !hash.startsWith('sha256:')) return false;
+  const earlier = Array.isArray(step.rereviews) ? step.rereviews : [];
+  const seen = [step.closed?.pr, ...earlier.map((r) => r?.pr)].filter((n) => Number.isInteger(n));
+  if (seen.some((n) => n >= pr)) return false;
+  step.rereviews = [...earlier, { pr, hash, by, date, commit, mergedBy, via: 'merged', waived: 'solo' }];
+  return true;
+}
+
+// Whether a solo re-review covers the content as it stands (`accepted`, from `acceptedHashes`).
+export function soloRereviewCovers(step, accepted) {
+  const list = Array.isArray(step?.rereviews) ? step.rereviews : [];
+  // Strict: nothing to fingerprint now (`accepted` empty) is never covered.
+  return Array.isArray(accepted) && accepted.length > 0 && list.some((r) => isPlainObject(r) && typeof r.hash === 'string' && accepted.includes(r.hash));
+}
+
 export function stampPassed(state, reviewStepId, { platform = null, number } = {}) {
   if (!reopenStampDue(state, reviewStepId) || !Number.isInteger(number) || number <= 0) return false;
   const steps = state.steps;

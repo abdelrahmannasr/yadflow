@@ -253,6 +253,168 @@ test('E174 review 2: a solo Foundation changed after its review is refused, usin
   assert.ok(g.created.length > 0); reset();
 });
 
+// A Foundation that changed after its review: each setup is told the step that really clears it, and the
+// tests follow that step to the end — publish goes ahead — rather than reading the wording alone.
+const SECTIONS = ['purpose.md', 'scope.md', 'mvp.md', 'stack.md', 'repos.md'];
+async function changedFoundation({ platform = 'github', solo = false, ledger = 'local' } = {}) {
+  const T = await product(platform === null ? 'github' : platform);
+  const cfg = path.join(T, '.sdlc/product.json');
+  fs.writeFileSync(cfg, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfg, 'utf8')), platform, ledger, ...(solo ? { solo: true } : {}) }));
+  for (const f of SECTIONS) fs.writeFileSync(path.join(T, 'foundation', f), `# ${f}\n`);
+  const sp = path.join(T, 'foundation/.sdlc/state.json');
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  const review = st.steps.find((s) => s.type === 'review+approve');
+  review.status = 'done';
+  review.closed = { by: 'ann', date: '2026-11-10', hash: 'sha256:old', pr: 3, via: 'merged', ...(solo ? { waived: 'solo' } : {}) };
+  fs.writeFileSync(sp, JSON.stringify(st));
+  return { T, sp, reviewId: review.id };
+}
+const captureJSON = async (fn) => {
+  const lines = [];
+  const orig = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (x) => { lines.push(String(x)); return true; };
+  try { await fn(); } finally { process.stdout.write = orig; }
+  return JSON.parse(lines.join(''));
+};
+const publishes = async (T) => { const f = fake(); await P.runFoundationPublish(T, { env, runner: f.runner }); const n = f.created.length; reset(); return n > 0; };
+const refusal = async (T) => { const f = fake(); const doc = await captureJSON(() => P.runFoundationPublish(T, { json: true, env, runner: f.runner })); reset(); return doc; };
+const { artifactHash: hashOf } = await import('./epic-state.mjs');
+const mergedPr = (over = {}) => () => ({ ok: true, state: 'MERGED', merged: true, headOid: 'abc', mergedAt: '2026-11-12T10:00:00Z', mergeCommit: 'm1', mergedBy: 'ann', reviews: [], threads: [], ...over });
+const openFresh = (T, reviewId, number) => fs.writeFileSync(path.join(T, 'foundation/.sdlc/product-prs.json'),
+  JSON.stringify([{ step: reviewId, artifact: 'foundation/', platform: 'github', number, branch: 'review/EP-foundation/foundation', lastSyncedAt: null }]));
+
+test('`yad gate reopen` refuses the Foundation, so no hint names it', async () => {
+  const { T, sp } = await changedFoundation();
+  const { reopenStep } = await import('./epic-state.mjs');
+  assert.throws(() => reopenStep(JSON.parse(fs.readFileSync(sp, 'utf8')), 'foundation', { reason: 'x' }), /Foundation is not reopened/);
+  const doc = await refusal(T);
+  assert.equal(doc.ok, false);
+  assert.doesNotMatch(doc.hint, /gate reopen/);
+  const { runFoundationStatus } = await import('./epic.mjs');
+  const st = await captureJSON(() => runFoundationStatus(T, { json: true }));
+  const w = st.warnings.find((x) => /changed after its review/.test(x));
+  assert.ok(w, JSON.stringify(st.warnings));
+  assert.doesNotMatch(w, /gate reopen/);
+});
+
+test('a solo Foundation with a platform: the hint is a fresh PR/MR, and its merge, synced, clears the refusal', async () => {
+  const { T, sp, reviewId } = await changedFoundation({ solo: true });
+  const doc = await refusal(T);
+  assert.match(doc.hint, /git switch -C review\/EP-foundation\/foundation origin\//);
+  assert.match(doc.hint, /yad gate open EP-foundation foundation\/`/);
+  assert.match(doc.hint, /merge it yourself \(solo mode\), then `yad gate sync EP-foundation`/);
+  assert.equal(await publishes(T), false);
+  // The steps the hint gives: a fresh review PR/MR (gate open records it), merged, then a sync.
+  openFresh(T, reviewId, 9);
+  const { gateSync } = await import('./gate.mjs');
+  const headIsCurrent = ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) });
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr(), contentAt: headIsCurrent });
+  reset();
+  const review = JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId);
+  assert.equal(review.closed.hash, 'sha256:old', 'the first close is kept');
+  assert.equal(review.rereviews.length, 1);
+  assert.deepEqual({ pr: review.rereviews[0].pr, via: review.rereviews[0].via, waived: review.rereviews[0].waived, date: review.rereviews[0].date },
+    { pr: 9, via: 'merged', waived: 'solo', date: '2026-11-12' });
+  assert.equal(await publishes(T), true);
+  // A second sync of the same merge writes nothing.
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-13', reader: mergedPr(), contentAt: headIsCurrent });
+  reset();
+  assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId).rereviews.length, 1);
+});
+
+test('a solo re-review covers only what its PR/MR merged: an edit after it, or an old merge re-read, is not covered', async () => {
+  const { T, sp, reviewId } = await changedFoundation({ solo: true });
+  const { gateSync } = await import('./gate.mjs');
+  openFresh(T, reviewId, 9);
+  const reviewed = hashOf(path.join(T, 'foundation'), 'foundation/');
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr(), contentAt: () => ({ ok: true, hash: reviewed }) });
+  reset();
+  assert.equal(await publishes(T), true);
+  // An unreviewed edit lands on the default branch after that review.
+  fs.writeFileSync(path.join(T, 'foundation/roadmap.md'), ROADMAP + '\n| Extra | EP-extra | planned |\n');
+  assert.equal(await publishes(T), false);
+  // A later sync re-reads the old merge: it merged the old content, and it is not newer — nothing is recorded.
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-13', reader: mergedPr(), contentAt: () => ({ ok: true, hash: reviewed }) });
+  reset();
+  assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId).rereviews.length, 1);
+  assert.equal(await publishes(T), false);
+  // A merge recorded only with a PR number at or below the first close's is refused too.
+  const { recordSoloRereview } = await import('./epic-state.mjs');
+  const st = JSON.parse(fs.readFileSync(sp, 'utf8'));
+  assert.equal(recordSoloRereview(st, reviewId, { pr: 3, hash: hashOf(path.join(T, 'foundation'), 'foundation/') }), false);
+});
+
+test('a solo Product that once closed the Foundation in team mode: the solo re-review still clears it', async () => {
+  const { T, reviewId } = await changedFoundation({ solo: true });
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: reviewId, status: 'approved', approver: 'bob', artifactHash: 'sha256:old' }]));
+  assert.equal(await publishes(T), false);
+  openFresh(T, reviewId, 9);
+  const { gateSync } = await import('./gate.mjs');
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr(), contentAt: ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) }) });
+  reset();
+  assert.equal(await publishes(T), true);
+});
+
+test('a team Foundation with a platform: the fresh PR/MR\'s approvals clear it; a merge alone records no re-review', async () => {
+  const { T, sp, reviewId } = await changedFoundation({ solo: false });
+  fs.writeFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), JSON.stringify([{ step: reviewId, status: 'approved', approver: 'bob', artifactHash: 'sha256:old' }]));
+  const doc = await refusal(T);
+  assert.match(doc.hint, /yad gate open EP-foundation foundation\/`/);
+  assert.match(doc.hint, /once it is approved and merged/);
+  openFresh(T, reviewId, 9);
+  const { gateSync } = await import('./gate.mjs');
+  const headIsCurrent = ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) });
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr(), contentAt: headIsCurrent });
+  reset();
+  assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId).rereviews, undefined);
+  assert.equal(await publishes(T), false);
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', reader: mergedPr({ reviews: [{ login: 'cy', state: 'APPROVED', submittedAt: '2026-11-12T09:00:00Z' }] }), contentAt: headIsCurrent });
+  reset();
+  assert.equal(await publishes(T), true);
+});
+
+test('a Foundation with no platform: the hint is `yad gate approve`, and that approval clears the refusal', async () => {
+  for (const solo of [true, false]) {
+    const { T } = await changedFoundation({ platform: null, solo });
+    const doc = await refusal(T);
+    assert.match(doc.hint, /`yad gate approve EP-foundation foundation\/ --by <your name>`/);
+    assert.doesNotMatch(doc.hint, /git push|gate open/);
+    const { gateApprove } = await import('./gate-local.mjs');
+    await gateApprove(T, { epic: 'EP-foundation', artifact: 'foundation/', by: 'cy', today: '2026-11-12' });
+    reset();
+    assert.equal(await publishes(T), true, `solo ${solo}`);
+  }
+});
+
+test('a verified solo Product: the hint says CI records the merge, and a local sync writes nothing', async () => {
+  const { T, sp, reviewId } = await changedFoundation({ solo: true, ledger: 'verified' });
+  const doc = await refusal(T);
+  assert.match(doc.hint, /CI records the merge as the new review/);
+  assert.doesNotMatch(doc.hint, /yad gate sync/);
+  openFresh(T, reviewId, 9);
+  const { gateSync } = await import('./gate.mjs');
+  await gateSync(T, { epic: 'EP-foundation', today: '2026-11-12', local: true, reader: mergedPr(), contentAt: ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) }) });
+  reset();
+  assert.equal(JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId).rereviews, undefined);
+});
+
+test('a verified solo Product: CI at the merge records the solo re-review, and publish goes ahead', async () => {
+  const { T, sp, reviewId } = await changedFoundation({ solo: true, ledger: 'verified' });
+  openFresh(T, reviewId, 9);
+  const { execFileSync } = await import('node:child_process');
+  const git = (...a) => execFileSync('git', a, { cwd: T, stdio: 'pipe' });
+  git('init', '-q'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 'x'); git('add', '-A'); git('commit', '-q', '-m', 'seed');
+  const { gateCi } = await import('./gate.mjs');
+  // The run a merge triggers (`gate ci --branch <head> --pr <n> --merged`); the scheduled sweep reads no passed step.
+  await gateCi(T, { branch: 'review/EP-foundation/foundation', pr: 9, merged: true, today: '2026-11-12', push: false, reader: mergedPr(), branchOf: () => ({ ok: false, reason: 'not asked in tests' }),
+    contentAt: ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) }) });
+  reset();
+  const review = JSON.parse(fs.readFileSync(sp, 'utf8')).steps.find((s) => s.id === reviewId);
+  assert.equal(review.rereviews?.length, 1);
+  assert.equal(review.closed.hash, 'sha256:old');
+  assert.equal(await publishes(T), true);
+});
+
 test('E174 review 2: a near-miss parked heading is published and said', () => {
   const near = [];
   const rows = P.roadmapRows('## Later\n| Feature | Proposed epic id |\n|---|---|\n| Y | EP-y |\n', [], near);

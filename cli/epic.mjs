@@ -40,7 +40,7 @@ import {
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
-import { foundationChanged, publishedItems } from './foundation-publish.mjs';
+import { foundationChanged, foundationReviewAgain, publishedItems } from './foundation-publish.mjs';
 
 // `foo`, `EP-foo` and `epics/EP-foo` all name the same epic. Accepting only one spelling would make the
 // command reject the id the user just read out of `yad next`.
@@ -491,9 +491,10 @@ export async function runFoundationStatus(root, { json = false } = {}) {
 
   // E174: whether the Foundation changed after its review, so a reader is told before `publish` refuses.
   let checkFailed = false;
-  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { return foundationChanged(dir, loadLedger(dir)); } catch { checkFailed = true; return true; } })() : false;
+  let foundationLedger = null;
+  const changed = productId === FOUNDATION_EPIC && approved ? (() => { try { foundationLedger = loadLedger(dir); return foundationChanged(dir, foundationLedger); } catch { checkFailed = true; return true; } })() : false;
   if (checkFailed) warnings.push('whether the Foundation changed after its review could not be checked — run `yad doctor`');
-  else if (changed) warnings.push('the Foundation changed after its review, so `yad foundation publish` refuses until it is reviewed again (`yad gate reopen EP-foundation foundation`)');
+  else if (changed) warnings.push(`the Foundation changed after its review, so \`yad foundation publish\` refuses until it is reviewed again — ${foundationReviewAgain(root, foundationLedger)}`);
   // E174: the item each row was published as, from the record only. Null when the record cannot be read.
   const items = productId === FOUNDATION_EPIC ? publishedItems(root) : new Map();
   for (const f of features) f.item = items ? (items.get(f.epicId) ?? null) : null;

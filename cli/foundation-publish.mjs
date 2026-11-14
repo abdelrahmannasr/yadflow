@@ -8,10 +8,12 @@
 // not cause duplicates: each item's body carries `<!-- yad-roadmap: EP-x -->`, and those are read first.
 import fs from 'node:fs';
 import path from 'node:path';
-import { run, forTerminal, readJSONStrict, writeJSON, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
+import { run, forTerminal, readJSON, readJSONStrict, writeJSON, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { err } from './errors.mjs';
-import { productConfigPath, epicFiles } from './manifest.mjs';
-import { acceptedHashes, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, roadmapFeatures } from './epic-state.mjs';
+import { isVerifiedLedger, productConfigPath, epicFiles } from './manifest.mjs';
+import { acceptedHashes, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, reviewAsItStands, roadmapFeatures, soloRereviewCovers } from './epic-state.mjs';
+import { productGit, resolveDefaultBranch } from './productcommit.mjs';
+import { isSolo } from './gate.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
 import { linkAndWriteBack, readItem, recordRoute } from './issues-write.mjs';
 import { readLinks, itemKey } from './issue-links.mjs';
@@ -26,17 +28,43 @@ const PAGE = 100;
 // The template's own heading for deferred work, exactly: a phase that merely contains the word ("Car park finder") counts.
 const PARKED = /^(later\s*\/\s*)?parked?$/i;
 
-// Whether the Foundation as it stands is not what its review passed. Approvals answer when there are any. With none
-// (a solo Product passes on the merge alone), the fingerprint the step was closed with answers. Neither: no claim.
+// Whether the Foundation as it stands is not what its review passed. A solo re-review that merged this very
+// content answers first (`rereviews`, written by `yad gate sync`/`gate ci`): it is newer than any approval or
+// close, and a Product that switched to solo after a team review keeps its old, now stale, approvals. Then
+// approvals answer when there are any. With none (a solo Product passes on the merge alone), the fingerprint
+// the step was closed with answers. Neither: no claim.
 export function foundationChanged(dir, ledger) {
   const review = ledger.state?.steps?.find((st) => st.type === 'review+approve');
   if (!review) return false;
+  if (Array.isArray(review.rereviews) && review.rereviews.length && soloRereviewCovers(review, acceptedHashes(dir, review.artifact))) return false;
   const approved = (Array.isArray(ledger.approvals) ? ledger.approvals : []).filter((a) => a?.step === review.id && a.status === 'approved');
   // Approvals with no fingerprint make no claim, so the closing fingerprint decides for them too.
   const hashed = approved.filter((a) => a.artifactHash);
   if (hashed.length) return !!doneStepUnapproved(dir, review, hashed);
   const hash = review.closed?.hash;
   return !!hash && isStaleHash(hash, acceptedHashes(dir, review.artifact));
+}
+
+// How a changed Foundation gets reviewed again. Not `yad gate reopen`: that refuses the Foundation
+// (reopenStep, "it runs once per product"). Each arm says the step that really clears `foundationChanged`:
+//   - no platform: `yad gate approve` records an approval bound to today's content, on a passed step too
+//     (gate-local) — the person's command, never the agent's;
+//   - a platform: the review as it stands on a fresh PR/MR (#418), the steps `yad next` prints. In team mode
+//     its approvals clear it; in solo mode its merge does (`rereviews`), recorded by `yad gate sync` on a
+//     local ledger and by CI at the merge on a verified one.
+export function foundationReviewAgain(root, ledger) {
+  const review = ledger?.state?.steps?.find((st) => st.type === 'review+approve');
+  const artifact = review?.artifact ?? 'foundation/';
+  const productConfig = readJSON(productConfigPath(root), null);
+  const platform = productConfig?.platform;
+  if (platform !== 'github' && platform !== 'gitlab') {
+    return `review it again on this machine (your command, not the agent's): \`yad gate approve ${FOUNDATION_EPIC} ${artifact} --by <your name>\``;
+  }
+  const fresh = reviewAsItStands(FOUNDATION_EPIC, artifact, resolveDefaultBranch(productGit(root), productConfig));
+  if (!isSolo(productConfig)) return `${fresh}; once it is approved and merged, its approvals cover the Foundation`;
+  return isVerifiedLedger(productConfig)
+    ? `${fresh}; merge it yourself (solo mode) — CI records the merge as the new review (CI must run this yadflow release or later)`
+    : `${fresh}; merge it yourself (solo mode), then \`yad gate sync ${FOUNDATION_EPIC}\` records the merge as the new review`;
 }
 
 export const priorityForPhase = (index) => (index === 0 ? 'P1' : index === 1 ? 'P2' : 'P3');
@@ -114,7 +142,7 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   // Approved once is not enough: a roadmap edited since its review holds rows nobody approved.
   let changed;
   try { changed = foundationChanged(dir, ledger); } catch { return refuse('the Foundation\'s review could not be checked', 'run `yad doctor`'); }
-  if (changed) return refuse('the Foundation changed after its review, so the review no longer covers the roadmap', 'have the Foundation reviewed again (`yad gate reopen EP-foundation foundation`), then publish');
+  if (changed) return refuse('the Foundation changed after its review, so the review no longer covers the roadmap', `have the Foundation reviewed again, then publish — ${foundationReviewAgain(root, ledger)}`);
   const file = path.join(dir, 'roadmap.md');
   if (!fs.existsSync(file)) return refuse('foundation/roadmap.md does not exist');
   const skipped = [];
