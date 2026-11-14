@@ -52,28 +52,48 @@ export function mapSnapshot(model) {
 }
 
 // The live stream: the Product's epics/ and .sdlc/, and each code repo's refs, watched while a page is open.
-function mapStream(root, { heartbeat = 15000, debounce = 500 } = {}) {
+function mapStream(root, { heartbeat = 15000, debounce = 500, runner = spawnSync } = {}) {
   const clients = new Set();
   let watchers = [], timer = null;
   const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   const send = (res, chunk) => { if (res.writableLength > 8 * 1024 * 1024) { res.destroy(); clients.delete(res); return; } res.write(chunk); };
   const changed = () => { clearTimeout(timer); timer = setTimeout(() => { for (const res of clients) send(res, frame('rebuilt', {})); }, debounce); timer.unref?.(); };
+  // What to watch: the Product's record, and each code repo's refs (in its shared git folder, so a repo that
+  // is a worktree — a `.git` FILE — is watched too).
   const watchPaths = () => {
     const out = [path.join(root, 'epics'), path.join(root, '.sdlc')];
     let reg = null;
     try { reg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'repos.json'), 'utf8')); } catch { /* none */ }
     for (const r of Array.isArray(reg?.repos) ? reg.repos : []) {
       if (!r || typeof r.path !== 'string') continue;
-      const git = path.join(path.resolve(root, r.path), '.git');
-      out.push(path.join(git, 'refs'), path.join(git, 'packed-refs'), path.join(git, 'FETCH_HEAD'));
+      const g = runner('git', ['-C', path.resolve(root, r.path), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+      if (g.status !== 0) continue;
+      const common = String(g.stdout).trim();
+      out.push(path.join(common, 'refs'), path.join(common, 'packed-refs'), path.join(common, 'FETCH_HEAD'));
     }
     return out.filter((p) => fs.existsSync(p));
+  };
+  // A recursive watch where the system has one (macOS, Windows, Linux on Node 20+); elsewhere each folder of
+  // the record is watched on its own, three levels deep — enough for epics/<id>/{.sdlc,stories}/.
+  const watchOne = (p) => {
+    try { watchers.push(fs.watch(p, { persistent: false }, changed)); } catch { /* left out */ }
+  };
+  const watchTree = (p, depth) => {
+    watchOne(p);
+    if (depth <= 0) return;
+    let kids = [];
+    try { kids = fs.readdirSync(p, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { /* none */ }
+    for (const d of kids) watchTree(path.join(p, d.name), depth - 1);
   };
   const start = () => {
     if (watchers.length) return;
     for (const p of watchPaths()) {
-      try { watchers.push(fs.watch(p, { recursive: fs.statSync(p).isDirectory(), persistent: false }, changed)); } catch { /* a path that cannot be watched is left out */ }
+      let dir;
+      try { dir = fs.statSync(p).isDirectory(); } catch { continue; }
+      if (!dir) { watchOne(p); continue; }
+      try { watchers.push(fs.watch(p, { recursive: true, persistent: false }, changed)); } catch { watchTree(p, 3); }
     }
+    return watchers.length;
   };
   const stop = () => { for (const w of watchers) { try { w.close(); } catch { /* closed */ } } watchers = []; };
   const ping = setInterval(() => { for (const res of clients) send(res, ': ping\n\n'); }, heartbeat);
@@ -82,24 +102,26 @@ function mapStream(root, { heartbeat = 15000, debounce = 500 } = {}) {
     path: '/events',
     attach(req, res, headers) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-      start();
+      const watching = start() ?? watchers.length;
       clients.add(res);
-      res.write(frame('status', { live: true }));
+      res.write(frame('status', { live: watching > 0, watching }));
       req.on('close', () => { clients.delete(res); if (!clients.size) stop(); });
     },
     close() { clearInterval(ping); clearTimeout(timer); stop(); for (const res of clients) res.end(); clients.clear(); },
+    // How much would be watched (for the person's line): a count, before any page has opened.
+    canWatch: () => watchPaths().length,
   };
 }
 
 export function startMapServer(root, { anonymous = false, live = false, env = process.env, runner = spawnSync, host = '127.0.0.1', port = 0, heartbeat, debounce } = {}) {
-  const stream = live ? mapStream(root, { heartbeat, debounce }) : null;
+  const stream = live ? mapStream(root, { heartbeat, debounce, runner }) : null;
   const routes = (token) => new Map([
     ['/', () => ({ type: TYPES.html, body: readView('index.html').replaceAll('__TOKEN__', token) })],
     ['/app.js', () => ({ type: TYPES.js, body: readView('app.js') })],
     ['/style.css', () => ({ type: TYPES.css, body: readView('style.css') })],
     ['/map.json', () => ({ type: TYPES.json, body: JSON.stringify(buildMap(root, { anonymous, env, runner }).model) })],
   ]);
-  return startPageServer({ routes, stream, host, port, failText: 'the map could not be read' });
+  return startPageServer({ routes, stream, host, port, failText: 'the map could not be read' }).then((srv) => ({ ...srv, watchable: stream ? stream.canWatch() : null }));
 }
 
 const storiesState = (m) => `${m.summary.stories.shipped} of ${m.summary.stories.total} stories shipped`;
@@ -122,7 +144,7 @@ export async function runMap(root, { args = [], html = false, open = false, live
       file = path.resolve(args[0]);
       const problem = writeOwnFile(file, page);
       if (problem) return refuse(problem, null, { json });
-      if (trackedRisk(file, gitRunner)) riskLine = `${forTerminal(file)} is in a git work tree and not ignored: it holds the team's names — do not commit it`;
+      if (trackedRisk(file, gitRunner)) riskLine = `${forTerminal(file)} is in a git work tree and not ignored: ${anonymous ? 'it is a picture of the work at one moment' : 'it holds the team\'s names'} — do not commit it`;
     } else {
       const saved = saveReport(root, { kind: 'progress-map', scope: 'all epics', state: anonymous ? `${storiesState(model)} anonymous` : storiesState(model), ext: 'html', content: page, command: `map --html${anonymous ? ' --anonymous' : ''}`, anonymous, env, runner, at: new Date(now) });
       if (saved.problem) return refuse(saved.problem, null, { json });
@@ -150,6 +172,7 @@ export async function runMap(root, { args = [], html = false, open = false, live
     ok(`the map is at ${s.url}`);
     info('only this machine can reach it, and only with that address (it holds a one-time key). Ctrl-C stops it.');
     info(live ? 'the page draws itself again when the ledger or a repo changes' : 'reload the page to read the record again');
+    if (live && !s.watchable) warn('nothing here can be watched (no epics/, .sdlc/ or repo refs found), so the page will not change by itself — reload it instead');
     if (opened === false) info('no browser opener was found here (open, xdg-open or explorer) — copy the address into your browser');
   }
   if (!wait) return s;

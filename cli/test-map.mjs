@@ -304,7 +304,7 @@ test('the live stream says it is live, and a change in the ledger sends "rebuilt
       req.end();
       setTimeout(() => { req.destroy(); resolve(seen.join('')); }, 5000).unref();
     });
-    assert.match(events, /event: status\ndata: \{"live":true\}/);
+    assert.match(events, /event: status\ndata: \{"live":true,"watching":\d+\}/);
     assert.match(events, /event: rebuilt/);
   } finally { await s.close(); done(ws); }
 });
@@ -346,8 +346,84 @@ test('the CLI: unknown flags are refused, and agents may run it but are never pr
     const j = spawnSync(process.execPath, [YAD, 'map', '--json'], { cwd: root, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1', [REPORTS_ENV]: path.join(ws, 'r') } });
     assert.equal(j.status, 0, j.stderr);
     assert.equal(JSON.parse(j.stdout).command, 'map');
-    assert.equal(classify(['map']), 'read');
+    assert.equal(classify(['map']), 'local-write', 'it runs a server until Ctrl-C, as brain view does');
     assert.equal(classify(['map'], ['html']), 'local-write');
     assert.equal(readAllowList().includes('Bash(yad map:*)'), false);
+  } finally { done(ws); }
+});
+
+// ---- review 1 ------------------------------------------------------------------------------------
+
+test('review 1: --anonymous masks names joined by dots, underscores or nothing, and says nothing moved', () => {
+  const i = baseInputs();
+  i.branches.push(
+    { repo: 'api', name: 'kit.ansel/EP-login-S01-try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'feat/EP-login-bo_lindqvist', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/kitansel-typo', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Kit Ansel', inProd: false, inInteg: false, ahead: 1 });
+  const digest = digestOf(mapModel(baseInputs(), { now: NOW }));
+  const m = mapModel(i, { now: NOW, anonymous: true, previous: digest });
+  const text = JSON.stringify(m).toLowerCase();
+  for (const word of ['kit', 'ansel', 'lindqvist', 'kitansel']) assert.equal(text.includes(word), false, word);
+  assert.ok(m.branches.some((b) => b.name === 'someone/EP-login-S01-try'));
+  assert.ok(m.branches.some((b) => b.name === 'feat/EP-login-someone_someone'));
+  assert.deepEqual(m.moved, []);
+  assert.equal(m.since, null);
+});
+
+test('review 1: the person a gate waits on, and who released last, are on the people list', () => {
+  const i = baseInputs({ waits: [{ epic: 'EP-later', step: 'epic-review', kind: 'gate', owner: 'Ida Quell' }] });
+  const m = mapModel(i, { now: NOW });
+  const ida = m.people.find((p) => p.name === 'Ida Quell');
+  assert.deepEqual(ida.roles, ['owner'], 'the person a gate waits on owns that step');
+  assert.equal(m.waiting[0].person, ida.key);
+  assert.ok(m.people.some((p) => p.key === m.repos[0].integration.by), 'every "by" can be looked up');
+  const anon = mapModel(i, { now: NOW, anonymous: true });
+  assert.ok(anon.waiting[0].person, 'anonymous keeps the link to the badge');
+  assert.ok(anon.people.some((p) => p.key === anon.repos[0].production.by));
+});
+
+test('review 1: a bad group pattern is left out, an epic id matches only whole, and a task-named port counts for that task only', () => {
+  const i = baseInputs({ groups: [{ id: 'broken', label: 'Broken', pattern: '([' }, { id: 'chores', label: 'Chores', pattern: '^chore/' }, { id: 'rest', label: 'Rest' }] });
+  i.epics.push({ id: 'EP-log', title: 'Logs', currentStep: 'epic', steps: [], owner: null, repos: [], onMain: true, stepOwners: {}, approvals: [] });
+  const m = mapModel(i, { now: NOW });
+  assert.equal(m.groups.some((g) => g.id === 'broken'), false);
+  assert.equal(m.branches.find((b) => b.name === 'chore/kit-cleanup').group, 'chores');
+  assert.equal(m.branches.find((b) => b.name === 'feat/EP-login-S02-remember').epic, 'EP-login', 'EP-log is not a match for EP-login');
+  // A direct-to-Production branch named for T01 makes T01 live, not T02.
+  const j = baseInputs();
+  j.tasks.push({ story: 'EP-login-S01', epic: 'EP-login', task: 'T02', repo: 'api', builder: null, reviewers: [], reach: { found: true, prod: false, integ: true, via: null } });
+  const mm = mapModel(j, { now: NOW });
+  assert.equal(mm.tasks.find((t) => t.task === 'T02').state, 'merged');
+});
+
+test('review 1: gathering says when a group pattern is invalid, and reads a story-named port for every task of it', () => {
+  const { ws, root, api } = workspace({ production: { api: 'main' } });
+  try {
+    // A second task of S01, only on dev; then the story rebuilt on its own branch, merged straight into main.
+    git(api, ['checkout', '-q', '-b', 'feat/EP-login-S01-T02', 'dev']);
+    put(path.join(api, 't2.txt'), 't2');
+    git(api, ['add', '-A']); git(api, ['commit', '-q', '-m', 't2'], PEOPLE.bo, daysAgo(3));
+    git(api, ['checkout', '-q', 'dev']);
+    git(api, ['merge', '-q', '--no-ff', 'feat/EP-login-S01-T02', '-m', "Merge branch 'feat/EP-login-S01-T02' into 'dev'"], PEOPLE.mae, daysAgo(3));
+    const t2 = git(api, ['rev-parse', 'HEAD']);
+    git(api, ['checkout', '-q', '-b', 'feat/EP-login-S01-T02-production', 'main']);
+    put(path.join(api, 't2p.txt'), 'p');
+    git(api, ['add', '-A']); git(api, ['commit', '-q', '-m', 'port'], PEOPLE.bo, daysAgo(2));
+    git(api, ['checkout', '-q', 'main']);
+    git(api, ['merge', '-q', '--no-ff', 'feat/EP-login-S01-T02-production', '-m', "Merge branch 'feat/EP-login-S01-T02-production' into 'main'"], PEOPLE.mae, daysAgo(2));
+    git(api, ['checkout', '-q', 'dev']);
+    git(api, ['push', '-q', 'origin', '--all']); git(api, ['fetch', '-q', 'origin']);
+    const logf = path.join(root, 'epics', 'EP-login', '.sdlc', 'build-log.json');
+    const log = JSON.parse(fs.readFileSync(logf, 'utf8'));
+    log.ships.push({ story: 'EP-login-S01', task: 'T02', repo: 'api', branch: 'feat/EP-login-S01-T02', mergeCommit: t2, shippedAt: '2026-11-11', engineer_review: [] });
+    put(logf, log);
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'product.json'), 'utf8'));
+    cfg.map.groups = [{ id: 'broken', pattern: '([' }];
+    put(path.join(root, '.sdlc', 'product.json'), cfg);
+    const g = gatherMap(root, { now: NOW });
+    assert.match(g.problems.join('\n'), /the pattern of "broken" is not a valid pattern/);
+    const t = (id) => g.inputs.tasks.find((x) => x.task === id);
+    assert.equal(t('T02').reach.via?.branch, 'feat/EP-login-S01-T02-production', 'its own port');
+    assert.equal(t('T01').reach.via, null, 'a port named for T02 is not T01\'s');
   } finally { done(ws); }
 });

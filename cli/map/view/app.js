@@ -44,8 +44,8 @@
     };
     var ORDER = ['live', 'merged', 'unver', 'active', 'planned', 'idle'];
     var HUES = ['63,111,216', '47,158,143', '138,92,214', '192,86,125', '185,133,43', '75,155,209', '110,154,60', '199,106,59'];
-    // HUB_GAP grows when there are people to show: the owner and waiting badges sit on a pill's top edge.
-    var R_RING = 74, XI = 172, BOW = 54, RH = 19, HUB_GAP = (D.people && D.people.length) ? 19 : 13, STEP = 14, SPOKE_MAX = 12;
+    // CLUSTER_GAP grows when there are people to show: the owner and waiting badges sit on a pill's top edge.
+    var R_RING = 74, XI = 172, BOW = 54, RH = 19, CLUSTER_GAP = (D.people && D.people.length) ? 19 : 13, STEP = 14, SPOKE_MAX = 12;
     function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
     var fmtDate = function (d) { return d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; };
     var ago = function (d) { if (!d) return ''; var n = Math.floor((Date.now() - Date.parse(d)) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n < 60 ? n + ' days ago' : Math.round(n / 30) + ' months ago'; };
@@ -68,7 +68,7 @@
       if (n.kind === 'story') { if (r.owner) out.push(r.owner); }
       else if (n.kind === 'task') { if (r.builder) out.push(r.builder); out.push.apply(out, r.reviewers || []); }
       else if (n.kind === 'branch') { if (r.builder) out.push(r.builder); }
-      else if (n.kind === 'hub' && n.hubKind === 'epic') {
+      else if (n.kind === 'cluster' && n.clusterKind === 'epic') {
         if (r.owner) out.push(r.owner);
         (r.stepOwners || []).forEach(function (x) { out.push(x.person); });
         (r.approvers || []).forEach(function (x) { out.push(x.person); });
@@ -86,7 +86,7 @@
     }
 
     // ─────────────────────────────────────────────────────────── model ──
-    var nodes = [], hubs = [];
+    var nodes = [], clusters = [];
     var taskBranch = new Set(D.tasks.map(function (t) { return t.repo + ':' + t.branch; }));
     var storyIds = new Set(D.stories.map(function (s) { return s.id; }));
     function bead(kind, ref) {
@@ -98,20 +98,20 @@
     }
     var pyramid = function (arr, w) { var out = []; arr.slice().sort(function (a, b) { return w(b) - w(a); }).forEach(function (x, i) { if (i % 2) out.unshift(x); else out.push(x); }); return out; };
 
-    var groupHubs = [];
+    var groupClusters = [];
     D.groups.forEach(function (g) {
       var mine = D.branches.filter(function (b) { return b.group === g.id; })
         .sort(function (a, b) { return ORDER.indexOf(a.state) - ORDER.indexOf(b.state) || String(b.date).localeCompare(String(a.date)); });
       if (!mine.length) return;
-      var h = { kind: 'hub', hubKind: 'group', ref: g, label: g.label, state: null, vis: null, spokes: [], lit: true, people: [], mid: 'group:' + g.id };
+      var h = { kind: 'cluster', clusterKind: 'group', ref: g, label: g.label, state: null, vis: null, spokes: [], lit: true, people: [], mid: 'group:' + g.id };
       var rows = Math.ceil(mine.length / SPOKE_MAX), per = Math.ceil(mine.length / rows);
       for (var i = 0; i < mine.length; i += per) h.spokes.push(mine.slice(i, i + per).map(function (b) { return bead('branch', b); }));
       h.search = g.label.toLowerCase();
-      groupHubs.push(h);
+      groupClusters.push(h);
     });
-    var epicHubs = [];
+    var epicClusters = [];
     D.epics.forEach(function (e) {
-      var h = { kind: 'hub', hubKind: 'epic', ref: e, label: clip(e.label, 26), state: e.state, vis: e.state, spokes: [], lit: true, mid: 'epic:' + e.id };
+      var h = { kind: 'cluster', clusterKind: 'epic', ref: e, label: clip(e.label, 26), state: e.state, vis: e.state, spokes: [], lit: true, mid: 'epic:' + e.id };
       D.stories.filter(function (x) { return x.epic === e.id; }).forEach(function (s) {
         var row = [bead('story', s)];
         D.tasks.filter(function (x) { return x.story === s.id; }).forEach(function (t) { row.push(bead('task', t)); });
@@ -124,10 +124,10 @@
       h.search = [e.id, e.label, e.title, e.type].concat(h.people.map(nameOf)).filter(Boolean).join(' ').toLowerCase();
       var waits = waitBy.get(e.id) || [];
       h.waitFor = waits.find(function (w) { return w.person; }) || null;
-      epicHubs.push(h);
+      epicClusters.push(h);
     });
     var longest = function (h) { return h.spokes.reduce(function (m, s) { return Math.max(m, s.length); }, 0) * 10 + h.spokes.length; };
-    hubs.push.apply(hubs, groupHubs.concat(epicHubs));
+    clusters.push.apply(clusters, groupClusters.concat(epicClusters));
 
     // ────────────────────────────────────────────────────────── layout ──
     function cubic(a, b, c, d, n) { var pts = []; for (var i = 0; i <= n; i++) { var t = i / n, m = 1 - t, k0 = m * m * m, k1 = 3 * m * m * t, k2 = 3 * m * t * t, k3 = t * t * t; pts.push({ x: k0 * a.x + k1 * b.x + k2 * c.x + k3 * d.x, y: k0 * a.y + k1 * b.y + k2 * c.y + k3 * d.y }); } return pts; }
@@ -138,23 +138,23 @@
     var core = { kind: 'core', x: 0, y: 0, r: 30, lit: true, label: 'Production', search: 'production', people: [], mid: 'core' };
     var ring = { kind: 'ring', x: 0, y: -R_RING, lit: true, label: 'Development', search: 'development', people: [], mid: 'ring' };
     var mctx = document.createElement('canvas').getContext('2d');
-    var HUB_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+    var CLUSTER_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
     var bbox = { x0: -120, y0: -R_RING - 22, x1: 120, y1: R_RING + 30 };
     (function layout() {
-      mctx.font = HUB_FONT;
-      hubs.forEach(function (h) {
+      mctx.font = CLUSTER_FONT;
+      clusters.forEach(function (h) {
         var all = [].concat.apply([], h.spokes);
         h.counts = {}; all.forEach(function (b) { h.counts[b.vis] = (h.counts[b.vis] || 0) + 1; });
         h.total = all.length; h.block = Math.max(h.spokes.length, 1) * RH; h.h = 26;
-        h.frac = h.hubKind === 'epic' ? (h.ref.storyCount ? h.ref.storiesShipped + '/' + h.ref.storyCount : '') : (h.counts.live || 0) + '/' + h.total;
+        h.frac = h.clusterKind === 'epic' ? (h.ref.storyCount ? h.ref.storiesShipped + '/' + h.ref.storyCount : '') : (h.counts.live || 0) + '/' + h.total;
         h.w = Math.ceil(mctx.measureText(h.label).width + (h.frac ? mctx.measureText(h.frac).width + 10 : 0) + 34);
       });
-      var height = function (list) { return list.reduce(function (s, h) { return s + h.block + HUB_GAP; }, -HUB_GAP); };
-      var left = groupHubs.slice(), right = [];
-      epicHubs.slice().sort(function (a, b) { return b.block - a.block; }).forEach(function (e) { (height(right) <= height(left) ? right : left).push(e); });
-      var weight = function (h) { return (h.hubKind === 'group' ? 1e4 : 0) + longest(h); };
+      var height = function (list) { return list.reduce(function (s, h) { return s + h.block + CLUSTER_GAP; }, -CLUSTER_GAP); };
+      var left = groupClusters.slice(), right = [];
+      epicClusters.slice().sort(function (a, b) { return b.block - a.block; }).forEach(function (e) { (height(right) <= height(left) ? right : left).push(e); });
+      var weight = function (h) { return (h.clusterKind === 'group' ? 1e4 : 0) + longest(h); };
       var wings = [[-1, pyramid(left, weight)], [1, pyramid(right, weight)]];
-      var maxW = Math.max.apply(null, hubs.map(function (h) { return h.w; }).concat([80])), XB = XI + maxW + 48;
+      var maxW = Math.max.apply(null, clusters.map(function (h) { return h.w; }).concat([80])), XB = XI + maxW + 48;
       var Y = Math.max(height(left), height(right), 200) / 2;
       wings.forEach(function (wing) {
         var sg = wing[0], list = wing[1], y = -height(list) / 2;
@@ -169,14 +169,14 @@
           h.spokes.forEach(function (sp, j) {
             var yb = y + (j + 0.5) * RH, fan = clamp1(yb / Y) * 0.3, d = { x: sg * Math.cos(fan), y: Math.sin(fan) };
             var base = { x: sg * (XB - BOW * 0.6 * Math.pow(yb / Y, 2)), y: yb }, mx = (base.x + out.x) / 2;
-            var toHub = cubic(base, { x: mx, y: base.y }, { x: mx, y: out.y }, out, 16);
-            trace(h.links, toHub);
+            var toCluster = cubic(base, { x: mx, y: base.y }, { x: mx, y: out.y }, out, 16);
+            trace(h.links, toCluster);
             sp.forEach(function (b, i) {
-              b.x = base.x + d.x * i * STEP; b.y = base.y + d.y * i * STEP; b.hub = h; b.spoke = sp; b.idx = i; b.side = sg;
+              b.x = base.x + d.x * i * STEP; b.y = base.y + d.y * i * STEP; b.cluster = h; b.spoke = sp; b.idx = i; b.side = sg;
               if (i) { h.links.moveTo(sp[i - 1].x, sp[i - 1].y); h.links.lineTo(b.x, b.y); }
               var back = []; for (var k = i; k >= 0; k--) back.push({ x: sp[k].x, y: sp[k].y });
-              var toPill = back.concat(toHub.slice(1));
-              b.hubAt = polyline(toPill).len;
+              var toPill = back.concat(toCluster.slice(1));
+              b.clusterAt = polyline(toPill).len;
               var pts = toPill.concat(trunk);
               if (b.state === 'live') pts.push({ x: 0, y: 0 });
               b.path = polyline(pts);
@@ -187,7 +187,7 @@
           bbox.y0 = Math.min(bbox.y0, h.y - 26); bbox.y1 = Math.max(bbox.y1, h.y + 26);
           bbox.x0 = Math.min(bbox.x0, h.x - h.w / 2 - 10); bbox.x1 = Math.max(bbox.x1, h.x + h.w / 2 + 10);
           nodes.push(h);
-          y += h.block + HUB_GAP;
+          y += h.block + CLUSTER_GAP;
         });
       });
       nodes.push(core, ring);
@@ -249,12 +249,12 @@
     var PERIOD = Math.max(2.6, flowing.length * 7.5 / 620);
     flowing.forEach(function (b) { b.next = Math.random() * PERIOD; });
     beads.forEach(function (b) { if (b.state === 'active') { b.next = Math.random() * 5; for (var i = 0; i < 3; i++) motes.push({ b: b, a: Math.random() * 6.28, w: (0.7 + Math.random() * 0.9) * (i % 2 ? 1 : -1), r: b.r + 4 + Math.random() * 5, ph: Math.random() * 6.28 }); } });
-    hubs.forEach(function (h) { if (h.state === 'active' && !h.spokes.length) for (var i = 0; i < 4; i++) motes.push({ b: h, a: Math.random() * 6.28, w: 0.5 + Math.random() * 0.6, r: 0, ph: Math.random() * 6.28, pill: true }); });
+    clusters.forEach(function (h) { if (h.state === 'active' && !h.spokes.length) for (var i = 0; i < 4; i++) motes.push({ b: h, a: Math.random() * 6.28, w: 0.5 + Math.random() * 0.6, r: 0, ph: Math.random() * 6.28, pill: true }); });
     var waitingDots = waitingTotal ? Math.min(150, 14 + waitingTotal * 7) : 0;
     var swarm = Array.from({ length: waitingDots }, function () { return { a: Math.random() * 6.28, w: 0.22 + Math.random() * 0.3, r: R_RING + (Math.random() - 0.5) * 11 }; });
     function spawn(b, attempt) {
       parts.push({ b: b, s: 0, seg: 0, v: 46 + Math.random() * 34, off: (Math.random() - 0.5) * 5, ph: Math.random() * 6.28, phase: 0, x: b.x, y: b.y, px: b.x, py: b.y, life: 0,
-        end: attempt ? b.hubAt * (0.35 + Math.random() * 0.35) : b.path.len, attempt: attempt });
+        end: attempt ? b.clusterAt * (0.35 + Math.random() * 0.35) : b.path.len, attempt: attempt });
     }
     function place(p) {
       var pts = p.b.path.pts, cum = p.b.path.cum, i = p.seg;
@@ -291,7 +291,7 @@
     function touches(n) {
       if (!person) return true;
       if (!roleFilter) return (n.people || []).indexOf(person) >= 0;
-      return rolesOf(n, person).indexOf(roleFilter) >= 0 || (n.kind === 'hub' && (waitBy.get(n.ref.id) || []).some(function (w) { return w.person === person && roleFilter === 'owner'; }));
+      return rolesOf(n, person).indexOf(roleFilter) >= 0 || (n.kind === 'cluster' && (waitBy.get(n.ref.id) || []).some(function (w) { return w.person === person && roleFilter === 'owner'; }));
     }
     function relight() {
       var f = focus || pinned, q = query.trim().toLowerCase();
@@ -299,8 +299,8 @@
       nodes.forEach(function (n) { n.lit = !anyDim; });
       if (f) {
         f.lit = true;
-        if (f.path) { f.hub.lit = true; core.lit = true; ring.lit = true; f.spoke.forEach(function (b) { if (b.idx <= f.idx) b.lit = true; }); }
-        else if (f.kind === 'hub') { [].concat.apply([], f.spokes).forEach(function (b) { b.lit = true; }); core.lit = ring.lit = true; }
+        if (f.path) { f.cluster.lit = true; core.lit = true; ring.lit = true; f.spoke.forEach(function (b) { if (b.idx <= f.idx) b.lit = true; }); }
+        else if (f.kind === 'cluster') { [].concat.apply([], f.spokes).forEach(function (b) { b.lit = true; }); core.lit = ring.lit = true; }
         else if (f.kind === 'core') { ring.lit = true; nodes.forEach(function (n) { if (n.state === 'live') n.lit = true; }); }
         else if (f.kind === 'ring') { nodes.forEach(function (n) { if (n.state === 'merged') n.lit = true; }); }
       } else if (anyDim) {
@@ -310,7 +310,7 @@
         });
         core.lit = ring.lit = true;
       }
-      hubs.forEach(function (h) { h.anyLit = h.lit || h.spokes.some(function (s) { return s.some(function (b) { return b.lit; }); }); });
+      clusters.forEach(function (h) { h.anyLit = h.lit || h.spokes.some(function (s) { return s.some(function (b) { return b.lit; }); }); });
       dirty = true;
     }
     var rgba = function (v, a) { return 'rgba(' + VIS[v].rgb + ',' + a + ')'; };
@@ -335,7 +335,7 @@
       ctx.setTransform(DPR * cam.k, 0, 0, DPR * cam.k, DPR * cam.x, DPR * cam.y);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-      hubs.forEach(function (h) {
+      clusters.forEach(function (h) {
         var a = anyDim ? (h.anyLit ? 1 : 0.16) : 1, live = h.counts.live || 0, wait = (h.counts.merged || 0) + (h.counts.unver || 0);
         ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(130,165,255,' + (0.2 * a) + ')'; ctx.stroke(h.links);
         var share = h.total ? (live + wait) / h.total : 0, v = live >= wait && live ? 'live' : wait ? 'merged' : null;
@@ -374,7 +374,7 @@
 
       beads.forEach(function (n) {
         var a = n.lit ? 1 : 0.16, v = n.vis, r = n.r;
-        if (n.kind === 'branch' && n.hub.hubKind === 'epic') {
+        if (n.kind === 'branch' && n.cluster.clusterKind === 'epic') {
           ctx.beginPath(); ctx.moveTo(n.x, n.y - r - 1); ctx.lineTo(n.x + r + 1, n.y); ctx.lineTo(n.x, n.y + r + 1); ctx.lineTo(n.x - r - 1, n.y); ctx.closePath();
           ctx.fillStyle = rgba(v, a); ctx.fill(); return;
         }
@@ -392,7 +392,7 @@
           if (!moved.has(n.mid)) return;
           ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * fade * (0.5 + 0.5 * ph)) + ')';
           if (n.path) { dot(n.x, n.y, n.r + 5 + ph * 2); ctx.stroke(); }
-          else if (n.kind === 'hub') { pill(n.x, n.y, n.w + 8 + ph * 3, n.h + 8 + ph * 3); ctx.stroke(); }
+          else if (n.kind === 'cluster') { pill(n.x, n.y, n.w + 8 + ph * 3, n.h + 8 + ph * 3); ctx.stroke(); }
         });
       }
       var f = focus || pinned;
@@ -413,20 +413,20 @@
         badge(n.ref.roles.owner, n.x - n.side * 5.4, n.y - 5.6, 4.4, (n.lit ? 1 : 0.2) * show, false, t);
       });
 
-      ctx.font = HUB_FONT; ctx.textBaseline = 'middle';
-      hubs.forEach(function (h) {
+      ctx.font = CLUSTER_FONT; ctx.textBaseline = 'middle';
+      clusters.forEach(function (h) {
         var a = anyDim ? (h.anyLit ? 1 : 0.22) : 1, hot = f === h;
         pill(h.x, h.y, h.w, h.h); ctx.fillStyle = 'rgba(7,13,34,' + (0.94 * a) + ')'; ctx.fill();
         ctx.lineWidth = hot ? 2 : 1.2; ctx.strokeStyle = hot ? 'rgba(235,242,255,.95)' : h.vis ? rgba(h.vis, 0.95 * a) : 'rgba(150,180,255,' + (0.5 * a) + ')';
         if (h.vis === 'planned') ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
-        ctx.font = HUB_FONT; ctx.textBaseline = 'middle';
+        ctx.font = CLUSTER_FONT; ctx.textBaseline = 'middle';
         ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(234,240,255,' + a + ')'; ctx.fillText(h.label, h.x - h.w / 2 + 12, h.y + 0.5);
         if (h.frac) { ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(170,183,214,' + a + ')'; ctx.fillText(h.frac, h.x + h.w / 2 - 12, h.y + 0.5); }
         if (h.total) {
           var x = h.x - h.w / 2 + 12; var bw = h.w - 24, y = h.y + h.h / 2 + 4;
           ORDER.forEach(function (v) { var c = h.counts[v]; if (!c) return; var w = Math.max(2.5, bw * c / h.total - 1.5); ctx.fillStyle = rgba(v, (v === 'planned' || v === 'idle' ? 0.55 : 0.95) * a); ctx.fillRect(x, y, w, 2.6); x += w + 1.5; });
         }
-        if (h.hubKind === 'epic' && show > 0) {
+        if (h.clusterKind === 'epic' && show > 0) {
           if (h.ref.roles && h.ref.roles.owner) badge(h.ref.roles.owner, h.x - h.w / 2 + 11, h.y - h.h / 2 - 1, 5.6, a * show, false, t);
           if (h.waitFor) badge(h.waitFor.person, h.x + h.w / 2 - 11, h.y - h.h / 2 - 1, 5.6, a * show, true, t);
         }
@@ -465,7 +465,7 @@
         var direct = D.repos.filter(function (x) { return x.available && x.productionAhead; }).map(function (p) { return p.name + ' ' + p.productionAhead; });
         if (direct.length) d.note = 'Production also holds commits that are not in Development (work merged straight to Production): ' + direct.join(', ') + '.';
         d.kids = nodes.filter(function (x) { return x.path && x.state === 'merged'; });
-      } else if (n.kind === 'hub' && n.hubKind === 'epic') {
+      } else if (n.kind === 'cluster' && n.clusterKind === 'epic') {
         d.kind = 'Epic' + (r.type ? ' · ' + r.type : ''); d.title = r.id; d.stateText = r.stateLabel; d.desc = r.title || '';
         var done = r.steps.filter(function (s) { return ['done', 'satisfied', 'skipped'].indexOf(s.status) >= 0; }).length;
         d.rows.push(['Planning', r.steps.length ? done + ' of ' + r.steps.length + ' steps closed, now at “' + stepWord(r.currentStep) + '”' : '—']);
@@ -484,7 +484,7 @@
         if (onePerson.has(r.id)) d.notes.push(['one', 'Every part of this epic so far is from one person.']);
         if (!r.onMain) d.note = 'Still being written on branch “' + r.sourceBranch + '”; not in this checkout yet.';
         d.kids = [].concat.apply([], n.spokes);
-      } else if (n.kind === 'hub') {
+      } else if (n.kind === 'cluster') {
         d.kind = 'Branch group'; d.title = r.label; d.vis = null; d.desc = 'Branches that are not tied to an epic, grouped by their name.';
         ORDER.forEach(function (v) { if (n.counts[v]) d.rows.push([VIS[v].label, String(n.counts[v])]); });
         d.kids = [].concat.apply([], n.spokes);
@@ -545,7 +545,7 @@
       var x = (sx - cam.x) / cam.k, y = (sy - cam.y) / cam.k, best = null, bd = Math.max(13, 11 / cam.k);
       beads.forEach(function (n) { var dd = Math.hypot(n.x - x, n.y - y) - n.r; if (dd < bd) { bd = dd; best = n; } });
       if (best && bd < 3) return best;
-      for (var i = 0; i < hubs.length; i++) { var h = hubs[i]; if (Math.abs(x - h.x) <= h.w / 2 + 2 && Math.abs(y - h.y) <= h.h / 2 + 4) return h; }
+      for (var i = 0; i < clusters.length; i++) { var h = clusters[i]; if (Math.abs(x - h.x) <= h.w / 2 + 2 && Math.abs(y - h.y) <= h.h / 2 + 4) return h; }
       if (ring.w && Math.abs(x - ring.x) <= ring.w / 2 + 2 && Math.abs(y - ring.y) <= ring.h / 2 + 3) return ring;
       if (best) return best;
       if (Math.hypot(x, y) < 46 || (Math.abs(x) < 70 && Math.abs(y - R_RING - 17) < 9)) return core;
@@ -634,7 +634,7 @@
           var x = el('button', 'x', 'Close'); x.onclick = function () { pin(null); };
           panel.append(x, el('div', 't-kind', 'What moved'), el('div', 't-title', 'Since ' + fmtDate(D.since)));
           var ul = el('ul', 'kids');
-          nodes.filter(function (n) { return moved.has(n.mid); }).forEach(function (n) { var li = el('li'), b = el('button'); b.append(el('span', 'mk ' + (n.vis || 'planned')), el('span', '', n.kind === 'hub' ? n.ref.id : n.label + (n.kind === 'story' && n.ref.title ? ' — ' + n.ref.title : ''))); b.onclick = function () { pin(n); }; li.append(b); ul.append(li); });
+          nodes.filter(function (n) { return moved.has(n.mid); }).forEach(function (n) { var li = el('li'), b = el('button'); b.append(el('span', 'mk ' + (n.vis || 'planned')), el('span', '', n.kind === 'cluster' ? n.ref.id : n.label + (n.kind === 'story' && n.ref.title ? ' — ' + n.ref.title : ''))); b.onclick = function () { pin(n); }; li.append(b); ul.append(li); });
           panel.append(ul);
         };
       }
@@ -661,7 +661,7 @@
       }
       var lg = $('legend'); lg.textContent = '';
       ORDER.forEach(function (v) {
-        var c = beads.filter(function (b) { return b.vis === v; }).length + hubs.filter(function (h) { return h.vis === v; }).length; if (!c) return;
+        var c = beads.filter(function (b) { return b.vis === v; }).length + clusters.filter(function (h) { return h.vis === v; }).length; if (!c) return;
         var b = el('button'); b.setAttribute('aria-pressed', 'false'); b.title = VIS[v].label + ' — click to show only these';
         b.append(el('span', 'mk ' + v), el('span', '', VIS[v].short), el('span', 'n', String(c)));
         b.onclick = function () { filterVis = filterVis === v ? null : v; lg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b && !!filterVis)); }); relight(); if (listOpen) renderList(); };
@@ -678,10 +678,10 @@
       bar.append(el('h2', '', 'Everything on the map'), el('span', '', (filterVis ? VIS[filterVis].label + ' only. ' : '') + (qq ? 'Matching “' + qq + '”.' : '') + (person ? ' ' + nameOf(person) + ' only.' : '')), close); list.append(bar);
       var tb = el('table'), hr = el('tr'); ['Item', 'Type', 'Status', 'Who', 'Last activity'].forEach(function (h) { hr.append(el('th', '', h)); }); tb.append(hr);
       var shown = 0;
-      hubs.forEach(function (h) {
+      clusters.forEach(function (h) {
         var rows = [].concat.apply([], h.spokes).filter(function (n) { return (!filterVis || n.vis === filterVis) && (!qq || n.search.indexOf(qq) >= 0 || h.search.indexOf(qq) >= 0) && touches(n); });
         if (!rows.length && ((filterVis && h.vis !== filterVis) || (qq && h.search.indexOf(qq) < 0) || (person && !touches(h)))) return;
-        var dh = describe(h), tr = el('tr', 'hub'), td = el('td'); if (h.vis) td.append(el('span', 'mk ' + h.vis)); td.append(h.hubKind === 'epic' ? h.ref.id : h.label);
+        var dh = describe(h), tr = el('tr', 'cluster'), td = el('td'); if (h.vis) td.append(el('span', 'mk ' + h.vis)); td.append(h.clusterKind === 'epic' ? h.ref.id : h.label);
         tr.append(td, el('td', '', dh.kind), el('td', '', dh.stateText || h.total + ' branches'), el('td', '', whoText(h)), el('td', '', h.ref.createdAt ? 'created ' + fmtDate(h.ref.createdAt) : '')); tb.append(tr);
         rows.forEach(function (n) {
           var d = describe(n), r = n.ref, row = el('tr'), c = el('td'); c.append(el('span', 'mk ' + n.vis), n.kind === 'story' ? r.id + ' — ' + clip(r.title || '', 90) : d.title);
@@ -706,7 +706,7 @@
       dirty = false; requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
-    window.__map = { nodes: nodes, hubs: hubs, cam: cam, D: D };
+    window.__map = { nodes: nodes, clusters: clusters, cam: cam, D: D };
     return { stop: function () { alive = false; ac.abort(); pin(null); togglePeople(false); toggleList(false); } };
   }
 })();

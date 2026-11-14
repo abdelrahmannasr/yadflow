@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { epicIds, epicRoot, loadLedger, readFrontmatter, FOUNDATION_EPIC } from './epic-state.mjs';
@@ -40,6 +41,7 @@ const clip = (s, n) => { s = String(s ?? '').replace(/\s+/g, ' ').trim(); return
 const pretty = (id) => id.replace(/^EP-/, '').replace(/-/g, ' ').replace(/\b\w/, (ch) => ch.toUpperCase());
 const tally = (arr, key) => arr.reduce((a, x) => { const k = typeof key === 'function' ? key(x) : x[key]; a[k] = (a[k] || 0) + 1; return a; }, {});
 const json = (t) => { try { return JSON.parse(t); } catch { return null; } };
+export const compiles = (pattern) => { try { new RegExp(pattern, 'i'); return true; } catch { return false; } };
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function frontmatterText(md) {
@@ -81,7 +83,7 @@ export function hueOf(key) {
   return (h >>> 0) % HUES;
 }
 // A short fingerprint for a key (never shown, never reversible to the text it came from in practice).
-const hueKey = (text) => { let h = 2166136261; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); };
+const hueKey = (text) => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 // "Person A", "Person B", … "Person Z", "Person AA" …
 export function personLetter(n) {
   let s = '';
@@ -132,9 +134,10 @@ export function makeResolver(members = []) {
 //   waits [{ epic, step, kind, owner (raw name) | null }]
 export function mapModel(inputs, { anonymous = false, previous = null, now = Date.now() } = {}) {
   const staleDays = Number.isInteger(inputs.staleDays) && inputs.staleDays > 0 ? inputs.staleDays : DEFAULT_STALE_DAYS;
-  const groups = (inputs.groups?.length ? inputs.groups : DEFAULT_GROUPS).map((g) => {
-    let re = null;
-    if (g.pattern) { try { re = new RegExp(g.pattern, 'i'); } catch { re = null; } }
+  // A group whose pattern does not compile is left out (gatherMap says so) — never a catch-all by mistake.
+  const usable = (inputs.groups || []).filter((g) => !g.pattern || compiles(g.pattern));
+  const groups = (usable.length ? usable : DEFAULT_GROUPS).map((g) => {
+    const re = g.pattern ? new RegExp(g.pattern, 'i') : null;
     return { id: String(g.id), label: String(g.label || g.id), re };
   });
   const { resolve, people } = makeResolver(inputs.members || []);
@@ -169,7 +172,7 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
   const branches = inputs.branches.map((b) => {
     const ageDays = Math.max(0, Math.floor((now - Date.parse(b.date)) / 864e5));
     const state = b.inProd ? 'live' : b.inInteg ? 'merged' : ageDays > staleDays ? 'idle' : 'active';
-    const epic = epicIdsLong.find((id) => b.name.includes(id)) || null;
+    const epic = epicIdsLong.find((id) => new RegExp(`(?:^|[^A-Za-z0-9])${reEsc(id)}(?![A-Za-z0-9])`).test(b.name)) || null;
     const sm = epic ? new RegExp(`${reEsc(epic)}-(S\\d+)`).exec(b.name) : null;
     const group = epic ? null : (groups.find((g) => !g.re || g.re.test(b.name)) || groups[groups.length - 1]).id;
     const author = resolve(b.author);
@@ -225,7 +228,9 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
   }
 
   // Waiting on whom: each open gate's owner, by the same rule `yad standup` reads (gateWaits).
+  // The person a gate waits on is that step's owner (the live E47 owner, else the epic's): an owner role.
   const waiting = (inputs.waits || []).map((w) => ({ epic: w.epic, step: w.step, kind: w.kind, person: resolve(w.owner) }));
+  for (const w of waiting) role(w.person, 'owner');
 
   // The single-person note: every part of the epic so far came from one person.
   const notes = { onePerson: [] };
@@ -241,8 +246,10 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
   }
 
   // People, sorted by name, each with the roles they hold — no counts.
-  const peopleList = [...people.values()].filter((p) => roles.has(p.key))
-    .map((p) => ({ key: p.key, name: p.name, initials: initials(p.name), hue: hueOf(p.key), roles: [...roles.get(p.key)].sort(), ambiguous: p.ambiguous }))
+  // Everyone the map names is listed, so every badge and every "by" can be looked up; a person seen only as the
+  // author of a repo's latest Production or Development commit holds no role.
+  const peopleList = [...people.values()]
+    .map((p) => ({ key: p.key, name: p.name, initials: initials(p.name), hue: hueOf(p.key), roles: [...(roles.get(p.key) || [])].sort(), ambiguous: p.ambiguous }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.key.localeCompare(b.key));
 
   // Repos: by label only, never a path on this machine.
@@ -261,7 +268,8 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
   if (anonymous) model = anonymize(model, people);
 
   // What moved: against the previous saved map's digest ({ at, states: { id: state } }).
-  if (previous && previous.states && typeof previous.states === 'object') {
+  // An anonymous map never says what moved: its masked ids would read as new against a named map's digest.
+  if (!anonymous && previous && previous.states && typeof previous.states === 'object') {
     const now2 = digestOf(model).states;
     model.moved = Object.entries(now2).filter(([id, st]) => Object.hasOwn(previous.states, id) ? previous.states[id] !== st : true)
       .map(([id, st]) => ({ id, from: Object.hasOwn(previous.states, id) ? previous.states[id] : null, to: st }));
@@ -301,12 +309,15 @@ function anonymize(model, people) {
   const keys = model.people.map((p) => p.key).sort();
   const alias = new Map(keys.map((k, i) => [k, { key: `p${i + 1}`, name: personLetter(i) }]));
   const raws = [...people.values()].filter((p) => alias.has(p.key)).flatMap((p) => [...p.raws, p.name]).map((r) => String(r).toLowerCase()).filter((r) => r.length >= 2);
-  const parts = new Set(raws.flatMap((r) => [r, ...r.split(/[\s._-]+/).filter((x) => x.length >= 3)]));
+  // Each name, each of its words (3 letters or more), and the name with its separators taken out
+  // (`bobbuilder`), so `bob.builder/x`, `feat/bob_builder` and `bobbuilder-fix` are all masked.
+  const parts = new Set(raws.flatMap((r) => [r, r.replace(/[\s._-]+/g, ''), ...r.split(/[\s._-]+/).filter((x) => x.length >= 3)]));
   const k = (key) => (key && alias.has(key) ? alias.get(key).key : null);
   const maskBranch = (name) => {
     if (!name) return name;
     let n = String(name).replace(/^yad\/wip\/[^/]+\//, 'yad/wip/someone/');
-    n = n.split('/').map((seg) => seg.split('-').map((w) => (parts.has(w.toLowerCase()) ? 'someone' : w)).join('-')).join('/');
+    n = n.split('/').map((seg) => (parts.has(seg.toLowerCase()) || parts.has(seg.toLowerCase().replace(/[._-]+/g, '')) ? 'someone'
+      : seg.split(/([._-])/).map((w) => (parts.has(w.toLowerCase()) ? 'someone' : w)).join(''))).join('/');
     return parts.has(n.toLowerCase()) ? 'someone' : n;
   };
   const out = JSON.parse(JSON.stringify(model));
@@ -359,7 +370,7 @@ function remoteBranches(g, repo) {
   }).filter((b) => b.name && b.name !== 'HEAD');
 }
 const mergedInto = (g, repo, ref) => new Set(lines(g(repo, ['for-each-ref', 'refs/remotes/origin', '--merged', ref, '--format=%(refname:lstrip=3)']).out));
-const count = (g, repo, range) => { const r = g(repo, ['rev-list', '--count', range]); return r.ok ? Number(r.out.trim()) : null; };
+const count = (g, repo, range) => { const r = g(repo, ['rev-list', '--count', range, '--']); return r.ok ? Number(r.out.trim()) : null; };
 
 // Read one epic from the working tree.
 function epicFromTree(root, id) {
@@ -399,11 +410,11 @@ function epicFromTree(root, id) {
 }
 
 // An epic that so far lives only on a Product branch (being written): read from that ref.
-function epicFromRef(g, root, ref, id) {
-  const files = listTreeAt(root, ref, [`epics/${id}`]);
+function epicFromRef(runner, root, ref, id) {
+  const files = listTreeAt(root, ref, [`epics/${id}`], { runner });
   if (!files.some((f) => f.endsWith('/.sdlc/state.json'))) return null;
   const want = files.filter((f) => /\/\.sdlc\/state\.json$|\/epic\.md$|\/stories\/[^/]+\.md$|\/\.sdlc\/build-log\.json$|\/\.sdlc\/build-log\/[^/]+\.json$/.test(f));
-  const got = readFilesAt(root, ref, want);
+  const got = readFilesAt(root, ref, want, { runner });
   const base = `epics/${id}/`;
   const state = json(got.get(`${base}.sdlc/state.json`)) || {};
   const epicMd = got.get(`${base}epic.md`) || '';
@@ -456,7 +467,7 @@ export function gatherMap(root, { fetch = false, runner = spawnSync, now = Date.
     for (const b of pBranches) {
       const id = b.name.split('/').find((seg) => /^EP-[A-Za-z0-9-]+$/.test(seg));
       if (!id || seen.has(id)) continue;
-      const e = epicFromRef(g, root, `origin/${b.name}`, id);
+      const e = epicFromRef(runner, root, `origin/${b.name}`, id);
       if (!e) continue;
       seen.add(id);
       epics.push(e.epic); stories.push(...e.stories); tasks.push(...e.tasks);
@@ -528,22 +539,30 @@ export function gatherMap(root, { fetch = false, runner = spawnSync, now = Date.
     };
     for (const t of mine) {
       if (!t.mergeCommit || !/^[0-9a-f]{4,64}$/i.test(t.mergeCommit) || !g(p, ['cat-file', '-e', `${t.mergeCommit}^{commit}`]).ok) { t.reach = { found: false }; continue; }
-      const via = direct.find((d) => new RegExp(`${reEsc(t.story)}(?!\\d)`).test(d.branch)) || null;
+      // Delivered straight to Production on a branch of its own: a branch that names this TASK counts for it;
+      // one that names only the story (no task id: the whole story rebuilt) counts for each of its tasks.
+      const names = (d, re) => re.test(d.branch);
+      const taskRe = new RegExp(`${reEsc(t.story)}-${reEsc(t.task)}(?![A-Za-z0-9])`);
+      const storyRe = new RegExp(`${reEsc(t.story)}(?![\\d])(?!-T\\d)`);
+      const via = direct.find((d) => names(d, taskRe)) || direct.find((d) => names(d, storyRe) && !/-T\d/.test(d.branch.slice(d.branch.indexOf(t.story) + t.story.length))) || null;
       t.reach = { found: true, prod: !!(prod && reach(t.mergeCommit, prod)), integ: !!(integ && reach(t.mergeCommit, integ)), via };
       // The builder: the author of the merged branch's tip (the merge's second parent), else of the commit.
       const parents = g(p, ['rev-list', '--parents', '-n', '1', t.mergeCommit]).out.trim().split(/\s+/);
       const tip = parents.length > 2 ? `${t.mergeCommit}^2` : t.mergeCommit;
-      const an = g(p, ['log', '-1', '--format=%an', tip]);
+      const an = g(p, ['log', '-1', '--format=%an', tip, '--']);
       if (an.ok && an.out.trim()) t.builder = an.out.trim();
     }
   }
 
+  for (const grp of Array.isArray(mapCfg.groups) ? mapCfg.groups : []) {
+    if (grp && typeof grp.pattern === 'string' && !compiles(grp.pattern)) problems.push(`map.groups: the pattern of "${shown(String(grp.id))}" is not a valid pattern, so that group is left out`);
+  }
   return {
     problems,
     inputs: {
       product: { name: typeof productConfig.name === 'string' && productConfig.name.trim() ? productConfig.name.trim() : path.basename(root), branch: branch && branch !== 'HEAD' ? branch : null, sha, behind, fetchedAt: isRepo(g, root) ? fetchTime(g, root) : null },
       staleDays: Number.isInteger(mapCfg.staleDays) ? mapCfg.staleDays : DEFAULT_STALE_DAYS,
-      groups: Array.isArray(mapCfg.groups) ? mapCfg.groups.filter((x) => x && typeof x.id === 'string') : [],
+      groups: Array.isArray(mapCfg.groups) ? mapCfg.groups.filter((x) => x && typeof x.id === 'string' && (!x.pattern || typeof x.pattern === 'string')) : [],
       members, epics, stories, tasks, repos, branches, waits, now,
     },
   };

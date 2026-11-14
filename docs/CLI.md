@@ -2389,7 +2389,7 @@ yad map --fetch --html         # git fetch origin first (downloads, never upload
 | Diamonds | Open branches of a story |
 | Blue | In Production |
 | Pink | Merged into Development, waiting for release |
-| Pink ring with a dot | Shipped, but this machine cannot check Production (the repo is not cloned here) |
+| Pink ring with a dot | Shipped, but this machine cannot check Production: the repo is not cloned here, or its merge commit is not fetched yet |
 | Amber | In progress |
 | Hollow ring | Not started |
 | Small grey | A branch with no commits for 60 days that was never merged |
@@ -2422,8 +2422,15 @@ map compares itself with the newest one and lights each item whose state changed
 header says "N moved since <date>" and lists them.
 
 **Sharing.** The file holds the team's names. `--anonymous` names each person "Person A", "Person B" and so
-on, masks the capture-branch name and any branch part that is a person's name, and drops pull request
-links. The file name says `anonymous`, and no digest is kept for it.
+on, masks the capture-branch name and any branch part that is a person's name (split at `/`, `-`, `.` and
+`_`, and the name with its separators taken out, so `bob.builder/x` and `bobbuilder-fix` are both masked),
+and drops pull request links. The file name says `anonymous`; it says nothing about what moved, and no
+digest is kept for it. Epic and story titles are shown as written: a title that names a person still
+shows that name.
+
+Live mode watches the Product's `epics/` and `.sdlc/` and each code repo's refs (in its shared git folder,
+so a repo that is a worktree is watched too). Where the system has no recursive watch, each folder is
+watched on its own, three levels deep. When nothing can be watched, yad says so: reload the page instead.
 
 **Production branch.** Set it per repo in the Product config:
 
@@ -2432,7 +2439,7 @@ links. The file name says `anonymous`, and no digest is kept for it.
            "groups": [{ "id": "chores", "label": "Chores", "pattern": "^chore/" }, { "id": "other", "label": "Other branches" }] } }
 ```
 
-Without `map.production`, yad tries `Production`, `production`, `prod`, `release`, `main` and `master`
+A group whose `pattern` is not a valid pattern is left out, and yad says so. Without `map.production`, yad tries `Production`, `production`, `prod`, `release`, `main` and `master`
 (never the repo's default branch), and the page says the branch was **guessed**. A name origin does not
 have is reported and nothing is guessed for that repo.
 
@@ -2442,7 +2449,7 @@ no path on this machine reaches the page. A repo that is not cloned here shows i
 "shipped, unchecked".
 
 **The page is locked down** the same way as `yad brain view`: 127.0.0.1 only, a one-time key, the Host
-checked, GET only, and a strict Content-Security-Policy. The `--html` file holds everything inline and
+checked, GET and HEAD only, and a strict Content-Security-Policy. The `--html` file holds everything inline and
 needs no network.
 
 | `--json` | Keys |

@@ -127,7 +127,7 @@ th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
 td { padding: 4px 10px; border-top: 1px solid rgba(140, 170, 255, .09); color: var(--ink-2); vertical-align: top; }
 td:first-child { color: var(--ink); overflow-wrap: anywhere; }
 td .mk { vertical-align: -1px; margin-right: 7px; }
-tr.hub td { padding-top: 14px; font-weight: 650; color: var(--ink); border-top: 0; }
+tr.cluster td { padding-top: 14px; font-weight: 650; color: var(--ink); border-top: 0; }
 
 #nodata { display: none; position: fixed; inset: 0; place-items: center; text-align: center; padding: 24px; }
 body.nodata #nodata { display: grid; }
