@@ -366,3 +366,17 @@ test('review 5: a takeover that moved a fresh lock puts it back, also on a disk 
     assert.equal(fs.readFileSync(lock, 'utf8'), fresh, 'and it is back in place');
   } finally { fs.linkSync = link; fs.renameSync = rename; done(ws); }
 });
+
+test('E181: prune removes a report\'s digest side file with it, and nothing else', () => {
+  const { ws, root } = product();
+  try {
+    const r = saveReport(root, { kind: 'progress-map', scope: 'all epics', state: '1 of 2', ext: 'html', content: 'x', at: new Date(2026, 0, 1), env: noEnv });
+    fs.writeFileSync(`${r.file}.digest.json`, '{}');
+    const other = path.join(path.dirname(r.file), 'keep.digest.json');
+    fs.writeFileSync(other, '{}');
+    pruneReports(root, { days: 30, now: AT.getTime(), apply: true, env: noEnv });
+    assert.equal(fs.existsSync(r.file), false);
+    assert.equal(fs.existsSync(`${r.file}.digest.json`), false);
+    assert.ok(fs.existsSync(other));
+  } finally { done(ws); }
+});

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Progress Map</title>
+<link rel="stylesheet" href="style.css?t=__TOKEN__">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<canvas id="fx" role="img" aria-label="Animated map of epics, stories, tasks and branches flowing toward Production. Use the List button for a table of the same information."></canvas>
+
+<header>
+  <div class="brand"><h1 id="title">Road to Production</h1><p id="asof"></p><p id="sub"><span id="live" hidden><i class="dot"></i>Live</span><span id="anon" class="chip" hidden>anonymous</span><button id="moved" class="linkish" type="button" hidden></button></p></div>
+  <div class="tiles" id="tiles"></div>
+</header>
+
+<footer class="glass">
+  <div id="legend" role="group" aria-label="Status. Click one to isolate it."></div>
+  <div id="controls">
+    <input id="q" type="search" placeholder="Find an epic, branch, person…" aria-label="Find">
+    <button id="bPeople" aria-expanded="false" aria-controls="people" title="Who owns, builds, reviews and approves">People</button>
+    <button id="bList" title="Show everything as a table">List</button>
+    <button id="bPause" aria-pressed="false" title="Pause or resume the motion">Pause</button>
+    <button id="bOut" aria-label="Zoom out">−</button>
+    <button id="bIn" aria-label="Zoom in">+</button>
+    <button id="bFit" title="Fit everything on screen">Fit</button>
+  </div>
+</footer>
+
+<section id="people" class="glass" aria-label="People" hidden>
+  <div class="pbar"><h2>People</h2><button id="pClear" class="x" type="button">Show everyone</button></div>
+  <div id="roles" role="group" aria-label="Role"></div>
+  <ul id="plist" class="kids"></ul>
+  <p class="muted small">Who owns, builds, reviews and approves each part. No counts, no ranking.</p>
+</section>
+
+<div id="tip" class="glass" role="status"></div>
+<aside id="panel" class="glass" aria-label="Details"></aside>
+<section id="list" aria-label="List view"></section>
+<div id="nodata"><div><h1>No data yet</h1><p id="nodataText">Run <code>yad map</code> in the Product, then reload this page.</p></div></div>
+
+<!--SCRIPTS-->
+<!--SERVED:start-->
+<script src="app.js?t=__TOKEN__"></script>
+<!--SERVED:end-->
+</body>
+</html>

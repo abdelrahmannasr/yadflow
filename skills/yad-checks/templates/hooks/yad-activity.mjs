@@ -54,7 +54,7 @@ export const YAD_COMMANDS = Object.freeze([
   'gate walkthrough', 'guide', 'help', 'history list', 'history search', 'history show', 'hook agent-guard',
   'hook ledger-guard', 'index', 'init', 'issues assign', 'issues close', 'issues comment', 'issues edit',
   'issues label', 'issues labels', 'issues link', 'issues list', 'issues new', 'issues reopen',
-  'issues show', 'issues sync', 'issues unlink', 'join', 'kill', 'member add', 'member list',
+  'issues show', 'issues sync', 'issues unlink', 'join', 'kill', 'map', 'member add', 'member list',
   'member remove', 'migrate', 'mode', 'mode solo', 'mode team', 'new', 'next', 'open-pr', 'owners',
   'reconcile check', 'reconcile refresh', 'reconcile wire', 'repo clone', 'repo list', 'repo preview',
   'repo refresh', 'repo sync', 'report', 'reports list', 'reports open', 'reports prune', 'review cards', 'review chat', 'review context', 'review nudge',

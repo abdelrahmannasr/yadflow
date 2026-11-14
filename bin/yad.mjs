@@ -163,6 +163,19 @@ ${c.bold('Daily standup')} ${c.dim('(derived live, read-only, facts only — no 
                                        flags: --since <YYYY-MM-DD>|<N>h|<N>d, --tz <zone> (default UTC),
                                        --member <login> | --me, --format md|html, --out <file>, --json
 
+${c.bold('Progress map')} ${c.dim('(E181 — read-only; names as roles, no score, no ranking)')}
+  yad map [--open]                     The road to Production as one moving picture: epics, stories, tasks
+                                       and branches flowing through each repo's Development branch into
+                                       Production, with who owns, built, reviewed and approved each part.
+                                       A local page on 127.0.0.1 with a one-time key; Ctrl-C stops it
+  yad map --html [<file>] [--open]     The same page as one file, saved in the local reports folder; it
+                                       lights what moved since the last saved map
+  yad map --live [--open]              The page draws itself again when the ledger or a repo changes
+                                       flags: --anonymous (every person as "Person A…", for sharing
+                                       outside the team), --fetch (git fetch origin first; downloads
+                                       only), --json. The Production branch is "map.production" in
+                                       product.json, else guessed (and the page says so)
+
 ${c.bold('Saved reports')} ${c.dim('(E180 — on this machine only, never committed)')}
   yad reports [list] [--json]          Every report saved in the local reports folder, newest first, each
                                        marked fresh or stale (the Product changed since it was made).
@@ -597,6 +610,8 @@ function parseArgs(argv) {
     else if (a === '--open') o.open = true;
     else if (a === '--html') o.html = true;
     else if (a === '--live') o.live = true;
+    else if (a === '--anonymous') o.anonymous = true;
+    else if (a === '--fetch') o.fetch = true;
     else if (a === '--done') o.done = true;
     else if (a === '--undo') o.undo = true;
     else if (a === '--debt') o.debt = true;
@@ -715,7 +730,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
-  'story', 'brain', 'reports',
+  'story', 'brain', 'reports', 'map',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -1379,6 +1394,15 @@ async function main() {
         since: o.since ?? null, tz: o.tz ?? 'UTC', member: o.member ?? null, me: !!o.me,
         format: o.format ?? null, out: o.out ?? null, json: !!o.json,
       });
+      break;
+    }
+    case 'map': {
+      // E181. Read-only, except --fetch (download only) and the file --html writes.
+      const MAP_OWN = new Set(['--open', '--html', '--live', '--anonymous', '--fetch', '--json', '--dir']);
+      const foreign = [...new Set(process.argv.slice(2).filter((t) => /^--./.test(t) || /^-[A-Za-z]$/.test(t)).map((t) => t.split('=')[0]).filter((f) => !MAP_OWN.has(f)))];
+      if (foreign.length) { refuse(`yad map does not take ${foreign.join(', ')}`, commands.MAP_USAGE); break; }
+      if (noProduct()) break;
+      result = await commands.runMap(o.dir, { args: o._.slice(1), html: !!o.html, open: !!o.open, live: !!o.live, anonymous: !!o.anonymous, fetch: !!o.fetch, json: !!o.json });
       break;
     }
     case 'reports': {

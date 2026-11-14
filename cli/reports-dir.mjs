@@ -38,6 +38,8 @@ export const CATALOG_FILE = 'catalog.json';
 export const INDEX_FILE = 'index.html';
 export const CATALOG_VERSION = 1;
 export const REPORTS_ENV = 'YAD_REPORTS_DIR';
+// A report may keep one side file beside it, `<file>.digest.json` (the progress map's item states, E181).
+export const SIDE_SUFFIX = '.digest.json';
 
 // The kinds of report. A kind is also its subfolder's name, so only these are accepted.
 export const KINDS = Object.freeze({
@@ -362,6 +364,10 @@ export function pruneReports(root, { days = null, apply = false, now = Date.now(
       const f = path.join(dir, e.file);
       let st = null; try { st = fs.lstatSync(f); } catch { /* already gone */ }
       if (st && (st.isFile() || st.isSymbolicLink())) fs.rmSync(f, { force: true });
+      // A report's own side file (the progress map's digest, E181) goes with it.
+      const side = `${f}${SIDE_SUFFIX}`;
+      let sst = null; try { sst = fs.lstatSync(side); } catch { /* none */ }
+      if (sst && (sst.isFile() || sst.isSymbolicLink())) fs.rmSync(side, { force: true });
     }
     writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries: p.kept });
     writeNew(path.join(dir, INDEX_FILE), renderIndex(p.kept));

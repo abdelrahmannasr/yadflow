@@ -177,6 +177,9 @@ export const COMMAND_CLASS = {
   standup: { class: 'read' },
   // E180: the local reports folder. `list` reads; `open` starts the browser; `prune` alone is a dry run, and
   // `prune --apply` deletes saved reports, so only when the person asks.
+  // E181: draws the map; --html writes one file into the local reports folder (or the path named), --live
+  // keeps a local server, --fetch downloads. Never pre-approved: `--html <file>` names any path.
+  map: { class: 'read', flags: { html: 'local-write', live: 'local-write', fetch: 'local-write', open: 'local-write' } },
   'reports list': { class: 'read' },
   'reports open': { class: 'local-write' },
   'reports prune': { class: 'read', flags: { apply: 'on-request' } },
@@ -403,7 +406,7 @@ export const claudeBlock = () => ['@AGENTS.md'];
 // `standup` reads, but `--out <file>` writes the file named: a prefix rule would let it overwrite any file.
 // `brain query`, `brain status`, `brain file` and `brain story` print names read from the code (E176, E179), which
 // anyone can write, as `issues show` does.
-const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show', 'brain query', 'brain status', 'brain file', 'brain story']);
+const NOT_PREAPPROVED = new Set(['map', 'standup', 'issues list', 'issues show', 'brain query', 'brain status', 'brain file', 'brain story']);
 export function readAllowList() {
   const keys = Object.keys(COMMAND_CLASS);
   const reads = keys.filter((key) => {
