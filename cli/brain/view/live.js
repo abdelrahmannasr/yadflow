@@ -130,6 +130,8 @@
     // Apply one event to the state; with `animate`, also fly a comet to it.
     function apply(ev, animate) {
       if (session && ev.s !== session) return;
+      // After a quiet stretch the plan starts over: last week's task is not today's (review 2).
+      if (S.lastAt && ev.t - S.lastAt > SESSION_GAP) { S.task = null; S.fileState = new Map(); S.outsidePlan = new Map(); }
       S.counts[ev.op] += 1;
       S.last = ev;
       S.lastAt = ev.t;
@@ -141,15 +143,17 @@
         if (n && n.kind === 'file') {
           var was = S.fileState.get(h.node);
           if (ev.op === 'edit' || !was) S.fileState.set(h.node, ev.op === 'edit' ? 'edit' : 'read');
-          // The task in hand moves only within its story: an edit to a file only ANOTHER story declares is
-          // outside this plan, and is flagged, not followed (review 1). With no task yet, the first file a
-          // task declares picks it; a read never moves an active task (reading around is not changing course).
-          var tasks = tasksOfFile.get(h.node) || [];
-          var sameStory = S.task === null ? -1 : tasks.findIndex(function (t) { return plan[t].story === plan[S.task].story; });
-          if (ev.op === 'edit' && S.task !== null && sameStory === -1) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
-          else if (ev.op === 'edit' && S.task === null && !tasks.length) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
-          if (S.task === null && tasks.length) S.task = tasks[0];
-          else if (ev.op === 'edit' && sameStory !== -1) S.task = tasks[sameStory];
+          // THE TASK IN HAND follows EDITS only — reading around is not changing course (review 2). An edit to
+          // a file the task's own story declares moves to that file's task; an edit to a file only ANOTHER
+          // story declares is flagged as outside the plan, then followed (the agent has changed course); an
+          // edit to a file no task declares is flagged. The first edit to a declared file picks the task.
+          if (ev.op === 'edit') {
+            var tasks = tasksOfFile.get(h.node) || [];
+            var sameStory = S.task === null ? -1 : tasks.findIndex(function (t) { return plan[t].story === plan[S.task].story; });
+            if (!tasks.length || (S.task !== null && sameStory === -1)) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
+            if (sameStory !== -1) S.task = tasks[sameStory];
+            else if (tasks.length) S.task = tasks[0];
+          }
         }
         if (animate) launch(S.lastNode, h.node, ev);
         // Only the few nodes touched last carry a label, so the sky never fills with text.

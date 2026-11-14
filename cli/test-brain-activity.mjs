@@ -489,11 +489,31 @@ test('review 1: a Product in a subfolder of its git repo records into that repo\
     put(path.join(sub, 'src', 'a.js'), 'x');
     fs.mkdirSync(path.join(sub, 'checks'));
     fs.copyFileSync(HOOK, path.join(sub, 'checks', 'yad-activity.mjs'));
+    git(top, 'add', '-A');
+    git(top, 'commit', '-qm', 'the Product, in a subfolder');
     const r = runHook(sub, { tool_name: 'Read', tool_input: { file_path: path.join(sub, 'src/a.js') } });
     assert.equal(r.status, 0);
     const lines = fs.readFileSync(path.join(top, '.git', hook.LOG_NAME), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.deepEqual(lines.map((x) => x.paths), [['src/a.js']]);
   } finally { done(top); }
+});
+
+test('review 2: a folder that only sits inside an unrelated repo (a home folder kept in git) records nothing there', () => {
+  const home = tmp();
+  try {
+    git(home, 'init', '-q');
+    put(path.join(home, '.zshrc'), '# dotfiles\n');
+    git(home, 'add', '.zshrc');
+    git(home, 'commit', '-qm', 'dotfiles');
+    const product = path.join(home, 'Projects', 'product');
+    put(path.join(product, 'src', 'a.js'), 'x');
+    fs.mkdirSync(path.join(product, 'checks'));
+    fs.copyFileSync(HOOK, path.join(product, 'checks', 'yad-activity.mjs'));
+    const r = runHook(product, { tool_name: 'Read', tool_input: { file_path: path.join(product, 'src/a.js') } });
+    assert.equal(r.status, 0);
+    assert.equal(fs.existsSync(path.join(home, '.git', hook.LOG_NAME)), false, 'the dotfiles repo is not the Product\'s');
+    assert.equal(hook.gitCommonDir(product), null);
+  } finally { done(home); }
 });
 
 test('review 1: the reader takes plain files only, keeps characters whole across reads, and drops an endless line', () => {

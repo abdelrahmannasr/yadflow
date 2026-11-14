@@ -162,9 +162,26 @@ export function lineOf(rec) {
 // no process started); for a worktree or a submodule, where `.git` is a file, git is asked.
 export function gitCommonDir(root) {
   const dotGit = path.join(root, '.git');
-  // No `.git` here at all is a repo whose root is ABOVE this folder (a Product in a subfolder, a monorepo
-  // app): git is asked, as for a worktree (E178 review 1).
-  try { if (fs.lstatSync(dotGit).isDirectory()) return dotGit; } catch { /* asked below */ }
+  let here = null;
+  try { here = fs.lstatSync(dotGit); } catch { /* none here */ }
+  if (here && here.isDirectory()) return dotGit;
+  // No `.git` here: a repo whose root is ABOVE this folder (a Product in a subfolder, a monorepo app) —
+  // but only one that TRACKS files under it. A folder that merely sits inside some other repo (a home folder
+  // kept in git) is not that repo's, and its activity is written nowhere (E178 review 2). With no `.git`
+  // anywhere above, git is never started.
+  if (!here) {
+    let up = path.dirname(root);
+    let found = false;
+    for (;;) {
+      try { fs.lstatSync(path.join(up, '.git')); found = true; break; } catch { /* keep going */ }
+      const next = path.dirname(up);
+      if (next === up) break;
+      up = next;
+    }
+    if (!found) return null;
+    const tracked = spawnSync('git', ['-C', root, 'ls-files', '--', '.'], { encoding: 'utf8', timeout: 2000 });
+    if (tracked.status !== 0 || !String(tracked.stdout).trim()) return null;
+  }
   const r = spawnSync('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 2000 });
   const out = r.status === 0 ? String(r.stdout).trim() : '';
   return out && path.isAbsolute(out) ? out : null;
