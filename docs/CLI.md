@@ -2422,7 +2422,8 @@ answers for that branch. Run the command again for a current one.
 - Two runs at the same moment never write the same file (each name is taken with an exclusive create), and
   `catalog.lock` keeps them from losing a catalog entry. A lock is taken over only when the run that made it
   is no longer alive, or after 5 minutes. When a lock is still held after 5 seconds, the report is saved and
-  yad says it is not in the catalog.
+  yad says it is not in the catalog. The run is judged by its process number on this machine, so keep the
+  folder off a disk that another machine or a container writes to at the same time.
 - A folder yad cannot write is a refusal that says what to do (`YAD_REPORTS_DIR` or `--out`), never a crash.
 - `prune` deletes only a catalog entry of the exact shape `<kind>/<file name>`, in a kind folder that is a
   real folder inside the reports folder. A path that leads out of it, a linked kind folder, or one of the

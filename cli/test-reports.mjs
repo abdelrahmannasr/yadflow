@@ -16,7 +16,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 }
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
-const { reportsDir, mainCheckout, reportName, slug, stamp, saveReport, readCatalog, listReports, pruneReports, freshness, renderIndex, writeOrSave, REPORTS_ENV, CATALOG_FILE } = await import('./reports-dir.mjs');
+const { withCatalogLock, reportsDir, mainCheckout, reportName, slug, stamp, saveReport, readCatalog, listReports, pruneReports, freshness, renderIndex, writeOrSave, REPORTS_ENV, CATALOG_FILE } = await import('./reports-dir.mjs');
 const { runReports } = await import('./reports.mjs');
 const { classify } = await import('./agent-rules.mjs');
 const { endJSON } = await import('./lib.mjs');
@@ -293,17 +293,45 @@ test('review 1: a name already taken is never overwritten, and a held catalog lo
     assert.equal(fs.readFileSync(b.file, 'utf8'), 'second');
     // A lock held by a run that is still going (this test's own pid): the report is saved, the catalog is
     // left, and the warning says where the report is — never "try again", which would save a second copy.
-    fs.writeFileSync(path.join(dir, 'catalog.lock'), `${process.pid} theirs`);
-    const held = saveReport(root, { kind: 'usage', scope: 'team', state: 'held', ext: 'md', content: 'x', at: AT, env: noEnv });
+    fs.writeFileSync(path.join(dir, 'catalog.lock'), `${process.pid} ${'a'.repeat(16)}`);
+    const held = saveReport(root, { kind: 'usage', scope: 'team', state: 'held', ext: 'md', content: 'x', at: AT, env: noEnv, lockWaitMs: 200 });
     assert.ok(fs.existsSync(held.file));
     assert.match(held.warnings[0], /the report was saved at .*held.*not added to the catalog: .*catalog\.lock is held by another yad run that is still going/);
     assert.equal(readCatalog(dir).entries.length, 2);
-    assert.equal(fs.readFileSync(path.join(dir, 'catalog.lock'), 'utf8'), `${process.pid} theirs`, 'a lock that is not ours is never removed');
+    assert.equal(fs.readFileSync(path.join(dir, 'catalog.lock'), 'utf8'), `${process.pid} ${'a'.repeat(16)}`, 'a lock that is not ours is never removed');
     // A lock whose run is gone (no such process) is taken over at once, and ours is removed after.
-    fs.writeFileSync(path.join(dir, 'catalog.lock'), '2147483646 gone');
+    fs.writeFileSync(path.join(dir, 'catalog.lock'), `2147483646 ${'b'.repeat(16)}`);
     saveReport(root, { kind: 'usage', scope: 'team', state: 'after', ext: 'md', content: 'x', at: AT, env: noEnv });
     assert.equal(readCatalog(dir).entries.length, 3);
     assert.equal(fs.existsSync(path.join(dir, 'catalog.lock')), false);
     assert.deepEqual(fs.readdirSync(dir).filter((n) => n.includes('.stale')), [], 'the set-aside lock is gone too');
+  } finally { done(ws); }
+});
+
+test('review 3: a young lock yad cannot judge is waited on, never taken; a lock it cannot read ends at the deadline', () => {
+  const ws = tmp();
+  try {
+    const lock = path.join(ws, 'catalog.lock');
+    let ran = 0;
+    for (const odd of ['', 'half', '0 x']) {
+      fs.writeFileSync(lock, odd);
+      const r = withCatalogLock(ws, () => { ran++; return {}; }, { waitMs: 150 });
+      assert.equal(r.held, true, `${JSON.stringify(odd)} is not taken over while young`);
+      assert.equal(fs.readFileSync(lock, 'utf8'), odd);
+    }
+    // The same content, older than 5 minutes: taken over, used, and released.
+    const old = new Date(Date.now() - 6 * 60 * 1000);
+    fs.utimesSync(lock, old, old);
+    assert.deepEqual(withCatalogLock(ws, () => { ran++; return { ok: 1 }; }, { waitMs: 150 }), { ok: 1 });
+    assert.equal(ran, 1);
+    assert.equal(fs.existsSync(lock), false);
+    // A folder where the lock should be: the loop ends, with the reason.
+    fs.mkdirSync(lock);
+    const t0 = Date.now();
+    const r = withCatalogLock(ws, () => { ran++; return {}; }, { waitMs: 150 });
+    assert.ok(Date.now() - t0 < 3000, 'no endless spin');
+    assert.equal(r.held, true);
+    assert.equal(ran, 1);
+    assert.deepEqual(fs.readdirSync(ws).filter((n) => /\.(new|stale)$/.test(n)), [], 'no temp lock files left');
   } finally { done(ws); }
 });

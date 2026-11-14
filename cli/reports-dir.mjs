@@ -117,30 +117,52 @@ function writeFresh(dir, name, content) {
 }
 
 // Hold `catalog.lock` while the catalog is read, changed and written, so a run at the same moment never
-// loses an entry. The lock holds `<pid> <token>`. It is taken over only when the run that made it is no
-// longer alive, or it is older than 5 minutes; a takeover first RENAMES the old lock to a name of its own
-// (only one run can win that rename), so two runs never both take it. On the way out a run removes the
-// lock only while it still holds its own token, never a lock another run took over.
+// loses an entry.
+//   - The lock appears WHOLE: its `<pid> <token>` is written to a temp file first, then hard-linked to
+//     `catalog.lock` (a link fails when the lock is there), so no run ever reads a half-made, empty lock.
+//   - It is taken over only when its content is ours to judge — `<pid> <token>`, with that process no
+//     longer alive — or it is older than 5 minutes. A takeover renames the lock aside, then checks that
+//     what it moved is what it judged; a fresh lock another run made in between is linked back.
+//   - On the way out a run removes the lock only while it still holds its own token.
+//   - A lock that cannot be read (a folder, no permission) is never spun on: the deadline still ends it.
+// The pid is this machine's: a reports folder shared with another machine or a container can see a
+// live lock there as dead. One residual race is left (a third run locking in the instant between the
+// rename and the link-back); it needs a crashed run and three runs in the same moment.
 const LOCK_FILE = 'catalog.lock';
 const LOCK_STALE_MS = 5 * 60 * 1000;
+const LOCK_RE = /^(\d+) [0-9a-f]{16}$/;
 const alive = (pid) => { if (!Number.isInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-function withCatalogLock(dir, fn, { waitMs = 5000 } = {}) {
+function lockStale(held, age) {
+  if (age > LOCK_STALE_MS) return true;
+  const m = LOCK_RE.exec(String(held));
+  return !!m && !alive(Number(m[1]));
+}
+function tryLock(lock, token) {
+  const tmp = `${lock}.${randomBytes(6).toString('hex')}.new`;
+  fs.writeFileSync(tmp, token, { flag: 'wx' });
+  try { fs.linkSync(tmp, lock); return true; } catch (e) { if (e.code === 'EEXIST') return false; throw e; } finally { fs.rmSync(tmp, { force: true }); }
+}
+export function withCatalogLock(dir, fn, { waitMs = 5000 } = {}) {
   const lock = path.join(dir, LOCK_FILE);
   const token = `${process.pid} ${randomBytes(8).toString('hex')}`;
   const until = Date.now() + waitMs;
   for (;;) {
-    try { fs.writeFileSync(lock, token, { flag: 'wx' }); break; } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      let held, age;
-      try { held = fs.readFileSync(lock, 'utf8'); age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
-      if (!alive(Number(String(held).split(' ')[0])) || age > LOCK_STALE_MS) {
-        const aside = `${lock}.${randomBytes(6).toString('hex')}.stale`;
-        try { fs.renameSync(lock, aside); fs.rmSync(aside, { force: true }); } catch { /* another run took it first */ }
-        continue;
-      }
-      if (Date.now() > until) return { problem: `${lock} is held by another yad run that is still going`, held: true };
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    if (tryLock(lock, token)) break;
+    if (Date.now() > until) return { problem: `${lock} is held by another yad run that is still going`, held: true };
+    let held, age;
+    try { held = fs.readFileSync(lock, 'utf8'); age = Date.now() - fs.statSync(lock).mtimeMs; } catch (e) {
+      if (e.code === 'ENOENT') continue;                  // released between the two steps: try again
+      return { problem: `${lock} cannot be read (${e.code || e.message}) — remove it if no yad run is going`, held: true };
     }
+    if (lockStale(held, age)) {
+      const aside = `${lock}.${randomBytes(6).toString('hex')}.stale`;
+      try { fs.renameSync(lock, aside); } catch { continue; }   // another run moved it first
+      let moved = null; try { moved = fs.readFileSync(aside, 'utf8'); } catch { /* gone */ }
+      if (moved !== held) { try { fs.linkSync(aside, lock); } catch { /* a newer lock is there */ } }
+      fs.rmSync(aside, { force: true });
+      continue;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
   try { return fn(); } finally {
     try { if (fs.readFileSync(lock, 'utf8') === token) fs.rmSync(lock, { force: true }); } catch { /* already gone */ }
@@ -227,7 +249,7 @@ function productAt(root, runner) {
 //   → { file, dir, name, warnings: [] }  |  { problem }
 // The report is written even when the catalog cannot be read: the person asked for the report, and
 // the broken catalog is named in a warning, never overwritten.
-export function saveReport(root, { kind, scope, state, ext, content, command = null, anonymous = false, at = new Date(), env = process.env, runner = spawnSync } = {}) {
+export function saveReport(root, { kind, scope, state, ext, content, command = null, anonymous = false, at = new Date(), env = process.env, runner = spawnSync, lockWaitMs = 5000 } = {}) {
   const { dir } = reportsDir(root, { env, runner });
   const sub = path.join(dir, kind);
   // A folder that cannot be made or written (a read-only parent, say) is a refusal, never a crash.
@@ -250,7 +272,7 @@ export function saveReport(root, { kind, scope, state, ext, content, command = n
       writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries });
       writeNew(path.join(dir, INDEX_FILE), renderIndex(entries));
       return {};
-    });
+    }, { waitMs: lockWaitMs });
     if (done.problem) warnings.push(done.held ? `the report was saved at ${file}, but not added to the catalog: ${done.problem}. It is in the folder; open it by that path` : done.problem);
   } catch (e) { warnings.push(`the report was saved, but the catalog was not updated (${e.code || e.message})`); }
   return { file, dir, name, warnings };
