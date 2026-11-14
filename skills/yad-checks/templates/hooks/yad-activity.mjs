@@ -179,8 +179,11 @@ export function gitCommonDir(root) {
       up = next;
     }
     if (!found) return null;
-    const tracked = spawnSync('git', ['-C', root, 'ls-files', '--', '.'], { encoding: 'utf8', timeout: 2000 });
-    if (tracked.status !== 0 || !String(tracked.stdout).trim()) return null;
+    // One tracked file is the answer; a big folder's full list overflows a small buffer, and that is a yes
+    // too (E178 review 3), never a no.
+    const tracked = spawnSync('git', ['-C', root, 'ls-files', '-z', '--', '.'], { encoding: 'utf8', timeout: 2000, maxBuffer: 4096 });
+    const listed = String(tracked.stdout || '').length > 0;
+    if (!listed || (tracked.status !== 0 && tracked.error?.code !== 'ENOBUFS')) return null;
   }
   const r = spawnSync('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 2000 });
   const out = r.status === 0 ? String(r.stdout).trim() : '';

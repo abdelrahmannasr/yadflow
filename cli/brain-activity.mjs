@@ -25,13 +25,17 @@ const posix = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '');
 
 // ---- where the records are -----------------------------------------------------------------------
 
+// Does the repo above `dir` track anything under it? One file is the answer: a big folder's full list
+// overflows the small buffer, and that is a yes (E178 review 3). Shared with yad doctor.
+export function tracksHere(dir, runner = run) {
+  const r = runner('git', ['-C', dir, 'ls-files', '-z', '--', '.'], { maxBuffer: 4096 });
+  return !!r.stdout && (r.ok || r.error?.code === 'ENOBUFS');
+}
+
 // The folder git keeps a repo's shared data in, or null. A folder with no `.git` of its own counts only when
 // the repo above it tracks files under it — the hook's own rule, so both look in the same place.
 function commonDir(dir, runner) {
-  if (!fs.existsSync(path.join(dir, '.git'))) {
-    const tracked = runner('git', ['-C', dir, 'ls-files', '--', '.']);
-    if (!tracked.ok || !tracked.stdout) return null;
-  }
+  if (!fs.existsSync(path.join(dir, '.git')) && !tracksHere(dir, runner)) return null;
   const r = runner('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
   return r.ok && r.stdout && path.isAbsolute(r.stdout) ? r.stdout : null;
 }
@@ -93,12 +97,13 @@ function openPlain(file) {
 }
 
 // The last MAX_READ bytes of a plain file, from its first whole line; '' for anything else.
-function readTail(file) {
+function readTail(file, upTo = null) {
   const o = openPlain(file);
   if (!o) return '';
   try {
-    const from = Math.max(0, o.st.size - MAX_READ);
-    const buf = Buffer.alloc(o.st.size - from);
+    const end = upTo === null || upTo.ino !== o.st.ino ? o.st.size : Math.min(o.st.size, upTo.offset);
+    const from = Math.max(0, end - MAX_READ);
+    const buf = Buffer.alloc(end - from);
     const got = fs.readSync(o.fd, buf, 0, buf.length, from);
     const text = buf.subarray(0, got).toString('utf8');
     return from === 0 ? text : text.slice(text.indexOf('\n') + 1);
@@ -107,12 +112,14 @@ function readTail(file) {
 
 // The recent past, for replay: every source's old and current file, newest KEEP_DAYS, oldest first, at most
 // `limit` events (the newest ones).
-export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit = BACKLOG_LIMIT } = {}) {
+// `upTo(src)` gives where the live reader of a source stands ({ ino, offset }): the current file is read only
+// up to there, so a line is either in the backlog or sent live, never both (E178 review 3).
+export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit = BACKLOG_LIMIT, upTo = () => null } = {}) {
   const since = now - days * 86400000;
   const all = [];
   for (const src of sources) {
     for (const name of [OLD_LOG_NAME, LOG_NAME]) {
-      for (const line of readTail(path.join(src.dir, name)).split('\n')) {
+      for (const line of readTail(path.join(src.dir, name), name === LOG_NAME ? upTo(src) : null).split('\n')) {
         const r = line ? parseRecord(line) : null;
         if (r && r.t >= since && r.t <= now + 60000) all.push({ src, r });
       }
@@ -168,7 +175,9 @@ export function follow(src, onRecord, { interval = 500, watch = fs.watchFile, un
     } catch { /* read again on the next tick */ } finally { fs.closeSync(o.fd); }
   };
   watch(file, { interval, persistent: false }, pump);
-  return { stop: () => unwatch(file, pump), pump };
+  // Where this reader stands: the backlog of a page that opens now stops here.
+  const position = () => (ino === null ? { ino: -1, offset: 0 } : { ino, offset: offset - Buffer.byteLength(rest) });
+  return { stop: () => unwatch(file, pump), pump, position };
 }
 
 // ---- matching events to the brain ----------------------------------------------------------------

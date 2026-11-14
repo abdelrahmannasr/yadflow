@@ -252,7 +252,8 @@ function activityStream(root, { runner, heartbeat, interval }) {
       const index = m.model ? activityIndex(m.model) : null;
       for (const f of followers) f.pump();
       res.write(frame('status', { activity: activityWanted(root), sources: sources.map((x) => x.repo ?? 'product'), brain: m.model?.meta.inputs ?? null }));
-      res.write(frame('backlog', index ? readBacklog(sources).map(({ src, r }) => matchEvent(index, src, r)) : []));
+      const at = new Map(sources.map((src, i) => [src, followers[i].position()]));
+      res.write(frame('backlog', index ? readBacklog(sources, { upTo: (src) => at.get(src) }).map(({ src, r }) => matchEvent(index, src, r)) : []));
       if (index) clients.set(res, { index, mtime, told: false });
       req.on('close', () => { clients.delete(res); if (!clients.size) stop(); });
       return undefined;

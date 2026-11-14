@@ -633,3 +633,72 @@ test('review 1: a second page gets no event twice; a page is told when the brain
     a.destroy(); b.destroy();
   } finally { await s.close(); done(ws); }
 });
+
+// ---- review 3 -----------------------------------------------------------------------------------------
+
+test('review 3: a big folder in a repo above still records — the tracked-file check reads only the first bytes', () => {
+  const top = tmp();
+  try {
+    git(top, 'init', '-q');
+    const app = path.join(top, 'apps', 'web');
+    for (let i = 0; i < 200; i++) put(path.join(app, 'src', `a-component-with-a-rather-long-file-name-${String(i).padStart(4, '0')}.js`), 'x');
+    fs.mkdirSync(path.join(app, 'checks'));
+    fs.copyFileSync(HOOK, path.join(app, 'checks', 'yad-activity.mjs'));
+    git(top, 'add', '-A');
+    git(top, 'commit', '-qm', 'many files');
+    assert.ok(spawnSync('git', ['-C', app, 'ls-files', '-z', '--', '.'], { encoding: 'utf8' }).stdout.length > 4096, 'the list is longer than the check reads');
+    assert.equal(hook.gitCommonDir(app), path.join(top, '.git'));
+    assert.equal(act.tracksHere(app, realRun), true);
+    // The reader's twin rule: a folder inside an unrelated repo is not a source.
+    const home = tmp();
+    git(home, 'init', '-q');
+    put(path.join(home, 'dot'), 'x');
+    git(home, 'add', 'dot');
+    git(home, 'commit', '-qm', 'dotfiles');
+    const loose = path.join(home, 'Projects', 'p');
+    fs.mkdirSync(loose, { recursive: true });
+    assert.equal(act.tracksHere(loose, realRun), false);
+    assert.equal(act.tracksHere(loose, () => ({ ok: false, stdout: 'a', error: { code: 'ENOBUFS' } })), true, 'an overflow is a yes');
+    assert.equal(act.tracksHere(loose, () => ({ ok: false, stdout: '', error: { code: 'ENOENT' } })), false);
+    done(home);
+  } finally { done(top); }
+});
+
+test('review 3: a page\'s backlog stops where the live reader stands, so a line is never in both', () => {
+  const dir = tmp();
+  try {
+    const file = path.join(dir, act.LOG_NAME);
+    const line = (op) => `${JSON.stringify({ v: 1, op, ts: new Date().toISOString(), paths: [] })}\n`;
+    fs.writeFileSync(file, line('read'));
+    const live = [];
+    const src = { repo: null, dir, prefixes: [] };
+    const f = act.follow(src, (s, r) => live.push(r.op), { watch: () => {}, unwatch: () => {} });
+    fs.appendFileSync(file, line('edit'));       // lands after the reader's last look
+    const at = f.position();
+    const backlog = act.readBacklog([src], { upTo: () => at }).map((x) => x.r.op);
+    f.pump();
+    assert.deepEqual(backlog, ['read'], 'the backlog stops at the reader');
+    assert.deepEqual(live, ['edit'], 'and the reader sends the rest');
+    f.stop();
+  } finally { done(dir); }
+});
+
+test('review 3: the doctor asks the hook\'s question — a Product no repo tracks has nowhere to record', () => {
+  const home = tmp();
+  try {
+    git(home, 'init', '-q');
+    put(path.join(home, 'dot'), 'x');
+    git(home, 'add', 'dot');
+    git(home, 'commit', '-qm', 'dotfiles');
+    const root = path.join(home, 'Projects', 'product');
+    fs.cpSync(GOLDEN, root, { recursive: true });
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'hub.json'), 'utf8'));
+    cfg.activity = true;
+    fs.writeFileSync(path.join(root, '.sdlc', 'hub.json'), JSON.stringify(cfg));
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    for (const a of plan.activityHookActions(root, ['.claude'])) a.apply();
+    const checks = [];
+    activityChecks(root, checks, cfg);
+    assert.match(JSON.stringify(checks), /not committed in a git repo of its own[\s\S]*commit the Product/);
+  } finally { done(home); }
+});
