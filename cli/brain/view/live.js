@@ -315,7 +315,8 @@
       heldNear = null;
       if (i !== null) {
         heldNear = new Set([i]);
-        edges.forEach(function (e) { if (e.s === i) heldNear.add(e.t); else if (e.t === i) heldNear.add(e.s); });
+        // At most 60 neighbours are named, so holding a hub does not bury the sky in labels; every link is still lit.
+        edges.forEach(function (e) { if (heldNear.size > 60) return; if (e.s === i) heldNear.add(e.t); else if (e.t === i) heldNear.add(e.s); });
       }
       if (renderer) renderer.refresh({ skipIndexation: true });
     }
@@ -323,8 +324,11 @@
       var i = Number(nodeKey);
       var res = Object.assign({}, data);
       if (!nodes[i]) return res;
-      if (heldNear && heldNear.has(i)) { res.label = nodes[i].label; res.forceLabel = true; res.zIndex = 3; if (i === held) res.highlighted = true; return res; }
-      if (nodes[i].layer !== 'work') res.label = '';
+      // A held node and its neighbours are named and drawn on top, and still show their heat: the agent's work
+      // on the very nodes a person is looking at must not vanish (review).
+      var near = heldNear !== null && heldNear.has(i);
+      if (near) { res.label = nodes[i].label; res.forceLabel = true; res.zIndex = 3; if (i === held) res.highlighted = true; }
+      else if (nodes[i].layer !== 'work') res.label = '';
       if (!heatOn) return res;
       var h = heatOf(i, clock());
       if (!h || h.total < 0.03) return res;
@@ -332,7 +336,7 @@
       var k = Math.min(1, 0.3 + h.total * 0.45);
       res.color = rgb(mix(rest[i], OPS[hot].rgb, k));
       res.size = data.size * (1 + Math.min(1.8, h.total * 0.55));
-      res.zIndex = 2;
+      res.zIndex = near ? 3 : 2;
       if (S.named.indexOf(i) !== -1 && clock() - h.at < 20000) { res.label = nodes[i].label; res.forceLabel = true; }
       return res;
     }
