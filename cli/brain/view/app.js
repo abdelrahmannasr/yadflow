@@ -176,8 +176,39 @@
         notice([el('strong', 'This browser cannot draw the graph. '), el('span', 'It needs WebGL, which is turned off or not available here. Search and the details panel still work.')]);
         return;
       }
-      renderer.on('clickNode', function (ev) { select(Number(ev.node)); });
-      renderer.on('clickStage', function () { select(null); });
+      renderer.on('clickNode', function (ev) { if (!justDragged) select(Number(ev.node)); });
+      renderer.on('clickStage', function () { if (!justDragged) select(null); });
+      // Press and hold a node to drag it: it is selected at once, so its links stay lit while it moves, and the
+      // camera holds still (no pan, no re-fit) until the button is let go.
+      var dragged = null;
+      var justDragged = false;
+      renderer.on('downNode', function (ev) {
+        dragged = ev.node;
+        justDragged = false;
+        if (!renderer.getCustomBBox()) renderer.setCustomBBox(renderer.getBBox());
+        if (state.selected !== Number(ev.node)) select(Number(ev.node));
+      });
+      renderer.on('moveBody', function (ev) {
+        if (dragged === null) return;
+        var at = renderer.viewportToGraph(ev.event);
+        graph.mergeNodeAttributes(dragged, { x: at.x, y: at.y });
+        justDragged = true;
+        ev.preventSigmaDefault();
+        if (ev.event.original.cancelable) ev.event.original.preventDefault();
+        ev.event.original.stopPropagation();
+      });
+      var drop = function () {
+        if (dragged === null) return;
+        dragged = null;
+        renderer.getContainer().style.cursor = '';
+        // The click that follows a drag must not select or clear anything.
+        setTimeout(function () { justDragged = false; }, 0);
+      };
+      renderer.on('enterNode', function () { renderer.getContainer().style.cursor = 'grab'; });
+      renderer.on('leaveNode', function () { if (dragged === null) renderer.getContainer().style.cursor = ''; });
+      renderer.on('upNode', drop);
+      renderer.on('upStage', drop);
+      renderer.getMouseCaptor().on('mouseup', drop);
     }
 
     function refresh() { if (renderer) renderer.refresh(); }
