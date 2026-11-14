@@ -24,7 +24,8 @@ import { gitHookState } from './plan.mjs';
 import { signingDoctorLine } from './signing.mjs';
 
 // Bumped when the shipped steps change in a way a reader of the file should know about.
-export const LOCAL_SETUP_CATALOGUE_VERSION = 1;
+// 2: a shipped tool's step runs its `yad toolbox connect` recipe (E185 review 1).
+export const LOCAL_SETUP_CATALOGUE_VERSION = 2;
 // The file's own format.
 export const LOCAL_SETUP_VERSION = 1;
 export const LOCAL_SETUP_FILE = '.sdlc/local-setup.json';
@@ -50,9 +51,16 @@ const step = (s) => ({ source: 'yadflow', vetted: true, verify: null, since: nul
 // The CLI version the script asks for: this release, or the one the file already asks for when that is newer. An
 // older yad rewriting the file (any member's `yad check --fix`) must never lower it, or the members who are behind
 // would stop being told to upgrade.
+// Only a plain release number (`4.12.0`, `5.0.0-next.3`) is ever taken from the file: it goes into the command.
+export const PLAIN_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+export const fileCliMin = (doc) => {
+  const step = Array.isArray(doc?.yadflow) ? doc.yadflow.find((s) => s && typeof s === 'object' && s.id === 'yadflow-cli') : null;
+  const min = step?.check?.min;
+  return typeof min === 'string' && PLAIN_VERSION.test(min) ? min : null;
+};
 export function cliMinimum(current) {
   const have = parseVersion(VERSION);
-  const was = typeof current === 'string' ? parseVersion(current) : null;
+  const was = typeof current === 'string' && PLAIN_VERSION.test(current) ? parseVersion(current) : null;
   return was && have && compare(was, have) > 0 ? current : VERSION;
 }
 

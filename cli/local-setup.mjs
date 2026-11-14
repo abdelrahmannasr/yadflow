@@ -14,10 +14,10 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { c, emitJSON, forTerminal, info, log, warn, writeJSON, isPlainObject } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
-import { productConfigPath, SCHEMA_VERSION } from './manifest.mjs';
+import { productConfigPath, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import {
   LOCAL_SETUP_CATALOGUE_VERSION, LOCAL_SETUP_VERSION, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC, STEP_ID, WHEN, BUILTIN_CHECKS,
-  yadflowSteps, cliMinimum, stepHash, runBuiltinCheck, localSetupPath,
+  yadflowSteps, cliMinimum, fileCliMin, stepHash, runBuiltinCheck, localSetupPath,
 } from './local-setup-steps.mjs';
 import { detectInstalled } from './detect.mjs';
 
@@ -38,9 +38,10 @@ const isTextList = (v) => Array.isArray(v) && v.length > 0 && v.every(isText);
 // removing text makes that safe (taking out one `<!--` can join the letters around it into another). So a step
 // holding one is refused, and every command is shown exactly as written.
 const MARKER = /<!--|-->/;
-// eslint-disable-next-line no-control-regex -- a command must be one plain line
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
-const oneLine = (v) => isText(v) && !CONTROL.test(v);
+// One plain line: nothing `forTerminal` would change — no control character, and none of the invisible or
+// direction-changing ones (U+202E and its kind), which would let LOCAL-SETUP.md show a reviewer one command while
+// the agent runs another.
+const oneLine = (v) => isText(v) && forTerminal(v) === v;
 
 export function stepProblems(s, source) {
   const p = [];
@@ -72,6 +73,8 @@ export const parseJSON = (text) => JSON.parse(text.charCodeAt(0) === 0xfeff ? te
 // are what this yadflow writes for this Product (`ours`: id → { hash, vetted }). Any other one is shown as not
 // vetted, and `yad update` rewrites it.
 export function readSteps(doc, { ours = null } = {}) {
+  // A file another catalogue wrote: its yadflow steps that differ are that release's, not a forgery.
+  const otherRelease = doc?.catalogueVersion !== LOCAL_SETUP_CATALOGUE_VERSION;
   const problems = [];
   const steps = [];
   const seen = new Set();
@@ -88,7 +91,7 @@ export function readSteps(doc, { ours = null } = {}) {
       const hash = stepHash(s);
       const mine = source === 'yadflow' ? ours?.get(s.id) : null;
       const known = !!mine && mine.hash === hash;
-      steps.push({ ...s, source, known: source === 'yadflow' ? known : false, vetted: known && mine.vetted !== false, hash });
+      steps.push({ ...s, source, known: source === 'yadflow' ? known : false, otherRelease: source === 'yadflow' && !known && otherRelease, vetted: known && mine.vetted !== false, hash });
     }
   }
   return { steps, problems };
@@ -113,9 +116,24 @@ export function readCommittedLocalSetup(root) {
 
 // yad's part of the file merged into what is there: `yadflow[]` and the two version numbers replaced, every
 // other key (the team's list first of all) kept as it is. The shape `reconcile` asks of a shared JSON file.
-const cliStepOf = (doc) => (Array.isArray(doc?.yadflow) ? doc.yadflow.find((s) => isPlainObject(s) && s.id === 'yadflow-cli') : null);
 // What this yadflow writes for this Product, given the file there now: id → { hash, vetted } (readSteps).
-export const oursFor = (doc, root) => new Map(mergeLocalSetup(isPlainObject(doc) ? doc : {}, root).settings.yadflow.map((s) => [s.id, { hash: stepHash(s), vetted: s.vetted }]));
+//
+// Built with the file's OWN CLI version: a member whose yad is newer (or older) than the one that wrote the file
+// still sees yad's own CLI step as yad's. Only a plain release number is taken from the file (PLAIN_VERSION).
+export const oursFor = (doc, root) => new Map(yadflowSteps(root, { cliMin: fileCliMin(doc) ?? VERSION }).map((s) => [s.id, { hash: stepHash(s), vetted: s.vetted }]));
+
+// yad's own steps that its own reader would refuse — a team's toolbox tool whose words hold a marker or a
+// two-line install command — are left out when yad writes them, and said once.
+const droppedSaid = new Set();
+function soundSteps(steps) {
+  return steps.filter((s) => {
+    const p = stepProblems(s, 'yadflow');
+    if (!p.length) return true;
+    const key = `${s.id}\0${p.join()}`;
+    if (!droppedSaid.has(key)) { droppedSaid.add(key); warn(`local setup: the step for \`${forTerminal(s.id)}\` is left out — ${p.join('; ')} (fix the tool in .sdlc/toolbox.json)`); }
+    return false;
+  });
+}
 
 export function mergeLocalSetup(current, root) {
   if (!isPlainObject(current)) return { unreadable: 'it is not a JSON object' };
@@ -127,7 +145,7 @@ export function mergeLocalSetup(current, root) {
     ...current,
     localSetupVersion: LOCAL_SETUP_VERSION,
     catalogueVersion: LOCAL_SETUP_CATALOGUE_VERSION,
-    yadflow: yadflowSteps(root, { cliMin: cliMinimum(cliStepOf(current)?.check?.min) }),
+    yadflow: soundSteps(yadflowSteps(root, { cliMin: cliMinimum(fileCliMin(current)) })),
     team: current.team ?? [],
   };
   return { settings, changed: JSON.stringify(settings) !== JSON.stringify(current) };
@@ -188,7 +206,7 @@ const checkWords = (s) => (s.source === 'team'
 
 function stepLines(s) {
   const who = s.source === 'team' ? ` · added by your team${s.addedBy ? ` (${md(s.addedBy)})` : ''}, not vetted by yadflow`
-    : !s.known ? ' · **not what this yadflow writes — not vetted; `yad update` rewrites it**'
+    : !s.known ? (s.otherRelease ? ' · written by another yadflow version; `yad update` rewrites it' : ' · **not what this yadflow writes — not vetted; `yad update` rewrites it**')
       : !s.vetted ? ' · a tool your team added, not vetted by yadflow' : '';
   const fence = '`'.repeat(Math.max(3, ...s.commands.map((cmd) => longestTicks(cmd) + 1)));
   const lines = [`### ${md(s.title)}`, '', `- **Id:** ${code(s.id)} · **${s.when}**${who}${s.person ? ' · **the person does this step, not the agent**' : ''}`];
@@ -227,10 +245,15 @@ export function localSetupDocLines(doc) {
 }
 
 // The team's list as committed, or undefined when HEAD has no readable file.
+// `{ team }` as committed: `[]` when HEAD has no file (an update PR then commits yad's own, with no team step), or
+// `{ broken: true }` when HEAD's file cannot be read (an update PR never carries the JSON then: reconcile).
 function committedTeam(root) {
   const r = spawnSync('git', ['show', `HEAD:${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
-  if (r.status !== 0) return undefined;
-  try { const d = parseJSON(r.stdout); return isPlainObject(d) ? (d.team ?? []) : undefined; } catch { return undefined; }
+  if (r.status !== 0) return { team: [] };
+  try {
+    const d = parseJSON(r.stdout);
+    return isPlainObject(d) && (d.team === undefined || Array.isArray(d.team)) ? { team: d.team ?? [] } : { broken: true };
+  } catch { return { broken: true }; }
 }
 
 // The two actions setup, update and check --fix apply: the JSON, then its Markdown view built from what the
@@ -251,8 +274,9 @@ export function localSetupActions(root) {
     // The view shows the team steps on disk. While those differ from the committed ones (a person's own edit, not
     // committed), the view is theirs too: `--open-pr` must not carry it, or the PR's LOCAL-SETUP.md would list a
     // step its JSON lacks. It goes with the person's own commit of the JSON, which the JSON row asks for.
+    // The JSON rides only when its team list is the committed one, so the view does too.
     const head = committedTeam(root);
-    const ownEdit = head !== undefined && JSON.stringify(head) !== JSON.stringify(isPlainObject(now) ? (now.team ?? []) : []);
+    const ownEdit = !!head.broken || JSON.stringify(head.team) !== JSON.stringify(isPlainObject(now) ? (now.team ?? []) : []);
     actions.push(ownEdit ? { ...view, shared: undefined, mergeShared: undefined } : view);
   }
   // A file with no block is `missing`; this one is yad's to add on every Product, so it is `new` for an update.
@@ -267,7 +291,9 @@ export function localSetupState(root, { items = null } = {}) {
   const read = readCommittedLocalSetup(root);
   if (!read.doc) return { exists: read.error !== null, committed: read.committed, error: read.error, steps: [], problems: [] };
   const { steps, problems } = readSteps(read.doc, { ours: oursFor(read.doc, root) });
-  const unknown = steps.filter((s) => s.source === 'yadflow' && !s.known).map((s) => s.id);
+  const older = steps.filter((s) => s.source === 'yadflow' && !s.known && s.otherRelease).map((s) => s.id);
+  const unknown = steps.filter((s) => s.source === 'yadflow' && !s.known && !s.otherRelease).map((s) => s.id);
+  if (older.length) problems.push(`${LOCAL_SETUP_FILE} was written by another yadflow version: ${older.length} of its yadflow step(s) differ from this one's (${older.join(', ')}) — \`yad update\` rewrites them`);
   if (unknown.length) problems.push(`${LOCAL_SETUP_FILE}: ${unknown.length} yadflow step(s) are not what this yadflow writes (${unknown.join(', ')}) — shown as not vetted; \`yad update\` rewrites them`);
   let found = items;
   const out = steps.map((s) => {
@@ -298,7 +324,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   if (json) {
     return emitJSON({
       ok: true, ...where, exists: true, committed: st.committed, error: null,
-      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, known, vetted, addedBy = null, hash, state, why }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, known, vetted, addedBy, hash, state, why })),
+      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, known, otherRelease = false, vetted, addedBy = null, hash, state, why }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, known, otherRelease, vetted, addedBy, hash, state, why })),
       ...n, problems: st.problems,
     });
   }
@@ -306,7 +332,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   log(c.bold(`\nyad local-setup — ${st.steps.length} step(s): ${n.pending} not done here, ${n.ask} to check with you`));
   if (!st.committed) warn(`${LOCAL_SETUP_FILE} is not committed yet — this is the copy on disk`);
   for (const s of st.steps) {
-    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? ', not vetted' : ''})`)}`);
+    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? (s.otherRelease ? ', from another yadflow version' : ', not vetted') : ''})`)}`);
     if (s.state === 'ok') continue;
     log(`      ${c.dim(`why: ${forTerminal(s.purpose)}`)}`);
     log(`      ${c.dim(`changes for you: ${forTerminal(s.impact)}`)}`);
@@ -322,7 +348,8 @@ export function runLocalSetupList(root, { json = false } = {}) {
 export function localSetupSection(root) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], error: 'could not read' }; }
-  if (!st.steps.length) return { pending: [], ask: [] };
+  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { pending: [], ask: [], error: st.error }; }
+  if (!st.steps.length) return { pending: [], ask: [], error: null };
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
   log(c.bold('\nLocal setup (this machine)'));
@@ -332,5 +359,5 @@ export function localSetupSection(root) {
     if (ask.length) log(`  ${c.cyan('?')} ${ask.length} step(s) from your team, to check with you: ${ask.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
-  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id) };
+  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), error: null };
 }

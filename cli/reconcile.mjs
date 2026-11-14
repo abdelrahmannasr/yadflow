@@ -393,7 +393,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   const sharedRows = [];
   const lf = (t) => t.replace(/\r\n/g, '\n');
-  const parse = (t) => { try { const v = JSON.parse(t); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+  // A byte-order mark (some Windows editors add one) is read past, as the files' own readers do.
+  const parse = (t) => { try { const v = JSON.parse(t.charCodeAt(0) === 0xfeff ? t.slice(1) : t); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
   // A settings file is JSON, merged as objects; a rules file (AGENTS.md, CLAUDE.md, E158) is text, with yad's
   // block put into it. Each kind: how to read it, merge yad's part in, and compare.
   const KINDS = {

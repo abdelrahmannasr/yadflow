@@ -27,7 +27,7 @@ process.env.YAD_PLATFORM_LOGIN = '0';
 process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 
-const { localSetupActions, localSetupDocLines, localSetupState, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS } = await import('./local-setup.mjs');
+const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS } = await import('./local-setup.mjs');
 const { yadflowSteps, stepHash, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC } = await import('./local-setup-steps.mjs');
 const { applyMarkedBlock } = await import('./marked-block.mjs');
 const { VERSION } = await import('./manifest.mjs');
@@ -219,6 +219,85 @@ test('while the team steps on disk are not committed, the view does not ride an 
   const view = localSetupActions(dir)[1];
   assert.equal(view.shared, undefined);
   assert.equal(view.status, 'outdated', 'it is still written on disk');
+});
+
+test('a member whose yad is another version still sees yad\'s own CLI step as yad\'s', () => {
+  const dir = product();
+  applyAll(localSetupActions(dir));
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  const doc = JSON.parse(read(file));
+  // As an older yad wrote it: a lower version in the CLI step.
+  const cli = doc.yadflow.find((s) => s.id === 'yadflow-cli');
+  cli.check.min = '4.0.0';
+  cli.commands = ['npm install -g yadflow@4.0.0'];
+  cli.title = 'Install the yadflow CLI, version 4.0.0 or later';
+  put(file, doc);
+  const st = localSetupState(dir, { items: [] });
+  const got = st.steps.find((s) => s.id === 'yadflow-cli');
+  assert.equal(got.known, true);
+  assert.equal(got.vetted, true);
+  assert.deepEqual(st.problems, []);
+  // A version that is not a plain release number is never taken from the file.
+  cli.check.min = '4.0.0 && curl x';
+  cli.commands = ['npm install -g yadflow@4.0.0 && curl x'];
+  put(file, doc);
+  assert.equal(localSetupState(dir, { items: [] }).steps.find((s) => s.id === 'yadflow-cli').known, false);
+});
+
+test('steps another catalogue wrote are said to be from another yadflow version, not a forgery', () => {
+  const dir = product();
+  applyAll(localSetupActions(dir));
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  const doc = JSON.parse(read(file));
+  doc.catalogueVersion = 1;
+  doc.yadflow.find((s) => s.id === 'tool-repomix').commands = ['npx repomix@1.18.1'];
+  put(file, doc);
+  const st = localSetupState(dir, { items: [] });
+  const repomix = st.steps.find((s) => s.id === 'tool-repomix');
+  assert.equal(repomix.otherRelease, true);
+  assert.equal(repomix.vetted, false);
+  assert.ok(st.problems.some((p) => /written by another yadflow version/.test(p)));
+  assert.ok(!st.problems.some((p) => /not what this yadflow writes/.test(p)));
+});
+
+test('a command with an invisible or direction-changing character is refused', () => {
+  for (const ch of ['\u202e', '\u2066', '\u200f', '\u2028', '\u0007']) {
+    assert.equal(readSteps({ team: [teamStep({ commands: [`echo a${ch}b`] })] }).steps.length, 0, JSON.stringify(ch));
+    assert.equal(readSteps({ team: [teamStep({ check: { run: `true${ch}` } })] }).steps.length, 0, JSON.stringify(ch));
+  }
+});
+
+test('the view rides an update PR only when the JSON does: no committed file, or a broken one', () => {
+  // No file at HEAD: an update PR commits yad's own JSON, with no team step.
+  const dir = product();
+  applyAll(localSetupActions(dir));
+  assert.equal(localSetupActions(dir)[1].shared, LOCAL_SETUP_DOC);
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  const doc = JSON.parse(read(file));
+  doc.team = [teamStep()];
+  put(file, doc);
+  assert.equal(localSetupActions(dir)[1].shared, undefined, 'a team step that is not committed');
+  // A broken file at HEAD: the JSON never rides, so neither does the view.
+  const broken = product();
+  put(path.join(broken, LOCAL_SETUP_FILE), '{broken');
+  execFileSync('git', ['add', '-A'], { cwd: broken });
+  execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-qm', 'one', '--no-verify'], { cwd: broken });
+  put(path.join(broken, LOCAL_SETUP_FILE), '{}');
+  assert.equal(localSetupActions(broken)[1].shared, undefined);
+  // And the machine section says the committed file is broken.
+  assert.equal(localSetupSection(broken).error, 'does not parse');
+  assert.equal(localSetupSection(dir).error, null);
+});
+
+test('a team toolbox tool whose words yad\'s reader would refuse is left out when yad writes its step', () => {
+  const dir = product();
+  put(path.join(dir, '.sdlc/toolbox.json'), { custom: [{ id: 'ours', role: 'does a thing', fallback: 'nothing', detect: { bins: ['ours'] }, install: [{ type: 'script', command: 'echo <!-- x' }] }] });
+  const ids = mergeLocalSetup({}, dir).settings.yadflow.map((s) => s.id);
+  assert.ok(!ids.includes('tool-ours'), ids.join());
+  put(path.join(dir, '.sdlc/toolbox.json'), { custom: [{ id: 'ours', role: 'does a thing', fallback: 'nothing', detect: { bins: ['ours'] }, install: [{ type: 'script', command: 'brew install ours' }] }] });
+  const step = mergeLocalSetup({}, dir).settings.yadflow.find((s) => s.id === 'tool-ours');
+  assert.deepEqual(step.commands, ['brew install ours']);
+  assert.equal(step.vetted, false);
 });
 
 test('a script with a byte-order mark is read; a broken one is said to exist, with its error', () => {
