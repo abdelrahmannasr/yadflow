@@ -37,6 +37,7 @@ import { lightTasksBlock, isLightSpec } from './build.mjs';
 import { readShips } from './ledger.mjs';
 import { judgeRepo, readRegistry } from './workspace.mjs';
 import { whereOnPath } from './toolbox.mjs';
+import { fileAbout, storyAbout } from './brain-about.mjs';
 
 export const GRAPHIFY_VERSION = '0.9.108';
 // The `graph.schema_version` values this reader knows. A new one is refused, never guessed at.
@@ -585,7 +586,7 @@ export function queryBrain(brain, text, { limit = 10, neighbours = 12 } = {}) {
 
 // ---- the command ---------------------------------------------------------------------------------
 
-export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | status | view [--live] [--open] [--html [<file>]]   (each with --json; the search text cannot start with -)';
+export const BRAIN_USAGE = 'usage: yad brain build [--repo <name>] | query <text> [--limit <n>] | file <repo>/<path> [--repo <name>] [--limit <n>] | story <story-id> [--limit <n>] | status | view [--live] [--open] [--html [<file>]]   (each with --json; the search text cannot start with -)';
 export const BRAIN_FLAGS = Object.freeze(['--repo', '--limit', '--json', '--dir', '--open', '--html', '--live']);
 
 export async function runBrain(root, { action = 'status', args = [], repo = null, limit = null, json = false, open = false, html = false, live = false, unknownFlags = [], runner = run, where = whereOnPath } = {}) {
@@ -599,11 +600,18 @@ export async function runBrain(root, { action = 'status', args = [], repo = null
   // E177: the viewer is its own module, loaded only when asked for (it is the one that starts a server).
   if (action === 'view' && (repo !== null || limit !== null)) return refuse(`yad brain view does not take ${[repo !== null ? '--repo' : null, limit !== null ? '--limit' : null].filter(Boolean).join(', ')}`, BRAIN_USAGE, { json });
   if (action === 'view') return (await import('./brain-view.mjs')).runBrainView(root, { args, html, open, live, json, runner });
-  if (action !== 'query' && args.length) return refuse(`unexpected argument(s): ${args.map(forTerminal).join(' ')}`, BRAIN_USAGE, { json });
+  // E179: `file` and `story` take exactly one name each.
+  if ((action === 'file' || action === 'story') && args.length !== 1) {
+    return refuse(args.length ? `yad brain ${action} takes one ${action === 'file' ? 'file' : 'story id'}, not ${args.length}` : `yad brain ${action} needs ${action === 'file' ? 'a file: <repo>/<path>' : 'a story id'}`, BRAIN_USAGE, { json });
+  }
+  if (action === 'story' && repo !== null) return refuse('yad brain story does not take --repo', BRAIN_USAGE, { json });
+  if (!['query', 'file', 'story'].includes(action) && args.length) return refuse(`unexpected argument(s): ${args.map(forTerminal).join(' ')}`, BRAIN_USAGE, { json });
   if (action === 'build') return brainBuild(root, { repo, json, runner, where });
   if (action === 'query') return brainQuery(root, { text: args.join(' '), limit, json, runner });
+  if (action === 'file') return brainFile(root, { target: args[0], repo, limit, json, runner });
+  if (action === 'story') return brainStory(root, { id: args[0], limit, json, runner });
   if (action === 'status') return brainStatus(root, { json, runner, where });
-  return refuse(`unknown brain action: ${forTerminal(action)} (build, query, status, view)`, BRAIN_USAGE, { json });
+  return refuse(`unknown brain action: ${forTerminal(action)} (build, query, file, story, status, view)`, BRAIN_USAGE, { json });
 }
 
 function brainBuild(root, { repo, json, runner, where }) {
@@ -654,16 +662,25 @@ function brainBuild(root, { repo, json, runner, where }) {
   return undefined;
 }
 
-function brainQuery(root, { text, limit, json, runner }) {
-  if (!text.trim()) return refuse('nothing to search for', 'usage: yad brain query <text> [--limit <n>] [--json]', { json });
-  const n = limit === null || limit === undefined ? 10 : Number(limit);
-  if (!Number.isInteger(n) || n < 1 || n > 500) return refuse(`--limit must be a whole number from 1 to 500, not ${forTerminal(limit)}`, null, { json });
+// The shared start of `query`, `file` and `story`: a --limit in range, the brain read back, and a warning when a
+// repo's code moved since it was built. `{ refused }` or `{ brain, n, behind }`.
+function openBrain(root, { limit, fallback, json, runner }) {
+  const n = limit === null || limit === undefined ? fallback : Number(limit);
+  if (!Number.isInteger(n) || n < 1 || n > 500) return { refused: refuse(`--limit must be a whole number from 1 to 500, not ${forTerminal(limit)}`, null, { json }) };
   let brain;
-  try { brain = readBrain(root); } catch (e) { return refuse(e.message, e.hint, { json }); }
-  if (!brain) return refuse(`no brain here yet (${BRAIN_FILE})`, 'build it: `yad brain build`', { json });
+  try { brain = readBrain(root); } catch (e) { return { refused: refuse(e.message, e.hint, { json }) }; }
+  if (!brain) return { refused: refuse(`no brain here yet (${BRAIN_FILE})`, 'build it: `yad brain build`', { json }) };
   // A cheap check, not `status`'s full rebuild: has any repo's code moved since its graph was built?
   const behind = codeBehind(root, brain, runner);
   if (behind.length) warn(`the code moved in ${behind.join(', ')} since the brain was built — the answer may be out of date; run \`yad brain build\` (\`yad brain status\` checks everything)`);
+  return { brain, n, behind };
+}
+
+function brainQuery(root, { text, limit, json, runner }) {
+  if (!text.trim()) return refuse('nothing to search for', 'usage: yad brain query <text> [--limit <n>] [--json]', { json });
+  const opened = openBrain(root, { limit, fallback: 10, json, runner });
+  if (opened.refused !== undefined || !opened.brain) return opened.refused;
+  const { brain, n, behind } = opened;
   const matches = queryBrain(brain, text, { limit: n });
   if (json) return emitJSON({ query: text, codeBehind: behind, matches });
   log(c.bold(`\nyad brain query ${forTerminal(text)}`));
@@ -676,6 +693,69 @@ function brainQuery(root, { text, limit, json, runner }) {
     }
     if (m.more) log(c.dim(`  … and ${m.more} more`));
   }
+  return undefined;
+}
+
+// E179 — `yad brain file <repo>/<path>`: what an agent needs before it plans around a file or edits it.
+function brainFile(root, { target, repo, limit, json, runner }) {
+  const opened = openBrain(root, { limit, fallback: 25, json, runner });
+  if (!opened.brain) return opened.refused;
+  const { brain, n, behind } = opened;
+  const asked = repo !== null && repo !== undefined ? `${repo}/${String(target).replace(/^\.?\//, '')}` : target;
+  const r = fileAbout(brain, asked, { limit: n });
+  if (r.found === 'none') {
+    return refuse(`the brain holds no file ${forTerminal(asked)}`, r.suggestions.length
+      ? `did you mean: ${r.suggestions.map(forTerminal).join(', ')}`
+      : 'name it as <repo>/<path>; a file nothing declares and Graphify did not map is not in the brain (`yad brain status`)', { json });
+  }
+  if (r.found === 'many') {
+    return refuse(`${forTerminal(asked)} is in more than one repo: ${r.candidates.map(forTerminal).join(', ')}`, 'name it as <repo>/<path>, or add --repo <name>', { json });
+  }
+  const a = r.about;
+  if (json) return emitJSON({ codeBehind: behind, ...a });
+  log(c.bold(`\nyad brain file ${forTerminal(`${a.file.repo}/${a.file.path}`)}`) + (a.file.missing ? c.yellow('  (declared, not in the code)') : ''));
+  const more = (k) => (a.more[k] ? log(c.dim(`  … and ${a.more[k]} more`)) : undefined);
+  const section = (title, rows, line, k) => {
+    log(`\n${c.bold(title)}`);
+    if (!rows.length) { log(c.dim('  none')); return; }
+    for (const x of rows) log(`  ${line(x)}`);
+    more(k);
+  };
+  const conf = (x) => (x.confidence === 'EXTRACTED' ? '' : c.dim(` (${x.confidence.toLowerCase()})`));
+  section('Declared by', a.declaredBy, (x) => `${forTerminal(x.task.short)} ${c.dim('of')} ${forTerminal(x.story?.label ?? '?')}${x.epic ? c.dim(` · ${forTerminal(x.epic.id.slice('epic:'.length))}`) : ''}  ${c.dim(forTerminal(x.task.label))}`, 'declaredBy');
+  section('Defines', a.defines, (x) => `${forTerminal(x.label)}${x.at ? c.dim(` ${forTerminal(x.at)}`) : ''}`, 'defines');
+  section('Used by', a.usedBy, (x) => `${forTerminal(x.file)}  ${c.dim(x.relations.map(forTerminal).join(', '))}${conf(x)}`, 'usedBy');
+  section('Uses', a.uses, (x) => `${forTerminal(x.file)}  ${c.dim(x.relations.map(forTerminal).join(', '))}${conf(x)}`, 'uses');
+  section('Shipped in', a.shippedIn, (x) => `${forTerminal(x.label)}${x.date ? c.dim(` ${forTerminal(x.date)}`) : ''}`, 'shippedIn');
+  section('Contract surfaces', a.surfaces, (x) => `${forTerminal(x.label)}  ${c.dim(`(inferred: ${x.via.join(', ')})`)}`, 'surfaces');
+  if (!brain.repos?.[a.file.repo]?.code) info(`${forTerminal(a.file.repo)} has no code graph in the brain, so "Defines", "Used by" and "Uses" are empty — \`yad brain status\` says why`);
+  return undefined;
+}
+
+// E179 — `yad brain story <id>`: a story's tasks and every file they declare.
+function brainStory(root, { id, limit, json, runner }) {
+  const opened = openBrain(root, { limit, fallback: 50, json, runner });
+  if (!opened.brain) return opened.refused;
+  const { brain, n, behind } = opened;
+  const r = storyAbout(brain, id, { limit: n });
+  if (r.found === 'none') {
+    return refuse(`the brain holds no story ${forTerminal(id)}`, r.suggestions.length ? `did you mean: ${r.suggestions.map(forTerminal).join(', ')}` : 'a story id looks like EP-<slug>-S01 (`yad brain query <text>` searches)', { json });
+  }
+  const a = r.about;
+  if (json) return emitJSON({ codeBehind: behind, ...a });
+  log(c.bold(`\nyad brain story ${forTerminal(a.story.id)}`) + (a.story.status ? c.dim(`  ${forTerminal(a.story.status)}`) : ''));
+  if (a.story.summary) log(forTerminal(a.story.summary));
+  if (a.epic) info(`epic: ${forTerminal(a.epic.label)}`);
+  info(`builds in: ${a.repos.map(forTerminal).join(', ') || '(no repo named)'}`);
+  if (a.surfaces.length) info(`contract surface: ${a.surfaces.map(forTerminal).join(', ')}`);
+  log(`\n${c.bold('Tasks')}`);
+  if (!a.tasks.length) log(c.dim('  none here'));
+  for (const t of a.tasks) {
+    log(`  ${forTerminal(t.label)}  ${c.dim(forTerminal(t.repo ?? ''))}${t.shipped.length ? c.green(`  shipped ${t.shipped.map((x) => forTerminal(x.label)).join(', ')}`) : ''}`);
+    for (const f of t.files) log(`    ${forTerminal(f.path)}${f.missing ? c.yellow('  (not in the code yet)') : ''}`);
+  }
+  if (a.more.tasks) log(c.dim(`  … and ${a.more.tasks} more tasks`));
+  for (const r2 of a.reposWithoutTasks) info(`${forTerminal(r2)}: no tasks in the brain — the repo is not cloned here, or its tasks.md is not written yet`);
   return undefined;
 }
 

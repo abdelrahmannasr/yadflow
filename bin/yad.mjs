@@ -441,6 +441,13 @@ ${c.bold('Build helpers')}
                                        .sdlc/brain/graph.json — on this machine only, never committed
   yad brain query <text> [--limit <n>] [--json]
                                        The brain's nodes whose name holds <text>, each with its neighbours
+  yad brain file <repo>/<path> [--repo <name>] [--limit <n>] [--json]
+                                       One file (E179): the tasks and stories that declare it, the code it
+                                       defines, the files that use it and that it uses, its ships, and the
+                                       contract surfaces that reach it — what to know before editing it
+  yad brain story <story-id> [--limit <n>] [--json]
+                                       One story (E179): its epic, repos, tasks, every file they declare,
+                                       and its ships
   yad brain status [--json]            Is the brain current, and is each repo's code graph current
   yad brain view [--open]              Draw the brain in a browser (E177): a local page on 127.0.0.1 with a
                                        one-time key, the code and the work in one graph — filter, search, a
@@ -669,7 +676,7 @@ const ACTIONS = {
   review: { known: ['trailer', 'context', 'chat', 'cards', 'walkthrough', 'nudge', 'reconcile'] },
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
-  brain: { known: ['build', 'query', 'status', 'view'], default: 'status' },
+  brain: { known: ['build', 'query', 'file', 'story', 'status', 'view'], default: 'status' },
   repo: { known: ['list', 'refresh', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },

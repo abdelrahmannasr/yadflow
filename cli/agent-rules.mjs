@@ -209,6 +209,9 @@ export const COMMAND_CLASS = {
   'brain build': { class: 'local-write' },
   'brain query': { class: 'read' },
   'brain status': { class: 'read' },
+  // E179: the focused questions the planning and building skills ask before they plan or edit.
+  'brain file': { class: 'read' },
+  'brain story': { class: 'read' },
   // E177: starts a local server (127.0.0.1, a one-time key), or with --html writes one file — the brain's own
   // ignored folder, or any path named. Local only, so local-write; never pre-approved (a prefix rule would let
   // `--html <file>` overwrite any file, as `standup --out` could).
@@ -392,8 +395,9 @@ export const claudeBlock = () => ['@AGENTS.md'];
 // command that is not a read (`yad mode` begins `yad mode team`). Written into `.claude/settings.json`
 // `permissions.allow` as `Bash(yad <words>:*)`; nothing that writes, pushes, posts or approves is ever there.
 // `standup` reads, but `--out <file>` writes the file named: a prefix rule would let it overwrite any file.
-// `brain query` and `brain status` print names read from the code (E176), which anyone can write, as `issues show` does.
-const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show', 'brain query', 'brain status']);
+// `brain query`, `brain status`, `brain file` and `brain story` print names read from the code (E176, E179), which
+// anyone can write, as `issues show` does.
+const NOT_PREAPPROVED = new Set(['standup', 'issues list', 'issues show', 'brain query', 'brain status', 'brain file', 'brain story']);
 export function readAllowList() {
   const keys = Object.keys(COMMAND_CLASS);
   const reads = keys.filter((key) => {

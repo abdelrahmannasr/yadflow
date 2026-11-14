@@ -587,3 +587,155 @@ test('review 4: --json build and status name a Graphify that does not start; the
     assert.equal(typeof run('brain', 'status', '--json').graphifyError, 'string');
   } finally { done(ws, bin); }
 });
+
+// ---- E179: focused questions, and the skills that ask them ---------------------------------------------
+
+const { fileAbout, storyAbout, fileCandidates } = await import('./brain-about.mjs');
+const { BRAIN_SKILLS, brainBlockLines, syncBrainSkills, BRAIN_BLOCK_BEGIN, BRAIN_BLOCK_END } = await import('./brain-skills.mjs');
+const SKILLS = path.join(HERE, '..', 'skills');
+
+// The golden Product with its backend mapped by the fake Graphify, composed and written: a brain with both layers.
+function builtProduct() {
+  const p = product();
+  buildRepoGraph(p.root, { name: 'backend', target: p.be }, { runner: fakeGraphify().runner });
+  const { brain } = composeBrain(p.root);
+  writeBrain(p.root, brain);
+  return { ...p, brain };
+}
+
+test('E179 fileAbout: who declares a file, what it defines, the files that use it and that it uses', () => {
+  const { ws, brain } = builtProduct();
+  try {
+    const r = fileAbout(brain, 'backend/src/order/index.js');
+    assert.equal(r.found, 'one');
+    const a = r.about;
+    assert.deepEqual(a.file, { id: 'file:backend:src/order/index.js', repo: 'backend', path: 'src/order/index.js' });
+    const t01 = a.declaredBy.find((d) => d.task.short === 'T01');
+    assert.equal(t01.story.id, 'story:EP-checkout-S01');
+    assert.equal(t01.epic.id, 'epic:EP-checkout');
+    assert.deepEqual(a.defines.map((d) => d.label), ['index.js', 'Order', 'create()'], 'in file order');
+    assert.deepEqual(a.usedBy.map((u) => [u.file, u.relations, u.confidence]), [['backend/src/routes.js', ['calls'], 'EXTRACTED']]);
+    assert.ok(a.surfaces.some((s) => s.label === 'Order' && s.via.includes('named-as')));
+    assert.ok(a.shippedIn.length >= 1, 'T01 shipped');
+    // The other direction, and an edge inside one file (routes.js contains postOrders) is not a use.
+    const routes = fileAbout(brain, 'src/routes.js').about;
+    assert.deepEqual(routes.uses.map((u) => u.file), ['backend/src/order/index.js']);
+    assert.deepEqual(routes.usedBy, []);
+    // A declared file the code does not hold yet.
+    const store = fileAbout(brain, 'backend/src/order/store.js').about;
+    assert.equal(store.file.missing, true);
+    assert.deepEqual(store.defines, []);
+    // --limit cuts each list and says how many were left out.
+    const cut = fileAbout(brain, 'backend/src/order/index.js', { limit: 1 }).about;
+    assert.equal(cut.defines.length, 1);
+    assert.equal(cut.more.defines, 2);
+    // Not in the brain: suggestions by the file's own name.
+    const none = fileAbout(brain, 'backend/src/nope/index.js');
+    assert.equal(none.found, 'none');
+    assert.equal(none.suggestions[0], 'backend/src/order/index.js', 'the same name in another folder');
+  } finally { done(ws); }
+});
+
+test('E179 fileCandidates: <repo>/<path> or a bare path; a path in two repos is ambiguous', () => {
+  const file = (repo, p) => ({ id: `file:${repo}:${p}`, kind: 'file', label: p, repo });
+  const brain = { nodes: [file('backend', 'src/a.js'), file('mobile', 'src/a.js'), file('src', 'x.js'), file('web', 'src/x.js')], edges: [] };
+  assert.deepEqual(fileCandidates(brain, 'backend/src/a.js').map((n) => n.id), ['file:backend:src/a.js']);
+  assert.equal(fileAbout(brain, 'src/a.js').found, 'many');
+  assert.deepEqual(fileAbout(brain, 'src/a.js').candidates, ['backend/src/a.js', 'mobile/src/a.js']);
+  // A repo named like a folder: both readings are taken, so neither file hides the other.
+  assert.deepEqual(fileCandidates(brain, 'src/x.js').map((n) => n.id), ['file:src:x.js', 'file:web:src/x.js']);
+  assert.deepEqual(fileCandidates(brain, './backend/src/a.js').map((n) => n.id), ['file:backend:src/a.js']);
+});
+
+test('E179 storyAbout: tasks with their files and ships; every declared file once; an unknown story suggests', () => {
+  const { ws, brain } = builtProduct();
+  try {
+    const a = storyAbout(brain, 'EP-checkout-S01').about;
+    assert.equal(a.epic.id, 'epic:EP-checkout');
+    assert.ok(a.repos.includes('backend'));
+    assert.deepEqual(a.tasks.map((t) => t.short), ['T01', 'T02']);
+    assert.deepEqual(a.tasks[0].files.map((f) => f.path), ['src/order/index.js', 'src/order/store.js', 'src/routes.js']);
+    assert.equal(a.tasks[0].files.find((f) => f.path === 'src/order/store.js').missing, true);
+    assert.ok(a.tasks[0].shipped.length >= 1);
+    assert.equal(new Set(a.files.map((f) => f.file)).size, a.files.length, 'each file once');
+    assert.ok(a.surfaces.includes('POST /orders'));
+    const none = storyAbout(brain, 'S01');
+    assert.equal(none.found, 'none');
+    assert.ok(none.suggestions.includes('EP-checkout-S01'));
+  } finally { done(ws); }
+});
+
+test('E179 yad brain file / story: --json answers, plain text, and every refusal', () => {
+  const { ws, root } = product();
+  try {
+    let r = yadGit(root, 'brain', 'file', 'backend/src/routes.js');
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /no brain here yet/);
+    buildRepoGraph(root, { name: 'backend', target: path.join(root, 'demo-repos', 'backend') }, { runner: fakeGraphify().runner });
+    writeBrain(root, composeBrain(root).brain);
+    r = yadGit(root, 'brain', 'file', 'backend/src/order/index.js', '--json');
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.command, 'brain file');
+    assert.deepEqual(j.codeBehind, []);
+    for (const k of ['file', 'declaredBy', 'defines', 'usedBy', 'uses', 'shippedIn', 'surfaces', 'more']) assert.ok(k in j, k);
+    r = yadGit(root, 'brain', 'file', 'src/order/index.js', '--repo', 'backend');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Used by\n {2}backend\/src\/routes\.js {2}calls/);
+    r = yadGit(root, 'brain', 'story', 'EP-checkout-S01', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).command, 'brain story');
+    assert.match(yadGit(root, 'brain', 'story', 'EP-checkout-S01').stdout, /T01 — Add `POST \/orders` route/);
+    // Refusals: no name, two names, a name the brain does not hold, flags that are not theirs.
+    for (const args of [['file'], ['file', 'a', 'b'], ['story'], ['story', 'EP-checkout-S01', '--repo', 'backend'],
+      ['file', 'backend/nope.js'], ['story', 'EP-nope-S01'], ['file', 'backend/src/routes.js', '--open'], ['story', 'EP-checkout-S01', '--limit', '0']]) {
+      const x = yadGit(root, 'brain', ...args);
+      assert.equal(x.status, 1, args.join(' '));
+    }
+    assert.match(yadGit(root, 'brain', 'file', 'backend/src/order/indx.js').stdout, /did you mean: backend\/src\/order\/index\.js/, 'a typo: the folder');
+    assert.match(yadGit(root, 'brain', 'file', 'backend/lib/routes.js').stdout, /did you mean: backend\/src\/routes\.js/, 'the wrong folder: the name');
+  } finally { done(ws); }
+});
+
+test('E179 the four skills hold the brain block exactly, and no other skill holds it', () => {
+  assert.deepEqual(Object.keys(BRAIN_SKILLS).sort(), ['yad-architecture', 'yad-implement', 'yad-spec', 'yad-stories']);
+  for (const skill of Object.keys(BRAIN_SKILLS)) {
+    const text = fs.readFileSync(path.join(SKILLS, skill, 'SKILL.md'), 'utf8');
+    const lines = text.split(/\r?\n/);
+    const b = lines.indexOf(BRAIN_BLOCK_BEGIN);
+    const e = lines.indexOf(BRAIN_BLOCK_END);
+    assert.ok(b >= 0 && e > b, `${skill} has the markers`);
+    assert.deepEqual(lines.slice(b + 1, e), brainBlockLines(skill), `${skill}: run node scripts/brain-skills.mjs`);
+    const block = lines.slice(b + 1, e).join('\n');
+    assert.match(block, /`yad brain status --json`/);
+    assert.match(block, /`missing` or `unreadable`.*skip the rest of this block/);
+    assert.match(block, /never stop for it/);
+  }
+  for (const skill of fs.readdirSync(SKILLS)) {
+    if (Object.hasOwn(BRAIN_SKILLS, skill)) continue;
+    const f = path.join(SKILLS, skill, 'SKILL.md');
+    if (fs.existsSync(f)) assert.equal(fs.readFileSync(f, 'utf8').includes('<!-- generated: brain '), false, skill);
+  }
+  const r = spawnSync(process.execPath, [path.join(HERE, '..', 'scripts', 'brain-skills.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test('E179 syncBrainSkills writes a stale block, refuses missing markers, and refuses the block in another skill', () => {
+  const dir = tmp();
+  try {
+    const marked = `# x\n\n## Step 1\n${BRAIN_BLOCK_BEGIN}\nold\n${BRAIN_BLOCK_END}\n\n## Step 2\n`;
+    put(path.join(dir, 'yad-spec', 'SKILL.md'), marked);
+    put(path.join(dir, 'yad-implement', 'SKILL.md'), '# no markers\n');
+    put(path.join(dir, 'yad-epic', 'SKILL.md'), marked);
+    let r = syncBrainSkills(dir, { check: true });
+    assert.deepEqual(r.stale, ['yad-spec']);
+    assert.deepEqual(r.wrote, []);
+    assert.deepEqual(r.refused.map((x) => x.skill).sort(), ['yad-epic', 'yad-implement']);
+    r = syncBrainSkills(dir);
+    assert.deepEqual(r.wrote, ['yad-spec']);
+    const text = fs.readFileSync(path.join(dir, 'yad-spec', 'SKILL.md'), 'utf8');
+    assert.ok(text.startsWith('# x\n\n## Step 1\n') && text.endsWith(`${BRAIN_BLOCK_END}\n\n## Step 2\n`), 'only the block changed');
+    assert.equal(fs.readFileSync(path.join(dir, 'yad-epic', 'SKILL.md'), 'utf8'), marked, 'a refused skill is left as it is');
+    assert.deepEqual(syncBrainSkills(dir, { check: true }).stale, []);
+  } finally { done(dir); }
+});
