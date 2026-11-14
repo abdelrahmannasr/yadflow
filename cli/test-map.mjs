@@ -389,7 +389,13 @@ test('review 7: under --anonymous an address hides the part before its @, never 
     { id: 'EP-login-S06', epic: 'EP-login', status: 'draft', owner: 'vic@nash@example.com', repos: [] },
     { id: 'EP-login-S05', epic: 'EP-login', status: 'draft', owner: 'Rae Moss <wren@example.com>', repos: [] },
     { id: 'EP-login-S04', epic: 'EP-login', status: 'draft', owner: 'yul @ example.com', repos: [] },
-    { id: 'EP-login-S03', epic: 'EP-login', status: 'draft', owner: '__@example.com', repos: [] }] });
+    { id: 'EP-login-S03', epic: 'EP-login', status: 'draft', owner: '__@example.com', repos: [] },
+    { id: 'EP-login-S10', epic: 'EP-login', status: 'draft', owner: 'प्रिया शर्मा <p@example.com>', repos: [] },
+    { id: 'EP-login-S11', epic: 'EP-login', status: 'draft', owner: 'Jose\u0301 Ruiz <jr@example.com>', repos: [] },
+    { id: 'EP-login-S12', epic: 'EP-login', status: 'draft', owner: "Sean O'Brien <sean@example.com>", repos: [] },
+    { id: 'EP-login-S13', epic: 'EP-login', status: 'draft', owner: 'tam+map@example.com', repos: [] },
+    { id: 'EP-login-S14', epic: 'EP-login', status: 'draft', owner: '"lou"@example.com', repos: [] },
+    { id: 'EP-login-S15', epic: 'EP-login', status: 'draft', owner: 'Ned @kip', repos: [] }] });
   i.branches.push(
     { repo: 'api', name: 'feat/sign-in-with-google', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'fix/com-name-zed', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
@@ -400,6 +406,12 @@ test('review 7: under --anonymous an address hides the part before its @, never 
     { repo: 'api', name: 'wren/go', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'feat/raemoss', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'yul/example-z', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/प्रिया', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/jose\u0301', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: "fix/o'brien", sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'tam+map/try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'kip/x', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'lou/go', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'fix-', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
   const m = mapModel(i, { now: NOW, anonymous: true });
   const names = m.branches.map((b) => b.name);
@@ -413,6 +425,15 @@ test('review 7: under --anonymous an address hides the part before its @, never 
   assert.equal(names.filter((n) => n === 'feat/someone').length, 2, '`Name <addr>` masks the joined name too');
   assert.ok(names.includes('someone/example-z'), 'spaces round an @ still give only the part before it');
   assert.ok(names.includes('fix-'), 'an empty piece is never a name');
+  const masked = (from) => !names.includes(from);
+  assert.ok(masked('fix/प्रिया'), 'a name with combining marks is masked whole');
+  assert.ok(masked('fix/jose\u0301'), 'a decomposed accent is part of the name');
+  assert.ok(masked("fix/o'brien"), "a name with an ' is masked whole");
+  assert.ok(masked('tam+map/try'), 'a local part with a + is masked whole');
+  assert.ok(masked('kip/x'), 'a handle after a name, with a space before its @, is masked');
+  assert.ok(names.includes('someone/go'), 'a quoted local part is masked');
+  assert.equal(names.filter((n) => n === 'someone/go').length, 2, '…and both `Name <addr>` and `"name"@x` give theirs');
+  assert.ok(names.includes('someone/example-z') && !names.includes('someone/someone-z'), 'a quoted local part leaves its domain alone');
   // A leading-@ value may be a handle or a domain: it is masked whole, on purpose, even when that over-masks.
   const dom = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: '@example.com', repos: [] }],
     branches: [{ repo: 'api', name: 'fix/com-z', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 }] }), { now: NOW, anonymous: true });

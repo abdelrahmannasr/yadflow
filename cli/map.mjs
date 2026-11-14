@@ -325,18 +325,27 @@ export function digestOf(model) {
   return { at: model.generatedAt, states };
 }
 
-// One rule for every way a raw value can hold an address (`kit@x.com`, `kit @ x.com`, `Bo <kit@x.com>`,
-// `mailto:kit@x.com`, `kit@x.com Kit Marsh`, `vic@nash@x.com`, `@quinn`): the names to mask, never a domain.
-// A value with no @ is returned as it is. Otherwise: close the spaces round each @; split on anything that
-// is not a letter, digit, `.`, `_`, `-` or `@`; cut each piece with a non-leading @ to what comes before its
-// last @ (inner @ signs split it again); a leading @ is dropped (a handle, or a domain masked on purpose).
-// The values given: the whole cut text, the words that held no @ on their own (`kit marsh`, so `kitmarsh`
-// is masked too), and each cut piece.
+// The names to mask from a raw value that may hold an address, never a domain. A value with no @ is returned
+// as it is. Otherwise the values are the UNION of two readings, so a later change to one can never mask less:
+// First an @ with a space AFTER it is joined to both sides (`kit @ x.com`, `kit@ x.com`): the word after such an
+// @ is its domain. An @ with no space after it is left alone, so the handle in `Bo @quinn` stays a handle
+// (the cost: `Bo @ Quinn` reads as an address whose domain is `quinn`).
+//   1. word by word on whitespace — each word with a non-leading @ cut to what comes before its last @, the
+//      @ signs left becoming spaces (`kit@x.com Kit Marsh` → `kit kit marsh`, `@quinn` → `quinn`);
+//   2. the same cut after the wrapping round an address is undone — wrapping just before an @ dropped
+//      (`"kit"@x.com`), and the value split on anything that is not part of a name (a letter, a combining
+//      mark, a digit, `.`, `_`, `-`, `'`, `+`), so `Bo <kit@x.com>` and
+//      `mailto:kit@x.com` give `kit`; the words with no @ are given joined too (`kit marsh`, for `kitmarsh`).
+// A leading @ is dropped, not cut: a handle (`@quinn`), or a domain (`@x.com`) masked on purpose.
+const cutAddress = (t) => (t.lastIndexOf('@') > 0 ? t.slice(0, t.lastIndexOf('@')) : t).replace(/@/g, ' ').trim();
 function addressFree(r) {
   if (!r.includes('@')) return [r];
-  const pieces = r.replace(/\s*@\s*/g, '@').split(/[^\p{L}\p{N}._@-]+/u).filter(Boolean);
-  const cut = pieces.map((t) => (t.lastIndexOf('@') > 0 ? t.slice(0, t.lastIndexOf('@')) : t).replace(/@/g, ' ').trim()).filter(Boolean);
-  return [cut.join(' '), pieces.filter((t) => !t.includes('@')).join(' '), ...cut];
+  const closed = r.replace(/\s*@\s+/g, '@');
+  const byWord = closed.split(/\s+/).map(cutAddress).filter(Boolean);
+  const pieces = closed.replace(/(?<=\S)[<>()[\]{}",;:]+@/g, '@')
+    .split(/[^\p{L}\p{M}\p{N}._@'+-]+/u).filter(Boolean);
+  const cut = pieces.map(cutAddress).filter(Boolean);
+  return [byWord.join(' '), cut.join(' '), pieces.filter((t) => !t.includes('@')).join(' '), ...cut];
 }
 
 // `--anonymous`: every person becomes "Person A…" (in the order of their key, so the same team always gets
