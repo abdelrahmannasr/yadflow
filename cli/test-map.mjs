@@ -386,13 +386,21 @@ test('review 7: under --anonymous an address hides the part before its @, never 
   const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'zed@example.com', repos: [] },
     { id: 'EP-login-S08', epic: 'EP-login', status: 'draft', owner: '@quinn', repos: [] },
     { id: 'EP-login-S07', epic: 'EP-login', status: 'draft', owner: 'ula@example.com Ula Marsh', repos: [] },
-    { id: 'EP-login-S06', epic: 'EP-login', status: 'draft', owner: 'vic@nash@example.com', repos: [] }] });
+    { id: 'EP-login-S06', epic: 'EP-login', status: 'draft', owner: 'vic@nash@example.com', repos: [] },
+    { id: 'EP-login-S05', epic: 'EP-login', status: 'draft', owner: 'Rae Moss <wren@example.com>', repos: [] },
+    { id: 'EP-login-S04', epic: 'EP-login', status: 'draft', owner: 'yul @ example.com', repos: [] },
+    { id: 'EP-login-S03', epic: 'EP-login', status: 'draft', owner: '__@example.com', repos: [] }] });
   i.branches.push(
     { repo: 'api', name: 'feat/sign-in-with-google', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'fix/com-name-zed', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'quinn/try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
     { repo: 'api', name: 'fix/marsh-x', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
-    { repo: 'api', name: 'fix/nash-y', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+    { repo: 'api', name: 'fix/nash-y', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'feat/ulamarsh', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'wren/go', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'feat/raemoss', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'yul/example-z', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix-', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
   const m = mapModel(i, { now: NOW, anonymous: true });
   const names = m.branches.map((b) => b.name);
   assert.ok(names.includes('feat/sign-in-with-google'), 'the words of the placeholder are not names');
@@ -400,6 +408,11 @@ test('review 7: under --anonymous an address hides the part before its @, never 
   assert.ok(names.includes('someone/try'), 'a handle is masked without its @');
   assert.ok(names.includes('fix/someone-x'), 'a name written after an address is masked');
   assert.ok(names.includes('fix/someone-y'), 'each part between two @ signs is masked');
+  assert.ok(names.includes('feat/someone'), 'the name beside an address, written joined, is masked');
+  assert.ok(names.includes('someone/go'), 'the part before the @ in `Name <addr>` is masked');
+  assert.equal(names.filter((n) => n === 'feat/someone').length, 2, '`Name <addr>` masks the joined name too');
+  assert.ok(names.includes('someone/example-z'), 'spaces round an @ still give only the part before it');
+  assert.ok(names.includes('fix-'), 'an empty piece is never a name');
   // A leading-@ value may be a handle or a domain: it is masked whole, on purpose, even when that over-masks.
   const dom = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: '@example.com', repos: [] }],
     branches: [{ repo: 'api', name: 'fix/com-z', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 }] }), { now: NOW, anonymous: true });
