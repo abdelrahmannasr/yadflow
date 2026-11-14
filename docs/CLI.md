@@ -2253,7 +2253,12 @@ and where this clone's record is.
 paths, or any path outside the repo — including one reached through a link that leaves it. Text that only
 looks like a relative path is dropped too: a `~` or a variable (`$HOME`, `%USERPROFILE%`), a URL, and, outside
 Windows, a drive letter or a backslash. A repo opened through a link (a linked projects folder, a Windows
-junction) is matched by its real path. So the live view
+junction) is matched by its real path. A Linux file whose name holds `:` or `\` is legal there but is not
+recorded by path (it shows as an action with no file).
+
+**Which git folder.** A repo's own `.git`; or, for a Product (or a monorepo app) in a subfolder, the repo above
+it — only when that repo tracks files in the subfolder. A folder that merely sits inside some other repo (a
+home folder kept in git) records nothing. So the live view
 **shows what the agent did, never why.**
 
 **Where the record lives.** Inside `.git`, so it can never be committed, and it stays on this machine. A worktree

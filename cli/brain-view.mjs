@@ -244,12 +244,13 @@ function activityStream(root, { runner, heartbeat, interval }) {
     attach(req, res, headers) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       start();
-      // The pages already open get every line that landed since the last look FIRST, so the files' read
-      // position is now: this page's backlog then holds those lines once, and no later pump sends them again.
-      for (const f of followers) f.pump();
+      // The model first (it asks git, so it is slow); then the pages already open get every line that landed
+      // since the last look, so the files' read position is now; then this page's backlog at once — those
+      // lines are in it once, and no later pump sends them again (E178 review 2).
       const mtime = brainMtime();
       const m = loadModel(root, runner, { live: true });
       const index = m.model ? activityIndex(m.model) : null;
+      for (const f of followers) f.pump();
       res.write(frame('status', { activity: activityWanted(root), sources: sources.map((x) => x.repo ?? 'product'), brain: m.model?.meta.inputs ?? null }));
       res.write(frame('backlog', index ? readBacklog(sources).map(({ src, r }) => matchEvent(index, src, r)) : []));
       if (index) clients.set(res, { index, mtime, told: false });

@@ -25,8 +25,13 @@ const posix = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '');
 
 // ---- where the records are -----------------------------------------------------------------------
 
-// The folder git keeps a repo's shared data in, or null.
+// The folder git keeps a repo's shared data in, or null. A folder with no `.git` of its own counts only when
+// the repo above it tracks files under it — the hook's own rule, so both look in the same place.
 function commonDir(dir, runner) {
+  if (!fs.existsSync(path.join(dir, '.git'))) {
+    const tracked = runner('git', ['-C', dir, 'ls-files', '--', '.']);
+    if (!tracked.ok || !tracked.stdout) return null;
+  }
   const r = runner('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
   return r.ok && r.stdout && path.isAbsolute(r.stdout) ? r.stdout : null;
 }
@@ -118,7 +123,10 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
 }
 
 // Follow one source's current file: `onRecord(src, record)` for each whole new line. It starts at the end
-// (the backlog has the rest). At a rotation it first reads what the old file gained since the last look (now
+// (the backlog has the rest). ITS LIMIT: a rotation is caught only while the renamed file is the one last read
+// and at most 4 MB behind; rotated twice between two looks (half a second apart, 5 MB a file), or looked at in
+// the instant between the rename and the next write, the old file's unread tail is not sent live — it is still
+// in the backlog of the next page that opens (E178 review 2). At a rotation it first reads what the old file gained since the last look (now
 // renamed aside), then starts the new file at 0. Bytes are decoded as a stream, so a character split across
 // two reads arrives whole; a part line longer than MAX_PART (no newline ever comes) is dropped. Returns
 // { stop, pump }.

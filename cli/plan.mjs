@@ -1692,6 +1692,12 @@ function linkOnTheWay(root, rel) {
   const last = lstatIfPresent(path.join(root, rel));
   return !!last && last.isSymbolicLink();
 }
+const keptSaid = new Set();
+function sayKept(where, rel) {
+  if (keptSaid.has(`${where}\0${rel}`)) return;
+  keptSaid.add(`${where}\0${rel}`);
+  info(`${where}: ${rel} is not yad's copy (edited, or from before yad recorded it), so it is left in place; nothing runs it now — delete it if it is not yours`);
+}
 const linkSaid = new Set();
 function sayLinked(where, rel) {
   if (linkSaid.has(`${where}\0${rel}`)) return;
@@ -1755,6 +1761,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
     const sha = st && st.isFile() ? contentSha(file) : null;
     const ours = sha && (readManagedLedger(root)[dest] === sha || sha === contentSha(asset(ACTIVITY_WIRING[0].src)));
     if (ours) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => fs.rmSync(file, { force: true }) });
+    else if (sha) sayKept(scope || 'the Product', dest);
   }
   return actions;
 }
