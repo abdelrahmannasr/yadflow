@@ -46,11 +46,12 @@
     return { text: get('--text', '#0f172a'), panel: get('--panel', '#ffffff'), line: get('--line', '#e2e8f0') };
   }
   function drawHover(context, d, s) {
+    if (!d.label) return; // a faded node has no label: no empty box
     var t = theme();
     var size = s.labelSize;
     context.font = s.labelWeight + ' ' + size + 'px ' + s.labelFont;
     var w = context.measureText(d.label || '').width;
-    var x = d.x + d.size + 4;
+    var x = d.x + d.size + 3; // where sigma draws the plain label, so it does not move on hover
     var y = d.y;
     context.fillStyle = t.panel;
     context.strokeStyle = t.line;
@@ -331,8 +332,9 @@
 
     build();
     draw();
-    // The system switched between light and dark while the page is open: draw again with the new label colour.
-    try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (renderer) draw(); }); } catch { /* an old browser keeps its first colours */ }
+    // The system switched between light and dark while the page is open: change the label colour in place, so the
+    // camera stays where the person left it (the hover box reads the theme each time it draws).
+    try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (renderer) renderer.setSetting('labelColor', { color: theme().text }); }); } catch { /* an old browser keeps its first colours */ }
   }
 
   load().then(start, function (err) {
