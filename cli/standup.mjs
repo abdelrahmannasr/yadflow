@@ -194,14 +194,14 @@ export function repoSources(root, identity, productConfig, notRead, env, { local
 
 // The one member a piece of evidence belongs to: `{ member }`, `{ ambiguous: [...] }` when more than one
 // matches, or `{}` when none does.
-function whose(members, e) {
+export function whose(members, e) {
   const hit = members.filter((m) => memberMatches(m, e));
   if (hit.length === 1) return { member: hit[0] };
   return hit.length ? { ambiguous: hit } : {};
 }
 // A git name made branch-safe (an owner file, a claim, a capture branch) — compared with the same form of
 // each name a member file holds.
-function whoseWip(members, w) {
+export function whoseWip(members, w) {
   const hit = members.filter((m) => m.names.some((n) => wipName(n) === w));
   if (hit.length === 1) return { member: hit[0] };
   return hit.length ? { ambiguous: hit } : {};
@@ -263,6 +263,70 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const prWord = (platform) => (platform === 'gitlab' ? 'MR !' : 'PR #');
 
 // The whole report as data. `now` is epoch milliseconds (injected, so a test can pin the day).
+// WAITING — gates, by the owner of the step they review: the live E47 owner, else the epic's `owner`.
+// Each epic on its own: a shared file that is not what yad writes stops that epic's lines, said in
+// "not read", never the whole report. → { waits: [{ owner: { at, display, key } | null, item }], notRead }
+// Shared by `yad standup` and `yad map` (E181), so the gate rule is read in one place.
+export function gateWaits(root, { ledgers, members, productConfig, identity, places = [] }) {
+  const solo = isSolo(productConfig);
+  const engagement = requireEngagement(productConfig);
+  const waits = [];
+  const notRead = [];
+  const mergeWord = identity.platform ? `its review ${identity.platform === 'gitlab' ? 'MR' : 'PR'} to merge` : '`yad gate advance` (no platform: the gate moves on when it is advanced)';
+  for (const [epic, led] of ledgers) {
+    try {
+      const state = led.state;
+      if (!state?.steps) continue;
+      const owners = new Map(readOwners(root, epic).filter((o) => !o.error && o.live).map((o) => [o.step, o]));
+      const front = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).owner || readFrontmatter(path.join(epicRoot(root, epic), 'roadmap.md')).owner;
+      const epicOwner = typeof front === 'string' && front.trim() ? front.trim() : null;
+      const ownerOf = (stepId) => {
+        const o = owners.get(stepId);
+        if (o) return { at: whoseWip(members, o.owner), display: o.name || o.owner, key: `wip:${o.owner}` };
+        if (epicOwner) return { at: whose(members, { login: epicOwner, name: epicOwner }), display: epicOwner, key: personKey({ login: epicOwner }) };
+        return null;
+      };
+      const put = (stepId, item) => { waits.push({ owner: ownerOf(stepId), item }); };
+      const approvals = records(led.approvals);
+      const comments = records(led.comments);
+      const reviewPrs = records(led.productPrs);
+      // (b) the current step is an author step someone owns, and it is not done.
+      const cur = state.steps.find((s) => s?.id === state.currentStep);
+      const curDef = STEPS.find((d) => d.id === cur?.id);
+      if (cur && !isPassed(cur) && curDef && curDef.kind !== 'review' && cur.type !== 'review+approve' && ownerOf(cur.id)) {
+        put(cur.id, { kind: 'next-move', epic, step: cur.id, state: stepStatus(cur), text: `${epic} ${safe(cur.id)} is the current step and theirs to author (${stepStatus(cur) || 'unknown state'})` });
+      }
+      // (a) an open gate: its author step passed, the review not yet. Read through the gate's own predicate,
+      // so this line never says more than `yad gate status` would (engagement, revoked approvals, solo).
+      for (const s of state.steps.filter((x) => x?.type === 'review+approve' && !isPassed(x))) {
+        const a = authorStepFor(state, s);
+        if (!a || !isPassed(a)) continue;
+        const verdict = gatePredicate({ step: s, approvals, acceptedHashes: acceptedHashes(epicRoot(root, epic), s.artifact), solo, requireEngagement: engagement, optional: optionalStepsFor(state) });
+        const rule = gateRuleFor(s);
+        const pr = reviewPrs.find((p) => (typeof p.step === 'string' && p.step === s.id) || (typeof p.artifact === 'string' && p.artifact === s.artifact));
+        const prNo = pr && Number.isSafeInteger(pr.number) ? pr.number : null;
+        const via = prNo != null ? `${prWord(identity.platform)}${prNo}` : null;
+        const asks = rule.riskStep ? `; the count asks ${gateRuleSum(rule)} (risk step advisory)` : '';
+        const waitsFor = solo
+          ? `waits for ${via ? `review ${via} to merge` : mergeWord} (solo mode: approvals waived)`
+          : verdict.approvalsSatisfied
+            ? `has the ${plural(verdict.have ?? 0, 'approval')} it needs to pass; waits for ${via ? `review ${via} to merge` : mergeWord}${asks}`
+            : `waits for approval — missing: ${verdict.missing.map(safe).join('; ')}${asks}${via ? `; review ${via}` : ''}`;
+        put(a.id, { kind: 'gate', epic, step: s.id, approvals: verdict.have ?? null, needed: rule.base, asks: rule.needed, missing: verdict.missing, pr: prNo, text: `${epic} ${safe(s.id)} ${waitsFor}` });
+        const rounds = comments.filter((x) => x.step === s.id && Number.isSafeInteger(x.round) && x.round >= 0);
+        if (rounds.length) {
+          const round = Math.max(...rounds.map((x) => x.round));
+          const count = rounds.filter((x) => x.round === round).reduce((n, x) => n + (Number.isSafeInteger(x.count) && x.count >= 0 && x.count <= 100_000 ? x.count : 1), 0);
+          put(a.id, { kind: 'comments', epic, step: s.id, round, count, text: `${epic} ${safe(s.id)}: ${plural(count, 'comment')} recorded in review round ${round} (yad does not know which are answered)` });
+        }
+      }
+    } catch (e) {
+      notRead.push(`${epic}: its gates could not be read (${why(e, places)}) — nothing is said about what waits there`);
+    }
+  }
+  return { waits, notRead };
+}
+
 export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null, env = process.env, runner, fetch = true, access = accessCheck } = {}) {
   const win = windowFor(now, { tz, since });
   if (win.error) return win;
@@ -426,67 +490,13 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
     byWip(w.name, w.name, 'working', { kind: 'drafts', epic: w.epic, last: new Date(w.at).toISOString(), text: `saved drafts on ${safe(w.epic)} (${zoneStamp(w.at, tz)}; nothing unmerged is open now)` });
   }
 
-  // WAITING — gates, by the owner of the step they review: the live E47 owner, else the epic's `owner`.
-  // Each epic on its own: a shared file that is not what yad writes stops that epic's lines, said in
-  // "not read", never the whole report.
-  const solo = isSolo(productConfig);
-  const engagement = requireEngagement(productConfig);
+  // WAITING — gates, by the owner of the step they review (gateWaits).
   const ownerless = [];
-  const mergeWord = identity.platform ? `its review ${identity.platform === 'gitlab' ? 'MR' : 'PR'} to merge` : '`yad gate advance` (no platform: the gate moves on when it is advanced)';
-  for (const [epic, led] of ledgers) {
-    try {
-      const state = led.state;
-      if (!state?.steps) continue;
-      const owners = new Map(readOwners(root, epic).filter((o) => !o.error && o.live).map((o) => [o.step, o]));
-      const front = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).owner || readFrontmatter(path.join(epicRoot(root, epic), 'roadmap.md')).owner;
-      const epicOwner = typeof front === 'string' && front.trim() ? front.trim() : null;
-      const ownerOf = (stepId) => {
-        const o = owners.get(stepId);
-        if (o) return { at: whoseWip(members, o.owner), display: o.name || o.owner, key: `wip:${o.owner}` };
-        if (epicOwner) return { at: whose(members, { login: epicOwner, name: epicOwner }), display: epicOwner, key: personKey({ login: epicOwner }) };
-        return null;
-      };
-      const put = (stepId, item) => {
-        const o = ownerOf(stepId);
-        if (!o) { ownerless.push(item); return; }
-        place(o.at, o.display, o.key, 'waiting', item);
-      };
-      const approvals = records(led.approvals);
-      const comments = records(led.comments);
-      const reviewPrs = records(led.productPrs);
-      // (b) the current step is an author step someone owns, and it is not done.
-      const cur = state.steps.find((s) => s?.id === state.currentStep);
-      const curDef = STEPS.find((d) => d.id === cur?.id);
-      if (cur && !isPassed(cur) && curDef && curDef.kind !== 'review' && cur.type !== 'review+approve' && ownerOf(cur.id)) {
-        put(cur.id, { kind: 'next-move', epic, step: cur.id, state: stepStatus(cur), text: `${epic} ${safe(cur.id)} is the current step and theirs to author (${stepStatus(cur) || 'unknown state'})` });
-      }
-      // (a) an open gate: its author step passed, the review not yet. Read through the gate's own predicate,
-      // so this line never says more than `yad gate status` would (engagement, revoked approvals, solo).
-      for (const s of state.steps.filter((x) => x?.type === 'review+approve' && !isPassed(x))) {
-        const a = authorStepFor(state, s);
-        if (!a || !isPassed(a)) continue;
-        const verdict = gatePredicate({ step: s, approvals, acceptedHashes: acceptedHashes(epicRoot(root, epic), s.artifact), solo, requireEngagement: engagement, optional: optionalStepsFor(state) });
-        const rule = gateRuleFor(s);
-        const pr = reviewPrs.find((p) => (typeof p.step === 'string' && p.step === s.id) || (typeof p.artifact === 'string' && p.artifact === s.artifact));
-        const prNo = pr && Number.isSafeInteger(pr.number) ? pr.number : null;
-        const via = prNo != null ? `${prWord(identity.platform)}${prNo}` : null;
-        const asks = rule.riskStep ? `; the count asks ${gateRuleSum(rule)} (risk step advisory)` : '';
-        const waitsFor = solo
-          ? `waits for ${via ? `review ${via} to merge` : mergeWord} (solo mode: approvals waived)`
-          : verdict.approvalsSatisfied
-            ? `has the ${plural(verdict.have ?? 0, 'approval')} it needs to pass; waits for ${via ? `review ${via} to merge` : mergeWord}${asks}`
-            : `waits for approval — missing: ${verdict.missing.map(safe).join('; ')}${asks}${via ? `; review ${via}` : ''}`;
-        put(a.id, { kind: 'gate', epic, step: s.id, approvals: verdict.have ?? null, needed: rule.base, asks: rule.needed, missing: verdict.missing, pr: prNo, text: `${epic} ${safe(s.id)} ${waitsFor}` });
-        const rounds = comments.filter((x) => x.step === s.id && Number.isSafeInteger(x.round) && x.round >= 0);
-        if (rounds.length) {
-          const round = Math.max(...rounds.map((x) => x.round));
-          const count = rounds.filter((x) => x.round === round).reduce((n, x) => n + (Number.isSafeInteger(x.count) && x.count >= 0 && x.count <= 100_000 ? x.count : 1), 0);
-          put(a.id, { kind: 'comments', epic, step: s.id, round, count, text: `${epic} ${safe(s.id)}: ${plural(count, 'comment')} recorded in review round ${round} (yad does not know which are answered)` });
-        }
-      }
-    } catch (e) {
-      notRead.push(`${epic}: its gates could not be read (${why(e, places)}) — nothing is said about what waits there`);
-    }
+  const gw = gateWaits(root, { ledgers, members, productConfig, identity, places });
+  notRead.push(...gw.notRead);
+  for (const { owner, item } of gw.waits) {
+    if (!owner) ownerless.push(item);
+    else place(owner.at, owner.display, owner.key, 'waiting', item);
   }
   // WAITING / WORKING — their own open PRs/MRs.
   for (const p of prRead) {
