@@ -128,7 +128,9 @@ const oldIs = (src, at) => {
   } catch { return false; }
 };
 // `upTo(src)` gives where the live reader of a source stands ({ ino, offset }): the current file is read only
-// up to there, so a line is either in the backlog or sent live, never both (E178 review 3).
+// up to there, so a line is in the backlog or sent live — not both, save in two rare races that repeat a line
+// rather than lose one: a rotation between this read's two files, and one on a file system whose file numbers
+// are all 0 (E178 reviews 3, 5).
 export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit = BACKLOG_LIMIT, upTo = () => null } = {}) {
   const since = now - days * 86400000;
   const all = [];
@@ -154,7 +156,9 @@ export function readBacklog(sources, { now = Date.now(), days = KEEP_DAYS, limit
 // (the backlog has the rest). ITS LIMIT: a rotation is caught only while the renamed file is the one last read
 // and at most 4 MB behind; rotated twice between two looks (half a second apart, 5 MB a file), or looked at in
 // the instant between the rename and the next write, the old file's unread tail is not sent live — it is still
-// in the backlog of the next page that opens (E178 review 2). At a rotation it first reads what the old file gained since the last look (now
+// in the backlog of the next page that opens (E178 review 2). On a file system that numbers every file 0 (FAT,
+// exFAT) a rotation is not seen at all: the old file's unread tail is not sent live (the next page's backlog
+// has it), and the new file is read from where the old one stood until it outgrows it. At a rotation it first reads what the old file gained since the last look (now
 // renamed aside), then starts the new file at 0. Bytes are decoded as a stream, so a character split across
 // two reads arrives whole; a part line longer than MAX_PART (no newline ever comes) is dropped. Returns
 // { stop, pump, position }.
