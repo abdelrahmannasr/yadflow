@@ -29,7 +29,8 @@
 // a login.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, note, readJSON, run, emitJSON, collectWarning } from './lib.mjs';
+import { c, log, ok, note, warn, fail, readJSON, run, emitJSON, collectWarning } from './lib.mjs';
+import { writeOrSave } from './reports-dir.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { epicRoot, ledgerPersonLogin, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
@@ -400,8 +401,11 @@ export function runUsage(root, { out, since, until, all, member, format, repos =
     return model;
   }
   const content = fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today);
-  const dest = out || `usage-report.${fmt === 'md' ? 'md' : 'html'}`;
-  writeReport(dest, content);
-  ok(`wrote ${fmt.toUpperCase()} report → ${c.bold(dest)} (${model.members.length} member(s), range: ${rangeLabel(model.window)})`);
+  // E180: with no --out, the report is saved in the local reports folder beside the Product, named by
+  // what it shows — never in the folder yad ran from, where it was easy to commit by mistake.
+  const saved = writeOrSave(root, { out, kind: 'usage', scope: member || 'team', state: rangeLabel(model.window), ext: fmt === 'md' ? 'md' : 'html', content, command: 'usage' });
+  if (saved.problem) { fail(saved.problem); process.exitCode = 1; return model; }
+  for (const w of saved.warnings) warn(w);
+  ok(`wrote ${fmt.toUpperCase()} report → ${c.bold(saved.file)} (${model.members.length} member(s), range: ${rangeLabel(model.window)})`);
   return model;
 }

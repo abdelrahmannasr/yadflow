@@ -42,6 +42,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { readBlobsAt } from './git-read.mjs';
 
 import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
@@ -267,20 +268,11 @@ export function judgedMemberFiles(root, identity) {
   // Each candidate must be on disk byte for byte as origin holds it (review 5): an untracked copy, or an edit
   // git was told to ignore (`--assume-unchanged`), is not what the gate judged. One git run for them all.
   const cands = [...new Set(changed.out.split('\n').filter(Boolean))];
-  const batch = spawnSync('git', ['cat-file', '--batch'], { cwd: root, input: cands.map((f) => `${base}:./${f}\n`).join(''), maxBuffer: 1 << 28 });
-  const out = batch.status === 0 ? batch.stdout : Buffer.alloc(0);
+  const blobs = readBlobsAt(root, cands.map((f) => `${base}:./${f}`));
   const files = new Set();
-  let at = 0;
   for (const f of cands) {
-    const nl = out.indexOf(10, at);
-    if (nl < 0) break;
-    const header = out.subarray(at, nl).toString();
-    at = nl + 1;
-    const m = header.match(/^[0-9a-f]+ (\w+) (\d+)$/);
-    if (!m) continue;   // `<name> missing`: deleted at origin, and no body follows
-    const blob = out.subarray(at, at + Number(m[2]));
-    at += Number(m[2]) + 1;   // every body is skipped, whatever its type (review 6)
-    if (m[1] !== 'blob') continue;
+    const blob = blobs.get(`${base}:./${f}`);
+    if (!blob) continue;   // deleted at origin, or not a file there
     let disk;
     try { if (fs.lstatSync(path.join(root, f)).isSymbolicLink()) continue; disk = fs.readFileSync(path.join(root, f)); } catch { continue; }
     if (sameText(disk.toString('utf8'), blob.toString('utf8'))) files.add(f);

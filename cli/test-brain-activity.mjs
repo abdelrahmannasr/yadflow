@@ -440,7 +440,7 @@ test('--html --live: the recorded events ride in the file, escaped, with every i
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
     assert.equal(out.events, 1);
-    assert.match(out.file, /live\.html$/);
+    assert.match(out.file, /--brain-view--live-replay--\d+-nodes\.html$/, 'E180: saved in the local reports folder');
     const html = fs.readFileSync(out.file, 'utf8');
     assert.equal(html.includes('</script><img'), false);
     const between = (open, close) => html.split(open).slice(1).map((part) => part.slice(0, part.indexOf(close)));

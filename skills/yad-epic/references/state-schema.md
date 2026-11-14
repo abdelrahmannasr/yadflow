@@ -91,6 +91,7 @@ Each `steps[]` entry:
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
 | `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived?, capped? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
+| `rereviews` | `[{ pr, platform, hash, by, date, commit, mergedBy, via: "merged", waived: "solo" }]` | Only on the Foundation's review step, in solo mode: each fresh review PR/MR merged after the first close, recorded by `yad gate sync` (local ledger) or `yad gate ci` at the merge (verified). `hash` is what that PR/MR merged. The first `closed` is never rewritten. See "Closing records" below. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). Only the base is enforced; the risk step is advisory and reported as a shortfall against the count capped at the active people less one, floor 1 (E72; no cap when the people cannot be counted). A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
 
 ### The step catalogue
@@ -395,6 +396,39 @@ step for it yet.
 
 A status this release does not know is left alone — the file wins — and reported as
 `step:unknown-status`. It fails closed: the step counts as neither passed nor authored.
+
+
+**A solo Foundation reviewed again: `rereviews`.** The first close wins, and solo mode counts no
+approvals, so once the Foundation changes after its review nothing else could ever record that the new
+text was reviewed, and `yad foundation publish` would refuse for good. In solo mode the merge is the
+human decision, so the merge of a fresh review PR/MR of the Foundation is added to the review step's
+`rereviews` list, beside `closed`:
+
+```json
+{ "id": "foundation-review", "status": "done",
+  "closed": { "by": "ann", "date": "2026-11-10", "via": "merge", "pr": 3, "hash": "sha256:…", "waived": "solo" },
+  "rereviews": [{ "pr": 9, "platform": "github", "hash": "sha256:…", "by": "ann", "date": "2026-11-12", "commit": "m1",
+                  "mergedBy": "ann", "via": "merged", "waived": "solo" }] }
+```
+
+- `hash` is the content at the PR/MR's approved head, never the default branch's: an edit merged after it
+  is not covered.
+- An entry covers only the content it merged, so adding one never covers more than was reviewed. To
+  keep the list short, the PR/MR of the first close is not added again (told apart by its merge commit when
+  both are known, since `closed` records no platform), and a PR/MR is added only when it
+  is newer than every earlier entry **from the same platform** (a Product that moved from GitHub to
+  GitLab numbers again from 1). So a re-sync of the same or an older merge writes nothing.
+- On a verified Product only the run a merge triggers records it (the scheduled sweep reads no passed
+  step). If that run cannot read what a merge still waiting to be recorded merged, it fails, and names
+  `yad gate ci --branch review/EP-foundation/<artifact> --pr <n> --merged` to run again (`foundation`, or
+  `discovery` on a review step that kept the old spelling). A merge already on file, or a read-only run,
+  only warns.
+- `yad next`, `yad status` and `yad doctor` read it too, so they stop reporting the Foundation as
+  changed once a re-review covers it.
+- `yad foundation publish` and `yad foundation status` read it first: when an entry's `hash` is the
+  Foundation as it stands, the Foundation counts as reviewed.
+- Nothing is written in team mode, where the fresh PR/MR's approvals answer, or with no platform, where
+  `yad gate approve` records an approval bound to today's content.
 
 ### `ui-design` is optional (skippable)
 

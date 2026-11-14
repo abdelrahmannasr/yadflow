@@ -10,7 +10,7 @@ export default [
   js.configs.recommended,
   {
     files: ['cli/**/*.mjs', 'cli/**/*.js', 'bin/**/*.mjs'],
-    ignores: ['cli/brain/view/**'],
+    ignores: ['cli/brain/view/**', 'cli/map/view/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -33,7 +33,7 @@ export default [
   },
   // The brain viewer's page script (E177) runs in a browser, as a plain script.
   {
-    files: ['cli/brain/view/**/*.js'],
+    files: ['cli/brain/view/**/*.js', 'cli/map/view/**/*.js'],
     languageOptions: {
       ecmaVersion: 2020,
       sourceType: 'script',
@@ -43,6 +43,7 @@ export default [
         Object: 'readonly', Date: 'readonly', JSON: 'readonly', Error: 'readonly',
         EventSource: 'readonly', performance: 'readonly', getComputedStyle: 'readonly', Map: 'readonly',
         setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly', Math: 'readonly', Array: 'readonly', parseInt: 'readonly',
+        AbortController: 'readonly', Path2D: 'readonly', requestAnimationFrame: 'readonly', Float32Array: 'readonly',
       },
     },
     rules: {

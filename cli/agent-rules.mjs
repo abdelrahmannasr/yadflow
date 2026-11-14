@@ -175,6 +175,15 @@ export const COMMAND_CLASS = {
   'worktree list': { class: 'read' },
   'worktree remove': { class: 'local-write' },
   standup: { class: 'read' },
+  // E181: `yad map` starts a local server and runs until Ctrl-C (as `brain view` does); --html writes one file into
+  // the local reports folder — or `--html <file>`, ANY path named, replacing a plain file there — and --fetch
+  // downloads. Local only, so local-write; never on the read allow list, so the prompt still covers the path.
+  map: { class: 'local-write' },
+  // E180: the local reports folder. `list` reads; `open` starts the browser; `prune` alone is a dry run, and
+  // `prune --apply` deletes saved reports, so only when the person asks.
+  'reports list': { class: 'read' },
+  'reports open': { class: 'local-write' },
+  'reports prune': { class: 'read', flags: { apply: 'on-request' } },
   'issues list': { class: 'read' },
   // Adds labels on the team's repos: asked for, never a side effect.
   'issues labels': { class: 'on-request' },
@@ -251,6 +260,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
   toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check', brain: 'status',
+  reports: 'list',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
@@ -423,6 +433,11 @@ export const SHIPPED_ALLOW_LISTS = Object.freeze([
   ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
+    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
+  // next release (E180): `reports list`
+  ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+    'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
+    'worktree list', 'reports list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
 ].map((list) => Object.freeze(list)));
 
