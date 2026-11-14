@@ -22,6 +22,7 @@ import { checkRepo } from './riskmap-command.mjs';
 import { checkCodeowners, codeownersFindings, unguardedHint, unguardedWords } from './codeowners-command.mjs';
 import { RISK_MAP_FILE } from './riskmap.mjs';
 import { readProtection, protectionLine, protectionJSON, hideAddresses, repoPathFromGitUrl, repoGitUrl, configuredGitUrl, shown } from './protection.mjs';
+import { tracksHere } from './brain-activity.mjs';
 import { readTokenPlacement, tokenLine, readExpiringProductTokens, TOKEN_NAME } from './product-token.mjs';
 import { soloTeamHint, TEAM_CMD } from './people.mjs';
 import { pagesWorkflowPath, pagesWorkflowFailsOnBuild, wiredPagesPlatform } from './docs.mjs';
@@ -3033,6 +3034,11 @@ export function activityChecks(root, checks, cfg) {
   if (unwired.length) {
     check(checks, 'activity', 'project', 'warn', `the live activity record is on but not wired: ${unwired.join(', ')}`,
       'run `yad check --fix` — until then `yad brain view --live` sees nothing the agent does');
+    return;
+  }
+  if (!exists(path.join(root, '.git')) && !tracksHere(root)) {
+    check(checks, 'activity', 'project', 'warn', 'the live activity record is wired, but the Product is not committed in a git repo of its own, so the record has nowhere to go',
+      'commit the Product (the hook writes into the git folder of the repo that tracks it), then start the agent again');
     return;
   }
   const log = activityLogState(root);

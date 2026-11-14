@@ -103,7 +103,7 @@
     var heatOn = true;
     function freshState() {
       return { heat: new Map(), counts: { read: 0, search: 0, edit: 0, run: 0 }, fileState: new Map(), touched: new Set(), unmapped: new Set(),
-        outsidePlan: new Map(), task: null, lastNode: null, trail: [], last: null, lastAt: 0, named: [] };
+        outsidePlan: new Map(), task: null, tentative: false, lastNode: null, trail: [], last: null, lastAt: 0, named: [] };
     }
     S = freshState();
     var session = '';      // '' = every session
@@ -131,7 +131,9 @@
     function apply(ev, animate) {
       if (session && ev.s !== session) return;
       // After a quiet stretch the plan starts over: last week's task is not today's (review 2).
-      if (S.lastAt && ev.t - S.lastAt > SESSION_GAP) { S.task = null; S.fileState = new Map(); S.outsidePlan = new Map(); }
+      // After a quiet stretch every panel starts over — the plan, the counts, what was touched — so they all
+      // cover the same time as the timeline's "This session" (review 3). The heat has faded by then anyway.
+      if (S.lastAt && ev.t - S.lastAt > SESSION_GAP) { var heat = S.heat; S = freshState(); S.heat = heat; }
       S.counts[ev.op] += 1;
       S.last = ev;
       S.lastAt = ev.t;
@@ -150,9 +152,15 @@
           if (ev.op === 'edit') {
             var tasks = tasksOfFile.get(h.node) || [];
             var sameStory = S.task === null ? -1 : tasks.findIndex(function (t) { return plan[t].story === plan[S.task].story; });
-            if (!tasks.length || (S.task !== null && sameStory === -1)) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
-            if (sameStory !== -1) S.task = tasks[sameStory];
-            else if (tasks.length) S.task = tasks[0];
+            // A first pick from a file several stories declare is TENTATIVE: the next edit settles the story,
+            // and moving then is not leaving the plan (review 3).
+            var settling = S.tentative && sameStory === -1 && tasks.length;
+            if (!tasks.length || (S.task !== null && sameStory === -1 && !settling)) S.outsidePlan.set(h.path, (S.outsidePlan.get(h.path) || 0) + 1);
+            if (sameStory !== -1) { S.task = tasks[sameStory]; S.tentative = false; }
+            else if (tasks.length) {
+              S.task = tasks[0];
+              S.tentative = !settling && new Set(tasks.map(function (t) { return plan[t].story; })).size > 1;
+            }
           }
         }
         if (animate) launch(S.lastNode, h.node, ev);
@@ -572,9 +580,10 @@
       var end = mode === 'live' ? Date.now() : Math.max(playhead || 0, events.length ? events[events.length - 1].t : 0);
       if (mode === 'live') end = Date.now();
       else if (events.length) end = Math.max(end, events[events.length - 1].t);
-      var startT = events.length ? events[0].t : end - 600000;
-      if (span === 'session' && events.length) {
-        for (var i = events.length - 1; i > 0; i--) { if (events[i].t - events[i - 1].t > SESSION_GAP) { startT = events[i].t; break; } }
+      var shown = shownEvents();
+      var startT = shown.length ? shown[0].t : end - 600000;
+      if (span === 'session' && shown.length) {
+        for (var i = shown.length - 1; i > 0; i--) { if (shown[i].t - shown[i - 1].t > SESSION_GAP) { startT = shown[i].t; break; } }
       }
       if (end - startT < 60000) startT = end - 60000;
       var pad = (end - startT) * 0.02;
