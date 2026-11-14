@@ -2149,6 +2149,62 @@ writes the work layer alone, with a file node for each file a task declares. A d
 is used, with a warning. A graph whose `schema_version` this yadflow does not read is refused
 (`YAD-STATE-011`), and the repo's last code graph is kept.
 
+### Focused questions: `yad brain file`, `yad brain story`
+
+`query` searches names. Two questions an agent asks before it plans or edits have their own commands (E179):
+
+```
+yad brain file <repo>/<path> [--repo <name>] [--limit <n>] [--json]
+yad brain story <story-id> [--limit <n>] [--json]
+```
+
+**`yad brain file`** tells you everything the brain knows about one file:
+
+| `--json` key | What it holds |
+|---|---|
+| `file` | `{ id, repo, path }`, plus `missing: true` when a task declares the file but the code does not have it yet |
+| `declaredBy` | The tasks that declare the file, each with its story and epic |
+| `defines` | The code symbols in the file, in file order, with their line (`at`) |
+| `usedBy` | The other files whose code calls or imports this file's code: one row per file, with the relations seen, the strongest confidence (`EXTRACTED` or `INFERRED`) and how many edges |
+| `uses` | The same, the other way: the files this file's code calls or imports |
+| `shippedIn` | The ships of the tasks that declare the file |
+| `surfaces` | The contract surfaces that reach the file, and how (`named-as`, `handled-by`, `mapped-to`, all inferred) |
+| `more` | For a list cut at `--limit` (25 by default), how many were left out |
+| `codeBehind` | The repos whose code moved since the brain was built (the answer may be out of date) |
+
+- Name the file as `<repo>/<path>`, or as a bare path with `--repo <name>`. A bare path found in two repos
+  is refused, with both listed.
+- A file the brain does not hold is refused, with files of the same name and files in the same folder as
+  suggestions.
+- A repo with no code graph (Graphify not installed, or the repo not cloned here) gives empty `defines`,
+  `usedBy` and `uses`. That does not mean nothing uses the file.
+
+**`yad brain story`** gives one story's `epic`, `repos`, `tasks` (each with its declared `files` and
+`shipped` ships), every declared file once in `files` (with the tasks that declare it), `surfaces`, and
+`reposWithoutTasks`: the story's repos that have no tasks in the brain, because the repo is not cloned here
+or its `tasks.md` is not written yet.
+
+Both refuse with `build it: yad brain build` when there is no brain, and exit 1 on any refusal.
+
+**The skills ask the brain (E179).** `yad-architecture`, `yad-stories`, `yad-spec` and `yad-implement`
+each carry a block, generated from `cli/brain-skills.mjs`, that asks the brain at the step where the skill
+reads its code context:
+
+| Skill | What it asks |
+|---|---|
+| `yad-architecture` | What is already in the area (`query`), and which files call the files a contract change lands in (`file`) |
+| `yad-stories` | Past stories and ships in the area (`query`), and the main users of the files a story's notes name (`file`) |
+| `yad-spec` | The files the story's tasks already declare (`story`), and the files that must change with each file a task touches (`file`), so the Files lists are complete |
+| `yad-implement` | What each declared file's edit can reach (`file`). A user outside the declared files is named in the hand-off, never edited: the file-boundary rule stands |
+
+The brain is optional. Each skill first runs `yad brain status --json`:
+- `current`: it uses the brain.
+- `behind`: it uses the brain and says so, and suggests `yad brain build`.
+- `missing` or `unreadable`: it goes on as before, from the code-maps. A step never stops for the brain.
+
+`yad-architecture` and `yad-stories` record the state as `brain:` inside their `code-context:`
+frontmatter. `yad-spec` and `yad-implement` say it in their hand-off.
+
 ### Seeing the brain: `yad brain view`
 
 `yad brain view` (E177) draws the brain in your browser. Engineers use it to see how the work and the code

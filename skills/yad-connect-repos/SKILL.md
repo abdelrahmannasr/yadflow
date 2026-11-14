@@ -207,6 +207,8 @@ use `yad brain view --html --open`, which writes one offline file and returns.
 To watch an agent work through the brain live (E178), the Product sets `"activity": true` and runs
 `yad check --fix`; then `yad brain view --live --open` shows each file the agent reads, searches or edits
 against the task's declared files. It records what the agent did, never why.
+Once built, the planning and building skills ask it themselves (E179): `yad brain file <repo>/<path>`
+(who declares a file, what uses it) and `yad brain story <id>` (a story's tasks and their files).
 
 ## Other actions
 
