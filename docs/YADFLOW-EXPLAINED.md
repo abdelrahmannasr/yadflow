@@ -286,8 +286,9 @@ Points to know:
   (`yad fold`).
 - **The Foundation** is the plan for the whole product (purpose, scope, MVP, roadmap, stack, repos,
   risks), written once by `yad-discovery` into `foundation/` and reviewed like any step. It sits
-  outside the six phases. It is meant to come before any epic; when it is not written, that is a
-  warning, never a refusal. `yad foundation status` shows each roadmap feature as planned, in-shape, in-build or
+  outside the six phases. It is meant to come before any epic, but it is optional: with none,
+  `yad next` offers it as an optional step. When epics go ahead of a Foundation that has not passed its
+  review, `yad next` notes it ("reported, not enforced") and never refuses. `yad foundation status` shows each roadmap feature as planned, in-shape, in-build or
   shipped; `yad foundation publish` turns each feature into an issue, with a milestone per phase.
 - **The phase is never stored.** It is worked out from the step ID, so it cannot go out of date.
 - **Code-aware planning.** When code repos are connected, each author step first reads each repo's
@@ -587,8 +588,8 @@ Contract-Change: yes
 
 - `Task:` is required (except for `chore`, `ci`, `build` and `test` commits).
 - `Contract-Change: yes` only when the contract surface changed.
-- An AI `Co-Authored-By:` line is **off by default**; it is added only with `--ai <id>`, from the list
-  fixed list yadflow ships (claude, copilot, cursor, coderabbit, none). `config.yaml` shows that list,
+- An AI `Co-Authored-By:` line is **off by default**; it is added only with `--ai <id>`, from the fixed
+  list yadflow ships (claude, copilot, cursor, coderabbit, none). `config.yaml` shows that list,
   but editing it there does not change what `--ai` accepts.
 - `yad commit` refuses more than 3 staged files unless you pass `--force`.
 
