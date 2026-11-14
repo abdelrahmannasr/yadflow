@@ -28,6 +28,7 @@ const GROUPS = [
       'yad usage [--out <path>] [--since/--until <YYYY-MM-DD> | --all] [--member <name>] [--format html|json|md] [--repos] — per-member adoption report from git + the ledgers; read-only',
       'yad standup [--since <YYYY-MM-DD>|<N>h|<N>d] [--tz <zone>] [--member <login>|--me] [--format md|html] [--out <file>] [--json] — each team member\'s done / working on / waiting since the previous working day; derived live, facts only; a repo the platform cannot be asked about says "platform not read"',
       'yad issues [list] [--priority P0,P1] [--type bug,feature,enhancement] [--status <status>] [--assignee <login>|none|--me] [--format md|html] [--json] — the team\'s GitHub issues and GitLab issues and tasks, with priority, type, status and assignee; the HTML page sorts and filters (E169)',
+      'yad reports [list] | open <n> | prune --older-than <days> [--apply] — the reports saved on this machine in <product>--reports/ beside the Product (standup, usage, issues, brain view), each named by date, kind, scope and state and marked fresh or stale; never committed (E180)',
       'yad issues labels [--dry-run] — create the predefined priority, type and status labels each repo lacks (E169)',
       'yad scan file <findings.json> --repo <name> — file a scan: security, technical debt and suggestions, by priority and in a milestone per category',
       'yad issues new --title <t> · assign · label · edit · comment · close · reopen — act on an item when an engineer asks; a new item goes to the Product repo',

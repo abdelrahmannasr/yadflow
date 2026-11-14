@@ -1410,13 +1410,22 @@ yad repo refresh backend</code></pre>
 
   <div class="skillcard" id="cmd-usage">
     <h4><code>yad usage</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> adoption &amp; behavior report for an EM/team-lead. It reconstructs each person's audit trail — <em>authored → commented → approved → shipped</em>, in order — entirely from data <strong>already in git</strong> (the approval/comment/ship ledgers + git authorship), then renders it to a path you choose as <strong>HTML</strong> (default), <strong>JSON</strong>, or <strong>Markdown</strong>. Derived and read-only: it hooks no commands and writes no tracked state, so it is rebuildable any time (like <code>yad-status</code>). People come from <strong>activity</strong>, not from a stored list: a person is whoever authored, commented, approved, shipped or committed. It surfaces factual <strong>workflow-hygiene</strong> flags — a ship with no recorded engineer review, someone who authors but never reviews — never a judgmental score. It emits <strong>no emails, commit messages, or comment bodies</strong> (the guarantee is structural, not scrubbed). Never a gate; never touches epic state.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> adoption &amp; behavior report for an EM/team-lead. It reconstructs each person's audit trail — <em>authored → commented → approved → shipped</em>, in order — entirely from data <strong>already in git</strong> (the approval/comment/ship ledgers + git authorship), then renders it as <strong>HTML</strong> (default), <strong>JSON</strong>, or <strong>Markdown</strong>. Derived and read-only: it hooks no commands and writes no tracked state, so it is rebuildable any time (like <code>yad-status</code>). People come from <strong>activity</strong>, not from a stored list: a person is whoever authored, commented, approved, shipped or committed. It surfaces factual <strong>workflow-hygiene</strong> flags — a ship with no recorded engineer review, someone who authors but never reviews — never a judgmental score. It emits <strong>no emails, commit messages, or comment bodies</strong> (the guarantee is structural, not scrubbed). Never a gate; never touches epic state.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad usage                                  # HTML report → ./usage-report.html, all time
+<pre><code>yad usage                                  # HTML report → the local reports folder, all time
 yad usage --out reports/team.html --since 2026-01-01 --until 2026-03-31
 yad usage --member carol --format md       # one member, Markdown
 yad usage --format json --all              # machine-readable, to stdout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> A team lead wants to see how the team actually uses the flow. <em>Note:</em> ledger events (approve/comment/ship) name the platform login. A GitHub/GitLab noreply commit address carries the login, so those commits join the same row; a person whose git name and login differ may appear on more than one row, and the report says so.</div>
+  </div>
+  <div class="skillcard" id="cmd-reports">
+    <h4><code>yad reports</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The reports saved on <strong>this machine only</strong> (E180). A report shows the work at one moment and goes stale, so when no <code>--out</code> is given the standup, usage and issues reports and the brain view page are saved in <code>&lt;product&gt;--reports/</code> beside the Product, one subfolder per kind, each file named <code>&lt;date&gt;-&lt;time&gt;--&lt;kind&gt;--&lt;scope&gt;--&lt;state&gt;</code>. A catalog page lists them all. Nothing there is ever committed or pushed.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad reports                          # newest first, each fresh or stale
+yad reports open 1                   # open the newest
+yad reports prune --older-than 30    # dry run; add --apply to remove</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> You want an earlier report back, or to clear out old ones. A report is <em>stale</em> once the Product's <code>epics/</code> or <code>.sdlc/</code> changed in a commit after it was made.</div>
   </div>
 
   <h3>Global flags</h3>
