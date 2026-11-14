@@ -268,6 +268,7 @@ test('the file: everything inline, hashed by the CSP, and no name can close its 
     const hashes = new Set([...csp.matchAll(/'sha256-([^']+)'/g)].map((x) => x[1]));
     // Every executable inline block (a <script> with no type) must be allowed by its hash; matched in any case.
     const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script[^>]*>/gi)].map((x) => x[1]);
+    assert.equal(blocks.length, 1, 'the one app script is inline');
     for (const block of blocks) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
     assert.equal(blocks.length, 1, 'the one app script is inline');
     assert.equal(html.split(/<script/i).length - 1, blocks.length + 1, 'every script tag is a bare inline block, plus the one data block');
@@ -381,13 +382,18 @@ test('review 1: --anonymous masks names joined by dots, underscores or nothing, 
   assert.equal(m.since, null);
 });
 
-test('review 10: under --anonymous the words of the address placeholder are never masked; the raw values still are', () => {
-  const branch = (name) => ({ repo: 'api', name, sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
-  const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'ula@example.com Ula Marsh', repos: [] }] });
-  i.branches.push(branch('feat/sign-in-with-google'), branch('fix/marsh-x'));
-  const names = mapModel(i, { now: NOW, anonymous: true }).branches.map((b) => b.name);
-  assert.ok(names.includes('feat/sign-in-with-google'), 'the placeholder words are not names');
-  assert.ok(names.includes('fix/someone-x'), 'a name in the raw value is still masked');
+test('review 7: under --anonymous an address hides the part before its @, never the placeholder words or the domain', () => {
+  const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'zed@example.com', repos: [] },
+    { id: 'EP-login-S08', epic: 'EP-login', status: 'draft', owner: '@quinn', repos: [] }] });
+  i.branches.push(
+    { repo: 'api', name: 'feat/sign-in-with-google', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'fix/com-name-zed', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 },
+    { repo: 'api', name: 'quinn/try', sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+  const m = mapModel(i, { now: NOW, anonymous: true });
+  const names = m.branches.map((b) => b.name);
+  assert.ok(names.includes('feat/sign-in-with-google'), 'the words of the placeholder are not names');
+  assert.ok(names.includes('fix/com-name-someone'), 'the local part is masked, the domain is not');
+  assert.ok(names.includes('someone/try'), 'a handle is masked without its @');
 });
 
 test('review 1: the person a gate waits on, and who released last, are on the people list', () => {

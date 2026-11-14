@@ -331,8 +331,13 @@ export function digestOf(model) {
 function anonymize(model, people) {
   const keys = model.people.map((p) => p.key).sort();
   const alias = new Map(keys.map((k, i) => [k, { key: `p${i + 1}`, name: personLetter(i) }]));
-  // The placeholder for an address is not a name: its words (`name`, `with`) are never masked.
-  const raws = [...people.values()].filter((p) => alias.has(p.key)).flatMap((p) => [...p.raws, ...(p.name === AT_NAME ? [] : [p.name])]).map((r) => String(r).toLowerCase()).filter((r) => r.length >= 2);
+  // The placeholder for an address is not a name, so its words (`name`, `with`) are never masked; an address
+  // gives only the part before its @ (`kit`), never its domain (`example`, `com`); a handle (`@kit`) gives `kit`.
+  const raws = [...people.values()].filter((p) => alias.has(p.key))
+    .flatMap((p) => [...p.raws, ...(p.name === AT_NAME ? [] : [p.name])])
+    .map((r) => String(r).toLowerCase())
+    .map((r) => (r.lastIndexOf('@') > 0 ? r.slice(0, r.lastIndexOf('@')).replace(/@/g, '') : r.replace(/@/g, '')))
+    .filter((r) => r.length >= 2);
   // Each name, each of its words (3 letters or more), and the name with its separators taken out
   // (`bobbuilder`), so `bob.builder/x`, `feat/bob_builder` and `bobbuilder-fix` are all masked.
   const parts = new Set(raws.flatMap((r) => [r, r.replace(/[\s._-]+/g, ''), ...r.split(/[\s._-]+/).filter((x) => x.length >= 3)]));
