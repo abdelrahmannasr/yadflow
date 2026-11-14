@@ -702,7 +702,7 @@ function brainFile(root, { target, repo, limit, json, runner }) {
   if (!opened.brain) return opened.refused;
   const { brain, n, behind } = opened;
   const inRepo = repo !== null && repo !== undefined ? String(repo) : null;
-  const path1 = String(target).replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
+  const path1 = String(target).trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
   const asked = inRepo !== null ? `${inRepo}/${path1}` : target;
   const r = fileAbout(brain, inRepo !== null ? path1 : target, { limit: n, repo: inRepo });
   if (r.found === 'none') {

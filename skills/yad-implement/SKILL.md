@@ -94,7 +94,7 @@ STOP and point at `yad-spec`.
 
 1. Run `yad brain status --json` and read its `state`, and each `repos[].state`:
    - `current`, and no repo `behind` or `unknown`: the brain is **current**. Use it as below.
-   - `behind`, or any repo `behind` or `unknown` (its code moved since the build): the brain is **behind**. Use it, knowing an answer may miss the newest code, and suggest `yad brain build` to the person. Do not run it inside this step: it runs Graphify over every connected repo, which can take minutes, and writes `graphify-out/` (kept out of git) in each.
+   - `behind`, or any repo `behind` or `unknown` (its code moved since the build, or its commit cannot be read): the brain is **behind**. Use it, knowing an answer may miss the newest code, and suggest `yad brain build` to the person. Do not run it inside this step: it runs Graphify over every connected repo, which can take minutes, and writes `graphify-out/` (kept out of git) in each.
    - `missing` or `unreadable`, or `yad brain` is not a command here: the brain is **none**. Skip step 2, go on with the declared files as before, and still do step 3.
 2. Ask it:
    - **What the edit reaches.** After reading the task's **Files:** list, run `yad brain file <repo>/<path> --json` for each declared file. Its `usedBy` files are what the edit can reach.
