@@ -91,6 +91,9 @@ export function personLetter(n) {
   return `Person ${s}`;
 }
 
+// What a person whose name holds an @ is shown as: an address is never shown.
+const AT_NAME = 'a name with an @ in it';
+
 // The resolver: a raw name from the record → one person key. Members first (E131); else the name itself,
 // compared without case. A name with an @ is never shown.
 export function makeResolver(members = []) {
@@ -112,8 +115,9 @@ export function makeResolver(members = []) {
       name = r;
       if (hit.ambiguous) ambiguous = hit.ambiguous.map((m) => (m.primary.login.includes('@') ? 'a login with an @ in it' : m.primary.login));
     }
-    // Any @ (even a leading one, which `shown` lets through) means an address: it is never shown.
-    if (!people.has(key)) people.set(key, { key, name: String(name).includes('@') ? 'a name with an @ in it' : shown(name), raws: new Set(), member: !!hit.member, ambiguous });
+    // Any @ (even a leading one, which `shown` lets through for a handle) means an address: it is never
+    // shown. This is stricter than `shown` on purpose — do not "fix" it to match.
+    if (!people.has(key)) people.set(key, { key, name: String(name).includes('@') ? AT_NAME : shown(name), raws: new Set(), member: !!hit.member, ambiguous });
     people.get(key).raws.add(r);
     cache.set(r.toLowerCase(), key);
     return key;
@@ -327,7 +331,8 @@ export function digestOf(model) {
 function anonymize(model, people) {
   const keys = model.people.map((p) => p.key).sort();
   const alias = new Map(keys.map((k, i) => [k, { key: `p${i + 1}`, name: personLetter(i) }]));
-  const raws = [...people.values()].filter((p) => alias.has(p.key)).flatMap((p) => [...p.raws, p.name]).map((r) => String(r).toLowerCase()).filter((r) => r.length >= 2);
+  // The placeholder for an address is not a name: its words (`name`, `with`) are never masked.
+  const raws = [...people.values()].filter((p) => alias.has(p.key)).flatMap((p) => [...p.raws, ...(p.name === AT_NAME ? [] : [p.name])]).map((r) => String(r).toLowerCase()).filter((r) => r.length >= 2);
   // Each name, each of its words (3 letters or more), and the name with its separators taken out
   // (`bobbuilder`), so `bob.builder/x`, `feat/bob_builder` and `bobbuilder-fix` are all masked.
   const parts = new Set(raws.flatMap((r) => [r, r.replace(/[\s._-]+/g, ''), ...r.split(/[\s._-]+/).filter((x) => x.length >= 3)]));

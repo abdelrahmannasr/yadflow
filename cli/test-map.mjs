@@ -135,9 +135,11 @@ test('people: roles, never counts; one badge per person through the member files
   // An email is never shown.
   const at = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'kit@example.com', repos: [] }] }), { now: NOW });
   const addr = at.people.find((x) => x.key.startsWith('n:@'));
+  assert.ok(addr, 'the address is a person with a fingerprint key');
   assert.match(addr.key, /^n:@[0-9a-f]{16}$/, 'the key is a fingerprint');
   assert.equal(addr.name, 'a name with an @ in it');
-  assert.equal(JSON.stringify(at).split('example.com').length, 1, 'no part of the address, not even the domain');
+  assert.equal(JSON.stringify(at).split('kit@').length, 1, 'not the address');
+  assert.equal(JSON.stringify(at).split('example.com').length, 1, 'not even the domain');
   const lead = mapModel(baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: '@example.com', repos: [] }] }), { now: NOW });
   assert.equal(JSON.stringify(lead).split('example.com').length, 1, 'a leading @ is an address too');
 });
@@ -267,6 +269,7 @@ test('the file: everything inline, hashed by the CSP, and no name can close its 
     // Every executable inline block (a <script> with no type) must be allowed by its hash; matched in any case.
     const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script[^>]*>/gi)].map((x) => x[1]);
     for (const block of blocks) assert.ok(hashes.has(createHash('sha256').update(block, 'utf8').digest('base64')));
+    assert.equal(blocks.length, 1, 'the one app script is inline');
     assert.equal(html.split(/<script/i).length - 1, blocks.length + 1, 'every script tag is a bare inline block, plus the one data block');
     assert.ok(html.includes('id="yad-map-data"'));
   } finally { done(ws); }
@@ -376,6 +379,15 @@ test('review 1: --anonymous masks names joined by dots, underscores or nothing, 
   assert.ok(m.branches.some((b) => b.name === 'feat/EP-login-someone_someone'));
   assert.deepEqual(m.moved, []);
   assert.equal(m.since, null);
+});
+
+test('review 10: under --anonymous the words of the address placeholder are never masked; the raw values still are', () => {
+  const branch = (name) => ({ repo: 'api', name, sha: 'f'.repeat(40), date: daysAgo(2), author: 'Bo Lindqvist', inProd: false, inInteg: false, ahead: 1 });
+  const i = baseInputs({ stories: [{ id: 'EP-login-S09', epic: 'EP-login', status: 'draft', owner: 'ula@example.com Ula Marsh', repos: [] }] });
+  i.branches.push(branch('feat/sign-in-with-google'), branch('fix/marsh-x'));
+  const names = mapModel(i, { now: NOW, anonymous: true }).branches.map((b) => b.name);
+  assert.ok(names.includes('feat/sign-in-with-google'), 'the placeholder words are not names');
+  assert.ok(names.includes('fix/someone-x'), 'a name in the raw value is still masked');
 });
 
 test('review 1: the person a gate waits on, and who released last, are on the people list', () => {
