@@ -823,6 +823,14 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // New approvals bind to what the review approved (#366); see headContentHash. Unknown is never
     // taken as approved: nothing is bound, and the run goes red so CI tries again.
     const at = approvedContent(contentAt, { root, epic, epicDir, artifact: pr.artifact, platform, number: pr.number, headOid: pull.headOid });
+    if (!at?.ok && alreadyDone && solo && epic === FOUNDATION_EPIC && pull.merged) {
+      // A solo Foundation's fresh review merged, and this run is the only one that records it: the sweep
+      // never reads a passed step. So the read failing is a failed run, as for an open step, never a warning.
+      fail(`${pr.artifact}: could not read what PR #${pr.number} merged (${at?.reason || 'no answer'}) — the Foundation's solo re-review was not recorded`);
+      hand(`run it again with the full history (fetch-depth: 0, or GIT_DEPTH: "0"), able to fetch the PR/MR: \`yad gate ci --branch review/${FOUNDATION_EPIC}/foundation --pr ${pr.number} --merged\` in CI, or \`yad gate sync ${FOUNDATION_EPIC}\` on a local ledger`);
+      process.exitCode = 1;
+      continue;
+    }
     if (!at?.ok && alreadyDone) {
       // A done step only records what arrives: nothing is bound, and the run is not failed for it.
       warn(`${pr.artifact}: could not read what PR #${pr.number} approved (${at?.reason || 'no answer'}) — ${step.id} is already done; no approval was recorded this time — a later sweep tries again`);
@@ -955,7 +963,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       const rereviewed = !readOnly && solo && epic === FOUNDATION_EPIC && stepStatus(step) === 'done' && !!pull.merged && pred.passed
         && typeof approvedHash === 'string' && approvedHash !== NOTHING_AT_HEAD
         && recordSoloRereview(state, step.id, {
-          pr: Number.isInteger(pr.number) ? pr.number : Number(pr.number), hash: approvedHash, by,
+          pr: Number.isInteger(pr.number) ? pr.number : Number(pr.number), platform, hash: approvedHash, by,
           date: (typeof pull.mergedAt === 'string' && pull.mergedAt.slice(0, 10)) || today,
           commit: pull.mergeCommit || null, mergedBy: pull.mergedBy || null,
         });

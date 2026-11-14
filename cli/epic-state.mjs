@@ -1113,6 +1113,9 @@ export function doneStepUnapproved(epicDir, step, approvals) {
   let accepted;
   try { accepted = acceptedHashes(epicDir, step.artifact); } catch { return null; }
   if (!accepted.length) return null;
+  // A solo re-review that merged this very content (the Foundation's `rereviews`) answers too, so `yad next`,
+  // `yad status` and `yad doctor` agree with `yad foundation publish`.
+  if (soloRereviewCovers(step, accepted)) return null;
   return forStep.some((a) => !isStaleHash(a.artifactHash, accepted)) ? null : { count: forStep.length };
 }
 
@@ -2657,18 +2660,22 @@ export function reopenStampDue(state, reviewStepId) {
 // changes after its review nothing could ever say the new text was reviewed: a sync of an already-done
 // step only re-syncs approvals, and the first close wins. In solo mode the merge IS the human decision, so
 // the merge of a FRESH review PR/MR is recorded beside the first close, never over it, in the review
-// step's `rereviews` list: the PR/MR, what it merged (`hash`, the content at its approved head — never the
-// default branch's, so an edit merged after it is not covered) and who and when. Only a PR/MR newer than
-// every one the step already holds (`closed.pr` and earlier re-reviews) is recorded, so a re-sync of the
-// same or an older merge writes nothing. Mutates `state`; true when it wrote.
-export function recordSoloRereview(state, reviewStepId, { pr, hash, by = null, date = null, commit = null, mergedBy = null } = {}) {
+// step's `rereviews` list: the PR/MR, its platform, what it merged (`hash`, the content at its approved
+// head — never the default branch's, so an edit merged after it is not covered) and who and when. An entry
+// covers only the content it merged, so recording one never covers more than was reviewed; the order rule
+// only keeps the list from growing. The PR/MR that made the first close is not recorded again, and a PR/MR
+// is recorded only when it is newer than every earlier entry FROM THE SAME PLATFORM: a Product that moved
+// from GitHub to GitLab starts numbering again, and comparing across that move would refuse every new one.
+// So a re-sync of the same or an older merge writes nothing. Mutates `state`; true when it wrote.
+export function recordSoloRereview(state, reviewStepId, { pr, platform = null, hash, by = null, date = null, commit = null, mergedBy = null } = {}) {
   const step = state?.steps?.find((s) => s?.id === reviewStepId);
   if (!isPlainObject(step) || step.type !== 'review+approve' || stepStatus(step) !== 'done') return false;
   if (!Number.isInteger(pr) || pr <= 0 || typeof hash !== 'string' || !hash.startsWith('sha256:')) return false;
+  if (step.closed?.pr === pr) return false;
   const earlier = Array.isArray(step.rereviews) ? step.rereviews : [];
-  const seen = [step.closed?.pr, ...earlier.map((r) => r?.pr)].filter((n) => Number.isInteger(n));
-  if (seen.some((n) => n >= pr)) return false;
-  step.rereviews = [...earlier, { pr, hash, by, date, commit, mergedBy, via: 'merged', waived: 'solo' }];
+  const samePlatform = earlier.filter((r) => isPlainObject(r) && (r.platform ?? null) === (platform ?? null) && Number.isInteger(r.pr));
+  if (samePlatform.some((r) => r.pr >= pr)) return false;
+  step.rereviews = [...earlier, { pr, platform, hash, by, date, commit, mergedBy, via: 'merged', waived: 'solo' }];
   return true;
 }
 

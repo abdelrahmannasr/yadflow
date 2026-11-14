@@ -63,7 +63,7 @@ export function foundationReviewAgain(root, ledger) {
   const fresh = reviewAsItStands(FOUNDATION_EPIC, artifact, resolveDefaultBranch(productGit(root), productConfig));
   if (!isSolo(productConfig)) return `${fresh}; once it is approved and merged, its approvals cover the Foundation`;
   return isVerifiedLedger(productConfig)
-    ? `${fresh}; merge it yourself (solo mode) — CI records the merge as the new review (CI must run this yadflow release or later)`
+    ? `${fresh}; merge it yourself (solo mode) — CI records the merge as the new review (CI must run this yadflow release or later; if that run failed, run it again: \`yad gate ci --branch review/${FOUNDATION_EPIC}/foundation --pr <n> --merged\`)`
     : `${fresh}; merge it yourself (solo mode), then \`yad gate sync ${FOUNDATION_EPIC}\` records the merge as the new review`;
 }
 
