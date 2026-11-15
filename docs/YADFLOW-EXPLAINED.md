@@ -1232,7 +1232,9 @@ data) and `LOCAL-SETUP.md` (the same steps as text).
 
 - Each step says **why** it is needed and **what it changes** for the person, so they decide whether to do it.
 - yadflow writes its own steps (install yad at this release, sign in, the tools your team uses). Your team
-  adds its own. An update rewrites yadflow's steps and never touches your team's.
+  adds its own with `yad local-setup add`, and at the first setup the agent proposes the ones your project
+  needs (a `.env` to copy, docker) — it adds only those you say yes to. An update rewrites yadflow's steps and
+  never touches your team's.
 - `yad local-setup` says which steps are done on this machine. yad runs no step: the agent runs a step
   only after the person says yes.
 - Each machine remembers its answers (inside `.git`, never committed): `done` for a step the person did,
@@ -1243,6 +1245,7 @@ data) and `LOCAL-SETUP.md` (the same steps as text).
 yad local-setup                               # the steps this machine still needs, with why and what each changes
 yad local-setup done docker                   # you did it (a step yad can check must pass its check first)
 yad local-setup skip docker --reason "..."    # you said no; asked again only when the step changes
+yad local-setup add --from step.json           # add one of your team's steps (commit both files)
 ```
 <!-- explainer:end id=toolbox -->
 
