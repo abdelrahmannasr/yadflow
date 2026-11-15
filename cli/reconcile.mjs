@@ -415,17 +415,24 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // file are theirs to keep or share — no row (E157 update review 12).
     if (ours !== undefined && base !== null && k.same(ours, base)) continue;
     // A file with no committed copy that an ignore rule hides can never ride a PR/MR (git refuses to add it,
-    // #555). The repo's own rule is the team's choice: the file stays on each machine, where each person's
-    // `yad update` or `yad check --fix` writes it — said once, no row. A rule only this machine has (a global
-    // ignore, `.git/info/exclude`) is not the team's: the row stays, naming the rule and the way out.
+    // #555). A rule the repo has committed, unchanged, is the team's choice: the file stays on each machine,
+    // where each person's `yad update` or `yad check --fix` writes it — said once, no row. Any other rule (a
+    // global ignore, `.git/info/exclude`, or a `.gitignore` line not committed) is only this machine's: the row
+    // stays, naming the rule and the way out — also when the file is yad's alone, which staging would
+    // otherwise drop without a word.
+    const what = e.a.what ?? k.what;
     const tracked = e.head !== null || run('git', ['ls-files', '--error-unmatch', '--', e.a.shared], { cwd: e.a.root }).ok;
-    const rule = !tracked && now !== null ? ignoreRules(e.a.root, [e.a.shared]).get(e.a.shared) : null;
-    if (rule && !rule.outside) {
-      info(`${repoLabel(root, e.a.root)}: ${e.a.shared} is ignored by ${rule.source}:${rule.line}, so it stays on each machine; the update leaves it out of the PR/MR`);
+    const rule = tracked ? null : ignoreRules(e.a.root, [e.a.shared]).get(e.a.shared);
+    const at = rule ? `${rule.source}${rule.line ? `:${rule.line}` : ''}` : '';
+    const teams = rule && !rule.outside
+      && run('git', ['ls-files', '--error-unmatch', '--', rule.source], { cwd: e.a.root }).ok
+      && run('git', ['diff', '--quiet', 'HEAD', '--', rule.source], { cwd: e.a.root }).ok;
+    if (teams) {
+      info(`${repoLabel(root, e.a.root)}: ${e.a.shared} is ignored by ${at}, so it stays on each machine; the update leaves it out of the PR/MR`);
       continue;
     }
     if (rule) {
-      const hint = `an ignore rule only this machine has (${rule.source}:${rule.line}, \`${rule.pattern}\`) hides ${e.a.shared}, so the update left ${k.what} out of the PR/MR: remove or narrow that rule, or commit it with \`git add -f ${e.a.shared}\`, through review on a branch of your own`;
+      const hint = `an ignore rule only this machine has (${at}, \`${rule.pattern}\`${rule.outside ? '' : ', not committed'}) hides ${e.a.shared}, so the update left ${what} out of the PR/MR: remove or narrow that rule, or commit it with \`git add -f ${e.a.shared}\`, through review on a branch of your own`;
       info(`${repoLabel(root, e.a.root)}: ${hint}`);
       sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: k.reason, hint });
       continue;
@@ -435,7 +442,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       : e.head !== null && k.eq(e.disk, e.head) ? true
         : !!(ours !== undefined && was !== null && k.same(was, ours));
     if (yadsAlone) { appliedActions.push({ ...e.a, paths: [e.a.shared] }); continue; }
-    const hint = `${e.a.shared} has changes that are not committed, so the update left ${k.what} out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
+    const hint = `${e.a.shared} has changes that are not committed, so the update left ${what} out of the PR/MR: commit ${e.a.shared} as it now stands, through review on a branch of your own`;
     info(`${repoLabel(root, e.a.root)}: ${hint}`);
     sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: k.reason, hint });
   }

@@ -1309,7 +1309,8 @@ function blockState(dest, opts) {
 export function markedBlockAction(root, relDest, lines, { scope = 'product', markers = AGENTS_MARKERS, what = 'the yadflow rules block' } = {}) {
   const dest = path.join(root, relDest);
   const opts = { ...markers, lines };
-  const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', mergeShared: (text) => applyMarkedBlock(text, opts) };
+  // `what` names the block in the row `yad update --open-pr` gives a file it leaves out ("its yadflow rules block").
+  const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', what: what.replace(/^the /, 'its '), mergeShared: (text) => applyMarkedBlock(text, opts) };
   const { state, refused } = blockState(dest, opts);
   // Never written, said once at plan time. Markers yad cannot trust are never guessed around: the team's
   // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).

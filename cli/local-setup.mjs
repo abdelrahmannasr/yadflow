@@ -160,7 +160,7 @@ export function mergeLocalSetup(current, root) {
 const said = new Set();
 function localSetupJsonAction(root) {
   const dest = localSetupPath(root);
-  const base = { scope: 'product', item: LOCAL_SETUP_FILE, root, paths: [], shared: LOCAL_SETUP_FILE, mergeShared: (o) => mergeLocalSetup(o, root) };
+  const base = { scope: 'product', item: LOCAL_SETUP_FILE, root, paths: [], shared: LOCAL_SETUP_FILE, what: 'its yadflow steps', mergeShared: (o) => mergeLocalSetup(o, root) };
   let raw = null;
   try { raw = fs.readFileSync(dest, 'utf8'); } catch { /* missing */ }
   let parsed = null;

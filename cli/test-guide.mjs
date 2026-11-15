@@ -979,6 +979,57 @@ test('#555: hook settings hidden by a rule only this machine has keep the row, n
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+// The settings file is yad's alone (this run writes it from nothing): a committed rule still gets no row, and a
+// rule only this machine has gets the row — staging would otherwise drop it without a word (review 1).
+test('#555: settings this run creates, hidden by a committed .gitignore: no row, the PR/MR opens', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/13' });
+    put(path.join(A, '.gitignore'), '.claude/settings.json\n');
+    git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+    assert.ok(!fs.existsSync(path.join(A, '.claude/settings.json')));
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
+    assert.ok(fs.existsSync(path.join(A, '.claude/settings.json')), 'written on this machine');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+for (const [label, hide, source] of [
+  ['.git/info/exclude', (A) => put(path.join(A, '.git/info/exclude'), '.claude/settings.json\n'), /\.git\/info\/exclude:1/],
+  ['a global ignore file', (A, P) => { put(path.join(P, 'global-ignore'), '.claude/\n'); git(A, ['config', 'core.excludesFile', path.join(P, 'global-ignore')]); }, /global-ignore:1, `\.claude\/`\)/],
+  ['a .gitignore line not committed', (A) => put(path.join(A, '.gitignore'), '.claude/settings.json\n'), /\(\.gitignore:1, `\.claude\/settings\.json`, not committed\)/],
+]) {
+  test(`#555: settings this run creates, hidden by ${label}: the row names the rule and git add -f`, async () => {
+    const { reconcile } = await import('./reconcile.mjs');
+    const { P, A } = await twoClones();
+    try {
+      const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/14' });
+      hide(A, P);
+      const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+      const row = r.commits.find((c) => c.reason === 'settings-uncommitted');
+      assert.ok(row, JSON.stringify(r.commits));
+      assert.match(row.hint, source);
+      assert.match(row.hint, /hides \.claude\/settings\.json, so the update left its entries \(hooks, the read-only allow list\) out of the PR\/MR/);
+      assert.match(row.hint, /git add -f \.claude\/settings\.json/);
+    } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+  });
+}
+
+test('#555: the local setup file\'s row names its own steps, never the hook entries', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/15' });
+    put(path.join(A, '.git/info/exclude'), '.sdlc/local-setup.json\n');
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = r.commits.find((c) => /local-setup\.json/.test(c.hint ?? ''));
+    assert.ok(row, JSON.stringify(r.commits));
+    assert.match(row.hint, /left its yadflow steps out of the PR\/MR/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('#555: an AGENTS.md the Product gitignores gets no agents-uncommitted row either', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const { P, R, A } = await twoClones();
