@@ -161,9 +161,9 @@ export function hiddenFolders(root, paths) {
   return out;
 }
 
-// An ignore file's lines as git reads its patterns (#555): a byte-order mark at the start skipped, a line's
-// `\r` dropped (the last line's too), and only the trailing spaces git drops — those not escaped by an odd
-// run of backslashes (`\ ` stays) — dropped; a tab stays.
+// An ignore file's lines as git reads its patterns (#555): a byte-order mark at the start skipped; one `\r` at
+// the end of each line dropped (the last line's too, never one inside a line); and only the trailing spaces git
+// drops — those not escaped by an odd run of backslashes (`\ ` stays). A tab stays.
 export const ignoreFileLines = (text) => text.replace(/^\uFEFF/, '').split('\n')
   .map((l) => l.replace(/\r$/, '').replace(/((?:^|[^\\])(?:\\\\)*) +$/, '$1'));
 

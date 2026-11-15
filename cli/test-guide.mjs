@@ -1098,6 +1098,7 @@ test('#555: ignoreFileLines reads an ignore file\'s lines as git does', async ()
   const cases = [
     ['a  ', 'a'], ['a\t', 'a\t'], ['a\\ ', 'a\\ '], ['a\\  ', 'a\\ '], ['a\\\\  ', 'a\\\\'],
     ['\\\\  ', '\\\\'], ['\\ ', '\\ '], ['   ', ''], ['a\r', 'a'], ['a  \r', 'a'],
+    ['\\\\\\  ', '\\\\\\ '], ['a\\ \r', 'a\\ '],
   ];
   for (const [line, want] of cases) assert.deepEqual(ignoreFileLines(line), [want], JSON.stringify(line));
   assert.deepEqual(ignoreFileLines('\uFEFFx\r\ny\n'), ['x', 'y', '']);
