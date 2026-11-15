@@ -114,41 +114,55 @@ function bare(sel) {
 }
 const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);
 
+// A markdown file's fenced code blocks, as CommonMark reads them (review 8): an opening run of 3 or more
+// backticks or tildes (a backtick fence's label holds no backtick), closed by a run of the same character at
+// least as long with nothing after it. → [{ label, body }]; an unclosed fence runs to the end. One pass by line.
+export function fencedBlocks(text) {
+  const out = [];
+  let open = null;
+  for (const raw of String(text).split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!open) {
+      const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (m && !(m[1][0] === '`' && m[2].includes('`'))) { open = { run: m[1], label: m[2].trim().split(/\s+/)[0].replace(/^\{?\.?|\}$/g, '').toLowerCase(), body: [] }; out.push(open); }
+      continue;
+    }
+    const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+    if (close && close[1][0] === open.run[0] && close[1].length >= open.run.length) { open = null; continue; }
+    open.body.push(line);
+  }
+  return out.map((f) => ({ label: f.label, body: f.body.join('\n') }));
+}
+
+const CSS_LABELS = new Set(['css', 'scss', 'less', 'postcss']);
+
 // The `--name: value` pairs of the first `:root` rule that is not a dark one, and of the dark rule when there
 // is one: an `@media (prefers-color-scheme: dark)` block's `:root`, `html` or `body` rule (else its first rule
 // with a `--` name), or a `[data-theme="dark"]` / `.dark` rule anywhere, inside another `@media` too.
-// The text inside a markdown file's code fences, or null when it has none (review 7: when a DESIGN.md has
-// fences, only their content is read as CSS, so no prose can ever be taken for it). Linear: one pass by line.
-// The CSS fences (`css`, `scss`, `less`) when there are any, else every fence, so a shell or JSON fence's `/*`
-// or quote is never read as CSS beside a CSS one.
-export function fencedText(text) {
-  const all = [], styled = [];
-  let open = null, isCss = false, any = false;
-  for (const line of String(text).split('\n')) {
-    const fence = /^\s*(```|~~~)\s*([\w-]*)/.exec(line);
-    if (fence && !open) { open = fence[1]; isCss = /^(?:css|scss|less|postcss)$/i.test(fence[2]); any = true; continue; }
-    if (fence && line.trim().startsWith(open)) { open = null; all.push(''); if (isCss) styled.push(''); continue; }
-    if (open) { all.push(line); if (isCss) styled.push(line); }
-  }
-  if (!any) return null;
-  return (styled.length ? styled : all).join('\n');
-}
-
 export function readRootVars(text) {
-  const all = [];
-  const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
-  const fenced = fencedText(String(text || ''));
-  walk(fenced === null ? cssRules(String(text || '')) : cssRules(fenced, { css: true }), false);
-  const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
-  const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)));
-  let dark = null;
-  for (const { r } of all) {
-    if (DARK_MEDIA.test(r.selector)) dark = r.rules.find((x) => isRootish(x) && hasVars(x)) || r.rules.find(hasVars) || null;
-    else if (DARK_SELECTOR.test(bare(r.selector)) && hasVars(r)) dark = r;
-    if (dark) break;
-  }
-  if (!light) return null;
-  return { light: vars(light.r.text), dark: dark ? vars(dark.text) : null };
+  const src = String(text || '');
+  // A DESIGN.md's CSS fences (or, with none, its fences with no label), each read on its own as CSS, so nothing
+  // in one fence (a shell glob, an unclosed comment) reaches another. With no such fence, or one that gives no
+  // light colours, the whole text is read with the prose rules (reviews 7, 8).
+  const fences = fencedBlocks(src);
+  const styled = fences.filter((f) => CSS_LABELS.has(f.label));
+  const chosen = styled.length ? styled : fences.filter((f) => !f.label);
+  const read = (rules) => {
+    const all = [];
+    const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
+    walk(rules, false);
+    const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
+    const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)));
+    let dark = null;
+    for (const { r } of all) {
+      if (DARK_MEDIA.test(r.selector)) dark = r.rules.find((x) => isRootish(x) && hasVars(x)) || r.rules.find(hasVars) || null;
+      else if (DARK_SELECTOR.test(bare(r.selector)) && hasVars(r)) dark = r;
+      if (dark) break;
+    }
+    return light ? { light: vars(light.r.text), dark: dark ? vars(dark.text) : null } : null;
+  };
+  const fenced = chosen.length ? read(chosen.flatMap((f) => cssRules(f.body, { css: true }))) : null;
+  return fenced && Object.keys(fenced.light).length ? fenced : read(cssRules(src));
 }
 
 // Fill each role from a { name: value } map. → { colors: { role: value }, filledFrom: { role: name } }

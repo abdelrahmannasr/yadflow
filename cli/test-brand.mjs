@@ -520,7 +520,14 @@ test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark
   for (const prose of ['Use the glob /*.css for all.', 'Files: /* everything', 'Run `rm dist /*`.', "It's {all} here: .dark { --bg: #f00 }"]) {
     assert.deepEqual(fenced(prose), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, prose);
   }
-  assert.deepEqual(readRootVars('```bash\nrm -rf dist/* "x\n```\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, 'a shell fence is never CSS beside a CSS one');
+  const both = { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } };
+  // Review 8: each fence is read on its own; a labelled non-CSS fence is never read; CSS outside fences still is.
+  assert.deepEqual(readRootVars('```bash\ncp a /* b "x\n```\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'a shell fence is never CSS beside a CSS one');
+  assert.deepEqual(readRootVars('```bash\ncp src/* dist/\n```\n\n```\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'nor beside an unlabelled one');
+  assert.deepEqual(readRootVars('Install:\n\n```bash\nnpm i\n```\n\n:root { --bg: #fff }\n.dark { --bg: #000 }\n'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, 'CSS outside the fences, beside a shell fence');
+  assert.deepEqual(readRootVars('Use ```css``` here.\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'a line with a backtick after the run is not a fence');
+  assert.deepEqual(readRootVars('````markdown\n```css\n:root{--bg:#123}\n```\n````\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'a fence inside a longer fence is its content, never the brand');
+  assert.deepEqual(readRootVars('```css\r\n:root{--bg:#fff}\r\n.dark{--bg:#000}\r\n```\r\n'), both, 'Windows line ends');
   assert.deepEqual(readRootVars(':root:NOT(.dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':not is not case-sensitive');
   assert.equal(readRootVars(':root{--bg:#fff}\nhtml:not(.dark){--x:1}').dark, null);
   assert.deepEqual(readRootVars(':root:not([data-theme="dark"]){--bg:#fff}\n[data-theme="dark"]{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
