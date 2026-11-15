@@ -11,6 +11,7 @@
 // runs a step's commands only after the person said yes to it (the `local-setup` rule, cli/agent-rules.mjs).
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
@@ -21,6 +22,7 @@ import {
 } from './local-setup-steps.mjs';
 import { detectInstalled } from './detect.mjs';
 import { readLocalSetupRecord, answerFor, writeLocalSetupAnswers } from './local-setup-record.mjs';
+import { looksSecret } from './secret-text.mjs';
 
 export const LOCAL_SETUP_MARKERS = Object.freeze({
   begin: '<!-- yadflow:local-setup:begin — written by yad from .sdlc/local-setup.json; edit outside these lines, `yad update` rewrites them -->',
@@ -457,6 +459,84 @@ export function runLocalSetupSkip(root, { ids = [], reason, json = false, now } 
   if (required) warn(`${x.id} is marked required: ${forTerminal(x.purpose)}`);
   info(`changed your mind? do the step, then \`yad local-setup done ${x.id}\``);
   return { skipped: x.id, reason: why, required, record: file };
+}
+
+// ---- the team's steps (E185 part 3) -------------------------------------------------------------------
+
+export const TEAM_USAGE = 'usage: yad local-setup add --from <step.json> [--json] · yad local-setup remove <id> [--json]';
+// What a step file may hold. `source`, `vetted` and `addedBy` are yad's to set, never the file's.
+const STEP_KEYS = Object.freeze(['id', 'title', 'purpose', 'impact', 'when', 'commands', 'check', 'verify', 'person']);
+
+// The script as it is on disk, read strictly: a file that does not parse, or a `team` that is not a list, is
+// refused, never replaced (read strictly before a write). A missing file starts empty. → { doc } | { error }
+function workingScript(root) {
+  let text;
+  try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch (e) { return e.code === 'ENOENT' ? { doc: {} } : { error: 'cannot be read' }; }
+  let doc;
+  try { doc = parseJSON(text); } catch { return { error: 'does not parse' }; }
+  if (!isPlainObject(doc) || (doc.team !== undefined && !Array.isArray(doc.team)) || (doc.yadflow !== undefined && !Array.isArray(doc.yadflow))) return { error: 'is not the shape yad writes' };
+  return { doc };
+}
+
+// Write the team's list, then the rest of the script and its view the way setup and update write them.
+function writeTeam(root, doc, team) {
+  writeJSON(localSetupPath(root), { ...doc, team });
+  for (const a of localSetupActions(root)) if (!a.writesNothing) a.apply();
+}
+
+const gitName = (root) => {
+  const r = spawnSync('git', ['config', 'user.name'], { cwd: root, encoding: 'utf8', windowsHide: true });
+  const name = r.status === 0 ? r.stdout.replace(/\s+/g, ' ').trim() : '';
+  return name && forTerminal(name) === name && !/<!--|--!?>/.test(name) ? name.slice(0, 80) : null;
+};
+const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`, 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
+
+export function runLocalSetupAdd(root, { from = null, json = false } = {}) {
+  if (typeof from !== 'string' || !from) return refuse('yad local-setup add needs --from <step.json>: one step, written as a JSON object', TEAM_USAGE, { json });
+  let raw;
+  try { raw = fs.readFileSync(path.resolve(from), 'utf8'); } catch { return refuse(`cannot read ${forTerminal(from)}`, TEAM_USAGE, { json }); }
+  let given;
+  try { given = parseJSON(raw); } catch { return refuse(`${forTerminal(from)} does not parse as JSON`, TEAM_USAGE, { json }); }
+  if (!isPlainObject(given)) return refuse(`${forTerminal(from)} should hold one step: a JSON object`, TEAM_USAGE, { json });
+  const extra = Object.keys(given).filter((k) => !STEP_KEYS.includes(k));
+  if (extra.length) return refuse(`the step holds ${extra.map((k) => `\`${forTerminal(k)}\``).join(', ')}, which a step does not take — only ${STEP_KEYS.join(', ')} (source, vetted and addedBy are yad's to set)`, TEAM_USAGE, { json });
+  const step = { ...Object.fromEntries(STEP_KEYS.filter((k) => given[k] !== undefined).map((k) => [k, given[k]])), addedBy: gitName(root) };
+  const problems = stepProblems(step, 'team');
+  if (problems.length) return refuse(`the step cannot be added: ${problems.join('; ')}`, TEAM_USAGE, { json });
+  const words = [['title', step.title], ['purpose', step.purpose], ['impact', step.impact], ['verify', step.verify], ['check', step.check?.run], ...step.commands.map((x, i) => [`command ${i + 1}`, x])];
+  const secret = words.filter(([, w]) => looksSecret(w)).map(([k]) => k);
+  if (secret.length) return refuse(`the step's ${secret.join(', ')} looks like it holds a secret — a step is committed and shown to every member`, 'name where the value comes from instead (an environment variable such as $API_KEY, or the vault the team uses)', { json });
+  const w = workingScript(root);
+  if (w.error) return scriptRefused(w.error, json);
+  const team = Array.isArray(w.doc.team) ? w.doc.team : [];
+  const yadIds = new Set([...yadflowSteps(root).map((x) => x.id), ...(Array.isArray(w.doc.yadflow) ? w.doc.yadflow.map((x) => x?.id) : [])]);
+  if (yadIds.has(step.id)) return refuse(`\`${step.id}\` is one of yadflow's steps — pick another id`, null, { json });
+  if (team.some((x) => x?.id === step.id)) return refuse(`\`${step.id}\` is already one of your team's steps — \`yad local-setup remove ${step.id}\` first to replace it`, null, { json });
+  writeTeam(root, w.doc, [...team, step]);
+  const files = [LOCAL_SETUP_FILE, LOCAL_SETUP_DOC];
+  if (json) return emitJSON({ ok: true, product: root, added: step.id, step, files });
+  ok(`added your team's step ${step.id} to ${LOCAL_SETUP_FILE} and ${LOCAL_SETUP_DOC}`);
+  info(`commit both so every member's agent offers it; until then \`yad local-setup list\` (which reads what is committed) does not show it — undo with \`yad local-setup remove ${step.id}\``);
+  return { added: step.id, step, files };
+}
+
+export function runLocalSetupRemove(root, { ids = [], json = false } = {}) {
+  if (ids.length !== 1) return refuse('yad local-setup remove takes one step id', TEAM_USAGE, { json });
+  const [id] = ids;
+  const w = workingScript(root);
+  if (w.error) return scriptRefused(w.error, json);
+  const team = Array.isArray(w.doc.team) ? w.doc.team : [];
+  if (!team.some((x) => x?.id === id)) {
+    const yad = yadflowSteps(root).some((x) => x.id === id);
+    return refuse(yad ? `\`${forTerminal(id)}\` is one of yadflow's steps, which come with each release — to say no to it on this machine, \`yad local-setup skip ${forTerminal(id)} --reason "<why>"\``
+      : `no team step \`${forTerminal(id)}\` in ${LOCAL_SETUP_FILE}`, null, { json });
+  }
+  writeTeam(root, w.doc, team.filter((x) => x?.id !== id));
+  const files = [LOCAL_SETUP_FILE, LOCAL_SETUP_DOC];
+  if (json) return emitJSON({ ok: true, product: root, removed: id, files });
+  ok(`removed your team's step ${id} from ${LOCAL_SETUP_FILE} and ${LOCAL_SETUP_DOC}`);
+  info('commit both so every member\'s agent stops offering it');
+  return { removed: id, files };
 }
 
 // The warning for a record that cannot be read: it is read as empty, so every answer would be asked again.

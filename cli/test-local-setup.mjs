@@ -650,3 +650,100 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   const { redactTokens } = await import('./scan.mjs');
   assert.equal(redactTokens('a ghp_abcdefghij1234 b'), 'a [redacted] b', 'yad scan still redacts the same way');
 });
+
+// A step file the way an agent writes it, outside the repo.
+const stepFile = (T, step) => { const f = path.join(T, `step-${Math.random().toString(36).slice(2)}.json`); put(f, step); return f; };
+const newStep = (extra = {}) => ({ id: 'env-file', title: 'Make your .env', purpose: 'the API reads its settings from .env', impact: 'adds a .env file you keep to yourself', when: 'required', commands: ['cp .env.example .env'], check: { run: 'test -f .env' }, ...extra });
+const gitIn = (dir, ...a) => execFileSync('git', a, { cwd: dir, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8' });
+
+test('E185 part 3: add writes the team step into the script and the view, by yad\'s own rules; remove takes it out', async () => {
+  const { runLocalSetupAdd, runLocalSetupRemove } = await import('./local-setup.mjs');
+  const dir = committedProduct(undefined, []);
+  gitIn(dir, 'config', 'user.name', 'Rana Ali');
+  const T = tmp();
+  const r = quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep({ person: false })) }));
+  assert.equal(r.value.added, 'env-file', r.lines.join('\n'));
+  const doc = JSON.parse(read(path.join(dir, LOCAL_SETUP_FILE)));
+  const written = doc.team.find((s) => s.id === 'env-file');
+  assert.equal(written.addedBy, 'Rana Ali', 'the git name, never the file\'s');
+  assert.equal(written.source, undefined);
+  assert.equal(written.vetted, undefined);
+  assert.ok(doc.yadflow.length > 0, 'yadflow\'s steps kept');
+  assert.match(read(path.join(dir, LOCAL_SETUP_DOC)), /Make your \.env/);
+  assert.ok(r.lines.some((l) => /commit both/.test(l)));
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, '-c', 'user.email=r@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'team step', '--no-verify');
+  const st = stateOf(dir, 'env-file', { noProgram: true });
+  assert.equal(st.state, 'ask');
+  assert.equal(st.source, 'team');
+  assert.equal(st.vetted, false);
+  const gone = quiet(() => runLocalSetupRemove(dir, { ids: ['env-file'] }));
+  assert.equal(gone.value.removed, 'env-file', gone.lines.join('\n'));
+  assert.ok(!JSON.parse(read(path.join(dir, LOCAL_SETUP_FILE))).team.some((s) => s.id === 'env-file'));
+  assert.doesNotMatch(read(path.join(dir, LOCAL_SETUP_DOC)), /Make your \.env/);
+});
+
+test('E185 part 3: add refuses an id taken, keys yad sets, a bad step, a secret, a broken script — and writes nothing', async () => {
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const dir = committedProduct();
+  const T = tmp();
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  const before = read(file);
+  const refused = (step, re) => {
+    const r = quiet(() => runLocalSetupAdd(dir, { from: typeof step === 'string' ? step : stepFile(T, step) }));
+    assert.equal(r.code, 1, r.lines.join('\n'));
+    assert.ok(r.lines.some((l) => re.test(l)), `${re}: ${r.lines.join(' | ')}`);
+    assert.equal(read(file), before, 'nothing written');
+  };
+  refused(newStep({ id: 'docker' }), /already one of your team's steps/);
+  refused(newStep({ id: 'yadflow-cli' }), /one of yadflow's steps/);
+  refused(newStep({ vetted: true }), /`vetted`, which a step does not take/);
+  refused(newStep({ addedBy: 'Someone' }), /`addedBy`, which a step does not take/);
+  refused(newStep({ commands: [] }), /cannot be added: it has no commands/);
+  refused(newStep({ title: 'x <!-- y' }), /cannot be added/);
+  refused(newStep({ commands: ['export API_KEY=abcd1234efgh'] }), /command 1 looks like it holds a secret/);
+  refused(newStep({ purpose: 'uses ghp_abcdefghij1234' }), /purpose looks like it holds a secret/);
+  refused(path.join(T, 'missing.json'), /cannot read/);
+  put(path.join(T, 'bad.json'), '{ nope');
+  refused(path.join(T, 'bad.json'), /does not parse as JSON/);
+  put(path.join(T, 'list.json'), '[]');
+  refused(path.join(T, 'list.json'), /should hold one step/);
+  assert.equal(quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep({ commands: ['export API_KEY=$API_KEY'] })) })).value.added, 'env-file', 'a name for where it comes from is fine');
+  // A script that does not parse is never replaced.
+  put(file, '{ broken');
+  const r = quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep({ id: 'other' })) }));
+  assert.equal(r.code, 1);
+  assert.ok(r.lines.some((l) => /does not parse, so it was not changed/.test(l)), r.lines.join(' | '));
+  assert.equal(read(file), '{ broken');
+});
+
+test('E185 part 3: remove refuses yadflow\'s steps and ids that are not there', async () => {
+  const { runLocalSetupRemove } = await import('./local-setup.mjs');
+  const dir = committedProduct();
+  const r1 = quiet(() => runLocalSetupRemove(dir, { ids: ['yadflow-cli'] }));
+  assert.equal(r1.code, 1);
+  assert.ok(r1.lines.some((l) => /one of yadflow's steps.*skip yadflow-cli/.test(l)), r1.lines.join(' | '));
+  const r2 = quiet(() => runLocalSetupRemove(dir, { ids: ['nope'] }));
+  assert.ok(r2.lines.some((l) => /no team step `nope`/.test(l)));
+  assert.equal(quiet(() => runLocalSetupRemove(dir, { ids: [] })).code, 1);
+});
+
+test('E185 part 3: add and remove from the CLI, in JSON; on-request for an agent; refused outside a Product', async () => {
+  const { classify } = await import('./agent-rules.mjs');
+  assert.equal(classify(['local-setup', 'add']), 'on-request');
+  assert.equal(classify(['local-setup', 'remove']), 'on-request');
+  const dir = committedProduct();
+  const T = tmp();
+  const add = yad(T, dir, ['local-setup', 'add', '--from', stepFile(T, newStep()), '--json']);
+  assert.equal(add.code, 0, add.err + add.out);
+  assert.equal(add.json.command, 'local-setup add');
+  assert.equal(add.json.added, 'env-file');
+  const rm = yad(T, dir, ['local-setup', 'remove', 'env-file', '--json']);
+  assert.equal(rm.code, 0, rm.err + rm.out);
+  assert.equal(rm.json.removed, 'env-file');
+  assert.notEqual(yad(T, dir, ['local-setup', 'add', 'words']).code, 0);
+  assert.notEqual(yad(T, dir, ['local-setup', 'list', '--from', 'x.json']).code, 0);
+  const plain = tmp();
+  assert.notEqual(yad(T, plain, ['local-setup', 'add', '--from', stepFile(T, newStep())]).code, 0);
+  assert.equal(fs.existsSync(path.join(plain, LOCAL_SETUP_FILE)), false);
+});

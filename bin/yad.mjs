@@ -296,6 +296,10 @@ ${c.bold('Where am I / what next')}
   yad local-setup skip <id> --reason <text>   Record that you said no to a step; it is asked again
                                        only when the step changes. Both write inside .git, never a file
                                        anyone commits
+  yad local-setup add --from <step.json>   Add one of your team's steps (a JSON object: id, title,
+                                       purpose, impact, when, commands, and check, verify, person if
+                                       wanted) to the script and LOCAL-SETUP.md; commit both
+  yad local-setup remove <id>          Take one of your team's steps out again
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -730,7 +734,7 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove', 'connect'], default: 'list' },
-  'local-setup': { known: ['list', 'done', 'skip'], default: 'list' },
+  'local-setup': { known: ['list', 'done', 'skip', 'add', 'remove'], default: 'list' },
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
@@ -768,6 +772,8 @@ function writesProduct(cmd, o) {
   if (cmd === 'brain') return action === 'build' || (action === 'view' && !!o.html);
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
+  // `local-setup add|remove` write the Product's committed script (E185 part 3).
+  if (cmd === 'local-setup') return action === 'add' || action === 'remove';
   // `brand init` writes the Product's .sdlc/brand.json: only into a Product found (review 1).
   if (cmd === 'brand') return action === 'init';
   if (cmd === 'dial') return o.to !== undefined;
@@ -1059,14 +1065,18 @@ async function main() {
       // E185. `list` reads the Product's committed script and runs yad's own checks for this machine. `done` and
       // `skip` write only this machine's answers, inside git's own folder (cli/local-setup-record.mjs).
       const [, action = 'list', ...words] = o._;
-      const usage = 'usage: yad local-setup [list] [--json] | done <id>… | skip <id> --reason "<why>"   [--dir <the Product>]';
-      if (!['list', 'done', 'skip'].includes(action)) { refuse(`unknown local-setup action: ${action} (list, done, skip)`, usage); break; }
+      const usage = 'usage: yad local-setup [list] [--json] | done <id>… | skip <id> --reason "<why>" | add --from <step.json> | remove <id>   [--dir <the Product>]';
+      if (!['list', 'done', 'skip', 'add', 'remove'].includes(action)) { refuse(`unknown local-setup action: ${action} (list, done, skip, add, remove)`, usage); break; }
+      if (action === 'add' && words.length) { refuse(`yad local-setup add takes the step from --from <step.json>, not words (got: ${words.join(' ')})`, usage); break; }
+      if (action !== 'add' && o.from !== undefined) { refuse('--from goes with yad local-setup add', usage); break; }
       if (action === 'list' && words.length) { refuse(`yad local-setup list takes no more words (got: ${words.join(' ')})`, usage); break; }
       if (action !== 'skip' && o.reason !== undefined) { refuse(`--reason goes with yad local-setup skip`, usage); break; }
       if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — the local setup script is the Product's .sdlc/local-setup.json`, 'run it from the Product, or from a repo it registers'); break; }
       result = action === 'list' ? commands.runLocalSetupList(o.dir, { json: o.json })
         : action === 'done' ? commands.runLocalSetupDone(o.dir, { ids: words, json: o.json })
-          : commands.runLocalSetupSkip(o.dir, { ids: words, reason: o.reason, json: o.json });
+          : action === 'skip' ? commands.runLocalSetupSkip(o.dir, { ids: words, reason: o.reason, json: o.json })
+            : action === 'add' ? commands.runLocalSetupAdd(o.dir, { from: o.from, json: o.json })
+              : commands.runLocalSetupRemove(o.dir, { ids: words, json: o.json });
       break;
     }
     case 'detect': {

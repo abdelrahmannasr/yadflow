@@ -97,6 +97,10 @@ export const COMMAND_CLASS = {
   'local-setup done': { class: 'local-write' },
   'local-setup list': { class: 'read' },
   'local-setup skip': { class: 'on-request' },
+  // E185 part 3: add and remove write the team's steps into the committed script, which reaches every member's
+  // agent — so only when the person asks, as `toolbox add`.
+  'local-setup add': { class: 'on-request' },
+  'local-setup remove': { class: 'on-request' },
   'skill list': { class: 'read' },
   'skill recommend': { class: 'read' },
   'skill bind': { class: 'on-request' },
