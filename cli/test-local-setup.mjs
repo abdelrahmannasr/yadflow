@@ -654,6 +654,7 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   for (const s of ['mytool --api-key=abcdefgh12345', 'mytool --client-secret=abcdefgh12345', 'aws --secret-access-key=abcdefgh12345', 'export DB_PASSWORD=p@ss&w0rd!xyz', 'export DB_PASSWORD=ab=cdefghijklmn', 'export PASSWORD="p&ssword123"']) assert.equal(looksSecret(s), true, s);
   // Review 4: a quoted value is read whole; an empty value before the next name is not one.
   // Review 5: a quoted & value is real; a prompt's closing quote opens nothing.
+  for (const s of ['export DB_PASSWORD=";x9Kq2mZp7"', "DB_PASSWORD=';semiStart99'", 'password: "|Ab9xQ2mZ"']) assert.equal(looksSecret(s), true, s);
   for (const s of ["password='&rmd!xyz9'", 'password="&abcdefghij"', 'export DB_PASSWORD="my password here"']) assert.equal(looksSecret(s), true, s);
   for (const s of ['read -sp "Password: " PW && export PW && echo "saved it"', 'read -p "Token: " t; echo "done now"', 'echo "API token: " && cat ~/.tok && echo "ok then"', 'echo "Password:"; read -s PW; echo "done ok"', 'curl "https://h/api?token=&verbose&page=2"']) assert.equal(looksSecret(s), false, s);
   for (const s of ['export TOKEN="abc,defghijk"', 'export API_KEY=\'abcd;efghijkl\'', 'export DB_PASSWORD="p@ss,word123"']) assert.equal(looksSecret(s), true, s);
