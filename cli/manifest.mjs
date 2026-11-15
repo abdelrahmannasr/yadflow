@@ -65,6 +65,8 @@ export const SKILLS = [
   'yad-stub',
   'yad-issues',
   'yad-scan',
+  // E184: fills .sdlc/brand.json from the Product's design system, so every page yad makes wears it.
+  'yad-brand',
 ];
 
 // Old skill names. `check`/`update` migrate any install still carrying one: remove the old copy,

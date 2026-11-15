@@ -36,6 +36,7 @@ import { localSetupWaiting } from './local-setup.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
 import { previewPattern, PREVIEW_KEY } from './preview.mjs';
+import { readBrand, contrastProblems, brandPath, sourceFingerprint, BRAND_FILE } from './brand.mjs';
 
 // The design, testing and learning rows (E165 follow-up). The files are the team's, committed: `source` says
 // what was found on the machine of whoever refreshed last, so a row says what was RECORDED, and the refresh
@@ -485,6 +486,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
   // a push to the `yad/wip/*` branches start the team's own CI?
   if (exists(productPath)) captureChecks(root, checks, readJSON(productPath, null));
   if (exists(productPath)) activityChecks(root, checks, readJSON(productPath, null));
+  if (exists(productPath)) brandChecks(root, checks);
   docsWorkflowChecks(root, checks);
   if (exists(productPath)) lineEndingChecks(root, checks);
 
@@ -3022,6 +3024,23 @@ export function captureChecks(root, checks, cfg) {
     check(checks, 'capture', 'project', 'warn', `${noisy.join(', ')} ${noisy.length > 1 ? 'run' : 'runs'} on a push to ANY branch, so every \`yad capture\` push to yad/wip/* starts ${noisy.length > 1 ? 'them' : 'it'}`,
       'add `branches-ignore: ["yad/wip/**"]` under its `push:` trigger (yadflow\'s own workflows already do)');
   }
+}
+
+// The brand (E184): which look the pages yad makes wear. No file is fine (yadflow's look); a file that cannot be
+// used, or one older than the DESIGN.md it was made from, is said — a page never breaks over it.
+export function brandChecks(root, checks) {
+  const r = readBrand(root);
+  if (r.origin === 'yadflow' && !r.problems.length) { check(checks, 'brand', 'project', 'ok', `no ${BRAND_FILE} — the pages yad makes wear yadflow's look`, 'run `yad brand init` to make them wear the Product\'s own design system'); return; }
+  if (r.problems.length) { check(checks, 'brand', 'project', 'warn', `${BRAND_FILE} cannot be used, so pages wear yadflow's look: ${r.problems[0]}${r.problems.length > 1 ? ` (and ${r.problems.length - 1} more)` : ''}`, 'see them all with `yad brand check`'); return; }
+  let stale = null;
+  if (r.brand.source && r.brand.sourceHash) {
+    const src = brandPath(root, r.brand.source);
+    try { if (src && sourceFingerprint(fs.readFileSync(src, 'utf8')) !== r.brand.sourceHash) stale = r.brand.source; } catch { /* unreadable: said by yad brand check */ }
+  }
+  if (stale) { check(checks, 'brand', 'project', 'warn', `${stale} changed since ${BRAND_FILE} was made`, 'run `yad brand init --force`, or update the brand file by hand'); return; }
+  const hard = contrastProblems(r.brand);
+  if (hard.length) { check(checks, 'brand', 'project', 'warn', `${BRAND_FILE}: ${hard[0]}`, 'pick a darker text or lighter background; `yad brand check` lists every pair'); return; }
+  check(checks, 'brand', 'project', 'ok', `the pages yad makes wear ${r.brand.name}'s brand (${BRAND_FILE})`);
 }
 
 // The activity half (E178): off says so; on says whether the Product's own script and entries are wired, and

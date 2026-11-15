@@ -21,6 +21,7 @@ import { gatherMap, mapModel, digestOf } from './map.mjs';
 import { TYPES, startPageServer, inlineSnapshot, writeOwnFile, trackedRisk } from './local-page.mjs';
 import { saveReport, listReports, SIDE_SUFFIX } from './reports-dir.mjs';
 import { openUrl } from './report.mjs';
+import { brandForPage } from './brand.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VIEW_DIR = path.join(HERE, 'map', 'view');
@@ -47,8 +48,9 @@ export function buildMap(root, { anonymous = false, fetch = false, env = process
   return { model, problems: g.problems };
 }
 
-export function mapSnapshot(model) {
-  return inlineSnapshot({ shell: readView('index.html'), scripts: [readView('app.js')], css: readView('style.css'), dataId: 'yad-map-data', data: model });
+// `brandCss`: the Product's brand (E184), added after the page's own CSS so it wins — inside the hashed style.
+export function mapSnapshot(model, { brandCss = '' } = {}) {
+  return inlineSnapshot({ shell: readView('index.html'), scripts: [readView('app.js')], css: `${readView('style.css')}\n${brandCss}`, dataId: 'yad-map-data', data: model });
 }
 
 // The live stream: the Product's epics/ and .sdlc/, and each code repo's refs, watched while a page is open.
@@ -118,7 +120,7 @@ export function startMapServer(root, { anonymous = false, live = false, env = pr
   const routes = (token) => new Map([
     ['/', () => ({ type: TYPES.html, body: readView('index.html').replaceAll('__TOKEN__', token) })],
     ['/app.js', () => ({ type: TYPES.js, body: readView('app.js') })],
-    ['/style.css', () => ({ type: TYPES.css, body: readView('style.css') })],
+    ['/style.css', () => ({ type: TYPES.css, body: `${readView('style.css')}\n${brandForPage(root, 'map').css}` })],
     ['/map.json', () => ({ type: TYPES.json, body: JSON.stringify(buildMap(root, { anonymous, env, runner }).model) })],
   ]);
   return startPageServer({ routes, stream, host, port, failText: 'the map could not be read' }).then((srv) => ({ ...srv, watchable: stream ? stream.canWatch() : null }));
@@ -138,7 +140,9 @@ export async function runMap(root, { args = [], html = false, open = false, live
   if (html) {
     const own = args.length === 1;
     let page;
-    try { page = mapSnapshot(model); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
+    const brand = brandForPage(root, 'map');
+    for (const p of brand.problems) warn(`the brand file cannot be used, so the page wears yadflow's look: ${forTerminal(p)}`);
+    try { page = mapSnapshot(model, { brandCss: brand.css }); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
     let file, riskLine = null;
     if (own) {
       file = path.resolve(args[0]);

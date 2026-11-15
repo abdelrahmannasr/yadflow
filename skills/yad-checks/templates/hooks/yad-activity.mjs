@@ -46,7 +46,7 @@ export const MAX_PATHS = 20;
 // hook imports nothing of yad's. A test holds the two lists equal.
 export const YAD_COMMANDS = Object.freeze([
   'assign', 'brain build', 'brain file', 'brain query', 'brain status', 'brain story', 'brain view', 'build done', 'build merged',
-  'build ship', 'build start', 'build step', 'build sync', 'build trust', 'capture', 'check', 'checkpoint',
+  'brand check', 'brand init', 'brand show', 'build ship', 'build start', 'build step', 'build sync', 'build trust', 'capture', 'check', 'checkpoint',
   'ci check', 'claims', 'codeowners check', 'commit', 'defer', 'detect', 'dial', 'docs build', 'docs deploy',
   'docs list', 'docs sync', 'doctor', 'epic new', 'fold', 'foundation new', 'foundation publish',
   'foundation status', 'gate advance', 'gate approve', 'gate ci', 'gate comment', 'gate comments',

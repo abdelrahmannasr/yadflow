@@ -17,7 +17,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { writePlain } from './brain.mjs';
 
-export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 export const BASE_HEADERS = Object.freeze({
   'Content-Security-Policy': CSP,
   'X-Content-Type-Options': 'nosniff',
@@ -99,7 +99,7 @@ export function inlineSnapshot({ shell, scripts, css, dataId, data }) {
     "default-src 'none'",
     `script-src ${scripts.map((s) => `'sha256-${sha256b64(s)}'`).join(' ')}`,
     `style-src 'sha256-${sha256b64(css)}'`,
-    "img-src data:", "base-uri 'none'", "form-action 'none'",
+    "img-src data:", "font-src data:", "base-uri 'none'", "form-action 'none'",
   ].join('; ');
   // The key placeholder goes before anything is spliced in: the data's own names may hold the same text.
   const page = shell.replaceAll('__TOKEN__', '');

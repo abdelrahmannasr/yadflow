@@ -189,6 +189,10 @@ export const COMMAND_CLASS = {
   'reports list': { class: 'read' },
   'reports open': { class: 'local-write' },
   'reports prune': { class: 'read', flags: { apply: 'on-request' } },
+  // E184: `brand` and `brand check` read; `brand init` writes the Product's brand file (committed by the person).
+  'brand show': { class: 'read' },
+  'brand check': { class: 'read' },
+  'brand init': { class: 'local-write' },
   'issues list': { class: 'read' },
   // Adds labels on the team's repos: asked for, never a side effect.
   'issues labels': { class: 'on-request' },
@@ -265,7 +269,7 @@ const stronger = (a, b) => (STRENGTH.indexOf(b) > STRENGTH.indexOf(a) ? b : a);
 export const DEFAULT_ACTION = {
   skill: 'list', history: 'list', repo: 'list', 'risk-map': 'check', codeowners: 'check', docs: 'list',
   toolbox: 'list', member: 'list', issues: 'list', worktree: 'list', signing: 'check', ci: 'check', brain: 'status',
-  reports: 'list', 'local-setup': 'list',
+  reports: 'list', 'local-setup': 'list', brand: 'show',
 };
 
 // The entry for a command line's words: `<cmd> <action>` when it has one, else `<cmd>` (or its default action).
@@ -449,6 +453,11 @@ export const SHIPPED_ALLOW_LISTS = Object.freeze([
   ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'local-setup list', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'reports list', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
+    'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
+  // next release (E184, #553): `brand show`, `brand check`
+  ['guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'local-setup list', 'skill list', 'skill recommend', 'foundation status', 'status', 'next',
+    'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
+    'worktree list', 'reports list', 'brand show', 'brand check', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
 ].map((list) => Object.freeze(list)));
 

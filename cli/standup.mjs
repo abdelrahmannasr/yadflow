@@ -33,6 +33,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, warn, fail, hand, note, readJSON, forTerminal } from './lib.mjs';
+import { brandForPage } from './brand.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRoot, loadLedger, isPassed, stepStatus, authorStepFor, acceptedHashes, gatePredicate, gateRuleFor, gateRuleSum, optionalStepsFor, readFrontmatter, legacyLogins } from './epic-state.mjs';
 import { isSolo, requireEngagement } from './gate.mjs';
@@ -679,7 +680,12 @@ export function renderMarkdown(model) {
   return L.join('\n');
 }
 
-export function renderHtml(model) {
+// The page with the Product's brand (E184) added after its own CSS, so the brand's colours and fonts win.
+export function renderHtml(model, { brandCss = '' } = {}) {
+  const html = renderHtmlPage(model);
+  return brandCss ? html.replace('</style>', () => `\n${brandCss}\n</style>`) : html;
+}
+function renderHtmlPage(model) {
   const list = (items, empty) => (items.length ? `<ul>${items.map((it) => `<li>${esc(it.text)}</li>`).join('')}</ul>` : `<p class="none">${esc(empty)}</p>`);
   const block = (b, title, sub = '') => `<section class="member"><h2>${esc(title)}${sub ? ` <span>${esc(sub)}</span>` : ''}</h2>${SECTIONS.map(([k, label]) => `<h3>${label}</h3>${list(b[k], emptyLine(model))}`).join('')}${b.issues ? `<h3>Assigned items</h3>${b.issues.length ? `<ul>${b.issues.map((it) => `<li>${it.url ? `<a href="${esc(it.url)}">${esc(it.ref)}</a>` : esc(it.ref)} ${esc(it.title)} <span class="none">(${esc(itemMeta(it))})</span></li>`).join('')}</ul>` : `<p class="none">${esc(noItems(model))}</p>`}` : ''}</section>`;
   const missing = gapLines(model);
@@ -739,7 +745,7 @@ export async function runStandup(root, { now = Date.now(), tz = 'UTC', since = n
   if (who) model = onlyMember(model, who);
   if (format) {
     // E180: with no --out, saved in the local reports folder, named by who it covers and how much waits.
-    const saved = writeOrSave(root, { out, kind: 'standup', scope: who || 'team', state: `${waitingCount(model)} waiting`, ext: format, content: format === 'md' ? renderMarkdown(model) : renderHtml(model), command: 'standup', env });
+    const saved = writeOrSave(root, { out, kind: 'standup', scope: who || 'team', state: `${waitingCount(model)} waiting`, ext: format, content: format === 'md' ? renderMarkdown(model) : renderHtml(model, { brandCss: brandForPage(root, 'standup').css }), command: 'standup', env });
     if (saved.problem) return refuse(saved.problem);
     for (const w of saved.warnings) warn(w);
     if (json) note(`wrote ${format.toUpperCase()} report → ${saved.file}`);

@@ -30,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, warn, fail, readJSON, run, emitJSON, collectWarning } from './lib.mjs';
+import { brandForPage } from './brand.mjs';
 import { writeOrSave } from './reports-dir.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
@@ -277,7 +278,12 @@ const rangeLabel = (w) => (!w.since && !w.until ? 'all time' : `${w.since || '�
 
 // A single self-contained HTML file — inline CSS + inline SVG bars, no build step, no external assets —
 // so the caller can drop it anywhere and open it in a browser.
-export function renderHtml(model, today = '') {
+// The page with the Product's brand (E184) added after its own CSS, so the brand's colours and fonts win.
+export function renderHtml(model, today = '', { brandCss = '' } = {}) {
+  const html = renderHtmlPage(model, today);
+  return brandCss ? html.replace('</style>', () => `\n${brandCss}\n</style>`) : html;
+}
+function renderHtmlPage(model, today = '') {
   const flagChip = (f) => `<span class="flag flag-${esc(f)}">${esc(f)}</span>`;
   const bar = (m) => {
     const max = Math.max(1, ...model.members.map((x) => x.total));
@@ -391,7 +397,7 @@ export function runUsage(root, { out, since, until, all, member, format, repos =
   const model = buildModel(root, { since, until, repos, member });
 
   if (json) {
-    if (out) { writeReport(out, fmt === 'json' ? `${JSON.stringify(model, null, 2)}\n` : fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today)); note(`wrote ${fmt.toUpperCase()} report → ${out}`); }
+    if (out) { writeReport(out, fmt === 'json' ? `${JSON.stringify(model, null, 2)}\n` : fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today, { brandCss: brandForPage(root, 'usage').css })); note(`wrote ${fmt.toUpperCase()} report → ${out}`); }
     emitJSON({ ...model, out: out || null });
     return model;
   }
@@ -400,7 +406,7 @@ export function runUsage(root, { out, since, until, all, member, format, repos =
     if (out) { writeReport(out, s + '\n'); note(`wrote JSON → ${out}`); } else { log(s); } // stdout stays pure JSON
     return model;
   }
-  const content = fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today);
+  const content = fmt === 'md' ? renderMarkdown(model, today) : renderHtml(model, today, { brandCss: brandForPage(root, 'usage').css });
   // E180: with no --out, the report is saved in the local reports folder beside the Product, named by
   // what it shows — never in the folder yad ran from, where it was easy to commit by mistake.
   const saved = writeOrSave(root, { out, kind: 'usage', scope: member || 'team', state: rangeLabel(model.window), ext: fmt === 'md' ? 'md' : 'html', content, command: 'usage' });

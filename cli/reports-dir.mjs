@@ -32,6 +32,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readJSONStrict, writeJSON } from './lib.mjs';
+import { brandForPage } from './brand.mjs';
 
 export const REPORTS_SUFFIX = '--reports';
 export const CATALOG_FILE = 'catalog.json';
@@ -228,7 +229,7 @@ const madeAt = (iso) => { const d = new Date(iso); return Number.isFinite(d.getT
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 // The catalog page. Static: no script, no network; links are relative, so the folder can be moved.
-export function renderIndex(entries) {
+export function renderIndex(entries, { brandCss = '' } = {}) {
   const kinds = [...new Set(entries.map((e) => e.kind))].sort((a, b) => (KINDS[a] || a).localeCompare(KINDS[b] || b));
   const section = (k) => {
     const rows = entries.filter((e) => e.kind === k).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -237,7 +238,7 @@ export function renderIndex(entries) {
   };
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
 <title>Saved reports</title>
 <style>
 :root{--bg:#fbfbfd;--ink:#1d2333;--muted:#667089;--line:#e3e6ee;--tag:#eef1f8;--link:#2457c5}
@@ -248,6 +249,7 @@ h2{font-size:15px;margin:26px 0 8px}h2 small{color:var(--muted);font-weight:500}
 table{border-collapse:collapse;width:100%;display:block;overflow-x:auto}th,td{text-align:left;padding:6px 10px;border-top:1px solid var(--line);white-space:nowrap}
 th{color:var(--muted);font-weight:600;font-size:12px;border-top:0}a{color:var(--link)}
 .tag{background:var(--tag);border-radius:4px;padding:1px 6px;font-size:12px;color:var(--muted)}code{font-size:12px}
+${brandCss}
 </style></head><body><main>
 <h1>Saved reports</h1>
 <p>Each report shows the state of the work when it was made. They are kept on this machine only and never committed. Run <code>yad reports list</code> to see which ones are stale.</p>
@@ -287,7 +289,7 @@ export function saveReport(root, { kind, scope, state, ext, content, command = n
       const entry = { file: `${kind}/${name}`, kind, scope: String(scope ?? ''), state: String(state ?? ''), createdAt: at.toISOString(), ...productAt(root, runner), anonymous: !!anonymous, command };
       const entries = [...cat.entries, entry];
       writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries });
-      writeNew(path.join(dir, INDEX_FILE), renderIndex(entries));
+      writeNew(path.join(dir, INDEX_FILE), renderIndex(entries, { brandCss: brandForPage(root, 'catalog').css }));
       return {};
     }, { waitMs: lockWaitMs });
     if (done.problem) warnings.push(done.held ? `the report was saved at ${file}, but not added to the catalog: ${done.problem}. It is in the folder; open it by that path` : done.problem);
@@ -370,7 +372,7 @@ export function pruneReports(root, { days = null, apply = false, now = Date.now(
       if (sst && (sst.isFile() || sst.isSymbolicLink())) fs.rmSync(side, { force: true });
     }
     writeJSON(path.join(dir, CATALOG_FILE), { version: CATALOG_VERSION, entries: p.kept });
-    writeNew(path.join(dir, INDEX_FILE), renderIndex(p.kept));
+    writeNew(path.join(dir, INDEX_FILE), renderIndex(p.kept, { brandCss: brandForPage(root, 'catalog').css }));
     return p;
   };
   let r;

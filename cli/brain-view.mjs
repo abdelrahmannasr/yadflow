@@ -30,6 +30,7 @@ import { CSP, TYPES, startPageServer, inlineSnapshot, scriptSafeJSON, writeOwnFi
 import { saveReport } from './reports-dir.mjs';
 import { VENDORED } from './brain-vendor.mjs';
 import { openUrl } from './report.mjs';
+import { brandForPage } from './brand.mjs';
 export { CSP, scriptSafeJSON };
 import { activityIndex, activitySources, follow, matchEvent, planOf, readBacklog } from './brain-activity.mjs';
 import { activityWanted } from './plan.mjs';
@@ -255,7 +256,7 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
   const routes = (token) => new Map([
     ['/', () => ({ type: TYPES.html, body: readView(page.html).replaceAll('__TOKEN__', token) })],
     ['/app.js', () => ({ type: TYPES.js, body: readView(page.js) })],
-    ['/style.css', () => ({ type: TYPES.css, body: readView(page.css) })],
+    ['/style.css', () => ({ type: TYPES.css, body: `${readView(page.css)}\n${brandForPage(root, live ? 'live' : 'brain').css}` })],
     ['/graph.json', () => {
       const m = loadModel(root, runner, { live });
       return m.model
@@ -272,10 +273,10 @@ export function startBrainServer(root, { runner = run, host = '127.0.0.1', port 
 
 // One HTML file with everything inline, and a CSP that allows exactly the inline blocks it holds (by hash)
 // and no network at all (cli/local-page.mjs).
-export function snapshotHTML(model, { live = false } = {}) {
+export function snapshotHTML(model, { live = false, brandCss = '' } = {}) {
   const page = live ? LIVE_PAGE : PAGE;
   const scripts = [...VENDORED.map((v) => readVendor(v.file).toString('utf8')), readView(page.js)];
-  return inlineSnapshot({ shell: readView(page.html), scripts, css: readView(page.css), dataId: 'yad-brain-data', data: model });
+  return inlineSnapshot({ shell: readView(page.html), scripts, css: `${readView(page.css)}\n${brandCss}`, dataId: 'yad-brain-data', data: model });
 }
 
 // ---- the command ---------------------------------------------------------------------------------
@@ -297,7 +298,7 @@ export async function runBrainView(root, { args = [], html = false, open = false
     // E178: `--live` with `--html` is a REPLAY file — the recorded activity embedded, played back offline.
     if (live) m.model.replay = recordedReplay(root, m.model, runner);
     let page;
-    try { page = snapshotHTML(m.model, { live }); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
+    try { page = snapshotHTML(m.model, { live, brandCss: brandForPage(root, live ? 'live' : 'brain').css }); } catch (e) { return refuse(`cannot build the page: ${e.message}`, null, { json }); }
     const saveWarnings = [];
     if (own) {
       const problem = writeOwnFile(file, page);

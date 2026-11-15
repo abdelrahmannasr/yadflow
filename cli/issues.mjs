@@ -10,6 +10,7 @@
 // Status is worked out from facts (open or closed, and later the linked epic). A `status:` label is never read.
 import fs from 'node:fs';
 import { run, readJSON, forTerminal, c, log, fail, hand, info, note, warn } from './lib.mjs';
+import { brandForPage } from './brand.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { platformLogin } from './platform.mjs';
 import { readMembers, productIdentity } from './members.mjs';
@@ -321,7 +322,12 @@ const options = (values) => values.map((v) => `<option value="${esc(lower(v))}">
 
 // One self-contained file. The table is written here, escaped, and reads with scripting off. The script only
 // hides and re-orders those rows using their data attributes; it never builds markup from an item's text.
-export function renderHtml(m, rules = labelRules(null)) {
+// The page with the Product's brand (E184) added after its own CSS, so the brand's colours and fonts win.
+export function renderHtml(m, rules = labelRules(null), { brandCss = '' } = {}) {
+  const html = renderHtmlPage(m, rules);
+  return brandCss ? html.replace('</style>', () => `\n${brandCss}\n</style>`) : html;
+}
+function renderHtmlPage(m, rules = labelRules(null)) {
   const people = [...new Set(m.items.flatMap((i) => i.assignees.map((a) => a.member || a.login)))].sort();
   // #514: every other label seen, once each (the first spelling met), for the Label filter.
   const labelNames = [...new Map(m.items.flatMap((i) => othersOf(i, rules)).map((l) => [lower(l), l]).reverse()).values()].sort((a, b) => lower(a).localeCompare(lower(b)));
@@ -342,7 +348,7 @@ export function renderHtml(m, rules = labelRules(null)) {
   const select = (id, label, opts) => `<label>${label}<select id="${id}"><option value="">All</option>${opts}</select></label>`;
   const missing = gaps(m);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:">
 <title>Issues and work items</title><style>
 :root{--bg:#fff;--fg:#1d2026;--dim:#5d6470;--card:#f6f7f9;--line:#e1e4ea;--link:#0b57d0;--warn:#8a4b00;--p0:#b3261e;--p1:#b3541e}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8ee;--dim:#9aa0ad;--card:#181b22;--line:#2b303a;--link:#8ab4f8;--warn:#f0b35a;--p0:#f28b82;--p1:#f6ae74}}
@@ -437,7 +443,7 @@ export async function runIssuesList(root, { priority = null, type = null, status
   if (format) {
     // E180: with no --out, saved in the local reports folder, named by the repos it covers and its count.
     const scope = repo ? list(repo).join(' ') : 'all repos';
-    const saved = writeOrSave(root, { out, kind: 'issues', scope, state: `${items.length} items`, ext: format, content: format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules), command: 'issues list', env });
+    const saved = writeOrSave(root, { out, kind: 'issues', scope, state: `${items.length} items`, ext: format, content: format === 'md' ? renderMarkdown(model, rules) : renderHtml(model, rules, { brandCss: brandForPage(root, 'issues').css }), command: 'issues list', env });
     if (saved.problem) return refuse(saved.problem);
     for (const w of saved.warnings) warn(w);
     const dest = saved.file;

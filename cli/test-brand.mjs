@@ -1,0 +1,348 @@
+// E184 — the Product's brand on every page yadflow makes. Every brand, name and file here is invented.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+if (process.env.NODE_TEST_CONTEXT) {
+  const write = process.stdout.write;
+  for (const k of ['log', 'info']) {
+    const orig = console[k];
+    console[k] = (...a) => (process.stdout.write === write ? console.error(...a) : orig(...a));
+  }
+}
+process.env.YAD_NO_UPDATE_NOTIFIER = '1';
+
+const { readBrand, checkBrand, brandCss, brandAssets, brandForPage, contrast, contrastProblems, linearRgb, COLOR_RE, BRAND_FILE, YADFLOW_BRAND, PAGE_MAPS, DATA_IMAGE_RE } = await import('./brand.mjs');
+const { runBrand, readFrontMatter, readRootVars, rolesFrom } = await import('./brand-cmd.mjs');
+const { classify } = await import('./agent-rules.mjs');
+const { endJSON } = await import('./lib.mjs');
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const YAD = path.join(HERE, '..', 'bin', 'yad.mjs');
+const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-brand-')));
+const put = (f, d) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof d === 'string' || Buffer.isBuffer(d) ? d : JSON.stringify(d, null, 2)); };
+const done = (...d) => d.forEach((x) => fs.rmSync(x, { recursive: true, force: true }));
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#2a7"/></svg>';
+async function captured(fn) {
+  const out = []; const orig = console.log;
+  console.log = (s) => out.push(String(s));
+  try { await fn(); } finally { console.log = orig; endJSON(); }
+  return out.length ? JSON.parse(out.join('\n')) : null;
+}
+
+// A Product with a YAML front-matter design system (the shape the Impeccable DESIGN.md spec uses).
+const YAML_DESIGN = `---
+name: Fernleaf (fernleaf.example)
+description: invented
+colors:
+  primary: "#2B7358"
+  accent: "#E4A036"
+  ink: "#101828"
+  ink-secondary: "#667085"
+  bg: "#F4F6FF"
+  surface: "#FFFFFF"
+  border: "#D0D5DD"
+  dark-bg: "#0D291F"
+  dark-surface: "#1A3D2E"
+  dark-ink: "#F2F4F7"
+  dark-ink-secondary: "#D3DBE9"
+  dark-border: "#2B7358"
+  dark-primary-strong: "#94CBBA"
+typography:
+  display:
+    fontFamily: "Fernsans, sans-serif"
+    fontSize: "28px"
+  body:
+    fontFamily: "Fernsans, sans-serif"
+---
+
+# Fernleaf design system
+`;
+// A Product with a CSS :root block in OKLCH (the shape a hand-written DESIGN.md often has).
+const CSS_DESIGN = `# Design
+
+The visual system for **Quillmark**.
+
+\`\`\`css
+:root {
+  --bg:            oklch(1.000 0.000 0);      /* page */
+  --surface:       oklch(0.975 0.002 75);
+  --border:        oklch(0.912 0.003 75);
+  --ink:           oklch(0.205 0.008 70);
+  --muted:         oklch(0.460 0.006 70);
+  --gold:          oklch(0.680 0.135 62);
+  --action:        oklch(0.220 0.010 70);
+}
+\`\`\`
+`;
+
+function product({ design = null, files = {} } = {}) {
+  const ws = tmp();
+  const root = path.join(ws, 'product');
+  put(path.join(root, '.sdlc', 'product.json'), { name: 'Invented' });
+  if (design) put(path.join(root, 'DESIGN.md'), design);
+  for (const [rel, data] of Object.entries(files)) put(path.join(root, rel), data);
+  return { ws, root };
+}
+
+test('no brand file: every page wears yadflow\'s look, with its mark, and nothing is said wrong', () => {
+  const { ws, root } = product();
+  try {
+    const r = readBrand(root);
+    assert.equal(r.origin, 'yadflow');
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.brand.colors.light.primary, '#6316db');
+    const p = brandForPage(root, 'standup');
+    assert.match(p.css, /--brand-primary:#6316db/);
+    assert.match(p.css, /--brand-mark:url\("data:image\/svg\+xml;base64,/, 'yadflow\'s mark');
+    assert.match(p.css, /body h1::before/);
+  } finally { done(ws); }
+});
+
+test('a colour must be one yadflow can write safely: nothing can end the CSS it goes into', () => {
+  for (const ok of ['#fff', '#A1b2C3', '#11223344', 'oklch(0.68 0.135 62)', 'oklch(68% 0.1 62deg)', 'rgb(1, 2, 3)', 'hsl(210 50% 40% / .5)', 'oklab(0.5 0.1 -0.1)']) assert.ok(COLOR_RE.test(ok), ok);
+  for (const bad of ['red', '#ggg', 'url(x)', '#fff;}body{display:none', 'oklch(0.5 0.1 62);x', 'expression(alert(1))', 'rgb(1,2,3)}', 'var(--x)', '"#fff"']) assert.equal(COLOR_RE.test(bad), false, bad);
+});
+
+test('the brand file is checked: paths stay inside, types and sizes, families, version', () => {
+  const { ws, root } = product({ files: { 'design/mark.svg': SVG, 'design/big.png': Buffer.alloc(600 * 1024), 'design/x.gif': 'gif' } });
+  try {
+    fs.writeFileSync(path.join(ws, 'outside.svg'), SVG);
+    fs.symlinkSync(path.join(ws, 'outside.svg'), path.join(root, 'design', 'link.svg'));
+    const base = { version: 1, name: 'Invented', colors: { light: { bg: '#fff', text: '#111' } } };
+    assert.deepEqual(checkBrand(root, { ...base, mark: 'design/mark.svg' }).problems, []);
+    const bad = (extra) => checkBrand(root, { ...base, ...extra }).problems.join(' | ');
+    assert.match(bad({ mark: '../outside.svg' }), /not a file inside the Product/);
+    assert.match(bad({ mark: 'design/link.svg' }), /not a file inside the Product/, 'a link out is never followed');
+    assert.match(bad({ mark: '/etc/hosts' }), /not a file inside the Product/);
+    assert.match(bad({ logo: 'design/x.gif' }), /is not one of/);
+    assert.match(bad({ logo: 'design/big.png' }), /at most 512 KB/);
+    assert.match(bad({ fonts: { body: { family: 'Evil"; } body{', files: [] } } }), /fonts.body.family must be a font name/);
+    assert.match(bad({ version: 2 }), /version 2/);
+    assert.match(bad({ colors: { light: { bg: 'red' } } }), /colors.light.bg is not a colour/);
+    assert.match(bad({ name: '' }), /"name"/);
+    // A broken file never breaks a page: the fallback, with the problem said.
+    put(path.join(root, BRAND_FILE), '{ nope');
+    const r = readBrand(root);
+    assert.equal(r.origin, 'yadflow');
+    assert.match(r.problems[0], /cannot be read/);
+  } finally { done(ws); }
+});
+
+test('init from YAML front matter: roles by name, dark from dark-*, fonts and their files, the mark found', async () => {
+  const { ws, root } = product({ design: YAML_DESIGN, files: { 'design/fonts/Fernsans-Bold.woff2': 'fontbytes', 'design/assets/fernleaf-logo.svg': SVG, 'design/assets/fernleaf-mark.svg': SVG } });
+  try {
+    const out = await captured(() => runBrand(root, { action: 'init', json: true }));
+    assert.equal(out.command, null);
+    const b = out.brand;
+    assert.equal(b.name, 'Fernleaf');
+    assert.deepEqual(b.colors.light, { bg: '#F4F6FF', surface: '#FFFFFF', text: '#101828', muted: '#667085', border: '#D0D5DD', primary: '#2B7358', accent: '#E4A036' });
+    assert.equal(b.colors.dark.bg, '#0D291F');
+    assert.equal(b.colors.dark.primary, '#94CBBA', 'dark-primary-strong');
+    assert.equal(b.fonts.heading.family, 'Fernsans');
+    assert.deepEqual(b.fonts.heading.files, ['design/fonts/Fernsans-Bold.woff2']);
+    assert.equal(b.logo, 'design/assets/fernleaf-logo.svg');
+    assert.equal(b.mark, 'design/assets/fernleaf-mark.svg');
+    assert.equal(out.report.how, 'front matter');
+    assert.equal(out.report.filled.light.text, 'ink');
+    assert.match(b.sourceHash, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(readBrand(root).origin, 'product');
+    // Not overwritten without --force.
+    assert.equal((await captured(() => runBrand(root, { action: 'init', json: true }))).ok, false);
+    process.exitCode = 0;
+  } finally { done(ws); }
+});
+
+test('init from a :root block in OKLCH: --action is primary, --gold is accent, missing roles are named', async () => {
+  const { ws, root } = product({ design: CSS_DESIGN });
+  try {
+    const out = await captured(() => runBrand(root, { action: 'init', json: true }));
+    assert.equal(out.report.how, ':root block');
+    assert.equal(out.brand.name, 'Design', 'the first heading, when there is no front matter name');
+    assert.equal(out.brand.colors.light.primary, 'oklch(0.220 0.010 70)');
+    assert.equal(out.brand.colors.light.accent, 'oklch(0.680 0.135 62)');
+    assert.equal(out.brand.colors.dark, null, 'no dark block: made from light later');
+    assert.deepEqual(out.report.missing, []);
+    const r = readBrand(root);
+    assert.equal(r.brand.colors.derivedDark, true);
+    assert.equal(r.brand.colors.dark.bg, YADFLOW_BRAND.colors.dark.bg, 'a neutral dark …');
+    assert.equal(r.brand.colors.dark.primary, 'oklch(0.220 0.010 70)', '… keeping the brand\'s own primary when it cannot be lightened');
+  } finally { done(ws); }
+});
+
+test('init refuses prose it cannot read, and a logo path outside the Product', async () => {
+  const { ws, root } = product({ design: '# Design\n\nOur primary colour is a deep teal.\n' });
+  try {
+    const prose = await captured(() => runBrand(root, { action: 'init', json: true }));
+    assert.equal(prose.ok, false);
+    assert.match(prose.error, /no colours yadflow can read/);
+    assert.match(prose.hint, /yad-brand skill/);
+    const out = await captured(() => runBrand(root, { action: 'init', logo: '../x.svg', json: true }));
+    assert.match(out.error, /not a file inside the Product/);
+    const missing = await captured(() => runBrand(root, { action: 'init', from: 'design/none.md', json: true }));
+    assert.match(missing.error, /no design\/none.md/);
+    process.exitCode = 0;
+  } finally { done(ws); }
+});
+
+test('the parsers: front matter maps, :root and dark blocks, role names', () => {
+  const fm = readFrontMatter('---\na: 1\nb:\n  c: "x" # note\n  d:\n    e: \'y\'\n---\nbody');
+  assert.deepEqual(fm, { a: '1', b: { c: 'x', d: { e: 'y' } } });
+  assert.equal(readFrontMatter('no front matter'), null);
+  const css = readRootVars(':root { --bg: #fff; --ink: #111 }\n@media (prefers-color-scheme: dark) { :root { --bg: #000; --ink: #eee } }');
+  assert.deepEqual(css.light, { '--bg': '#fff', '--ink': '#111' });
+  assert.deepEqual(css.dark, { '--bg': '#000', '--ink': '#eee' });
+  assert.deepEqual(rolesFrom({ 'color-background': '#fff', foreground: '#000', 'not-a-colour': 'blue' }).colors, { bg: '#fff', text: '#000' });
+});
+
+test('check: stale when DESIGN.md moved on; contrast in hex and OKLCH; exit 1 only for an unusable file', async () => {
+  const { ws, root } = product({ design: YAML_DESIGN });
+  try {
+    await captured(() => runBrand(root, { action: 'init', json: true }));
+    let c = await captured(() => runBrand(root, { action: 'check', json: true }));
+    assert.equal(c.ok, true);
+    assert.equal(c.stale, null);
+    fs.appendFileSync(path.join(root, 'DESIGN.md'), '\nmore\n');
+    c = await captured(() => runBrand(root, { action: 'check', json: true }));
+    assert.match(c.stale, /DESIGN.md changed since/);
+    assert.equal(c.ok, true, 'stale is a warning, not a failure');
+    // Contrast.
+    assert.ok(contrast('#000', '#fff') > 20);
+    assert.ok(Math.abs(contrast('oklch(1 0 0)', '#ffffff') - 1) < 0.01, 'oklch white is white');
+    assert.equal(contrast('hsl(0 0% 0%)', '#fff'), null, 'not read: never guessed');
+    assert.ok(linearRgb('oklch(0.205 0.008 70)'));
+    const low = { ...YADFLOW_BRAND, colors: { light: { ...YADFLOW_BRAND.colors.light, text: '#eeeeee' }, dark: YADFLOW_BRAND.colors.dark } };
+    assert.match(contrastProblems(low)[0], /light: text on bg is .* under 4.5:1/);
+    // An unusable file: exit 1 on check.
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'X', colors: { light: { bg: 'nope' } } });
+    const bad = await captured(() => runBrand(root, { action: 'check', json: true }));
+    assert.equal(bad.ok, false);
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+  } finally { done(ws); }
+});
+
+test('the CSS: fonts embedded under the cap, both schemes named, status only when set, the mark only as a data image', () => {
+  const { ws, root } = product({ files: { 'design/fonts/Fernsans.woff2': 'abc', 'design/mark.svg': SVG } });
+  try {
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'Fern', mark: 'design/mark.svg', colors: { light: { bg: '#fff', text: '#111', primary: '#2b7358' } },
+      fonts: { body: { family: 'Fernsans', files: ['design/fonts/Fernsans.woff2'] } }, status: { live: '#0055ff' } });
+    const r = readBrand(root);
+    assert.equal(r.origin, 'product');
+    const assets = brandAssets(root, r.brand, r.origin);
+    const css = brandCss(r.brand, assets);
+    assert.match(css, /@font-face\{font-family:"Fernsans";src:url\(data:font\/woff2;base64,YWJj\) format\("woff2"\)/);
+    assert.match(css, /--brand-primary:#2b7358;--brand-dark-primary:#/);
+    assert.match(css, /--brand-font-body:"Fernsans", system-ui/);
+    assert.match(css, /--brand-status-live:#0055ff/);
+    assert.equal(/--brand-status-merged/.test(css), false);
+    assert.ok(DATA_IMAGE_RE.test(assets.mark));
+    // The map keeps its status colours unless the brand sets them.
+    assert.match(PAGE_MAPS.map, /--merged:var\(--brand-status-merged, #d55181\)/);
+    assert.match(PAGE_MAPS.map, /--bg:var\(--brand-dark-bg\)/, 'the map is always dark');
+  } finally { done(ws); }
+});
+
+test('every page takes the brand: reports and the catalog carry it after their own CSS, with fonts and images allowed', async () => {
+  const { ws, root } = product({ design: YAML_DESIGN, files: { 'design/assets/fernleaf-mark.svg': SVG } });
+  try {
+    await captured(() => runBrand(root, { action: 'init', json: true }));
+    const { renderHtml: standupHtml } = await import('./standup.mjs');
+    const { renderHtml: issuesHtml } = await import('./issues.mjs');
+    const { renderIndex } = await import('./reports-dir.mjs');
+    const css = brandForPage(root, 'issues').css;
+    const issues = issuesHtml({ items: [], repos: [], notes: [], notRead: [], summary: { total: 0, status: {}, priority: {}, type: {}, unassigned: 0 }, unfiltered: 0 }, undefined, { brandCss: css });
+    assert.match(issues, /--brand-primary:#2B7358/);
+    assert.ok(issues.indexOf('--brand-primary') > issues.indexOf('--p0:'), 'after the page\'s own colours, so it wins');
+    assert.match(issues, /img-src data:; font-src data:/);
+    const index = renderIndex([], { brandCss: brandForPage(root, 'catalog').css });
+    assert.match(index, /img-src data:; font-src data:/);
+    assert.match(index, /body > main > h1::before/);
+    assert.equal(typeof standupHtml, 'function');
+  } finally { done(ws); }
+});
+
+test('yad brand from the CLI, and its agent classes', () => {
+  const { ws, root } = product();
+  try {
+    const r = spawnSync(process.execPath, [YAD, 'brand', '--json'], { cwd: root, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1' } });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.command, 'brand show');
+    assert.equal(out.origin, 'yadflow');
+    assert.equal(classify(['brand']), 'read');
+    assert.equal(classify(['brand', 'check']), 'read');
+    assert.equal(classify(['brand', 'init']), 'local-write');
+  } finally { done(ws); }
+});
+
+// #553: the self-contained map and brain files carry the brand inside the ONE hashed style, so the CSP still
+// allows it; fonts are allowed as data; the map's status colours keep their meaning unless the brand sets them.
+test('#553: the map and brain files carry the brand inside the hashed style; status colours stay', async () => {
+  const { ws, root } = product({ design: YAML_DESIGN, files: { 'design/assets/fernleaf-mark.svg': SVG } });
+  try {
+    await captured(() => runBrand(root, { action: 'init', json: true }));
+    const { mapSnapshot } = await import('./map-view.mjs');
+    const { snapshotHTML } = await import('./brain-view.mjs');
+    const pages = [
+      ['map', mapSnapshot({ epics: [] }, { brandCss: brandForPage(root, 'map').css })],
+      ['brain', snapshotHTML({ nodes: [], edges: [] }, { brandCss: brandForPage(root, 'brain').css })],
+      ['live', snapshotHTML({ nodes: [], edges: [] }, { live: true, brandCss: brandForPage(root, 'live').css })],
+    ];
+    for (const [page, html] of pages) {
+      const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)[1];
+      assert.match(csp, /font-src data:/, page);
+      const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((x) => x[1]);
+      assert.equal(styles.length, 1, `${page}: one inline style`);
+      assert.match(styles[0], /--brand-primary:#2B7358/i, `${page}: the brand is in the style`);
+      const hash = createHash('sha256').update(styles[0], 'utf8').digest('base64');
+      assert.ok(csp.includes(`'sha256-${hash}'`), `${page}: the CSP allows the style with the brand in it`);
+    }
+    const mapCss = brandForPage(root, 'map').css;
+    for (const [k, v] of [['live', '#3987e5'], ['merged', '#d55181'], ['active', '#c98500'], ['planned', '#93a0bf'], ['idle', '#5b6680']]) {
+      assert.ok(mapCss.includes(`--${k}:var(--brand-status-${k}, ${v})`), `${k} keeps its colour`);
+    }
+    assert.ok(!/--brand-status-live:/.test(mapCss), 'no status colour unless the brand sets one');
+  } finally { done(ws); }
+});
+
+test('#553: a standup page carries the brand after its own colours; with no brand file it is yadflow\'s look', async () => {
+  const { renderHtml, buildStandup } = await import('./standup.mjs');
+  const branded = product();
+  try {
+    const model = buildStandup(branded.root, { now: Date.now(), fetch: false, env: {}, access: () => 'yes' });
+    const page = renderHtml(model, { brandCss: ':root{--brand-primary:#2B7358}' });
+    assert.ok(page.indexOf('--brand-primary:#2B7358') > page.indexOf('--bg:'), 'after the page\'s own colours, so it wins');
+    assert.equal(page.split('</style>').length, 2, 'still one style block');
+    assert.ok(!renderHtml(model).includes('--brand-'), 'no brand CSS asked for, none added');
+  } finally { done(branded.ws); }
+  const { ws, root } = product();
+  try {
+    const css = brandForPage(root, 'standup').css;
+    assert.match(css, /--brand-primary:#6316db/i, 'yadflow\'s purple');
+    assert.match(css, /--brand-accent:#fb2576/i, 'yadflow\'s pink');
+  } finally { done(ws); }
+});
+
+test('#553: the doctor row — none is fine, a broken file and a changed DESIGN.md are said', async () => {
+  const { brandChecks } = await import('./doctor.mjs');
+  const row = (root) => { const checks = []; brandChecks(root, checks); return checks.find((x) => x.id === 'brand'); };
+  const none = product();
+  const made = product({ design: YAML_DESIGN });
+  try {
+    assert.equal(row(none.root).status, 'ok');
+    assert.match(row(none.root).message, /yadflow's look/);
+    put(path.join(none.root, BRAND_FILE), '{ broken');
+    assert.equal(row(none.root).status, 'warn');
+    await captured(() => runBrand(made.root, { action: 'init', json: true }));
+    assert.equal(row(made.root).status, 'ok');
+    put(path.join(made.root, 'DESIGN.md'), `${YAML_DESIGN}\nMore words.\n`);
+    assert.equal(row(made.root).status, 'warn');
+    assert.match(row(made.root).message, /DESIGN\.md changed since/);
+  } finally { done(none.ws, made.ws); }
+});

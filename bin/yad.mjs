@@ -176,6 +176,15 @@ ${c.bold('Progress map')} ${c.dim('(E181 — read-only; names as roles, no score
                                        only), --json. The Production branch is "map.production" in
                                        product.json, else guessed (and the page says so)
 
+${c.bold('Brand')} ${c.dim('(E184 — the look every page yad makes wears)')}
+  yad brand [show] [--json]            The brand the pages wear: the Product's (.sdlc/brand.json) or
+                                       yadflow's, with its colours, fonts, logo and any problem
+  yad brand init [--from <DESIGN.md>] [--logo <file>] [--mark <file>] [--force]
+                                       Make .sdlc/brand.json from the Product's DESIGN.md (its YAML
+                                       front matter or :root block); says each colour it found and
+                                       each it did not. For prose, ask the agent (yad-brand skill)
+  yad brand check [--json]             Is the brand file usable, readable (contrast) and current
+
 ${c.bold('Saved reports')} ${c.dim('(E180 — on this machine only, never committed)')}
   yad reports [list] [--json]          Every report saved in the local reports folder, newest first, each
                                        marked fresh or stale (the Product changed since it was made).
@@ -731,6 +740,7 @@ const ACTIONS = {
   run: { known: ['checks'] },
   build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
   reports: { known: ['list', 'open', 'prune'], default: 'list' },
+  brand: { known: ['show', 'init', 'check'], default: 'show' },
 };
 // E80 — how each command finds its folder. A PRODUCT command works on the Product; a REPO command works
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
@@ -740,7 +750,7 @@ const PRODUCT_CMDS = new Set([
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
-  'story', 'brain', 'reports', 'map', 'local-setup',
+  'story', 'brain', 'reports', 'map', 'local-setup', 'brand',
 ]);
 // `status` reads the Product but must keep the folder it ran in: "here" is that checkout's task branch (#349).
 const REPO_CMDS = new Set(['commit', 'open-pr', 'ship', 'review', 'run', 'status', 'guide']);
@@ -1427,6 +1437,13 @@ async function main() {
       if (foreign.length) { refuse(`yad map does not take ${foreign.join(', ')}`, commands.MAP_USAGE); break; }
       if (noProduct()) break;
       result = await commands.runMap(o.dir, { args: o._.slice(1), html: !!o.html, open: !!o.open, live: !!o.live, anonymous: !!o.anonymous, fetch: !!o.fetch, json: !!o.json });
+      break;
+    }
+    case 'brand': {
+      // E184. The Product's brand file; `init` writes it, the rest read.
+      const [, action, ...args] = o._;
+      if (noProduct()) break;
+      result = await commands.runBrand(o.dir, { action: action || 'show', args, from: o.from ?? null, logo: o.logo ?? null, mark: o.mark ?? null, force: !!o.force, json: !!o.json });
       break;
     }
     case 'reports': {

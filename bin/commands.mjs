@@ -37,6 +37,7 @@ export { runMemberAdd, runMemberList, runMemberRemove } from '../cli/members.mjs
 export { runWorktreeAdd, runWorktreeList, runWorktreeRemove } from '../cli/worktree.mjs';
 export { runStandup, foreignFlags as standupForeignFlags } from '../cli/standup.mjs';
 export { runReports } from '../cli/reports.mjs';
+export { runBrand, BRAND_USAGE } from '../cli/brand-cmd.mjs';
 export { runMap, MAP_USAGE } from '../cli/map-view.mjs';
 export { runIssuesNew, runIssuesAssign, runIssuesLabel, runIssuesEdit, runIssuesComment, runIssuesClose, runIssuesReopen, ACT_ACTIONS, actForeignFlags } from '../cli/issues-act.mjs';
 export { runFoundationPublish } from '../cli/foundation-publish.mjs';
