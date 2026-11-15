@@ -1230,9 +1230,14 @@ data) and `LOCAL-SETUP.md` (the same steps as text).
   adds its own. An update rewrites yadflow's steps and never touches your team's.
 - `yad local-setup` says which steps are done on this machine. yad runs no step: the agent runs a step
   only after the person says yes.
+- Each machine remembers its answers (inside `.git`, never committed): `done` for a step the person did,
+  `skip` for a no. After an update, only the steps that are new or that changed are asked again. `yad guide`
+  and `yad doctor` say when steps are waiting.
 
 ```bash
-yad local-setup             # the steps this machine still needs, with why and what each changes
+yad local-setup                               # the steps this machine still needs, with why and what each changes
+yad local-setup done docker                   # you did it (a step yad can check must pass its check first)
+yad local-setup skip docker --reason "..."    # you said no; asked again only when the step changes
 ```
 <!-- explainer:end id=toolbox -->
 
