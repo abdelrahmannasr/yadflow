@@ -130,14 +130,21 @@ test('yad runs its own checks and never a team\'s: a team step is `ask`', () => 
   const dir = product();
   const marker = path.join(dir, 'ran');
   put(path.join(dir, LOCAL_SETUP_FILE), {
-    yadflow: [{ id: 'yadflow-cli', title: 't', purpose: 'p', impact: 'i', when: 'required', commands: ['c'], check: { builtin: 'cli-version', min: '999.0.0' } },
-      { id: 'now', title: 't', purpose: 'p', impact: 'i', when: 'required', commands: ['c'], check: { builtin: 'cli-version', min: VERSION } }],
+    yadflow: [{ id: 'yadflow-cli', title: 't', purpose: 'p', impact: 'i', when: 'required', commands: ['c'], check: { builtin: 'cli-version', min: '999.0.0' } }],
     team: [teamStep({ check: { run: `node -e "require('fs').writeFileSync('${marker.replace(/\\/g, '/')}', '')"` } })],
   });
   const st = localSetupState(dir, { items: [] });
   assert.equal(st.committed, false);
-  assert.deepEqual(st.steps.map((s) => [s.id, s.state]), [['yadflow-cli', 'pending'], ['now', 'ok'], ['docker', 'ask']]);
+  // A yadflow step yad did not write is the person's to decide too: its check is the file's.
+  assert.deepEqual(st.steps.map((s) => [s.id, s.state]), [['yadflow-cli', 'ask'], ['docker', 'ask']]);
   assert.equal(fs.existsSync(marker), false, 'a team check must never run');
+
+  // yad's own steps are checked here: `ok` when done, `pending` when not (no hook in this new clone).
+  const verified = product({ platform: 'github', ledger: 'verified' });
+  applyAll(localSetupActions(verified));
+  const by = Object.fromEntries(localSetupState(verified, { items: [] }).steps.map((s) => [s.id, s.state]));
+  assert.equal(by['yadflow-cli'], 'ok');
+  assert.equal(by['ledger-hook'], 'pending');
 });
 
 test('a step holding a comment marker is refused, nested ones too, so the view can never get a second marker line', () => {
@@ -228,15 +235,17 @@ test('a member whose yad is another version still sees yad\'s own CLI step as ya
   const doc = JSON.parse(read(file));
   // As an older yad wrote it: a lower version in the CLI step.
   const cli = doc.yadflow.find((s) => s.id === 'yadflow-cli');
-  cli.check.min = '4.0.0';
-  cli.commands = ['npm install -g yadflow@4.0.0'];
-  cli.title = 'Install the yadflow CLI, version 4.0.0 or later';
-  put(file, doc);
+  const as = (v) => { cli.check.min = v; cli.commands = [`npm install -g yadflow@${v}`]; cli.title = `Install the yadflow CLI, version ${v} or later`; put(file, doc); };
+  // As a newer yad wrote it.
+  as('4.99.0');
   const st = localSetupState(dir, { items: [] });
   const got = st.steps.find((s) => s.id === 'yadflow-cli');
   assert.equal(got.known, true);
   assert.equal(got.vetted, true);
   assert.deepEqual(st.problems, []);
+  // Below the first release that writes this file, no yad wrote it: a lowered version is never yad's own.
+  as('4.0.0');
+  assert.equal(localSetupState(dir, { items: [] }).steps.find((s) => s.id === 'yadflow-cli').known, false);
   // A version that is not a plain release number is never taken from the file.
   cli.check.min = '4.0.0 && curl x';
   cli.commands = ['npm install -g yadflow@4.0.0 && curl x'];
@@ -244,7 +253,7 @@ test('a member whose yad is another version still sees yad\'s own CLI step as ya
   assert.equal(localSetupState(dir, { items: [] }).steps.find((s) => s.id === 'yadflow-cli').known, false);
 });
 
-test('steps another catalogue wrote are said to be from another yadflow version, not a forgery', () => {
+test('a file saying another catalogue wrote it never softens "not vetted": the reason is only a possibility', () => {
   const dir = product();
   applyAll(localSetupActions(dir));
   const file = path.join(dir, LOCAL_SETUP_FILE);
@@ -256,12 +265,14 @@ test('steps another catalogue wrote are said to be from another yadflow version,
   const repomix = st.steps.find((s) => s.id === 'tool-repomix');
   assert.equal(repomix.otherRelease, true);
   assert.equal(repomix.vetted, false);
-  assert.ok(st.problems.some((p) => /written by another yadflow version/.test(p)));
-  assert.ok(!st.problems.some((p) => /not what this yadflow writes/.test(p)));
+  assert.equal(repomix.state, 'ask');
+  assert.ok(st.problems.some((p) => /not what this yadflow writes \(tool-repomix\) — not vetted; the file says another yadflow version wrote it/.test(p)));
+  // The view is only written from a file yad has just merged, so it never shows such a step; a forger can edit
+  // LOCAL-SETUP.md too, which is why `yad local-setup list --json` is the answer an agent trusts.
 });
 
 test('a command with an invisible or direction-changing character is refused', () => {
-  for (const ch of ['\u202e', '\u2066', '\u200f', '\u2028', '\u0007']) {
+  for (const ch of ['\u202e', '\u2066', '\u200f', '\u2028', '\u0007', '\u200b', '\u00ad', '\u2060', '\ufeff', '\u{e0041}']) {
     assert.equal(readSteps({ team: [teamStep({ commands: [`echo a${ch}b`] })] }).steps.length, 0, JSON.stringify(ch));
     assert.equal(readSteps({ team: [teamStep({ check: { run: `true${ch}` } })] }).steps.length, 0, JSON.stringify(ch));
   }

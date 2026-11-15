@@ -41,7 +41,10 @@ const MARKER = /<!--|-->/;
 // One plain line: nothing `forTerminal` would change — no control character, and none of the invisible or
 // direction-changing ones (U+202E and its kind), which would let LOCAL-SETUP.md show a reviewer one command while
 // the agent runs another.
-const oneLine = (v) => isText(v) && forTerminal(v) === v;
+// Also every format and separator character (zero-width spaces, soft hyphens, tag characters): `exa\u200bmple.com`
+// reads as `example.com`.
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const oneLine = (v) => isText(v) && forTerminal(v) === v && !HIDDEN.test(v);
 
 export function stepProblems(s, source) {
   const p = [];
@@ -99,7 +102,7 @@ export function readSteps(doc, { ours = null } = {}) {
 
 // The file as git has it at HEAD, else as it is on disk (a setup not committed yet). `{ doc, committed, error }`.
 export function readCommittedLocalSetup(root) {
-  const r = spawnSync('git', ['show', `HEAD:${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  const r = spawnSync('git', ['show', `HEAD:./${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   let text = r.status === 0 ? r.stdout : null;
   const committed = text !== null;
   if (text === null) {
@@ -206,7 +209,7 @@ const checkWords = (s) => (s.source === 'team'
 
 function stepLines(s) {
   const who = s.source === 'team' ? ` · added by your team${s.addedBy ? ` (${md(s.addedBy)})` : ''}, not vetted by yadflow`
-    : !s.known ? (s.otherRelease ? ' · written by another yadflow version; `yad update` rewrites it' : ' · **not what this yadflow writes — not vetted; `yad update` rewrites it**')
+    : !s.known ? ` · **not what this yadflow writes — not vetted${s.otherRelease ? ' (possibly from another yadflow version)' : ''}; \`yad update\` rewrites it**`
       : !s.vetted ? ' · a tool your team added, not vetted by yadflow' : '';
   const fence = '`'.repeat(Math.max(3, ...s.commands.map((cmd) => longestTicks(cmd) + 1)));
   const lines = [`### ${md(s.title)}`, '', `- **Id:** ${code(s.id)} · **${s.when}**${who}${s.person ? ' · **the person does this step, not the agent**' : ''}`];
@@ -248,7 +251,7 @@ export function localSetupDocLines(doc) {
 // `{ team }` as committed: `[]` when HEAD has no file (an update PR then commits yad's own, with no team step), or
 // `{ broken: true }` when HEAD's file cannot be read (an update PR never carries the JSON then: reconcile).
 function committedTeam(root) {
-  const r = spawnSync('git', ['show', `HEAD:${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  const r = spawnSync('git', ['show', `HEAD:./${LOCAL_SETUP_FILE}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   if (r.status !== 0) return { team: [] };
   try {
     const d = parseJSON(r.stdout);
@@ -291,13 +294,15 @@ export function localSetupState(root, { items = null } = {}) {
   const read = readCommittedLocalSetup(root);
   if (!read.doc) return { exists: read.error !== null, committed: read.committed, error: read.error, steps: [], problems: [] };
   const { steps, problems } = readSteps(read.doc, { ours: oursFor(read.doc, root) });
-  const older = steps.filter((s) => s.source === 'yadflow' && !s.known && s.otherRelease).map((s) => s.id);
-  const unknown = steps.filter((s) => s.source === 'yadflow' && !s.known && !s.otherRelease).map((s) => s.id);
-  if (older.length) problems.push(`${LOCAL_SETUP_FILE} was written by another yadflow version: ${older.length} of its yadflow step(s) differ from this one's (${older.join(', ')}) — \`yad update\` rewrites them`);
-  if (unknown.length) problems.push(`${LOCAL_SETUP_FILE}: ${unknown.length} yadflow step(s) are not what this yadflow writes (${unknown.join(', ')}) — shown as not vetted; \`yad update\` rewrites them`);
+  // The file says which catalogue wrote it, and whoever writes the file can say anything: the reason is only a
+  // possibility, and never softens "not vetted".
+  const unknown = steps.filter((s) => s.source === 'yadflow' && !s.known);
+  if (unknown.length) problems.push(`${LOCAL_SETUP_FILE}: ${unknown.length} yadflow step(s) are not what this yadflow writes (${unknown.map((s) => s.id).join(', ')}) — not vetted${unknown.some((s) => s.otherRelease) ? '; the file says another yadflow version wrote it' : ''}; \`yad update\` rewrites them`);
   let found = items;
   const out = steps.map((s) => {
     if (s.source !== 'yadflow' || !s.check?.builtin) return { ...s, state: 'ask', why: s.check?.run ? 'yad does not run a team\'s check' : 'it has no check' };
+    // A step yad did not write: its check is the file's too, so it never decides what the agent is told.
+    if (!s.known) return { ...s, state: 'ask', why: 'it is not what this yadflow writes, so the person decides' };
     if (s.check.builtin === 'tool' && !found) found = detectInstalled(root).items;
     const r = runBuiltinCheck(s.check, root, { items: found });
     return { ...s, state: r.ok ? 'ok' : 'pending', why: r.why };
@@ -332,7 +337,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   log(c.bold(`\nyad local-setup — ${st.steps.length} step(s): ${n.pending} not done here, ${n.ask} to check with you`));
   if (!st.committed) warn(`${LOCAL_SETUP_FILE} is not committed yet — this is the copy on disk`);
   for (const s of st.steps) {
-    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? (s.otherRelease ? ', from another yadflow version' : ', not vetted') : ''})`)}`);
+    log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? `, not vetted${s.otherRelease ? ' — possibly from another yadflow version' : ''}` : ''})`)}`);
     if (s.state === 'ok') continue;
     log(`      ${c.dim(`why: ${forTerminal(s.purpose)}`)}`);
     log(`      ${c.dim(`changes for you: ${forTerminal(s.impact)}`)}`);

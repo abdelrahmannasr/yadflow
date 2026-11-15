@@ -53,10 +53,14 @@ const step = (s) => ({ source: 'yadflow', vetted: true, verify: null, since: nul
 // would stop being told to upgrade.
 // Only a plain release number (`4.12.0`, `5.0.0-next.3`) is ever taken from the file: it goes into the command.
 export const PLAIN_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+// The first release that writes this file (E185). No yad below it ever did, so a file asking for less was edited
+// by hand: it is never taken as yad's own (a lowered version would send new machines to an old release).
+export const LOCAL_SETUP_SINCE = '4.12.0-0';
 export const fileCliMin = (doc) => {
   const step = Array.isArray(doc?.yadflow) ? doc.yadflow.find((s) => s && typeof s === 'object' && s.id === 'yadflow-cli') : null;
   const min = step?.check?.min;
-  return typeof min === 'string' && PLAIN_VERSION.test(min) ? min : null;
+  if (typeof min !== 'string' || !PLAIN_VERSION.test(min)) return null;
+  return compare(parseVersion(min), parseVersion(LOCAL_SETUP_SINCE)) >= 0 ? min : null;
 };
 export function cliMinimum(current) {
   const have = parseVersion(VERSION);
