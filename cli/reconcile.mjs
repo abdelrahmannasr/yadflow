@@ -18,7 +18,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS, ignoreRules } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -414,6 +414,22 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // yad's parts are all committed already: nothing of yad's is left out, and the person's own edits in the
     // file are theirs to keep or share — no row (E157 update review 12).
     if (ours !== undefined && base !== null && k.same(ours, base)) continue;
+    // A file with no committed copy that an ignore rule hides can never ride a PR/MR (git refuses to add it,
+    // #555). The repo's own rule is the team's choice: the file stays on each machine, where each person's
+    // `yad update` or `yad check --fix` writes it — said once, no row. A rule only this machine has (a global
+    // ignore, `.git/info/exclude`) is not the team's: the row stays, naming the rule and the way out.
+    const tracked = e.head !== null || run('git', ['ls-files', '--error-unmatch', '--', e.a.shared], { cwd: e.a.root }).ok;
+    const rule = !tracked && now !== null ? ignoreRules(e.a.root, [e.a.shared]).get(e.a.shared) : null;
+    if (rule && !rule.outside) {
+      info(`${repoLabel(root, e.a.root)}: ${e.a.shared} is ignored by ${rule.source}:${rule.line}, so it stays on each machine; the update leaves it out of the PR/MR`);
+      continue;
+    }
+    if (rule) {
+      const hint = `an ignore rule only this machine has (${rule.source}:${rule.line}, \`${rule.pattern}\`) hides ${e.a.shared}, so the update left ${k.what} out of the PR/MR: remove or narrow that rule, or commit it with \`git add -f ${e.a.shared}\`, through review on a branch of your own`;
+      info(`${repoLabel(root, e.a.root)}: ${hint}`);
+      sharedRows.push({ label: repoLabel(root, e.a.root), product: e.a.root === root, branch: null, committed: false, pushed: false, opened: false, pr: null, skipped: true, error: false, reason: k.reason, hint });
+      continue;
+    }
     const was = e.disk === null ? null : k.read(e.disk);
     const yadsAlone = e.disk === null ? e.head === null
       : e.head !== null && k.eq(e.disk, e.head) ? true

@@ -944,6 +944,76 @@ test('AGENTS.md with the team\'s own uncommitted edits never rides the update: s
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+// #555: a shared file the repo's own .gitignore keeps out of git can never ride a PR/MR, so it gets no row.
+for (const [label, rule] of [['the file', '.claude/settings.json'], ['its folder', '.claude/']]) {
+  test(`#555: hook settings the Product gitignores (a rule on ${label}) get no row, and stay as they are`, async () => {
+    const { reconcile } = await import('./reconcile.mjs');
+    const { P, R, A } = await twoClones();
+    try {
+      const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/10' });
+      put(path.join(A, '.gitignore'), `${rule}\n`);
+      git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+      put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+      const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+      assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+      assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
+      const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+      assert.ok(!files.includes('.claude/settings.json'), files.join(', '));
+      assert.match(fs.readFileSync(path.join(A, '.claude/settings.json'), 'utf8'), /Bash\(ls\)/, 'their entry is still there');
+    } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+  });
+}
+
+test('#555: hook settings hidden by a rule only this machine has keep the row, naming the rule and git add -f', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/11' });
+    put(path.join(A, '.git/info/exclude'), '.claude/settings.json\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = r.commits.find((c) => c.reason === 'settings-uncommitted');
+    assert.ok(row, JSON.stringify(r.commits));
+    assert.match(row.hint, /an ignore rule only this machine has \(\.git\/info\/exclude:1, `\.claude\/settings\.json`\) hides \.claude\/settings\.json/);
+    assert.match(row.hint, /git add -f \.claude\/settings\.json/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('#555: an AGENTS.md the Product gitignores gets no agents-uncommitted row either', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/12' });
+    put(path.join(A, '.gitignore'), 'AGENTS.md\n');
+    git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+    put(path.join(A, 'AGENTS.md'), '# My own rules\n');
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'agents-uncommitted'), JSON.stringify(r.commits));
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(!files.includes('AGENTS.md'), files.join(', '));
+    assert.match(fs.readFileSync(path.join(A, 'AGENTS.md'), 'utf8'), /# My own rules/, 'their text is still there');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('#555: ignoreRules names a file rule and a folder rule, says whose rule it is, and never counts a negation', async () => {
+  const { ignoreRules } = await import('./update-commit.mjs');
+  const P = tmp();
+  try {
+    git(P, ['init', '-q', '-b', 'main']);
+    git(P, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+    put(path.join(P, '.gitignore'), 'secret.txt\nbuild/\n*.log\n!keep.log\n');
+    put(path.join(P, '.git/info/exclude'), 'mine.md\n');
+    for (const f of ['secret.txt', 'build/out.js', 'keep.log', 'mine.md', 'plain.md']) put(path.join(P, f), 'x');
+    const got = ignoreRules(P, ['secret.txt', 'build/out.js', 'keep.log', 'mine.md', 'plain.md']);
+    assert.deepEqual(got.get('secret.txt'), { source: '.gitignore', line: 1, pattern: 'secret.txt', outside: false });
+    assert.deepEqual(got.get('build/out.js'), { source: '.gitignore', line: 2, pattern: 'build/', outside: false });
+    assert.equal(got.get('mine.md').outside, true);
+    assert.equal(got.get('mine.md').source, '.git/info/exclude');
+    assert.ok(!got.has('keep.log') && !got.has('plain.md'), [...got.keys()].join(', '));
+    assert.equal(ignoreRules(P, []).size, 0);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); }
+});
+
 test('a code repo yad never wired: its own AGENTS.md is left alone by update --open-pr, with no row', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const P = tmp();
