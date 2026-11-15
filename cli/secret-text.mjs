@@ -17,11 +17,12 @@ export const redact = (s) => String(s ?? '').replace(SECRET, '[redacted]');
 //   - a password sits in a URL (`https://user:pw@host`), or after `--password` / `--token`, after `-p` on a
 //     login line (`docker login -p …`, `mysql -p…`), or after `aws configure set` for a secret key.
 const KEYWORD = /password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key/i;
-const NAME_FOR_WHERE = /[_-](?:url|uri|file|path|name|header|id|dir|env|endpoint|host|type|length|expiry|ttl)$/i;
-// A name starts where no name character came before (linear, and `--from-literal=password=x` reads `password`);
-// the value is read ahead without being taken, and stops at `&`, `=`, `,` or `;`, so a name inside a value
-// (`url=https://h/?token=…`) and the next name=value in a query or a list are each read on their own (review 2).
-const NAMED = /(?<![\w.-])([A-Za-z_][\w.-]*)["']?\s*[=:]\s*["']?(?=([^\s"'`,;&=]+))/g;
+const NAME_FOR_WHERE = /[_.-](?:url|uri|file|path|name|header|id|dir|env|endpoint|host|type|length|expiry|ttl|json|yaml|yml)$/i;
+// A name starts where no name character came before — a `-` counts only inside a name, so `--api-key=x` reads
+// `api-key` and `--from-literal=password=x` reads `password` (linear either way; reviews 2, 3). The value is read
+// ahead without being taken, so a name inside a value (`url=https://h/?token=…`) is read on its own too; the value
+// itself keeps `&` and `=`, so a password holding them still counts (a query string may be refused: use $VAR).
+const NAMED = /(?<![\w.]|[\w.]-)([A-Za-z_][\w.-]*)["']?\s*[=:]\s*["']?(?=([^\s"'`,;]+))/g;
 const literal = (v) => v.length >= 8 && !/^[$<{%]/.test(v) && !/^(?:\/|\.{1,2}\/|~\/|[a-z][\w+.-]*:\/\/)/i.test(v);
 const OTHER = [
   /\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/,
@@ -39,7 +40,8 @@ function windowLooksSecret(s) {
   return false;
 }
 // Long text is read in overlapping windows, so the time grows with its length, never with its square (review 2).
-// A secret sits on one line, and any secret these patterns name is far shorter than the overlap.
+// A secret sits on one line, and any secret these patterns name is far shorter than the overlap. A step's fields are
+// capped below one window today; the windows keep any later caller (a scanner, say) safe too.
 const WINDOW = 1000;
 const OVERLAP = 200;
 export function looksSecret(s) {

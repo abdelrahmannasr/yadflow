@@ -650,6 +650,9 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   // Review 1: more secrets found, and names for where a value is no longer taken for one.
   for (const s of ['docker login -p hunter2hunter', 'docker login --password hunter2hunter', 'mysql -uroot -phunter2x', 'curl https://user:hunter2x@host', 'postgres://app:secretpw1@localhost/db', 'sk_live_abcdefghijkl12', 'aws configure set aws_secret_access_key abcd1234efgh5678']) assert.equal(looksSecret(s), true, s);
   for (const s of ['kubectl create secret generic app --from-literal=password=supersecret1', 'curl "https://api.example.com/x?user=me&api_key=1234567890abcdef"', 'curl -d foo=bar&token=abcdefgh12345 https://x', 'echo url=https://h/?token=SECRETSECRET123']) assert.equal(looksSecret(s), true, s);
+  // Review 3: flags written --name=value, and passwords holding & or =.
+  for (const s of ['mytool --api-key=abcdefgh12345', 'mytool --client-secret=abcdefgh12345', 'aws --secret-access-key=abcdefgh12345', 'export DB_PASSWORD=p@ss&w0rd!xyz', 'export DB_PASSWORD=ab=cdefghijklmn', 'export PASSWORD="p&ssword123"']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['token.ttl=36000000', 'cp tokens.json:12345678 x']) assert.equal(looksSecret(s), false, s);
   for (const s of ['gh auth login && mkdir -p ~/.config/foo', 'aws sso login --profile dev && mkdir -p .aws/cache', 'az login; cp -p src/file dest/file']) assert.equal(looksSecret(s), false, s);
   for (const s of ['export TOKEN_URL=https://auth.example.com/token', 'export PASSWORD_FILE=/etc/secrets/pw', 'export SECRET_NAME=prod-db-creds', 'export API_KEY_HEADER=X-Api-Key', 'docker run -p 8080:80 app', 'mkdir -p build/out', 'postgres://app:$PGPASS@localhost/db', 'git config --global user.signingkey ABCDEF1234567890', 'npm config set //registry.npmjs.org/:_authToken=${NPM_TOKEN}']) assert.equal(looksSecret(s), false, s);
   const { redactTokens } = await import('./scan.mjs');
@@ -865,8 +868,11 @@ test('E185 part 3 review 2: the invite is update\'s, not check --fix\'s; a team 
   const s = quiet(() => localSetupSection(odd, { invite: true }));
   assert.ok(s.lines.some((l) => /left out because they break a rule/.test(l)), s.lines.join('\n'));
   assert.ok(!s.lines.some((l) => /no steps from your team yet/.test(l)));
-  const lines = localSetupDocLines({ yadflow: [], team: [teamStep({ purpose: 'run `make <target>` & see <b>' })] }).join('\n');
-  assert.match(lines, /run `make <target>` &amp; see &lt;b&gt;/);
+  // Review 3: code spans are escaped too — telling them apart is what let HTML through.
+  for (const purpose of ['a `<details>`` b', 'a \\`<details>` b', 'a ```<b>`` c', 'run `make <target>` & see <b>']) {
+    const view = localSetupDocLines({ yadflow: [], team: [teamStep({ purpose })] }).join('\n');
+    assert.ok(!/<(?:details|b|target)>/.test(view), view);
+  }
 });
 
 test('E185 part 3 review 2: an invisible character Unicode only marks as ignorable is refused too', async () => {
@@ -882,4 +888,18 @@ test('E185 part 3 review 2: a pipe given as --from is refused, never read', { sk
   const r = quiet(() => runLocalSetupAdd(dir, { from: fifo }));
   assert.equal(r.code, 1);
   assert.ok(r.lines.some((l) => /cannot read .* as a file/.test(l)), r.lines.join(' | '));
+});
+
+test('E185 part 3 review 3: a tool already in toolbox.json whose words break a step limit keeps counting; only its step is left out', () => {
+  const dir = committedProduct(undefined, []);
+  const tool = { ...MISSING_TOOL, id: 'longtool', role: `does ${'a lot '.repeat(120)}`.trim() };
+  put(path.join(dir, '.sdlc/toolbox.json'), { custom: [MISSING_TOOL, tool] });
+  const T = tmp();
+  const list = yad(T, dir, ['toolbox', 'list', '--json']);
+  assert.equal(list.code, 0, list.err + list.out);
+  assert.ok(JSON.stringify(list.json).includes('longtool'), 'the tool still counts');
+  const r = quiet(() => localSetupActions(dir));
+  assert.ok(r.lines.some((l) => /tool-longtool/.test(l) && /left out/.test(l)), r.lines.join('\n'));
+  const ids = yadflowSteps(dir).map((x) => x.id);
+  assert.ok(ids.includes('tool-longtool'), 'built');
 });

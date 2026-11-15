@@ -61,7 +61,7 @@ export function stepProblems(s, source) {
   for (const k of ['title', 'purpose', 'impact']) if (!isText(s[k])) p.push(`it has no ${k}`);
   if (isText(s.title) && (!oneLine(s.title) || s.title.length > STEP_LIMITS.title)) p.push(`its title should be one plain line of at most ${STEP_LIMITS.title} characters`);
   for (const k of ['purpose', 'impact']) {
-    if (isText(s[k]) && (!prose(s[k]) || s[k].length > STEP_LIMITS.text)) p.push(`its ${k} should be plain text of at most ${STEP_LIMITS.text} characters`);
+    if (isText(s[k]) && (!prose(s[k]) || s[k].length > STEP_LIMITS.text)) p.push(`its ${k} should be plain text of at most ${STEP_LIMITS.text} characters (nothing hidden: no emoji joiner, variation selector or invisible character)`);
   }
   if (!isTextList(s.commands)) p.push('it has no commands');
   else if (!s.commands.every(oneLine)) p.push('each command should be one line');
@@ -204,9 +204,9 @@ function localSetupJsonAction(root) {
 // are single lines. Prose is put on one line; code is shown exactly as written, in a span or fence longer than any
 // run of backticks inside it, so an agent that copies from LOCAL-SETUP.md runs what the JSON says.
 // HTML is written as text (review: an unclosed `<details>` would fold every later step out of sight).
-// Inside a code span (`make <target>`) the text is shown as written: there HTML is text already.
-const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/(`+)(.*?)\1|[^`]+|`+/g, (m, ticks) => (ticks ? m : esc(m)));
+// Every `<`, `>` and `&`, code spans too: telling markdown's code spans apart is exactly what let HTML through
+// (review 3), so `make <target>` in prose shows its escaped form there — a small cost for a view that is safe.
+const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const longestTicks = (s) => Math.max(0, ...[...String(s).matchAll(/`+/g)].map((m) => m[0].length));
 const code = (s) => {
   const t = String(s);
@@ -502,7 +502,7 @@ const gitName = (root) => {
   const r = spawnSync('git', ['config', 'user.name'], { cwd: root, encoding: 'utf8', windowsHide: true });
   // Cut to 80 as stepProblems counts (string length), never inside a character pair.
   let name = r.status === 0 ? r.stdout.replace(/\s+/g, ' ').trim() : '';
-  while (name.length > 80) name = Array.from(name).slice(0, -1).join('');
+  if (name.length > 80) { const chars = Array.from(name); while (chars.join('').length > 80) chars.pop(); name = chars.join(''); }
   return name && plainLine(name) && !/<!--|--!?>/.test(name) ? name : null;
 };
 const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`, 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
