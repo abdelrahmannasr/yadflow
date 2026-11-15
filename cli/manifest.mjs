@@ -284,6 +284,9 @@ export const PROJECT_FILES = {
   // Which toolbox tools this project uses or skips, and its own tools (E86). Absent is the normal case:
   // the core tools and the connected design, testing and learning tools are the ones in use.
   toolboxConfig: '.sdlc/toolbox.json',
+  // The Product's brand, which every page yad makes wears (E184). Absent is the normal case: yadflow's look.
+  // Listed so a shape change reaches it: it is written under .sdlc/, so writeJSON stamps it (review 1).
+  brandConfig: '.sdlc/brand.json',
   // The kill switch and the Shape steps a team has set to `advance: auto` (E34). Absent is the normal
   // case: the switch is off and every Shape step is `human`. A project file, not the module config the
   // switch lived in before (`_bmad/sdlc/config.yaml` then, `.sdlc/config.yaml` since E3) — that one is

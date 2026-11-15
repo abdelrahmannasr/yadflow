@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, writeJSON } from './lib.mjs';
-import { BRAND_FILE, BRAND_VERSION, ROLES, COLOR_RE, FAMILY_RE, IMAGE_CAP, checkBrand, readBrand, contrastProblems, sourceFingerprint, brandPath } from './brand.mjs';
+import { BRAND_FILE, BRAND_VERSION, ROLES, isColor, FAMILY_RE, IMAGE_CAP, checkBrand, readBrand, contrastProblems, sourceFingerprint, brandPath } from './brand.mjs';
 
 export const BRAND_USAGE = 'usage: yad brand [show] [--json] · yad brand init [--from <DESIGN.md>] [--logo <file>] [--mark <file>] [--force] · yad brand check [--json]';
 
@@ -56,7 +56,9 @@ export function readRootVars(text) {
   const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;}]+)/g)].map((x) => [x[1], x[2].replace(/\/\*[\s\S]*?\*\//g, '').trim()]));
   const darkAt = src.search(/prefers-color-scheme:\s*dark|\[data-theme=["']?dark["']?\]|\.dark\s*\{/);
   const light = /:root\s*\{([^}]*)\}/.exec(darkAt > 0 ? src.slice(0, darkAt) : src);
-  const dark = darkAt > 0 ? /\{[^{}]*?((?:--[^{}]*?;?\s*)+)\}/.exec(src.slice(darkAt)) : null;
+  // The dark block's own declarations: the first run of text between braces after it that holds a `--` name.
+  // No nested quantifier, so a long or nested block is read in linear time (review 1: the old pattern hung).
+  const dark = darkAt > 0 ? [...src.slice(darkAt).matchAll(/\{([^{}]*)/g)].find((x) => x[1].includes('--')) ?? null : null;
   if (!light) return null;
   return { light: vars(light[1]), dark: dark ? vars(dark[1]) : null };
 }
@@ -64,7 +66,7 @@ export function readRootVars(text) {
 // Fill each role from a { name: value } map. → { colors: { role: value }, filledFrom: { role: name } }
 export function rolesFrom(map, { darkPrefix = false } = {}) {
   const colors = {}, filledFrom = {};
-  const entries = Object.entries(map || {}).filter(([, v]) => typeof v === 'string' && COLOR_RE.test(v.trim()));
+  const entries = Object.entries(map || {}).filter(([, v]) => isColor(v));
   const pick = (k) => { const n = norm(k); if (darkPrefix) { const m = /^(?:dark-(.+)|(.+)-dark)$/.exec(n); return m ? (m[1] || m[2]) : null; } return /(^dark-|-dark$)/.test(n) ? null : n; };
   for (const role of ROLES) {
     for (const want of ROLE_NAMES[role]) {
@@ -134,7 +136,8 @@ export function brandFromDesign(root, text, { name = null, from = 'DESIGN.md', l
   const images = findFiles(root, (n) => /\.(svg|png|webp|jpe?g)$/i.test(n)).filter((f) => smallEnough(root, f));
   const logoFile = logo || prefer(images.filter((f) => /logo|wordmark/i.test(path.posix.basename(f))));
   const markFile = mark || prefer(images.filter((f) => /mark|icon|favicon|symbol/i.test(path.posix.basename(f)))) || logoFile;
-  const title = name || (typeof fm?.name === 'string' && fm.name) || (typeof fm?.title === 'string' && fm.title) || (/^#\s+(.+)$/m.exec(String(text).replace(/^---[\s\S]*?\n---/, ''))?.[1]) || path.basename(root);
+  const productName = (() => { try { const n = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'product.json'), 'utf8')).name; return typeof n === 'string' && n.trim() ? n : null; } catch { return null; } })();
+  const title = name || (typeof fm?.name === 'string' && fm.name) || (typeof fm?.title === 'string' && fm.title) || productName || (/^#\s+(.+)$/m.exec(String(text).replace(/^---[\s\S]*?\n---/, ''))?.[1]) || path.basename(root);
   const cleanName = String(title).split(/\s+[—–-]\s+|\s+\(/)[0].trim().slice(0, 80);
   const brand = {
     version: BRAND_VERSION, name: cleanName, source: from, sourceHash: sourceFingerprint(text),
@@ -155,9 +158,15 @@ export async function runBrand(root, { action = 'show', args = [], from = null, 
     let stale = null;
     if (r.origin === 'product' && r.brand.source) {
       const src = brandPath(root, r.brand.source);
+      let text = null;
+      try { text = src ? fs.readFileSync(src, 'utf8') : null; } catch { /* a folder, or unreadable */ }
       if (!src) stale = `its source ${r.brand.source} is not in the Product any more`;
-      else if (r.brand.sourceHash && sourceFingerprint(fs.readFileSync(src, 'utf8')) !== r.brand.sourceHash) stale = `${r.brand.source} changed since ${BRAND_FILE} was made — run \`yad brand init --force\`, or update the file`;
+      else if (text === null) stale = `its source ${r.brand.source} cannot be read`;
+      else if (!r.brand.sourceHash) stale = null;
+      else if (sourceFingerprint(text) !== r.brand.sourceHash) stale = `${r.brand.source} changed since ${BRAND_FILE} was made — run \`yad brand init --force\`, or update the file`;
     }
+    // A file written by hand has no fingerprint, so nothing can say when its design system moves on (review 1).
+    if (r.origin === 'product' && !r.brand.sourceHash) r.warnings = [...r.warnings, `no sourceHash in ${BRAND_FILE}, so yad cannot tell when the design system changes — \`yad brand init --force\` stamps it, if the design system is one it reads`];
     if (action === 'check' && exists && r.problems.length) process.exitCode = 1;
     const payload = { origin: r.origin, file: BRAND_FILE, exists, name: r.brand.name, logo: r.brand.logo, mark: r.brand.mark, colors: r.brand.colors, fonts: r.brand.fonts, status: r.brand.status,
       problems: r.problems, warnings: r.warnings, contrast: contrastLines, stale };
@@ -184,8 +193,11 @@ export async function runBrand(root, { action = 'show', args = [], from = null, 
     const src = brandPath(root, srcRel);
     if (!src) return refuse(`no ${forTerminal(srcRel)} in the Product`, 'name the design system with --from <file> (a DESIGN.md), or ask the agent to fill the brand with the yad-brand skill', { json });
     for (const [flag, rel] of [['--logo', logo], ['--mark', mark]]) if (rel && !brandPath(root, rel)) return refuse(`${flag} ${forTerminal(rel)} is not a file inside the Product`, null, { json });
-    const text = fs.readFileSync(src, 'utf8');
-    const { brand, report } = brandFromDesign(root, text, { from: path.relative(root, src).split(path.sep).join('/'), logo, mark });
+    let text;
+    try { text = fs.readFileSync(src, 'utf8'); } catch { return refuse(`${forTerminal(srcRel)} cannot be read as a file`, null, { json }); }
+    // Relative to the Product's REAL path: `src` is real (brandPath), and a Product reached through a link
+    // must never write a path that leaves it, or this machine's folders, into a committed file (review 1).
+    const { brand, report } = brandFromDesign(root, text, { from: path.relative(fs.realpathSync(root), src).split(path.sep).join('/'), logo, mark });
     if (!Object.keys(brand.colors.light).length) return refuse(`${forTerminal(srcRel)} has no colours yadflow can read (no front matter \`colors:\` and no \`:root\` block)`, 'ask the agent to fill the brand with the yad-brand skill — it reads prose and design tools', { json });
     const checked = checkBrand(root, brand);
     if (checked.problems.length) return refuse(`the brand made from ${forTerminal(srcRel)} cannot be used: ${checked.problems.join('; ')}`, null, { json });

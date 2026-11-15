@@ -768,6 +768,8 @@ function writesProduct(cmd, o) {
   if (cmd === 'brain') return action === 'build' || (action === 'view' && !!o.html);
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
+  // `brand init` writes the Product's .sdlc/brand.json: only into a Product found (review 1).
+  if (cmd === 'brand') return action === 'init';
   if (cmd === 'dial') return o.to !== undefined;
   if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
   if (cmd === 'worktree') return o._[1] === 'add' || o._[1] === 'remove';

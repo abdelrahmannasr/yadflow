@@ -163,7 +163,7 @@ test('init from a :root block in OKLCH: --action is primary, --gold is accent, m
   try {
     const out = await captured(() => runBrand(root, { action: 'init', json: true }));
     assert.equal(out.report.how, ':root block');
-    assert.equal(out.brand.name, 'Design', 'the first heading, when there is no front matter name');
+    assert.equal(out.brand.name, 'Invented', 'the Product\'s own name, when there is no front matter name');
     assert.equal(out.brand.colors.light.primary, 'oklch(0.220 0.010 70)');
     assert.equal(out.brand.colors.light.accent, 'oklch(0.680 0.135 62)');
     assert.equal(out.brand.colors.dark, null, 'no dark block: made from light later');
@@ -171,7 +171,7 @@ test('init from a :root block in OKLCH: --action is primary, --gold is accent, m
     const r = readBrand(root);
     assert.equal(r.brand.colors.derivedDark, true);
     assert.equal(r.brand.colors.dark.bg, YADFLOW_BRAND.colors.dark.bg, 'a neutral dark …');
-    assert.equal(r.brand.colors.dark.primary, 'oklch(0.220 0.010 70)', '… keeping the brand\'s own primary when it cannot be lightened');
+    assert.equal(r.brand.colors.dark.primary, 'oklch(0.610 0.010 70)', '… with the brand\'s own primary made lighter, so it reads on the dark');
   } finally { done(ws); }
 });
 
@@ -277,7 +277,7 @@ test('yad brand from the CLI, and its agent classes', () => {
     assert.equal(out.origin, 'yadflow');
     assert.equal(classify(['brand']), 'read');
     assert.equal(classify(['brand', 'check']), 'read');
-    assert.equal(classify(['brand', 'init']), 'local-write');
+    assert.equal(classify(['brand', 'init']), 'on-request', 'it writes a committed file: only when the person asks');
   } finally { done(ws); }
 });
 
@@ -345,4 +345,122 @@ test('#553: the doctor row — none is fine, a broken file and a changed DESIGN.
     assert.equal(row(made.root).status, 'warn');
     assert.match(row(made.root).message, /DESIGN\.md changed since/);
   } finally { done(none.ws, made.ws); }
+});
+
+// ---- review 1 -----------------------------------------------------------------------------------
+
+test('#553 review 1: a long or nested dark block and a huge colour are read in linear time', async () => {
+  const { isColor } = await import('./brand.mjs');
+  const dark = `.dark {${Array.from({ length: 40 }, (_, i) => ` --c${i}: #000;`).join('')} .card { color: red; } }`;
+  let t = Date.now();
+  const r = readRootVars(`:root{--bg:#fff}\n${dark}`);
+  assert.ok(Date.now() - t < 1000, `read in ${Date.now() - t} ms`);
+  assert.equal(Object.keys(r.dark).length, 40);
+  assert.deepEqual(readRootVars(`:root{--bg:#fff}\n@media (prefers-color-scheme: dark) { :root { --bg: #000; } }`).dark, { '--bg': '#000' });
+  t = Date.now();
+  assert.equal(isColor(`rgb(${' '.repeat(400000)}x`), false);
+  assert.equal(isColor(`rgb(${'1 '.repeat(40)})`), false, 'longer than any colour');
+  assert.ok(Date.now() - t < 200, `refused in ${Date.now() - t} ms`);
+  assert.equal(isColor(' #2B7358 '), true);
+});
+
+test('#553 review 1: init through a linked Product writes a path inside it, never this machine\'s folders', async () => {
+  const { ws, root } = product({ design: YAML_DESIGN });
+  const link = path.join(ws, 'linked');
+  fs.symlinkSync(root, link, 'dir');
+  try {
+    await captured(() => runBrand(link, { action: 'init', json: true }));
+    const rec = JSON.parse(fs.readFileSync(path.join(root, BRAND_FILE), 'utf8'));
+    assert.equal(rec.source, 'DESIGN.md');
+    const r = await captured(() => runBrand(link, { action: 'check', json: true }));
+    assert.equal(r.stale, null, 'staleness still tracked');
+  } finally { done(ws); }
+});
+
+test('#553 review 1: a source that is a folder is said, never a crash; a hand-made file says staleness is not tracked', async () => {
+  const { ws, root } = product({ files: { 'design/x.txt': 'x' } });
+  try {
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'Hand', source: 'design', colors: { light: { primary: '#2B7358' } } });
+    const r = await captured(() => runBrand(root, { action: 'check', json: true }));
+    const out = r;
+    assert.match(out.stale, /cannot be read/);
+    assert.ok(out.warnings.some((w) => /no sourceHash/.test(w)), out.warnings.join(' | '));
+  } finally { done(ws); }
+});
+
+test('#553 review 1: bad status colours, backslash and drive paths are refused', () => {
+  const { ws, root } = product({ files: { 'design/m.svg': SVG } });
+  try {
+    const base = { version: 1, name: 'X', colors: { light: { primary: '#2B7358' } } };
+    assert.ok(checkBrand(root, { ...base, status: { live: '#fff;}' } }).problems.some((p) => /status\.live/.test(p)));
+    assert.ok(checkBrand(root, { ...base, status: { live: '</style>' } }).problems.some((p) => /status\.live/.test(p)));
+    for (const bad of ['..\\design\\m.svg', 'C:design/m.svg', '/etc/passwd', 'design/../../m.svg']) {
+      assert.ok(checkBrand(root, { ...base, mark: bad }).problems.some((p) => /not a file inside the Product/.test(p)), bad);
+    }
+    assert.deepEqual(checkBrand(root, { ...base, mark: 'design/m.svg' }).problems, []);
+  } finally { done(ws); }
+});
+
+test('#553 review 1: contrast reads each channel\'s own unit, and returns nothing for a unit it does not read', () => {
+  assert.equal(contrast('rgb(100 100 100 / 50%)', '#fff').toFixed(1), '5.9');
+  assert.equal(contrast('rgb(39.2% 39.2% 39.2%)', '#fff').toFixed(1), '5.9');
+  assert.equal(contrast('oklch(0.5 0.1 250turn)', '#fff'), null);
+  assert.ok(linearRgb('oklch(60% 40% 250)').every((x) => x >= 0 && x <= 1));
+});
+
+test('#553 review 1: a dark scheme without its primary takes the light one made lighter, not yadflow\'s purple', () => {
+  const { ws, root } = product();
+  try {
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'X', colors: { light: { primary: '#2B7358', accent: 'rgb(1 2 3)' }, dark: { bg: '#0D291F' } } });
+    const r = readBrand(root);
+    assert.equal(r.origin, 'product');
+    assert.notEqual(r.brand.colors.dark.primary, YADFLOW_BRAND.colors.dark.primary);
+    assert.match(r.brand.colors.dark.primary, /^#[0-9a-f]{6}$/);
+    assert.equal(r.brand.colors.dark.accent, YADFLOW_BRAND.colors.dark.accent, 'one it cannot make lighter is yadflow\'s');
+    assert.equal(r.brand.colors.dark.bg, '#0D291F');
+  } finally { done(ws); }
+});
+
+test('#553 review 1: the doctor row never prints escape codes from the file', async () => {
+  const { brandChecks } = await import('./doctor.mjs');
+  const { ws, root } = product();
+  try {
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'Evil\u001b]52;c;aGk=\u0007', colors: { light: { primary: '#2B7358' } } });
+    const checks = [];
+    brandChecks(root, checks);
+    const row = checks.find((x) => x.id === 'brand');
+    assert.ok(![...row.message].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f), JSON.stringify(row.message));
+  } finally { done(ws); }
+});
+
+test('#553 review 1: the served map and brain style sheets carry the brand; the usage page too; init outside a Product is refused', async () => {
+  const http = await import('node:http');
+  const { startMapServer } = await import('./map-view.mjs');
+  const { startBrainServer } = await import('./brain-view.mjs');
+  const { ws, root } = product({ design: YAML_DESIGN });
+  try {
+    await captured(() => runBrand(root, { action: 'init', json: true }));
+    const get = (port, p) => new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path: p, headers: { Host: `127.0.0.1:${port}` } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); });
+      req.on('error', reject); req.end();
+    });
+    for (const start of [() => startMapServer(root, { env: { YAD_REPORTS_DIR: path.join(ws, 'r') } }), () => startBrainServer(root, {})]) {
+      const s = await start();
+      try {
+        const r = await get(s.port, `/style.css?t=${s.token}`);
+        assert.equal(r.status, 200);
+        assert.match(r.body, /--brand-primary:#2B7358/i);
+      } finally { await s.close(); }
+    }
+    const U = await import('./usage.mjs');
+    const page = U.renderHtml(U.analyze([], { since: null, until: null }), '2026-11-15', { brandCss: brandForPage(root, 'usage').css });
+    assert.ok(page.indexOf('--brand-primary') > page.indexOf('--bg'));
+  } finally { done(ws); }
+  const plain = tmp();
+  try {
+    put(path.join(plain, 'DESIGN.md'), YAML_DESIGN);
+    const r = spawnSync(process.execPath, [YAD, 'brand', 'init'], { cwd: plain, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', SDLC_NONINTERACTIVE: '1', YAD_NO_REPORT: '1' } });
+    assert.notEqual(r.status, 0);
+    assert.equal(fs.existsSync(path.join(plain, BRAND_FILE)), false);
+  } finally { done(plain); }
 });

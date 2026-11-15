@@ -3030,17 +3030,25 @@ export function captureChecks(root, checks, cfg) {
 // used, or one older than the DESIGN.md it was made from, is said — a page never breaks over it.
 export function brandChecks(root, checks) {
   const r = readBrand(root);
+  // Every value from the committed file is passed through forTerminal: a teammate's file must never send
+  // escape codes to the reader's terminal (review 1).
+  const t = (v) => forTerminal(String(v));
   if (r.origin === 'yadflow' && !r.problems.length) { check(checks, 'brand', 'project', 'ok', `no ${BRAND_FILE} — the pages yad makes wear yadflow's look`, 'run `yad brand init` to make them wear the Product\'s own design system'); return; }
-  if (r.problems.length) { check(checks, 'brand', 'project', 'warn', `${BRAND_FILE} cannot be used, so pages wear yadflow's look: ${r.problems[0]}${r.problems.length > 1 ? ` (and ${r.problems.length - 1} more)` : ''}`, 'see them all with `yad brand check`'); return; }
+  if (r.problems.length) { check(checks, 'brand', 'project', 'warn', `${BRAND_FILE} cannot be used, so pages wear yadflow's look: ${t(r.problems[0])}${r.problems.length > 1 ? ` (and ${r.problems.length - 1} more)` : ''}`, 'see them all with `yad brand check`'); return; }
+  // The same staleness `yad brand check` says: the source gone, unreadable, or changed since.
   let stale = null;
-  if (r.brand.source && r.brand.sourceHash) {
+  if (r.brand.source) {
     const src = brandPath(root, r.brand.source);
-    try { if (src && sourceFingerprint(fs.readFileSync(src, 'utf8')) !== r.brand.sourceHash) stale = r.brand.source; } catch { /* unreadable: said by yad brand check */ }
+    let text = null;
+    try { text = src ? fs.readFileSync(src, 'utf8') : null; } catch { /* a folder, or unreadable */ }
+    if (!src) stale = `its source ${t(r.brand.source)} is not in the Product any more`;
+    else if (text === null) stale = `its source ${t(r.brand.source)} cannot be read`;
+    else if (r.brand.sourceHash && sourceFingerprint(text) !== r.brand.sourceHash) stale = `${t(r.brand.source)} changed since ${BRAND_FILE} was made`;
   }
-  if (stale) { check(checks, 'brand', 'project', 'warn', `${stale} changed since ${BRAND_FILE} was made`, 'run `yad brand init --force`, or update the brand file by hand'); return; }
+  if (stale) { check(checks, 'brand', 'project', 'warn', stale, 'run `yad brand init --force`, or update the brand file by hand'); return; }
   const hard = contrastProblems(r.brand);
   if (hard.length) { check(checks, 'brand', 'project', 'warn', `${BRAND_FILE}: ${hard[0]}`, 'pick a darker text or lighter background; `yad brand check` lists every pair'); return; }
-  check(checks, 'brand', 'project', 'ok', `the pages yad makes wear ${r.brand.name}'s brand (${BRAND_FILE})`);
+  check(checks, 'brand', 'project', 'ok', `the pages yad makes wear ${t(r.brand.name)}'s brand (${BRAND_FILE})`);
 }
 
 // The activity half (E178): off says so; on says whether the Product's own script and entries are wired, and

@@ -189,10 +189,11 @@ export const COMMAND_CLASS = {
   'reports list': { class: 'read' },
   'reports open': { class: 'local-write' },
   'reports prune': { class: 'read', flags: { apply: 'on-request' } },
-  // E184: `brand` and `brand check` read; `brand init` writes the Product's brand file (committed by the person).
+  // E184: `brand` and `brand check` read; `brand init` writes the Product's committed brand file (and `--force`
+  // replaces the team's edits), so only when the person asks — as `toolbox add` and `skill bind` (review 1).
   'brand show': { class: 'read' },
   'brand check': { class: 'read' },
-  'brand init': { class: 'local-write' },
+  'brand init': { class: 'on-request' },
   'issues list': { class: 'read' },
   // Adds labels on the team's repos: asked for, never a side effect.
   'issues labels': { class: 'on-request' },

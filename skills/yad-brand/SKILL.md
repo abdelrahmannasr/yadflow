@@ -17,7 +17,7 @@ is never an error.
 
 ```json
 { "version": 1, "name": "<the product's name>",
-  "source": "DESIGN.md", "sourceHash": "<leave to yad brand init, or omit>",
+  "source": "DESIGN.md", "sourceHash": "<only yad brand init writes it; omit it when you write the file by hand>",
   "logo": "<path inside the Product: .svg/.png/.webp/.jpg, at most 512 KB>",
   "mark": "<a small square version of the logo — the favicon-like mark>",
   "colors": {
@@ -38,7 +38,7 @@ is never an error.
 
 ## Steps
 
-1. **Machine-readable first.** Run `yad brand init` (or `--from <file>` for a DESIGN.md that is not at the
+1. **Machine-readable first.** The person asked for their brand, so run `yad brand init` (or `--from <file>` for a DESIGN.md that is not at the
    Product's root, `--logo <file>` / `--mark <file>` when the files are not found by name). It reads YAML
    front matter (`colors:`, `typography:`) or a CSS `:root { --name: value }` block, and prints which name
    filled each role and which roles it could not fill. If it succeeds, go to step 4.
@@ -52,7 +52,7 @@ is never an error.
 4. **Check:** run `yad brand check`. Fix every problem it names (an unusable value, a path outside the
    Product, a file too big). Report its contrast warnings to the person; do not change their colours
    yourself.
-5. **Show the person** `yad brand` (the resolved look) and say which pages will now wear it. The brand file
+5. **Show the person** `yad brand show` (the resolved look) and say which pages will now wear it. The brand file
    is committed like any other Product file; the person commits it.
 
 ## Rules
@@ -61,5 +61,9 @@ is never an error.
   pages; the person says which.
 - Never copy a logo or font from outside the Product into it without the person's yes.
 - Never put a colour that is not in the design system into the file.
-- When DESIGN.md changes later, `yad brand check` and `yad doctor` say the brand file is stale: run
-  `yad brand init --force`, or this skill again.
+- When DESIGN.md changes later, `yad brand check` and `yad doctor` say the brand file is stale — but only for
+  a file `yad brand init` made (it stamps `sourceHash`). A file you write by hand has none, so nothing can tell
+  when its design system moves on: `yad brand check` says so, and you tell the person to run this skill again
+  when their design system changes.
+- `yad brand init` writes a committed file (and `--force` replaces the team's edits), so run it only when the
+  person asks for their brand.

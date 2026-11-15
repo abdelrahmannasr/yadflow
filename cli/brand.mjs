@@ -23,8 +23,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readJSONStrict } from './lib.mjs';
+import { PROJECT_FILES } from './manifest.mjs';
 
-export const BRAND_FILE = '.sdlc/brand.json';
+export const BRAND_FILE = PROJECT_FILES.brandConfig;
 export const BRAND_VERSION = 1;
 export const ROLES = Object.freeze(['bg', 'surface', 'text', 'muted', 'border', 'primary', 'accent']);
 export const STATUS_KEYS = Object.freeze(['live', 'merged', 'active', 'planned', 'idle']);
@@ -37,6 +38,9 @@ const FONT_TYPES = Object.freeze({ '.woff2': ['font/woff2', 'woff2'], '.woff': [
 // A colour value: hex, or a CSS colour function holding only numbers, units, `%`, `.`, `/`, `,` and spaces.
 export const COLOR_RE = /^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgba?|hsla?|oklch|oklab)\(\s*(?:[-+0-9.%\s/,]|deg|turn|none)+\))$/i;
 export const FAMILY_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$/;
+// A colour yadflow can write: checked for length first, so a huge value never reaches the pattern (review 1).
+export const COLOR_MAX = 64;
+export const isColor = (v) => typeof v === 'string' && v.trim().length <= COLOR_MAX && COLOR_RE.test(v.trim());
 const SYSTEM_SANS = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const SYSTEM_MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
@@ -81,7 +85,7 @@ export function checkBrand(root, rec) {
     for (const role of ROLES) {
       const v = c[role];
       if (v === undefined || v === null) { warnings.push(`colors.${scheme}.${role} is not set — yadflow's is used`); continue; }
-      if (typeof v !== 'string' || !COLOR_RE.test(v.trim())) { problems.push(`colors.${scheme}.${role} is not a colour yadflow can use (hex, rgb(), hsl(), oklch() or oklab())`); continue; }
+      if (!isColor(v)) { problems.push(`colors.${scheme}.${role} is not a colour yadflow can use (hex, rgb(), hsl(), oklch() or oklab())`); continue; }
       out[role] = v.trim();
     }
     for (const k of Object.keys(c)) if (!ROLES.includes(k)) warnings.push(`colors.${scheme}.${k} is not a role yadflow uses (${ROLES.join(', ')})`);
@@ -124,7 +128,7 @@ export function checkBrand(root, rec) {
       for (const k of STATUS_KEYS) {
         const v = rec.status[k];
         if (v === undefined) continue;
-        if (typeof v !== 'string' || !COLOR_RE.test(v.trim())) problems.push(`status.${k} is not a colour yadflow can use`);
+        if (!isColor(v)) problems.push(`status.${k} is not a colour yadflow can use`);
         else status[k] = v.trim();
       }
     }
@@ -146,13 +150,14 @@ export function readBrand(root) {
   return { brand: completeBrand(c.brand), origin: 'product', problems: [], warnings: c.warnings, file };
 }
 
-// Every role set: a missing light role is yadflow's; a missing dark scheme is a neutral dark that keeps the
-// brand's own primary and accent (and its logo and fonts), so the brand still reads in dark.
+// Every role set: a missing light role is yadflow's. A dark primary or accent the brand does not give (no dark
+// scheme, or one without them) is its light one made lighter, or yadflow's when it cannot be made lighter, so
+// it reads on a dark background; every other missing dark role is yadflow's neutral dark.
 function completeBrand(b) {
   const light = { ...YADFLOW_BRAND.colors.light, ...(b.colors?.light || {}) };
   const ownDark = b.colors?.dark;
-  const dark = ownDark ? { ...YADFLOW_BRAND.colors.dark, ...ownDark }
-    : { ...YADFLOW_BRAND.colors.dark, primary: b.colors?.light?.primary ? lighter(light.primary) : YADFLOW_BRAND.colors.dark.primary, accent: b.colors?.light?.accent ? lighter(light.accent) : YADFLOW_BRAND.colors.dark.accent };
+  const derive = (role) => (b.colors?.light?.[role] && lighter(light[role])) || YADFLOW_BRAND.colors.dark[role];
+  const dark = { ...YADFLOW_BRAND.colors.dark, primary: derive('primary'), accent: derive('accent'), ...(ownDark || {}) };
   return { ...b, colors: { light, dark, derivedDark: !ownDark }, fonts: b.fonts || { heading: null, body: null, mono: null } };
 }
 
@@ -169,11 +174,14 @@ export function linearRgb(value) {
     if (h.length <= 4) h = [...h].map((ch) => ch + ch).join('');
     return [0, 2, 4].map((i) => toLinear(parseInt(h.slice(i, i + 2), 16) / 255));
   }
-  m = /^rgba?\(\s*([\d.]+)%?[\s,]+([\d.]+)%?[\s,]+([\d.]+)%?/.exec(v);
-  if (m) return [m[1], m[2], m[3]].map((x) => toLinear(clamp01(Number(x) / (v.includes('%') ? 100 : 255))));
-  m = /^oklch\(\s*([\d.]+)(%?)\s+([\d.]+)%?\s+([-\d.]+)(deg)?/.exec(v);
+  // Each channel read with its own unit; an alpha after `/` or a fourth value is left out. Anything else is
+  // not read (null), never guessed (review 1).
+  m = /^rgba?\(\s*([\d.]+)(%?)(?:\s*,\s*|\s+)([\d.]+)(%?)(?:\s*,\s*|\s+)([\d.]+)(%?)\s*(?:[,/]\s*[\d.]+%?\s*)?\)$/.exec(v);
+  if (m) return [[m[1], m[2]], [m[3], m[4]], [m[5], m[6]]].map(([x, pc]) => toLinear(clamp01(Number(x) / (pc ? 100 : 255))));
+  m = /^oklch\(\s*([\d.]+)(%?)\s+([\d.]+)(%?)\s+([-\d.]+)(deg)?\s*(?:\/\s*[\d.]+%?\s*)?\)$/.exec(v);
   if (m) {
-    const L = Number(m[1]) / (m[2] ? 100 : 1), C = Number(m[3]), h = (Number(m[4]) * Math.PI) / 180;
+    // CSS: L 100% is 1; C 100% is 0.4.
+    const L = Number(m[1]) / (m[2] ? 100 : 1), C = m[4] ? (Number(m[3]) / 100) * 0.4 : Number(m[3]), h = (Number(m[5]) * Math.PI) / 180;
     const a = C * Math.cos(h), b = C * Math.sin(h);
     const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
     const mm = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
@@ -189,10 +197,16 @@ export function contrast(a, b) {
   const [hi, lo] = [luminance(x), luminance(y)].sort((p, q) => q - p);
   return (hi + 0.05) / (lo + 0.05);
 }
-// A colour made lighter for a dark background (hex in, hex out; anything else is kept).
-function lighter(value) {
+// A colour made lighter for a dark background: hex in, hex out; oklch() with its lightness raised; anything
+// else → null, and yadflow's dark colour is used instead (review 1).
+export function lighter(value) {
+  const ok = /^oklch\(\s*([\d.]+)(%?)(\s+[\d.]+%?\s+[-\d.]+(?:deg)?\s*(?:\/\s*[\d.]+%?\s*)?)\)$/i.exec(String(value).trim());
+  if (ok) {
+    const L = Number(ok[1]) / (ok[2] ? 100 : 1);
+    return `oklch(${(L + (1 - L) * 0.5).toFixed(3)}${ok[3]})`;
+  }
   const rgb = linearRgb(value);
-  if (!rgb || !/^#/.test(value)) return value;
+  if (!rgb || !/^#/.test(value)) return null;
   const toS = (c) => { const s = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055; return Math.round(clamp01(s) * 255); };
   const mixed = rgb.map((c) => c + (1 - c) * 0.35);
   return `#${mixed.map((c) => toS(c).toString(16).padStart(2, '0')).join('')}`;
@@ -203,7 +217,7 @@ export function contrastProblems(brand) {
   const out = [];
   for (const scheme of ['light', 'dark']) {
     const c = brand.colors[scheme];
-    for (const [role, min] of [['text', 4.5], ['muted', 3]]) {
+    for (const [role, min] of [['text', 4.5], ['muted', 3], ['primary', 3]]) {
       const r = contrast(c[role], c.bg);
       if (r !== null && r < min) out.push(`${scheme}: ${role} on bg is ${r.toFixed(1)}:1 — under ${min}:1, hard to read`);
     }
@@ -219,7 +233,9 @@ export function brandAssets(root, brand, origin) {
   const image = (rel) => {
     const full = rel ? brandPath(root, rel) : null;
     if (!full) return null;
-    try { return dataUri(IMAGE_TYPES[path.extname(full).toLowerCase()], fs.readFileSync(full)); } catch { return null; }
+    const mime = IMAGE_TYPES[path.extname(full).toLowerCase()];
+    if (!mime) return null;
+    try { return dataUri(mime, fs.readFileSync(full)); } catch { return null; }
   };
   let mark = image(brand.mark) || image(brand.logo);
   if (!mark && origin === 'yadflow') { try { mark = dataUri('image/svg+xml', fs.readFileSync(YADFLOW_MARK_FILE)); } catch { mark = null; } }
@@ -230,12 +246,14 @@ export function brandAssets(root, brand, origin) {
       for (const rel of f?.files || []) {
         const full = brandPath(root, rel);
         if (!full) continue;
-        const [mime, format] = FONT_TYPES[path.extname(full).toLowerCase()];
+        const type = FONT_TYPES[path.extname(full).toLowerCase()];
+        if (!type) continue; // a brand never breaks a page
+        const [mime, format] = type;
         try { fonts.push({ family: f.family, src: dataUri(mime, fs.readFileSync(full)), format }); } catch { /* left out */ }
       }
     }
   }
-  return { mark, logo: image(brand.logo) || mark, fonts };
+  return { mark, fonts };
 }
 
 const familyStack = (f, system) => (f ? `"${f.family}", ${system}` : system);
@@ -269,13 +287,13 @@ const both = (light, dark) => `:root{${light}}\n@media (prefers-color-scheme: da
 const map = (pairs, scheme) => pairs.map(([v, role]) => `${v}:var(--brand-${scheme === 'dark' ? 'dark-' : ''}${role})`).join(';');
 export const PAGE_MAPS = Object.freeze({
   // The progress map is always dark: the dark roles, a glass of the surface, the status colours only if set.
-  map: `:root{${map([['--bg', 'bg'], ['--ink', 'text'], ['--ink-2', 'muted'], ['--muted', 'muted'], ['--brand-link', 'primary']], 'dark')};--hair:color-mix(in srgb, var(--brand-dark-border) 70%, transparent);--glass:color-mix(in srgb, var(--brand-dark-surface) 80%, transparent)}
+  map: `:root{${map([['--bg', 'bg'], ['--ink', 'text'], ['--muted', 'muted']], 'dark')};--ink-2:color-mix(in srgb, var(--brand-dark-text) 60%, var(--brand-dark-muted));--hair:color-mix(in srgb, var(--brand-dark-border) 70%, transparent);--glass:color-mix(in srgb, var(--brand-dark-surface) 80%, transparent)}
 :root{--live:var(--brand-status-live, #3987e5);--merged:var(--brand-status-merged, #d55181);--active:var(--brand-status-active, #c98500);--planned:var(--brand-status-planned, #93a0bf);--idle:var(--brand-status-idle, #5b6680)}
-html,body{font-family:var(--brand-font-body)}.brand h1{font-family:var(--brand-font-heading)}`,
+html,body{font-family:var(--brand-font-body)}.brand h1{font-family:var(--brand-font-heading)}.linkish,#panel a{color:var(--brand-dark-primary)}`,
   brain: both(map([['--bg', 'bg'], ['--panel', 'surface'], ['--text', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--accent', 'primary']], 'light'),
     map([['--bg', 'bg'], ['--panel', 'surface'], ['--text', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--accent', 'primary']], 'dark'))
     + '\nbody{font-family:var(--brand-font-body)}h1,h2,h3{font-family:var(--brand-font-heading)}',
-  live: `:root{--sky-0:var(--brand-dark-bg);--sky-1:var(--brand-dark-surface);--ink:var(--brand-dark-text);--sans:var(--brand-font-body);--mono:var(--brand-font-mono)}`,
+  live: `:root{--sky-0:var(--brand-dark-bg);--sky-1:var(--brand-dark-surface);--ink:var(--brand-dark-text);--ink-2:color-mix(in srgb, var(--brand-dark-text) 60%, var(--brand-dark-muted));--ink-3:var(--brand-dark-muted);--rule:color-mix(in srgb, var(--brand-dark-border) 60%, transparent);--glass:color-mix(in srgb, var(--brand-dark-surface) 66%, transparent);--sans:var(--brand-font-body);--mono:var(--brand-font-mono)}`,
   catalog: both(map([['--bg', 'bg'], ['--ink', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--tag', 'surface'], ['--link', 'primary']], 'light'),
     map([['--bg', 'bg'], ['--ink', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--tag', 'surface'], ['--link', 'primary']], 'dark'))
     + '\nbody{font-family:var(--brand-font-body)}h1,h2{font-family:var(--brand-font-heading)}',
