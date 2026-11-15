@@ -609,13 +609,6 @@ export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.mjs', dest: 'hooks/ledger-guard.mjs' },
 ];
 
-// The local setup notice (E185 part 4): git's post-merge and post-rewrite hooks in each clone run it after a pull,
-// and it says in one line which local setup steps the pull brought. Every ledger mode; the Product's config turns
-// it off with `"localSetupNotice": false`.
-export const LOCAL_SETUP_NOTICE_WIRING = [
-  { src: 'skills/yad-checks/templates/hooks/local-setup-notice.mjs', dest: 'hooks/local-setup-notice.mjs' },
-];
-
 // The shell scripts every hook was before E113. `yad check --fix` rewrites an entry that still names one
 // (each adapter's `legacyCommands`) and then deletes the script — but only a copy the provenance record
 // proves yad wrote and nobody edited. An edited or unrecorded copy is the team's, and may be what their

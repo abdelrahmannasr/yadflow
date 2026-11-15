@@ -6,9 +6,11 @@
 // IT ONLY PRINTS. It runs no step, reaches no network, and never fails the pull: any error, an old git, a file
 // that does not parse — it says nothing and exits 0. `YAD_HOOK_DISABLE=1` silences it.
 //
-// A NODE SCRIPT (E113), importing nothing outside Node itself: it runs from the Product, where yadflow may not be
-// installed. Git runs it from the top of the repo. yad rewrites this file; the Product turns it off with
-// `"localSetupNotice": false` in .sdlc/product.json.
+// A NODE SCRIPT (E113), importing nothing outside Node itself. NEVER RUN FROM THE PRODUCT'S FILES: yad copies it
+// from its own package into this clone's git folder (`.git/yad/local-setup-notice.mjs`), which a pull never
+// changes — so a pull can never make a teammate's machine run code the pull brought (review 1). Git runs the hook
+// from the top of the repo and passes the Product's folder within it (`.` when the Product is the repo). yad
+// rewrites this copy; the Product turns the notice off with `"localSetupNotice": false` in .sdlc/product.json.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -22,8 +24,10 @@ export const stepHash = (step) => createHash('sha256')
   .update(JSON.stringify({ commands: step.commands ?? [], check: step.check ?? null, when: step.when ?? 'optional' }))
   .digest('hex').slice(0, 16);
 
+// Every git call runs from the Product's folder, and never fetches (a partial clone would fetch a missing file).
+let productRoot = process.cwd();
 const git = (args) => {
-  const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: 10_000 });
+  const r = spawnSync('git', ['-C', productRoot, ...args], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: 5_000, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
   return r.status === 0 ? r.stdout : null;
 };
 const parse = (text) => {
@@ -55,12 +59,17 @@ export function broughtSteps(before, after, record) {
   return ids;
 }
 
-export function notice() {
+export function notice(product = '.') {
   if (process.env.YAD_HOOK_DISABLE === '1') return null;
-  const before = git(['show', `ORIG_HEAD:./${FILE}`]);
+  productRoot = path.resolve(process.cwd(), product);
+  // No ORIG_HEAD: no move to compare. One without the file: the pull brought the script itself.
+  if (git(['rev-parse', '-q', '--verify', 'ORIG_HEAD^{commit}']) === null) return null;
+  const before = git(['show', `ORIG_HEAD:./${FILE}`]) ?? '';
   const after = git(['show', `HEAD:./${FILE}`]);
-  if (before === null || after === null || before === after) return null;
-  const common = (git(['rev-parse', '--path-format=absolute', '--git-common-dir']) || '').trim();
+  if (after === null || before === after) return null;
+  // Read relative to the Product (an older git than 2.31 has no --path-format).
+  const commonOut = (git(['rev-parse', '--git-common-dir']) || '').trim();
+  const common = commonOut ? path.resolve(productRoot, commonOut) : '';
   let record = null;
   if (common) { try { record = parse(fs.readFileSync(path.join(common, 'yad', 'local-setup-done.json'), 'utf8')); } catch { /* none yet */ } }
   const ids = broughtSteps(parse(before), parse(after), record);
@@ -70,8 +79,11 @@ export function notice() {
 }
 
 // Run as a hook: print the line, if any, and never fail.
-const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Real paths on both sides: Node runs the main module by its real path (a junction, a linked folder, a drive
+// letter's case on Windows would otherwise keep this silent for good).
+const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const isMain = !!process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url));
 if (isMain) {
-  try { const line = notice(); if (line) process.stderr.write(`${line}\n`); } catch { /* never fail the pull */ }
+  try { const line = notice(process.argv[2] || '.'); if (line) process.stderr.write(`${line}\n`); } catch { /* never fail the pull */ }
   process.exitCode = 0;
 }

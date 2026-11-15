@@ -8,7 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
@@ -3247,19 +3247,16 @@ export function localSetupNoticeCheck(root, checks) {
   if (cfg && cfg.localSetupNotice === false) { check(checks, 'local-setup-hook', 'project', 'ok', 'the local setup notice after a pull is turned off for this Product ("localSetupNotice": false)'); return; }
   const states = localSetupNoticeStates(root).filter((s) => s.applies);
   if (!states.length) return;
+  const copy = noticeCopyState(root);
+  // Every part that is not right is said, the hooks yad left alone and the ones it would install alike (review 1).
   const blocked = states.filter((s) => s.state === 'foreign' || s.state === 'hooks-path');
-  const todo = states.filter((s) => s.state === 'missing' || s.state === 'outdated');
-  if (blocked.length) {
-    const s = blocked[0];
-    const why = s.state === 'hooks-path' ? `core.hooksPath is set (${forTerminal(s.hooksPath)})` : `${path.relative(root, s.file).split(path.sep).join('/')} is not yad's`;
-    check(checks, 'local-setup-hook', 'project', 'warn', `the local setup notice after a pull is not installed for ${blocked.map((x) => x.name).join(' and ')}: ${why}`,
-      `to have it, add this line to ${s.state === 'hooks-path' ? forTerminal(s.editFile) : 'that hook'}: ${s.line}`);
-  } else if (todo.length) {
-    check(checks, 'local-setup-hook', 'project', 'warn', `the local setup notice after a pull is ${todo.some((x) => x.state === 'missing') ? 'not installed' : 'out of date'} in this clone (${todo.map((x) => x.name).join(', ')})`,
-      'run `yad check --fix` — until then a pull that brings new setup steps says nothing');
-  } else {
-    check(checks, 'local-setup-hook', 'project', 'ok', 'the local setup notice after a pull is installed in this clone (post-merge, post-rewrite)');
-  }
+  const todo = states.filter((s) => s.state === 'missing' || s.state === 'outdated').map((s) => s.name);
+  if (copy && copy.state !== 'ok') todo.push(`its script in git's folder (${copy.state})`);
+  if (!blocked.length && !todo.length) { check(checks, 'local-setup-hook', 'project', 'ok', 'the local setup notice after a pull is installed in this clone (post-merge, post-rewrite)'); return; }
+  const parts = [];
+  if (todo.length) parts.push(`not installed or out of date here: ${todo.join(', ')} — \`yad check --fix\` installs ${todo.length > 1 ? 'them' : 'it'}`);
+  if (blocked.length) parts.push(forTerminal(localSetupNoticeAdvice(root) || ''));
+  check(checks, 'local-setup-hook', 'project', 'warn', 'the local setup notice after a pull will not show in this clone', parts.join('; '));
 }
 
 // The preview address patterns (#359), by the same rule `yad repo preview` writes with. Said only when

@@ -163,7 +163,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
   const gitHookNote = gitHookAdvice(gitHookState(root));
   if (gitHookNote) warn(gitHookNote);
-  for (const note of localSetupNoticeAdvice(root)) warn(note);
+  // The pull notice is a convenience, not a guard: its one line for a hook yad left alone only on --fix/update.
+  const noticeNote = fix ? localSetupNoticeAdvice(root) : null;
+  if (noticeNote) info(noticeNote);
   const shownInvalid = ideState.invalid.map((v) => {
     try { return JSON.stringify(v) ?? String(v); } catch { return String(v); }
   });

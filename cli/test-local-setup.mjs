@@ -932,82 +932,141 @@ test('E185 part 4: the notice script counts the steps a move brought, less those
   assert.deepEqual(broughtSteps(null, { team: 'nope' }, null), []);
 });
 
-test('E185 part 4: check --fix installs the notice in every ledger mode; a foreign hook is left with advice; off removes yad\'s copies', async () => {
+test('E185 part 4: check --fix installs the notice from yad\'s own copy in git\'s folder; a foreign hook is left with advice; off removes yad\'s copies', async () => {
   const { localSetupNoticeActions, orphanLocalSetupNoticeActions, localSetupNoticeStates, localSetupNoticeAdvice } = await import('./plan.mjs');
   const dir = product();
   applyAll(localSetupNoticeActions(dir));
-  assert.ok(fs.existsSync(path.join(dir, 'hooks', 'local-setup-notice.mjs')));
+  assert.equal(fs.existsSync(path.join(dir, 'hooks', 'local-setup-notice.mjs')), false, 'never a file of the Product\'s');
+  const copy = path.join(dir, '.git', 'yad', 'local-setup-notice.mjs');
+  assert.equal(read(copy), read(NOTICE), 'yad\'s own bytes, in git\'s folder');
   for (const name of ['post-merge', 'post-rewrite']) {
     const f = path.join(dir, '.git', 'hooks', name);
     assert.match(read(f), /yadflow local-setup notice \(E185\)/);
+    assert.match(read(f), /\$\(git rev-parse --git-common-dir 2>\/dev\/null\)\/yad\/local-setup-notice\.mjs/);
     if (process.platform !== 'win32') assert.ok(fs.statSync(f).mode & 0o111, `${name} is executable`);
   }
   assert.match(read(path.join(dir, '.git', 'hooks', 'post-rewrite')), /\[ "\$1" = rebase \] \|\| exit 0/);
   assert.deepEqual(localSetupNoticeStates(dir).map((s) => s.state), ['ok', 'ok']);
-  // A hook of the team's own is never touched.
+  assert.deepEqual(localSetupNoticeActions(dir).filter((a) => a.status !== 'ok'), [], 'nothing left to do');
+  // A hook of the team's own is never touched; one line of advice names both lines to add.
   put(path.join(dir, '.git', 'hooks', 'post-merge'), '#!/bin/sh\necho mine\n');
-  assert.equal(localSetupNoticeActions(dir).filter((a) => /post-merge/.test(a.item)).length, 0);
-  assert.ok(localSetupNoticeAdvice(dir).some((l) => /post-merge is not yad's, so yad left it alone; .*add this line to it: \[ ! -f 'hooks\/local-setup-notice\.mjs' \]/.test(l)), localSetupNoticeAdvice(dir).join('\n'));
-  // Turned off: only yad's exact copy goes.
+  put(path.join(dir, '.git', 'hooks', 'post-rewrite'), '#!/bin/sh\necho mine too\n');
+  assert.deepEqual(localSetupNoticeActions(dir).filter((a) => /git hook/.test(a.item)), [], 'no hook action for a hook of the team\'s own');
+  const advice = localSetupNoticeAdvice(dir);
+  assert.match(advice, /yad left post-merge and post-rewrite alone/);
+  assert.match(advice, /post-rewrite: \[ "\$1" != rebase \] \|\| \{ notice=/, 'the hand line keeps rebase-only');
+  // Turned off: only yad's exact copies go.
+  fs.rmSync(path.join(dir, '.git', 'hooks', 'post-rewrite'));
+  applyAll(localSetupNoticeActions(dir));
   const cfg = path.join(dir, '.sdlc', 'product.json');
   put(cfg, { ...JSON.parse(read(cfg)), localSetupNotice: false });
   assert.deepEqual(localSetupNoticeActions(dir), []);
   applyAll(orphanLocalSetupNoticeActions(dir));
   assert.equal(fs.existsSync(path.join(dir, '.git', 'hooks', 'post-rewrite')), false);
+  assert.equal(fs.existsSync(copy), false);
   assert.equal(read(path.join(dir, '.git', 'hooks', 'post-merge')), '#!/bin/sh\necho mine\n');
 });
 
-test('E185 part 4: after a real pull (merge or rebase) the person sees one line; nothing when nothing changed or when skipped', { skip: process.platform === 'win32' }, async () => {
-  const { localSetupNoticeActions } = await import('./plan.mjs');
-  const { runLocalSetupAdd } = await import('./local-setup.mjs');
-  const A = committedProduct(undefined, []);
-  applyAll(localSetupNoticeActions(A));
-  gitC(A, 'add', '-A'); gitC(A, 'commit', '-qm', 'notice', '--no-verify');
-  const T = tmp();
-  const origin = path.join(T, 'origin.git');
-  gitC(T, 'init', '-q', '--bare', '-b', 'main', origin);
-  gitC(A, 'remote', 'add', 'origin', origin); gitC(A, 'push', '-q', 'origin', 'HEAD:main');
-  const B = path.join(T, 'b');
-  gitC(T, 'clone', '-q', '-b', 'main', origin, B);
-  applyAll(localSetupNoticeActions(B).filter((a) => !a.paths?.length));
-  const pull = (args, extra) => spawnSync('git', ['pull', '-q', ...args], { cwd: B, encoding: 'utf8', env: pullEnv(extra) });
-  // Nothing changed in the script: silence.
-  assert.doesNotMatch(pull(['--no-rebase']).stderr, /yad: the pull brought/);
-  // A teammate adds a step.
-  const step = path.join(T, 'step.json');
-  put(step, { id: 'env-file', title: 'Make your .env', purpose: 'the API reads it', impact: 'adds a .env', when: 'required', commands: ['cp .env.example .env'] });
-  quiet(() => runLocalSetupAdd(A, { from: step }));
-  gitC(A, 'add', '-A'); gitC(A, 'commit', '-qm', 'team step', '--no-verify'); gitC(A, 'push', '-q', 'origin', 'HEAD:main');
-  const merged = pull(['--no-rebase']);
-  assert.equal(merged.status, 0, merged.stderr);
-  assert.match(merged.stderr, /yad: the pull brought 1 local setup step\(s\) to look at \(env-file\) — run `yad local-setup`/);
-  // Another, pulled with --rebase over a commit of B's own: post-rewrite says it.
-  put(step, { id: 'docker-up', title: 'Start docker', purpose: 'the API runs in it', impact: 'starts a container', when: 'optional', commands: ['docker compose up -d'] });
-  quiet(() => runLocalSetupAdd(A, { from: step }));
-  gitC(A, 'add', '-A'); gitC(A, 'commit', '-qm', 'another', '--no-verify'); gitC(A, 'push', '-q', 'origin', 'HEAD:main');
-  put(path.join(B, 'notes.txt'), 'mine\n'); gitC(B, 'add', 'notes.txt'); gitC(B, 'commit', '-qm', 'mine', '--no-verify');
-  const rebased = pull(['--rebase']);
-  assert.equal(rebased.status, 0, rebased.stderr);
-  assert.match(rebased.stderr, /yad: the pull brought 1 local setup step\(s\) to look at \(docker-up\)/);
-  // The switch silences it.
-  put(step, { id: 'make-setup', title: 'Run make setup', purpose: 'installs deps', impact: 'adds node_modules', when: 'optional', commands: ['make setup'] });
-  quiet(() => runLocalSetupAdd(A, { from: step }));
-  gitC(A, 'add', '-A'); gitC(A, 'commit', '-qm', 'third', '--no-verify'); gitC(A, 'push', '-q', 'origin', 'HEAD:main');
-  assert.doesNotMatch(pull(['--no-rebase'], { YAD_HOOK_DISABLE: '1' }).stderr, /yad: the pull brought/);
+test('E185 part 4: core.hooksPath gets one line of advice, on --fix only', async () => {
+  const { localSetupNoticeAdvice, localSetupNoticeActions } = await import('./plan.mjs');
+  const dir = product();
+  gitIn(dir, 'config', 'core.hooksPath', '.husky/_');
+  assert.deepEqual(localSetupNoticeActions(dir).filter((a) => /git hook/.test(a.item)), []);
+  assert.match(localSetupNoticeAdvice(dir), /core\.hooksPath is \.husky\/_\); for the local setup notice after a pull, add to \.husky\/post-merge and \.husky\/post-rewrite/);
 });
 
-test('E185 part 4: the doctor row says whether this clone has the notice, in any ledger mode', async () => {
+// A Product with the notice installed, pushed to a bare origin, and a second clone of it with its own install.
+async function noticeClones({ sub = '' } = {}) {
+  const { localSetupNoticeActions } = await import('./plan.mjs');
+  const T = tmp();
+  const repoA = path.join(T, 'a');
+  fs.mkdirSync(repoA);
+  gitC(repoA, 'init', '-q', '-b', 'main');
+  const A = sub ? path.join(repoA, sub) : repoA;
+  put(path.join(A, '.sdlc', 'product.json'), { name: 'Orchard' });
+  applyAll(localSetupActions(A));
+  applyAll(localSetupNoticeActions(A));
+  gitC(repoA, 'add', '-A'); gitC(repoA, 'commit', '-qm', 'setup', '--no-verify');
+  const origin = path.join(T, 'origin.git');
+  gitC(T, 'init', '-q', '--bare', '-b', 'main', origin);
+  gitC(repoA, 'remote', 'add', 'origin', origin); gitC(repoA, 'push', '-q', 'origin', 'HEAD:main');
+  const repoB = path.join(T, 'b');
+  gitC(T, 'clone', '-q', '-b', 'main', origin, repoB);
+  const B = sub ? path.join(repoB, sub) : repoB;
+  applyAll(localSetupNoticeActions(B));
+  return { T, repoA, A, repoB, B };
+}
+const addStep = async (T, A, repoA, step) => {
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const f = path.join(T, `${step.id}.json`);
+  put(f, { title: step.id, purpose: 'needed here', impact: 'changes a file', when: 'optional', commands: ['true'], ...step });
+  const r = quiet(() => runLocalSetupAdd(A, { from: f }));
+  assert.equal(r.value?.added, step.id, r.lines.join('\n'));
+  gitC(repoA, 'add', '-A'); gitC(repoA, 'commit', '-qm', `step ${step.id}`, '--no-verify'); gitC(repoA, 'push', '-q', 'origin', 'HEAD:main');
+};
+const gitRun = (dir, args, extra) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: pullEnv(extra) });
+
+test('E185 part 4: after a real pull — fast-forward, a true merge, or a rebase — the person sees one line; never on amend, nothing changed, or when skipped', { skip: process.platform === 'win32' }, async () => {
+  const { T, repoA, A, repoB } = await noticeClones();
+  assert.doesNotMatch(gitRun(repoB, ['pull', '-q', '--no-rebase']).stderr, /yad: the pull brought/, 'nothing changed');
+  await addStep(T, A, repoA, { id: 'env-file' });
+  const ff = gitRun(repoB, ['pull', '-q', '--no-rebase']);
+  assert.equal(ff.status, 0, ff.stderr);
+  assert.match(ff.stderr, /yad: the pull brought 1 local setup step\(s\) to look at \(env-file\) — run `yad local-setup`/);
+  // A true merge commit (B has its own commit).
+  await addStep(T, A, repoA, { id: 'merge-step' });
+  put(path.join(repoB, 'notes.txt'), 'mine\n'); gitC(repoB, 'add', 'notes.txt'); gitC(repoB, 'commit', '-qm', 'mine', '--no-verify');
+  const merge = gitRun(repoB, ['pull', '-q', '--no-rebase', '--no-edit']);
+  assert.equal(merge.status, 0, merge.stderr);
+  assert.match(merge.stderr, /\(merge-step\)/);
+  // A rebase over a commit of B's own: post-rewrite says it.
+  await addStep(T, A, repoA, { id: 'docker-up' });
+  put(path.join(repoB, 'notes.txt'), 'mine 2\n'); gitC(repoB, 'commit', '-qam', 'mine 2', '--no-verify');
+  const rebased = gitRun(repoB, ['pull', '-q', '--rebase']);
+  assert.equal(rebased.status, 0, rebased.stderr);
+  assert.match(rebased.stderr, /\(docker-up\)/);
+  // An amend after it says nothing (ORIG_HEAD still points before the rebase).
+  const amend = gitRun(repoB, ['commit', '-q', '--amend', '-m', 'mine 2, reworded', '--no-verify']);
+  assert.equal(amend.status, 0, amend.stderr);
+  assert.doesNotMatch(amend.stderr, /yad: the pull brought/);
+  // The switch silences it.
+  await addStep(T, A, repoA, { id: 'make-setup' });
+  assert.doesNotMatch(gitRun(repoB, ['pull', '-q', '--rebase'], { YAD_HOOK_DISABLE: '1' }).stderr, /yad: the pull brought/);
+});
+
+test('E185 part 4: a Product in a subfolder of its repo gets the notice; so does the pull that brings the script itself', { skip: process.platform === 'win32' }, async () => {
+  const { T, repoA, A, repoB } = await noticeClones({ sub: 'product' });
+  await addStep(T, A, repoA, { id: 'env-file' });
+  const r = gitRun(repoB, ['pull', '-q', '--no-rebase']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /\(env-file\)/);
+  // The first pull that brings .sdlc/local-setup.json at all.
+  const { notice } = await import(NOTICE);
+  const C = tmp();
+  gitC(C, 'init', '-q', '-b', 'main');
+  put(path.join(C, 'README.md'), 'x\n'); gitC(C, 'add', '-A'); gitC(C, 'commit', '-qm', 'one', '--no-verify');
+  put(path.join(C, '.sdlc', 'local-setup.json'), { yadflow: [], team: [teamStep()] }); gitC(C, 'add', '-A'); gitC(C, 'commit', '-qm', 'two', '--no-verify');
+  gitC(C, 'update-ref', 'ORIG_HEAD', 'HEAD~1');
+  const cwd = process.cwd();
+  try { process.chdir(C); delete process.env.YAD_HOOK_DISABLE; assert.match(notice('.'), /\(docker\)/); } finally { process.chdir(cwd); }
+});
+
+test('E185 part 4: the doctor row says whether this clone has the notice and its script, in any ledger mode', async () => {
   const { localSetupNoticeCheck } = await import('./doctor.mjs');
   const { localSetupNoticeActions } = await import('./plan.mjs');
   const row = (dir) => { const checks = []; localSetupNoticeCheck(dir, checks); return checks.find((x) => x.id === 'local-setup-hook'); };
   const dir = product();
   assert.equal(row(dir).status, 'warn');
-  assert.match(row(dir).message, /not installed in this clone \(post-merge, post-rewrite\)/);
+  assert.match(row(dir).hint, /post-merge, post-rewrite, its script in git's folder \(missing\) — `yad check --fix` installs them/);
   applyAll(localSetupNoticeActions(dir));
   assert.equal(row(dir).status, 'ok');
+  // Mixed: one hook the team's own, the script gone — both said.
   put(path.join(dir, '.git', 'hooks', 'post-merge'), '#!/bin/sh\necho mine\n');
-  assert.equal(row(dir).status, 'warn');
-  assert.match(row(dir).hint, /add this line to that hook: \[ ! -f 'hooks\/local-setup-notice\.mjs' \]/);
+  fs.rmSync(path.join(dir, '.git', 'yad', 'local-setup-notice.mjs'));
+  const r = row(dir);
+  assert.equal(r.status, 'warn');
+  assert.match(r.hint, /its script in git's folder \(missing\)/);
+  assert.match(r.hint, /yad left post-merge alone/);
   const cfg = path.join(dir, '.sdlc', 'product.json');
   put(cfg, { ...JSON.parse(read(cfg)), localSetupNotice: false });
   assert.match(row(dir).message, /turned off for this Product/);

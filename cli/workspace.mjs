@@ -517,8 +517,8 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   const hook = gitHookActions(product);
   for (const a of hook) a.apply();
   if (hook.length) ok('installed the git pre-commit hook in this clone');
-  // E185 part 4: the notice after a pull — only the hooks (this clone's); the script came with the clone.
-  const notice = localSetupNoticeActions(product).filter((a) => !a.paths?.length && !a.writesNothing);
+  // E185 part 4: the notice after a pull — this clone's copy of the script, in git's folder, and its hooks.
+  const notice = localSetupNoticeActions(product);
   for (const a of notice) a.apply();
   if (notice.length) ok('installed the local setup notice after a pull in this clone (post-merge, post-rewrite)');
   // E85: the tools the team chose (the Product's toolbox.json, just cloned) that this machine lacks. A
