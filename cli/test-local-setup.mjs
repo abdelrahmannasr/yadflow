@@ -1172,6 +1172,8 @@ test('E185 part 4 review 4: a plain hooks folder and a ~ hooksPath are read wher
   assert.equal(localSetupNoticeStates(dir)[0].state, 'hand-wired');
   put(f, `#!/bin/sh\r\n${merge.line}\r\n`);
   assert.equal(localSetupNoticeStates(dir)[0].state, 'hooks-path', 'a CRLF line sh cannot run');
+  put(f, `#!/bin/sh\r\n${merge.line}`);
+  assert.equal(localSetupNoticeStates(dir)[0].state, 'hooks-path', 'a CR on the #! line alone');
   // ~ in core.hooksPath: read where git resolves it.
   const home = tmp();
   const prev = process.env.HOME;

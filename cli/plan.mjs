@@ -1695,8 +1695,9 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
   applies: noticeWanted,
   // Wired by hand: a line that is not a comment and runs our copy for this Product's folder — and, for
   // post-rewrite, only on a rebase (review 3: a mention of the path alone is not enough).
-  // A line ending in a carriage return is not one sh can run (`}` and the CR read as one word).
-  wired: (text, prefix) => text.split('\n').some((l) => !l.endsWith('\r') && !/^\s*#/.test(l) && l.includes('/yad/local-setup-notice.mjs')
+  // A file with any carriage return is not one sh or git can run as written (a CR after `}` or after the `#!`
+  // line breaks it; reviews 4, 5).
+  wired: (text, prefix) => !text.includes('\r') && text.split('\n').some((l) => !/^\s*#/.test(l) && l.includes('/yad/local-setup-notice.mjs')
     && l.includes(`node "$notice" ${shQuote(prefix || '.')}`) && (name !== 'post-rewrite' || l.includes('[ "$1" != rebase ]'))),
   item: `${name} git hook (this clone)`,
   advice: () => null,
