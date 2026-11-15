@@ -571,5 +571,7 @@ export function localSetupSection(root) {
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
   if (skipped.length) info(c.dim(`${skipped.length} step(s) you said no to: ${skipped.map((s) => s.id).join(', ')}`));
+  // E185 part 3: the team has not added a step of its own yet — say how, once, in passing.
+  if (!st.steps.some((s) => s.source === 'team')) info(c.dim('no steps from your team yet — add this project\'s own with `yad local-setup add --from <step.json>`, or ask the agent to propose them'));
   return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), skipped: skipped.map((s) => s.id), changed: changed.map((s) => s.id), error: null };
 }

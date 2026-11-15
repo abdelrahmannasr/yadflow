@@ -962,6 +962,8 @@ export async function runSetup(root, opts = {}) {
   log('');
   log(c.bold('Then — AI-only steps (run in your AI agent):'));
   if (registry.repos.length) hand('generate code-maps: run `yad-connect-repos` for each connected repo');
+  // E185 part 3: the agent proposes this project's own setup steps; the person says yes to each.
+  hand('propose this project\'s own setup steps for each member\'s machine (a .env to copy, docker, the Node version): the person says yes to each, then `yad local-setup add --from <step.json>`');
   const design = readJSON(designPath, null);
   if (design && design.tool && design.tool !== 'none') {
     hand(`confirm the design tool: run \`yad-connect-design\` to detect the ${design.tool} MCP (or it degrades to markdown-only)`);

@@ -747,3 +747,12 @@ test('E185 part 3: add and remove from the CLI, in JSON; on-request for an agent
   assert.notEqual(yad(T, plain, ['local-setup', 'add', '--from', stepFile(T, newStep())]).code, 0);
   assert.equal(fs.existsSync(path.join(plain, LOCAL_SETUP_FILE)), false);
 });
+
+test('E185 part 3: the machine section says when the team has no steps of its own yet, and stops once it has', () => {
+  const none = committedProduct(undefined, []);
+  const a = quiet(() => localSetupSection(none));
+  assert.ok(a.lines.some((l) => /no steps from your team yet — add this project's own with `yad local-setup add/.test(l)), a.lines.join('\n'));
+  const some = committedProduct();
+  const b = quiet(() => localSetupSection(some));
+  assert.ok(!b.lines.some((l) => /no steps from your team yet/.test(l)), b.lines.join('\n'));
+});
