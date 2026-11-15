@@ -91,6 +91,9 @@ repos live beside it (`yad check` and `yad doctor`'s `workspace-file` line say w
 | `yad local-setup [list] [--json]` | **The steps each team member's machine needs for this project (E185).** The steps live in the Product's `.sdlc/local-setup.json` (committed) and are shown as text in `LOCAL-SETUP.md`. This command reads the committed copy and says, for each step, whether it is done on this machine: `ok` (yad's own check passed), `pending` (it failed), or `ask` (a step your team wrote: yad shows its check and never runs it). `--json` counts `pending` and `ask` apart, and marks each yadflow step `known` (and `vetted`) only when it is exactly what this yadflow writes for this Product. Each step has a `purpose` (why it is needed) and an `impact` (what it changes for you), so you decide whether to do it. It also shows `done` (you said you did it on this machine) and `skipped` (you said no). Read only: it runs no step. See [the local setup script](#the-local-setup-script). |
 | `yad local-setup done <id>… [--json]` | **Record on this machine that you did these steps (E185).** A step yad can check must pass its check first, or nothing is recorded. All ids are recorded, or none. The answer is kept inside `.git`, never in a file anyone commits. |
 | `yad local-setup skip <id> --reason "<why>" [--json]` | **Record that you said no to a step (E185).** The reason is your own words, one line. The step is not asked again until what it runs changes. Changed your mind? Do the step, then `yad local-setup done <id>`. |
+| `yad brand [show] [--json]` | **The brand the pages yad makes wear (E184, #553).** It shows the Product's brand from `.sdlc/brand.json`, or yadflow's own look when there is none, and why. It also shows the colours, fonts, logo and mark, and each problem found. It only reads. |
+| `yad brand init [--from <DESIGN.md>] [--logo <file>] [--mark <file>] [--force]` | **Make `.sdlc/brand.json` from the Product's DESIGN.md (E184).** It reads YAML front matter (`colors:`, `typography.*.fontFamily`) or a CSS `:root` block and its dark block. It says each colour role it filled and from where, and each it could not fill (yadflow's value is used there). It finds the logo, the mark and the font files by name, or takes `--logo` / `--mark`. It refuses to replace a file unless you pass `--force`. It never commits: commit the file so the whole team's pages wear the brand. For a DESIGN.md written as prose, or a design tool, ask the agent (the `yad-brand` skill). |
+| `yad brand check [--json]` | **Is the brand file usable, readable and current (E184).** It checks each value and file, the contrast of text on the background in light and dark, and whether DESIGN.md changed since the file was made. It exits 1 only when the file cannot be used. |
 | `yad dial <step> [--to auto\|human]` / `yad dial <epic> <story> --repo <name> <step> [--to auto\|human]` / `yad kill --reason <text>` / `yad unkill [--reason <text>]` | **Set a step's advance dial, and the kill switch (E34).** Automation is no longer earned: the team sets the dial, and the engine shows the step's run record beside it as **advice, never a refusal**. With one word, `yad dial` sets a **Shape author step** for the whole project, in `.sdlc/automation.json`; that choice is **recorded, not acted on** — nothing drives a Shape step on its own until the engine runs agents. With an epic, a story and `--repo`, it sets a **Build lane step** (`spec`, `tasks`, `implement`, `checks`) in `build-state/<story>.json`, writing both dial names, and prints that step's run record in that repo (runs, % `approved-unchanged`); the `yad-run` skill then moves past the step on its own after a clean run. No `--to` only reads, and a gate asked that way answers `human` — it is always a person. The Foundation steps are Product-level and refused. A review gate — the engineer review and every Shape review — is refused, and so is a lane step `yad-run` has not written yet, an undeclared repo and a skipped lane. `yad kill --reason` holds **every** step at `advance: human`, recorded with who, when and why in `.sdlc/automation.json`; `yad unkill` lets each step follow its own dial again, keeping the record it replaces as `kill.previous`. An `automation.json` that will not parse is read as the kill switch ON, and neither command writes over it. `--json` on all three. `yad next` says when a dial is held by the kill switch, and that a Shape `auto` is only recorded. The old `kill_switch` line in `_bmad/sdlc/config.yaml` is no longer read — `yad doctor` fails on one left `true`. |
 | `yad mode` / `yad mode solo --reason <text>` / `yad mode team [--reason <text>]` | **Who must approve (E10).** Solo mode waives the approval requirement on every review gate — the merge and the resolved threads still decide — and team mode counts approvals. With no word it reads the mode the gates act on and the last change; in solo mode it also counts the active people and suggests `yad mode team` when more than one person may work on the Product (E74 — a suggestion only, see [When solo mode may be wrong](#the-pr-driven-review-gate)). `yad mode solo` needs `--reason`, because every open gate stops counting approvals, CI's included on a verified Product; `yad mode team` takes one optionally. The change is recorded as `mode_set` (`from`, `to`, `by`, `date`, `reason`) in `.sdlc/product.json` / `hub.json`, and `mode: solo\|team` is written beside the `solo` flag — `solo` is still the one the gates read this major. **Nothing looks back:** a gate that already passed keeps its record, and the command names each open review, which follows the new mode from its next sync. A gate that passes in solo mode records `waived: "solo"` on its closing record, and `yad gate status` prints it. On a verified Product the open reviews live on the platform, so it says that every open review PR/MR follows the new mode from its next CI run, and `--json` carries `openReviewsKnown: false`. The Product config that is read (`product.json`, or `hub.json` when it is absent) is never written over when it will not parse. `--json` for both. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (an old installed name: pre-2.0 `sdlc-*`, or 4.0's `hub` → `product` renames) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -957,6 +960,8 @@ added. A git name typed two ways (`bo` and `Bo Chen`) still counts as two people
 carry an email the member file holds.
 
 ### The daily standup (`yad standup`)
+
+Its HTML page wears the Product's brand, or yadflow's look when there is none (see [the Product's brand](#the-products-brand-yad-brand)).
 
 `yad standup` is a status for each person on the team list (E131) — what they did since the last standup,
 what they are working on, and what is waiting. A person runs it; nothing schedules it, and it posts
@@ -2287,6 +2292,8 @@ once, when it is authored. `yad-spec` and `yad-implement` say it in their report
 
 ### Seeing the brain: `yad brain view`
 
+The page, and the `--live` page, wear the Product's brand, or yadflow's look when there is none (see [the Product's brand](#the-products-brand-yad-brand)).
+
 `yad brain view` (E177) draws the brain in your browser. Engineers use it to see how the work and the code
 fit together: which stories and tasks reach which files, and which code handles each contract surface.
 
@@ -2437,6 +2444,8 @@ replaced by a still highlight.
 | `brain status` | `graphifyError?` (as for `build`), `file`, `state` (`current`, `behind`, `missing` or `unreadable` — `unreadable` exits 1, with `ok: false`, `error`, `code` and `hint`), `problem?` (`repos.json` cannot be read), `repos[{name, state, builtHead?, head?, graphifyVersion?, why?}]` — a repo's `state` is `current`, `behind`, `unknown` (its HEAD cannot be read), `not-built` or `skipped`, `counts?`, `graphify`, `vetted` |
 
 ## The progress map: `yad map`
+
+The page wears the Product's brand, or yadflow's look when there is none (see [the Product's brand](#the-products-brand-yad-brand)).
 
 `yad map` (E181) draws the road to Production as one moving picture. It answers two questions: how close
 is each piece of work to the people who use it, and who is doing which part.
@@ -2607,6 +2616,46 @@ answers for that branch. Run the command again for a current one.
 | `reports list` | `dir`, `via` (`env` or `beside`), `entries[{n, file, kind, scope, state, createdAt, productSha, productBranch, anonymous, command, present, freshness}]` — `freshness` is `fresh`, `stale` or `unknown` |
 | `reports open` | `file`, `opened` (`false` when no browser opener was found), `freshness` |
 | `reports prune` | `dir`, `applied`, `removed[{file, createdAt, reason}]` (`reason` is `old`, `missing` or `outside`), `kept` |
+
+## The Product's brand: `yad brand`
+
+Every page yad makes for a Product can wear the Product's own look: its logo, its colours and its fonts
+(E184, #553). These pages are the progress map (`yad map`), the brain view (`yad brain view`, `--live`),
+the standup, usage and issues reports, and the saved-reports catalog.
+
+**One small file.** Pages never read a design system themselves. They read one committed file,
+`.sdlc/brand.json`, so every person on the team sees the same look:
+
+| Key | What it holds |
+|---|---|
+| `name` | the brand's name |
+| `colors.light`, `colors.dark` | seven roles: `bg` (background), `surface` (cards and panels), `text`, `muted` (secondary text), `border`, `primary` (links and the main accent), `accent`. `dark` may be `null`: the dark look is then yadflow's dark one, with the brand's `primary` and `accent` made lighter |
+| `fonts.heading`, `fonts.body`, `fonts.mono` | a font family, and the font files to embed (`.woff2`, `.woff`, `.ttf`, `.otf`) |
+| `logo`, `mark` | image files in the Product (`.svg`, `.png`, `.webp`, `.jpg`); the mark is shown beside each page's title |
+| `status` | optional: the map's status colours (`live`, `merged`, `active`, `planned`, `idle`). Without it, they keep yadflow's colours, which carry a meaning |
+| `source`, `sourceHash` | the DESIGN.md the file was made from, so `yad brand check` and `yad doctor` can say when it changed |
+
+**Making it.** `yad brand init` fills the file from a DESIGN.md with YAML front matter or a CSS `:root` block.
+For a DESIGN.md written as prose, a design folder or a connected design tool, the agent fills it by hand with
+the `yad-brand` skill. Neither one invents a colour: a role it cannot find is named, and yadflow's value is used.
+
+**With no file**, or one that cannot be used, every page wears yadflow's own look: the purple (`#6316db`) and
+pink (`#fb2576`) of its logo, in light and dark, with the yadflow mark. A brand never breaks a page:
+`yad brand` and `yad doctor` (row `brand`) say what is wrong.
+
+**Safe to embed.**
+- A colour must be a hex value or a colour function made only of numbers (`rgb()`, `hsl()`, `oklch()`,
+  `oklab()`), so no value can end the CSS it is written into.
+- A font family is letters, digits, spaces, `-` and `_`.
+- A file must sit inside the Product (no `..`, no link that leads out), be of an allowed type, and stay under
+  its size limit: 512 KB for an image, 600 KB for all fonts together.
+- Files are embedded as `data:` addresses, so a saved page still works offline. An SVG is only ever shown as
+  an image, where its scripts never run.
+- The pages' Content-Security-Policy allows `font-src data:`. The brand's CSS goes inside the one style the
+  policy allows by its hash.
+
+**On the map**, only the frame changes: the background, text, panels, links, fonts and mark. The status
+colours keep their meaning unless `status` sets them. The doc sites do not wear the brand yet (E186).
 
 ## Work-item history: `yad history`
 

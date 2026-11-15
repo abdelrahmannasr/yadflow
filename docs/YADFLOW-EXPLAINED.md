@@ -863,6 +863,7 @@ The usual job titles are useful as **lenses** — a way to see which parts matte
 | `yad issues` | The team's GitHub issues and GitLab work items, as a list or a sortable HTML page. Items link to epics and update from epic status. |
 | `yad map` | The progress map: everything on its road to Production, with who owns, built, reviewed and approved each part. `--anonymous` for a copy without names. |
 | `yad reports` | The reports saved on this machine (standup, usage, issues, brain view, map), each marked fresh or stale. Never committed. |
+| `yad brand` | The look those pages wear: the Product's own logo, colours and fonts from one committed file, `.sdlc/brand.json` (`yad brand init` fills it from DESIGN.md), or yadflow's look when there is none. |
 
 A **worktree** is a second working folder for the same git repository, so two pieces of work can be open
 at once without getting in each other's way.
@@ -944,6 +945,9 @@ Two of them make pictures for people:
   work moves on. So, unless you name a file yourself, yadflow saves each report on your own machine, in
   one folder beside the Product. It never commits or pushes one. `yad reports` lists them and says which are still fresh.
 
+Every one of those pages wears the Product's own look — its logo, colours and fonts — when the Product has a
+brand file, and yadflow's purple and pink when it has none (`yad brand`).
+
 ### How it works (for technical readers)
 
 | Command | Answers |
@@ -959,6 +963,7 @@ Two of them make pictures for people:
 | `yad docs list` / `build` / `deploy` / `sync` | The generated documentation sites (one per epic, and a project overview). |
 | `yad map` | The progress map: how close each piece of work is to Production, and who did which part. |
 | `yad reports` | The reports saved on this machine, newest first, each marked fresh or stale. |
+| `yad brand` / `init` / `check` | The brand the pages wear; make `.sdlc/brand.json` from DESIGN.md; check it is usable, readable and current. |
 
 A **theme** tag in `epic.md` groups related epics; a child epic copies its parent's theme.
 
