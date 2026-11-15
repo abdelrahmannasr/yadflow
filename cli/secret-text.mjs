@@ -22,8 +22,10 @@ const NAME_FOR_WHERE = /[_.-](?:url|uri|file|path|name|header|id|dir|env|endpoin
 // `api-key` and `--from-literal=password=x` reads `password` (linear either way; reviews 2, 3). The value is read
 // ahead without being taken, so a name inside a value (`url=https://h/?token=…`) is read on its own too; the value
 // itself keeps `&` and `=`, so a password holding them still counts (a query string may be refused: use $VAR).
-const NAMED = /(?<![\w.]|[\w.]-)([A-Za-z_][\w.-]*)["']?\s*[=:]\s*["']?(?=([^\s"'`,;]+))/g;
-const literal = (v) => v.length >= 8 && !/^[$<{%]/.test(v) && !/^(?:\/|\.{1,2}\/|~\/|[a-z][\w+.-]*:\/\/)/i.test(v);
+// A quoted value is read to its closing quote, so `TOKEN="abc,defghijk"` counts whole (review 4).
+const NAMED = /(?<![\w.]|[\w.]-)([A-Za-z_][\w.-]*)["']?\s*[=:]\s*(?=("[^"\n]*"|'[^'\n]*'|["']?[^\s"'`,;]+))/g;
+// A value with its quotes taken off; one that starts with `&` is an empty value before the next name (`password=&user=x`).
+const literal = (raw) => { const v = raw.replace(/^["']|["']$/g, ''); return v.length >= 8 && !/^[$<{%&]/.test(v) && !/^(?:\/|\.{1,2}\/|~\/|[a-z][\w+.-]*:\/\/)/i.test(v); };
 const OTHER = [
   /\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/,
   /(?<![\w+.-])[a-z][\w+.-]*:\/\/[^\s/:@]+:([^\s/@$<{%][^\s/@]*)@/i,

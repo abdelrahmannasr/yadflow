@@ -652,7 +652,9 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   for (const s of ['kubectl create secret generic app --from-literal=password=supersecret1', 'curl "https://api.example.com/x?user=me&api_key=1234567890abcdef"', 'curl -d foo=bar&token=abcdefgh12345 https://x', 'echo url=https://h/?token=SECRETSECRET123']) assert.equal(looksSecret(s), true, s);
   // Review 3: flags written --name=value, and passwords holding & or =.
   for (const s of ['mytool --api-key=abcdefgh12345', 'mytool --client-secret=abcdefgh12345', 'aws --secret-access-key=abcdefgh12345', 'export DB_PASSWORD=p@ss&w0rd!xyz', 'export DB_PASSWORD=ab=cdefghijklmn', 'export PASSWORD="p&ssword123"']) assert.equal(looksSecret(s), true, s);
-  for (const s of ['token.ttl=36000000', 'cp tokens.json:12345678 x']) assert.equal(looksSecret(s), false, s);
+  // Review 4: a quoted value is read whole; an empty value before the next name is not one.
+  for (const s of ['export TOKEN="abc,defghijk"', 'export API_KEY=\'abcd;efghijkl\'', 'export DB_PASSWORD="p@ss,word123"']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['token.ttl=36000000', 'cp tokens.json:12345678 x', 'curl "https://x/login?password=&user=administrator"', 'export API_KEY="$API_KEY"', 'export PASSWORD="${PASSWORD}"']) assert.equal(looksSecret(s), false, s);
   for (const s of ['gh auth login && mkdir -p ~/.config/foo', 'aws sso login --profile dev && mkdir -p .aws/cache', 'az login; cp -p src/file dest/file']) assert.equal(looksSecret(s), false, s);
   for (const s of ['export TOKEN_URL=https://auth.example.com/token', 'export PASSWORD_FILE=/etc/secrets/pw', 'export SECRET_NAME=prod-db-creds', 'export API_KEY_HEADER=X-Api-Key', 'docker run -p 8080:80 app', 'mkdir -p build/out', 'postgres://app:$PGPASS@localhost/db', 'git config --global user.signingkey ABCDEF1234567890', 'npm config set //registry.npmjs.org/:_authToken=${NPM_TOKEN}']) assert.equal(looksSecret(s), false, s);
   const { redactTokens } = await import('./scan.mjs');
@@ -897,9 +899,12 @@ test('E185 part 3 review 3: a tool already in toolbox.json whose words break a s
   const T = tmp();
   const list = yad(T, dir, ['toolbox', 'list', '--json']);
   assert.equal(list.code, 0, list.err + list.out);
-  assert.ok(JSON.stringify(list.json).includes('longtool'), 'the tool still counts');
+  const listed = JSON.stringify(list.json);
+  assert.match(listed, /"id":"longtool"/, 'the tool is listed by its id');
   const r = quiet(() => localSetupActions(dir));
   assert.ok(r.lines.some((l) => /tool-longtool/.test(l) && /left out/.test(l)), r.lines.join('\n'));
-  const ids = yadflowSteps(dir).map((x) => x.id);
-  assert.ok(ids.includes('tool-longtool'), 'built');
+  assert.ok(yadflowSteps(dir).some((x) => x.id === 'tool-longtool'), 'its step is built from the tool');
+  const view = localSetupDocLines(mergeLocalSetup({}, dir).settings).join('\n');
+  assert.ok(view.includes('tool-nowhere'), 'the other tool\'s step stays');
+  assert.ok(!view.includes('tool-longtool'), 'only the step that breaks a limit is left out of the view');
 });
