@@ -520,7 +520,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     });
   }
   const toolbox = toolboxSection(root, toolboxAt);
-  const localSetup = localSetupSection(root);
+  const localSetup = localSetupSection(root, { invite: true });
   return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox, localSetup };
 }
 

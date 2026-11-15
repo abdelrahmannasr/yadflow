@@ -647,6 +647,9 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   const { looksSecret } = await import('./secret-text.mjs');
   for (const s of ['ghp_abcdefghij1234', 'export API_KEY=abcd1234efgh', 'password: "hunter22hunter"', 'curl -H "x" sk-abcdefghijklmnop1234', '-----BEGIN RSA PRIVATE KEY-----']) assert.equal(looksSecret(s), true, s);
   for (const s of ['export API_KEY=$API_KEY', 'token: <your token>', 'password={{ vault }}', 'SECRET=${SECRET}', 'npm i -g pnpm', 'git config commit.gpgsign true', 'see the api key docs']) assert.equal(looksSecret(s), false, s);
+  // Review 1: more secrets found, and names for where a value is no longer taken for one.
+  for (const s of ['docker login -p hunter2hunter', 'docker login --password hunter2hunter', 'mysql -uroot -phunter2x', 'curl https://user:hunter2x@host', 'postgres://app:secretpw1@localhost/db', 'sk_live_abcdefghijkl12', 'aws configure set aws_secret_access_key abcd1234efgh5678']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['export TOKEN_URL=https://auth.example.com/token', 'export PASSWORD_FILE=/etc/secrets/pw', 'export SECRET_NAME=prod-db-creds', 'export API_KEY_HEADER=X-Api-Key', 'docker run -p 8080:80 app', 'mkdir -p build/out', 'postgres://app:$PGPASS@localhost/db', 'git config --global user.signingkey ABCDEF1234567890', 'npm config set //registry.npmjs.org/:_authToken=${NPM_TOKEN}']) assert.equal(looksSecret(s), false, s);
   const { redactTokens } = await import('./scan.mjs');
   assert.equal(redactTokens('a ghp_abcdefghij1234 b'), 'a [redacted] b', 'yad scan still redacts the same way');
 });
@@ -696,7 +699,9 @@ test('E185 part 3: add refuses an id taken, keys yad sets, a bad step, a secret,
     assert.equal(read(file), before, 'nothing written');
   };
   refused(newStep({ id: 'docker' }), /already one of your team's steps/);
-  refused(newStep({ id: 'yadflow-cli' }), /one of yadflow's steps/);
+  refused(newStep({ id: 'yadflow-cli' }), /kept for yadflow's own steps/);
+  refused(newStep({ id: 'platform-login' }), /kept for yadflow's own steps/);
+  refused(newStep({ id: 'tool-docker' }), /kept for yadflow's own steps/);
   refused(newStep({ vetted: true }), /`vetted`, which a step does not take/);
   refused(newStep({ addedBy: 'Someone' }), /`addedBy`, which a step does not take/);
   refused(newStep({ commands: [] }), /cannot be added: it has no commands/);
@@ -750,9 +755,85 @@ test('E185 part 3: add and remove from the CLI, in JSON; on-request for an agent
 
 test('E185 part 3: the machine section says when the team has no steps of its own yet, and stops once it has', () => {
   const none = committedProduct(undefined, []);
-  const a = quiet(() => localSetupSection(none));
+  const a = quiet(() => localSetupSection(none, { invite: true }));
+  assert.ok(!quiet(() => localSetupSection(none)).lines.some((l) => /no steps from your team yet/.test(l)), 'only on setup and update');
   assert.ok(a.lines.some((l) => /no steps from your team yet — add this project's own with `yad local-setup add/.test(l)), a.lines.join('\n'));
   const some = committedProduct();
-  const b = quiet(() => localSetupSection(some));
+  const b = quiet(() => localSetupSection(some, { invite: true }));
   assert.ok(!b.lines.some((l) => /no steps from your team yet/.test(l)), b.lines.join('\n'));
+});
+
+// ---- E185 part 3, review 1 -------------------------------------------------------------------------
+
+test('E185 part 3 review 1: nothing hidden passes — variation selectors, blank fillers, half a character pair', async () => {
+  const { stepProblems } = await import('./local-setup.mjs');
+  for (const ch of ['\u{FE0F}', '\u{E0100}', '\u{E0141}', '\u3164', '\u115F', '\uFFA0', '\u2800', '\ud800']) {
+    assert.ok(stepProblems(teamStep({ purpose: `hi${ch}there` }), 'team').length, `purpose with U+${ch.codePointAt(0).toString(16)}`);
+    assert.ok(stepProblems(teamStep({ commands: [`echo a${ch}b`] }), 'team').length, `command with U+${ch.codePointAt(0).toString(16)}`);
+  }
+});
+
+test('E185 part 3 review 1: the view writes a step\'s HTML as text', () => {
+  const lines = localSetupDocLines({ yadflow: [], team: [teamStep({ title: '<details open><summary>ok</summary>', purpose: 'see <img src=x> & more' })] }).join('\n');
+  assert.ok(!lines.includes('<details'), lines);
+  assert.match(lines, /&lt;details open&gt;/);
+  assert.match(lines, /see &lt;img src=x&gt; &amp; more/);
+});
+
+test('E185 part 3 review 1: add writes only the team list, refuses when the view cannot follow, and when there is no script yet', async () => {
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const dir = committedProduct(undefined, []);
+  const T = tmp();
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  // yadflow's part on disk is left exactly as it is (another yad must not rewrite it in a team's commit).
+  const doc = JSON.parse(read(file));
+  put(file, { ...doc, catalogueVersion: 999, yadflow: doc.yadflow.slice(0, 1) });
+  assert.equal(quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep()) })).value.added, 'env-file');
+  const after = JSON.parse(read(file));
+  assert.equal(after.catalogueVersion, 999);
+  assert.equal(after.yadflow.length, 1);
+  // A view whose markers yad cannot trust refuses the change: the JSON and the view never disagree.
+  const view = path.join(dir, LOCAL_SETUP_DOC);
+  put(view, `${read(view).replace(/<!-- yadflow:local-setup:end[^\n]*-->/, '')}`);
+  const before = read(file);
+  const r = quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep({ id: 'second' })) }));
+  assert.equal(r.code, 1, r.lines.join('\n'));
+  assert.ok(r.lines.some((l) => /nothing was written: LOCAL-SETUP\.md cannot be updated/.test(l)), r.lines.join(' | '));
+  assert.equal(read(file), before);
+  // No script yet: setup and update write it, add never makes one up.
+  fs.rmSync(file);
+  const n = quiet(() => runLocalSetupAdd(dir, { from: stepFile(T, newStep({ id: 'third' })) }));
+  assert.ok(n.lines.some((l) => /is not here yet — `yad check --fix`/.test(l)), n.lines.join(' | '));
+  assert.equal(fs.existsSync(file), false);
+});
+
+test('E185 part 3 review 1: a committed team step that breaks a rule is said, and the invite is not shown; add says why the id is taken', async () => {
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const dir = committedProduct(undefined, [teamStep({ id: 'env-file', commands: Array.from({ length: 11 }, () => 'true') })]);
+  const s = quiet(() => localSetupSection(dir, { invite: true }));
+  assert.ok(s.lines.some((l) => /1 step\(s\) in \.sdlc\/local-setup\.json are left out because they break a rule/.test(l)), s.lines.join('\n'));
+  assert.ok(!s.lines.some((l) => /no steps from your team yet/.test(l)));
+  const r = quiet(() => runLocalSetupAdd(dir, { from: stepFile(tmp(), newStep()) }));
+  assert.ok(r.lines.some((l) => /already one of your team's steps \(one yad ignores now/.test(l)), r.lines.join(' | '));
+});
+
+test('E185 part 3 review 1: --from is read from where yad runs, and only as a file', async () => {
+  const dir = committedProduct();
+  const T = tmp();
+  put(path.join(T, 'steps', 'env.json'), newStep());
+  const r = yad(T, T, ['local-setup', 'add', '--from', 'steps/env.json', '--dir', dir, '--json']);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json.added, 'env-file');
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const d = quiet(() => runLocalSetupAdd(dir, { from: T }));
+  assert.ok(d.lines.some((l) => /cannot read .* as a file/.test(l)), d.lines.join(' | '));
+});
+
+test('E185 part 3 review 1: a toolbox tool of the team\'s own takes the step limits where it is entered', async () => {
+  const { customProblems } = await import('./toolbox.mjs');
+  const tool = { id: 'mytool', role: 'does a thing', fallback: 'nothing', detect: { bins: ['mytool'] } };
+  assert.deepEqual(customProblems(tool), []);
+  assert.ok(customProblems({ ...tool, role: 'x'.repeat(401) }).some((p) => /role says what it does, on one plain line/.test(p)));
+  assert.ok(customProblems({ ...tool, fallback: 'a\tb' }).some((p) => /fallback says/.test(p)));
+  assert.ok(customProblems({ ...tool, install: [{ type: 'script', command: 'x'.repeat(501) }] }).some((p) => /install, when set/.test(p)));
 });

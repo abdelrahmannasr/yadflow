@@ -23,6 +23,8 @@ import {
 import { detectInstalled } from './detect.mjs';
 import { readLocalSetupRecord, answerFor, writeLocalSetupAnswers } from './local-setup-record.mjs';
 import { looksSecret } from './secret-text.mjs';
+import { isText, plainLine, plainProse, STEP_LIMITS } from './plain-text.mjs';
+export { STEP_LIMITS };
 
 export const LOCAL_SETUP_MARKERS = Object.freeze({
   begin: '<!-- yadflow:local-setup:begin — written by yad from .sdlc/local-setup.json; edit outside these lines, `yad update` rewrites them -->',
@@ -32,7 +34,6 @@ export const LOCAL_SETUP_MARKERS = Object.freeze({
 
 // ---- reading and checking the file ------------------------------------------------------------------
 
-const isText = (v) => typeof v === 'string' && v.trim().length > 0;
 const isTextList = (v) => Array.isArray(v) && v.length > 0 && v.every(isText);
 
 // What is wrong with one step, as words (empty when it is sound). Used for both lists: a yadflow step in a
@@ -48,13 +49,10 @@ const MARKER = /<!--|--!?>/;
 // Also every format and separator character (zero-width spaces, soft hyphens, tag characters): `exa\u200bmple.com`
 // reads as `example.com`.
 // And every space but the plain one: a no-break space looks like a space and is not one to the shell.
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/u;
-const oneLine = (v) => isText(v) && forTerminal(v) === v && !HIDDEN.test(v);
+// HIDDEN, plainLine and plainProse live in cli/plain-text.mjs (the toolbox's own tools take them too).
+const oneLine = plainLine;
 
-// How long each part of a step may be (E185 part 3): a step is read by every member, so it stays readable.
-export const STEP_LIMITS = Object.freeze({ title: 120, text: 600, commands: 10, command: 500 });
-// Prose may wrap onto several lines, but holds nothing hidden either.
-const prose = (v) => isText(v) && !/[\p{Cf}\p{Zl}\p{Zp}]|[^\P{Cc}\n]|(?![ \n])\p{Zs}/u.test(v);
+const prose = plainProse;
 
 export function stepProblems(s, source) {
   const p = [];
@@ -69,7 +67,7 @@ export function stepProblems(s, source) {
   else if (!s.commands.every(oneLine)) p.push('each command should be one line');
   else if (s.commands.length > STEP_LIMITS.commands || s.commands.some((x) => x.length > STEP_LIMITS.command)) p.push(`it may hold at most ${STEP_LIMITS.commands} commands of at most ${STEP_LIMITS.command} characters each`);
   if (s.person !== undefined && typeof s.person !== 'boolean') p.push('its `person` should be true or false');
-  if (s.addedBy != null && typeof s.addedBy !== 'string') p.push('its `addedBy` should be a name');
+  if (s.addedBy != null && (!oneLine(s.addedBy) || s.addedBy.length > 80)) p.push('its `addedBy` should be a name on one plain line');
   if (!WHEN.includes(s.when)) p.push('its `when` should be "required" or "optional"');
   if (s.verify != null && (!oneLine(s.verify) || s.verify.length > STEP_LIMITS.command)) p.push(`its verify should be one line of at most ${STEP_LIMITS.command} characters`);
   if (s.check != null) {
@@ -205,7 +203,8 @@ function localSetupJsonAction(root) {
 // The view's words. Every step that reaches here passed stepProblems: it holds no comment marker, and its commands
 // are single lines. Prose is put on one line; code is shown exactly as written, in a span or fence longer than any
 // run of backticks inside it, so an agent that copies from LOCAL-SETUP.md runs what the JSON says.
-const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim();
+// HTML is written as text (review: an unclosed `<details>` would fold every later step out of sight).
+const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const longestTicks = (s) => Math.max(0, ...[...String(s).matchAll(/`+/g)].map((m) => m[0].length));
 const code = (s) => {
   const t = String(s);
@@ -468,33 +467,48 @@ export const TEAM_USAGE = 'usage: yad local-setup add --from <step.json> [--json
 const STEP_KEYS = Object.freeze(['id', 'title', 'purpose', 'impact', 'when', 'commands', 'check', 'verify', 'person']);
 
 // The script as it is on disk, read strictly: a file that does not parse, or a `team` that is not a list, is
-// refused, never replaced (read strictly before a write). A missing file starts empty. → { doc } | { error }
+// refused, never replaced (read strictly before a write). A missing file is refused too: setup and update write
+// it, with yadflow's steps, and add never writes yadflow's part (review 1). → { doc } | { error }
 function workingScript(root) {
   let text;
-  try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch (e) { return e.code === 'ENOENT' ? { doc: {} } : { error: 'cannot be read' }; }
+  try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch (e) { return { error: e.code === 'ENOENT' ? 'is not here yet — `yad check --fix` (or `yad update`) writes it' : 'cannot be read' }; }
   let doc;
   try { doc = parseJSON(text); } catch { return { error: 'does not parse' }; }
   if (!isPlainObject(doc) || (doc.team !== undefined && !Array.isArray(doc.team)) || (doc.yadflow !== undefined && !Array.isArray(doc.yadflow))) return { error: 'is not the shape yad writes' };
   return { doc };
 }
 
-// Write the team's list, then the rest of the script and its view the way setup and update write them.
+// Write the team's list and nothing else: yadflow's part stays as it is on disk (an older or newer yad here must
+// not rewrite it in a team's commit), and the view is made from that same file. Both are checked before either is
+// written: a LOCAL-SETUP.md whose markers yad cannot trust refuses the change, so the JSON and the view never
+// disagree (review 1). → null, or the reason nothing was written.
 function writeTeam(root, doc, team) {
-  writeJSON(localSetupPath(root), { ...doc, team });
-  for (const a of localSetupActions(root)) if (!a.writesNothing) a.apply();
+  const next = { ...doc, team };
+  const view = markedBlockAction(root, LOCAL_SETUP_DOC, localSetupDocLines(next), { markers: LOCAL_SETUP_MARKERS, what: 'the local setup steps' });
+  if (view.writesNothing) return `${LOCAL_SETUP_DOC} cannot be updated (${forTerminal(view.reason || 'its yadflow markers are not ones yad can trust')}) — fix its markers (or delete both of them), then run this again`;
+  writeJSON(localSetupPath(root), next);
+  view.apply();
+  return null;
 }
+
+// Ids yadflow keeps for its own steps, whatever this Product records today: a team step by one of these names
+// would vanish the day yadflow writes its own (a platform set, a tool added) — so they are refused (review 1).
+const YADFLOW_IDS = Object.freeze(['yadflow-cli', 'platform-login', 'ledger-hook', 'commit-signing']);
+const yadflowsId = (id) => YADFLOW_IDS.includes(id) || id.startsWith('tool-');
 
 const gitName = (root) => {
   const r = spawnSync('git', ['config', 'user.name'], { cwd: root, encoding: 'utf8', windowsHide: true });
-  const name = r.status === 0 ? r.stdout.replace(/\s+/g, ' ').trim() : '';
-  return name && forTerminal(name) === name && !/<!--|--!?>/.test(name) ? name.slice(0, 80) : null;
+  const name = r.status === 0 ? Array.from(r.stdout.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') : '';
+  return name && plainLine(name) && !/<!--|--!?>/.test(name) ? name : null;
 };
 const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`, 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
 
 export function runLocalSetupAdd(root, { from = null, json = false } = {}) {
   if (typeof from !== 'string' || !from) return refuse('yad local-setup add needs --from <step.json>: one step, written as a JSON object', TEAM_USAGE, { json });
   let raw;
-  try { raw = fs.readFileSync(path.resolve(from), 'utf8'); } catch { return refuse(`cannot read ${forTerminal(from)}`, TEAM_USAGE, { json }); }
+  // Relative to where yad was run. Only a plain file: a pipe or a device would wait forever.
+  const file = path.resolve(from);
+  try { if (!fs.statSync(file).isFile()) throw new Error('not a file'); raw = fs.readFileSync(file, 'utf8'); } catch { return refuse(`cannot read ${forTerminal(from)} as a file`, TEAM_USAGE, { json }); }
   let given;
   try { given = parseJSON(raw); } catch { return refuse(`${forTerminal(from)} does not parse as JSON`, TEAM_USAGE, { json }); }
   if (!isPlainObject(given)) return refuse(`${forTerminal(from)} should hold one step: a JSON object`, TEAM_USAGE, { json });
@@ -510,9 +524,14 @@ export function runLocalSetupAdd(root, { from = null, json = false } = {}) {
   if (w.error) return scriptRefused(w.error, json);
   const team = Array.isArray(w.doc.team) ? w.doc.team : [];
   const yadIds = new Set([...yadflowSteps(root).map((x) => x.id), ...(Array.isArray(w.doc.yadflow) ? w.doc.yadflow.map((x) => x?.id) : [])]);
-  if (yadIds.has(step.id)) return refuse(`\`${step.id}\` is one of yadflow's steps — pick another id`, null, { json });
-  if (team.some((x) => x?.id === step.id)) return refuse(`\`${step.id}\` is already one of your team's steps — \`yad local-setup remove ${step.id}\` first to replace it`, null, { json });
-  writeTeam(root, w.doc, [...team, step]);
+  if (yadIds.has(step.id) || yadflowsId(step.id)) return refuse(`\`${step.id}\` is kept for yadflow's own steps (${YADFLOW_IDS.join(', ')} and every tool-…) — pick another id`, null, { json });
+  const taken = team.find((x) => x?.id === step.id);
+  if (taken) {
+    const ignored = stepProblems(taken, 'team').length > 0;
+    return refuse(`\`${step.id}\` is already one of your team's steps${ignored ? ' (one yad ignores now — `yad local-setup list` says why)' : ''} — \`yad local-setup remove ${step.id}\` first to replace it`, null, { json });
+  }
+  const blocked = writeTeam(root, w.doc, [...team, step]);
+  if (blocked) return refuse(`nothing was written: ${blocked}`, null, { json });
   const files = [LOCAL_SETUP_FILE, LOCAL_SETUP_DOC];
   if (json) return emitJSON({ ok: true, product: root, added: step.id, step, files });
   ok(`added your team's step ${step.id} to ${LOCAL_SETUP_FILE} and ${LOCAL_SETUP_DOC}`);
@@ -531,7 +550,8 @@ export function runLocalSetupRemove(root, { ids = [], json = false } = {}) {
     return refuse(yad ? `\`${forTerminal(id)}\` is one of yadflow's steps, which come with each release — to say no to it on this machine, \`yad local-setup skip ${forTerminal(id)} --reason "<why>"\``
       : `no team step \`${forTerminal(id)}\` in ${LOCAL_SETUP_FILE}`, null, { json });
   }
-  writeTeam(root, w.doc, team.filter((x) => x?.id !== id));
+  const blocked = writeTeam(root, w.doc, team.filter((x) => x?.id !== id));
+  if (blocked) return refuse(`nothing was written: ${blocked}`, null, { json });
   const files = [LOCAL_SETUP_FILE, LOCAL_SETUP_DOC];
   if (json) return emitJSON({ ok: true, product: root, removed: id, files });
   ok(`removed your team's step ${id} from ${LOCAL_SETUP_FILE} and ${LOCAL_SETUP_DOC}`);
@@ -542,16 +562,21 @@ export function runLocalSetupRemove(root, { ids = [], json = false } = {}) {
 // The warning for a record that cannot be read: it is read as empty, so every answer would be asked again.
 const recordWarning = (r) => `local setup: this machine's record (${forTerminal(r.path)}) ${r.error} — read as empty, so every step is asked again; delete it, it only remembers your answers`;
 
+// Whether the committed script holds any step of the team's own (valid or not), for setup's hint to the agent.
+export const hasTeamSteps = (root) => { const d = readCommittedLocalSetup(root).doc; return Array.isArray(d?.team) && d.team.length > 0; };
+
 // The few lines setup, update, check and join print about this machine. Never fails the command it is part of.
 // Returns the part of that command's --json answer it adds: `{ pending, ask, unvetted, skipped, changed, error }`
 // (step ids, and why the committed script could not be read, or null).
 const EMPTY = Object.freeze({ pending: [], ask: [], unvetted: [], skipped: [], changed: [] });
-export function localSetupSection(root) {
+export function localSetupSection(root, { invite = false } = {}) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { ...EMPTY, error: 'could not read' }; }
   if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
   if (!st.steps.length) return { ...EMPTY, error: null };
   if (st.record.error) warn(recordWarning(st.record));
+  // A step the script holds but yad left out (it breaks a rule) is said here too, not only in `list` (review 1).
+  const ignored = st.problems.filter((p) => / is ignored — | is listed twice/.test(p));
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
   const skipped = st.steps.filter((s) => s.state === 'skipped');
@@ -571,7 +596,8 @@ export function localSetupSection(root) {
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
   if (skipped.length) info(c.dim(`${skipped.length} step(s) you said no to: ${skipped.map((s) => s.id).join(', ')}`));
-  // E185 part 3: the team has not added a step of its own yet — say how, once, in passing.
-  if (!st.steps.some((s) => s.source === 'team')) info(c.dim('no steps from your team yet — add this project\'s own with `yad local-setup add --from <step.json>`, or ask the agent to propose them'));
+  if (ignored.length) warn(`local setup: ${ignored.length} step(s) in ${LOCAL_SETUP_FILE} are left out because they break a rule — \`yad local-setup list\` says which and why`);
+  // E185 part 3: on setup and update only, a team with no step of its own yet (and none left out) is told how.
+  if (invite && !ignored.length && !st.steps.some((s) => s.source === 'team')) info(c.dim('no steps from your team yet — add this project\'s own with `yad local-setup add --from <step.json>`, or ask the agent to propose them'));
   return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), skipped: skipped.map((s) => s.id), changed: changed.map((s) => s.id), error: null };
 }

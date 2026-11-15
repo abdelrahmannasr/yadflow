@@ -8,7 +8,29 @@ export const PREFIXED = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,
 export const redactTokens = (s) => String(s ?? '').replace(PREFIXED, '[redacted]');
 export const redact = (s) => String(s ?? '').replace(SECRET, '[redacted]');
 
-// A secret value written into text: a known token, or a password, secret, token or key given a literal value.
-// A name for where the value comes from (`$API_KEY`, `${TOKEN}`, `<your key>`, `{{ secret }}`) is not one.
-const ASSIGNED = /(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\w*["']?\s*[=:]\s*["']?(?![$<{%])[^\s"'`]{8,}/i;
-export const looksSecret = (s) => typeof s === 'string' && (redactTokens(s) !== s || ASSIGNED.test(s));
+// A secret value written into text (review 1 widened both ways). It counts when:
+//   - a known token is there (the list above), or a Stripe key (`sk_live_…`, `rk_test_…`);
+//   - a password, secret, token or key NAME is given a literal value (`API_KEY=abcd…`, `password: "…"`) —
+//     never when the name is for where or what the value is (`TOKEN_URL`, `PASSWORD_FILE`, `SECRET_NAME`),
+//     nor when the value names where it comes from (`$API_KEY`, `${TOKEN}`, `<your key>`, `{{ vault }}`, a path
+//     or a URL);
+//   - a password sits in a URL (`https://user:pw@host`), or after `--password` / `--token`, after `-p` on a
+//     login line (`docker login -p …`, `mysql -p…`), or after `aws configure set` for a secret key.
+const KEYWORD = /password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key/i;
+const NAME_FOR_WHERE = /[_-](?:url|uri|file|path|name|header|id|dir|env|endpoint|host|type|length|expiry|ttl)$/i;
+const NAMED = /([A-Za-z_][\w.-]*)["']?\s*[=:]\s*["']?([^\s"'`,;]+)/g;
+const literal = (v) => v.length >= 8 && !/^[$<{%]/.test(v) && !/^(?:\/|\.{1,2}\/|~\/|[a-z][\w+.-]*:\/\/)/i.test(v);
+const OTHER = [
+  /\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/,
+  /[a-z][\w+.-]*:\/\/[^\s/:@]+:([^\s/@$<{%][^\s/@]*)@/i,
+  /(?:^|\s)--(?:password|passwd|token|secret)(?:=|\s+)["']?(?![$<{%])[^\s"'`-][^\s"'`]{5,}/i,
+  /\blogin\b[^\n]*\s-p\s*["']?(?![$<{%])[^\s"'`-][^\s"'`]{5,}/i,
+  /\bmysql\b[^\n]*\s-p(?![$<{%\s])[^\s"'`]{6,}/i,
+  /\bconfigure\s+set\s+\S*(?:secret|token|key)\S*\s+(?![$<{%])[^\s"'`]{8,}/i,
+];
+export function looksSecret(s) {
+  if (typeof s !== 'string') return false;
+  if (redactTokens(s) !== s || OTHER.some((re) => re.test(s))) return true;
+  for (const [, name, value] of s.matchAll(NAMED)) if (KEYWORD.test(name) && !NAME_FOR_WHERE.test(name) && literal(value)) return true;
+  return false;
+}
