@@ -147,22 +147,7 @@ export function hiddenFolders(root, paths) {
   if (!folderOf.size) return [];
   // Asked by name, never with a trailing slash: with one, `.claude/*` is read as matching `.claude` itself.
   // Every folder asked is on disk, so a folder-only pattern (`build/`) matches it as a folder.
-  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: [...folderOf.keys()].join('\0'), maxBuffer: 64 * 1024 * 1024 });
-  if (r.error || !r.stdout) return [];
-  const gitDirRun = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
-  // Compared by real path: git names a temp or linked folder by its real spelling (`/private/var`), the run by
-  // the one it was given (`/var`).
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const gitDir = real(gitDirRun.ok && gitDirRun.stdout ? gitDirRun.stdout : path.join(root, '.git'));
-  const inside = (child, parent) => { const rel = path.relative(real(parent), real(child)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
-  const home = os.homedir();
-  const rules = new Map();
-  const f = r.stdout.split('\0');
-  for (let i = 0; i + 3 < f.length; i += 4) {
-    const [source, line, pattern, dirSlash] = f.slice(i, i + 4);
-    if (!source || !pattern || !dirSlash || pattern.startsWith('!')) continue;
-    rules.set(dirSlash.replace(/\/+$/, ''), { source, line, pattern });
-  }
+  const rules = ignoreRules(root, [...folderOf.keys()]);
   const seen = new Set();
   const out = [];
   for (const [dir, under] of folderOf) {
@@ -171,15 +156,41 @@ export function hiddenFolders(root, paths) {
     const fresh = under.filter((p) => !seen.has(p));
     if (!fresh.length) continue; // a higher folder already names these paths
     fresh.forEach((p) => seen.add(p));
-    const abs = path.resolve(root, rule.source);
+    out.push({ folder: dir, paths: fresh, ...rule });
+  }
+  return out;
+}
+
+// The ignore rule that hides each of `names` (repo-relative, `/`-separated): a Map of name → { source, line,
+// pattern, outside }, for the names an ignore rule hides. Asked with `--no-index`, so a rule is found whatever
+// is tracked. A negated pattern (`!x`) re-includes, so it never counts as hiding. `source` is shown with `~`
+// for the home folder, and relative to the repo for the repo's own files; a rule inside the git folder
+// (`.git/info/exclude`) is this clone's alone, like a global ignore, so it is `outside` too (#555 also uses it).
+export function ignoreRules(root, names) {
+  const rules = new Map();
+  if (!names.length) return rules;
+  const r = run('git', ['check-ignore', '-v', '-z', '--no-index', '--stdin'], { cwd: root, input: names.join('\0'), maxBuffer: 64 * 1024 * 1024 });
+  if (r.error || !r.stdout) return rules;
+  const gitDirRun = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
+  // Compared by real path: git names a temp or linked folder by its real spelling (`/private/var`), the run by
+  // the one it was given (`/var`).
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const gitDir = real(gitDirRun.ok && gitDirRun.stdout ? gitDirRun.stdout : path.join(root, '.git'));
+  const inside = (child, parent) => { const rel = path.relative(real(parent), real(child)); return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
+  const home = os.homedir();
+  const f = r.stdout.split('\0');
+  for (let i = 0; i + 3 < f.length; i += 4) {
+    const [source, line, pattern, name] = f.slice(i, i + 4);
+    if (!source || !pattern || !name || pattern.startsWith('!')) continue;
+    const abs = path.resolve(root, source);
     const local = inside(abs, gitDir) || real(abs) === gitDir;
     const inRepo = !local && inside(abs, root);
     const shown = inRepo ? path.relative(real(root), real(abs)).split(path.sep).join('/')
       : local && inside(abs, root) ? path.relative(real(root), real(abs)).split(path.sep).join('/')
       : home && inside(abs, home) ? `~/${path.relative(real(home), real(abs)).split(path.sep).join('/')}` : abs;
-    out.push({ folder: dir, paths: fresh, source: shown, line: Number(rule.line) || null, pattern: rule.pattern, outside: !inRepo });
+    rules.set(name.replace(/\/+$/, ''), { source: shown, line: Number(line) || null, pattern, outside: !inRepo });
   }
-  return out;
+  return rules;
 }
 
 // The words for an ignored folder that git would not stage from (#508): the folder, the rule, whether the rule
