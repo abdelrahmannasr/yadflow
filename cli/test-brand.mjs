@@ -355,6 +355,9 @@ test('#553 review 1: a long or nested dark block and a huge colour are read in l
   let t = Date.now();
   const r = readRootVars(`:root{--bg:#fff}\n${dark}`);
   assert.ok(Date.now() - t < 1000, `read in ${Date.now() - t} ms`);
+  t = Date.now();
+  for (const hostile of ['{'.repeat(200000), '/*'.repeat(100000), '"'.repeat(200000), `:root{--a:1}${'.dark{'.repeat(50000)}--bg:#000${'}'.repeat(50000)}`]) readRootVars(hostile);
+  assert.ok(Date.now() - t < 2000, `hostile input read in ${Date.now() - t} ms`);
   assert.equal(Object.keys(r.dark).length, 40);
   assert.deepEqual(readRootVars(`:root{--bg:#fff}\n@media (prefers-color-scheme: dark) { :root { --bg: #000; } }`).dark, { '--bg': '#000' });
   t = Date.now();
@@ -479,7 +482,16 @@ test('#553 review 2: the dark block is read inside itself only, at its own level
   assert.deepEqual(dark('[data-theme=dark] { --bg:#000 }'), { '--bg': '#000' });
   assert.deepEqual(dark('.dark{ --bg:#000; .card{ --bg:#222 } --text:#eee }'), { '--bg': '#000', '--text': '#eee' }, 'after a nested rule too, never the nested one');
   assert.deepEqual(dark('.dark{ .card{ color:red } --bg:#000 }'), { '--bg': '#000' });
-  assert.deepEqual(dark('@media (prefers-color-scheme: dark){ body{color:var(--x)} }\n.btn{ --pad:4px; --bg:#f00 }'), {}, 'never a later component\'s');
+  assert.equal(dark('@media (prefers-color-scheme: dark){ body{color:red} }\n.btn{ --pad:4px; --bg:#f00 }'), null, 'never a later component\'s');
+  // Review 3: a dark media block whose first rule is not :root; an outer @media; comments and quotes; prose.
+  assert.deepEqual(dark('@media (prefers-color-scheme: dark) { body{color:red} :root{--bg:#000} }'), { '--bg': '#000' });
+  assert.deepEqual(dark('@media screen{.dark{--bg:#000}}'), { '--bg': '#000' });
+  assert.deepEqual(dark('.x{}@media{}.dark{--bg:#000}'), { '--bg': '#000' });
+  assert.deepEqual(dark('/* use [data-theme="dark"] */ .x{--pad:1px} [data-theme="dark"]{--bg:#000}'), { '--bg': '#000' });
+  assert.deepEqual(dark('.dark { /* } */ --bg:#000 }'), { '--bg': '#000' });
+  assert.deepEqual(dark('.dark { --icon:"}"; --bg:#000 }'), { '--icon': '"}"', '--bg': '#000' });
+  assert.deepEqual(readRootVars('Dark mode follows prefers-color-scheme: dark.\n\n```css\n:root { --bg: #fff; --ink: #111 }\n@media (prefers-color-scheme: dark) { :root { --bg: #000 } }\n```'),
+    { light: { '--bg': '#fff', '--ink': '#111' }, dark: { '--bg': '#000' } }, 'prose before the CSS is never a selector');
 });
 
 test('#553 review 2: primary is checked as link text in yad brand check, never in the doctor row; yadflow\'s own look passes', async () => {

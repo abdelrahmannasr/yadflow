@@ -50,34 +50,64 @@ export function readFrontMatter(text) {
   return root;
 }
 
-// The dark block's own declarations, read in one pass with a depth count (linear; review 1 and 2): the text at
-// the block's top level, never a nested rule's and never past the block's end. An `@media` block holds a rule,
-// so its first nested block (`:root`) is read instead. → text, or null when there is no block.
-function darkDeclarations(src, at) {
-  const open = src.indexOf('{', at);
-  if (open < 0) return null;
-  const media = /@media|prefers-color-scheme/.test(src.slice(Math.max(0, at - 16), open));
-  const want = media ? 2 : 1;
-  let depth = 0, text = '', entered = 0;
-  for (let i = open; i < src.length; i++) {
+// A DESIGN.md's CSS as rules, in ONE pass (linear; reviews 1–3): comments and quoted text are skipped, so a
+// brace or a selector inside them never counts. Each rule: { selector, text (its own declarations, never a
+// nested rule's), rules (nested) }. A selector is the text since the last rule or statement, cut at a blank
+// line or a code fence, so prose before a CSS block is never part of one.
+export const CSS_DEPTH = 16;
+export function cssRules(src) {
+  const top = { selector: '', text: '', rules: [] };
+  const stack = [top];
+  let pending = '', deeper = 0; // braces past CSS_DEPTH are counted, never kept: no design system nests so far
+  const flush = () => { if (stack.length > 1) stack[stack.length - 1].text += `${pending};`; pending = ''; };
+  for (let i = 0; i < src.length; i++) {
     const ch = src[i];
-    if (ch === '{') { depth++; if (depth === want) entered++; continue; }
-    if (ch === '}') { depth--; if (depth === 0 || (depth < want && entered)) break; continue; }
-    if (depth === want && entered === 1) text += ch;
+    if (ch === '/' && src[i + 1] === '*') { const end = src.indexOf('*/', i + 2); i = end < 0 ? src.length : end + 1; continue; }
+    if (ch === '"' || ch === "'") {
+      const end = src.indexOf(ch, i + 1);
+      pending += src.slice(i, end < 0 ? src.length : end + 1);
+      i = end < 0 ? src.length : end;
+      continue;
+    }
+    if (deeper) { if (ch === '{') deeper++; else if (ch === '}') deeper--; continue; }
+    if (ch === '{' && stack.length > CSS_DEPTH) { deeper = 1; pending = ''; continue; }
+    if (ch === '{') {
+      const rule = { selector: pending.split(/\n\s*\n|```/).pop().trim(), text: '', rules: [] };
+      stack[stack.length - 1].rules.push(rule);
+      stack.push(rule);
+      pending = '';
+    } else if (ch === '}') {
+      flush();
+      if (stack.length > 1) stack.pop();
+    } else if (ch === ';') flush();
+    else pending += ch;
   }
-  return text;
+  return top.rules;
 }
 
-// The `--name: value` pairs of the first `:root { … }` block, and of a dark block (`@media (prefers-color-
-// scheme: dark)` or `[data-theme="dark"]` / `.dark`) when there is one.
+const DARK_SELECTOR = /\[data-theme=["']?dark["']?\]|(?:^|[\s,>+~])\.dark\b/;
+const DARK_MEDIA = /^@media\b[^{]*prefers-color-scheme\s*:\s*dark/;
+const ROOT = /(?:^|[\s,]):root\b/;
+const hasVars = (r) => /--[A-Za-z0-9_-]+\s*:/.test(r.text);
+const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);
+
+// The `--name: value` pairs of the first `:root` rule that is not a dark one, and of the dark rule when there
+// is one: an `@media (prefers-color-scheme: dark)` block's `:root`, `html` or `body` rule (else its first rule
+// with a `--` name), or a `[data-theme="dark"]` / `.dark` rule anywhere, inside another `@media` too.
 export function readRootVars(text) {
-  const src = String(text || '');
-  const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;}]+)/g)].map((x) => [x[1], x[2].replace(/\/\*[\s\S]*?\*\//g, '').trim()]));
-  const darkAt = src.search(/prefers-color-scheme:\s*dark|\[data-theme=["']?dark["']?\]|\.dark\s*\{/);
-  const light = /:root\s*\{([^}]*)\}/.exec(darkAt > 0 ? src.slice(0, darkAt) : src);
-  const dark = darkAt > 0 ? darkDeclarations(src, darkAt) : null;
+  const all = [];
+  const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
+  walk(cssRules(String(text || '')), false);
+  const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
+  const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(r.selector));
+  let dark = null;
+  for (const { r } of all) {
+    if (DARK_MEDIA.test(r.selector)) dark = r.rules.find((x) => isRootish(x) && hasVars(x)) || r.rules.find(hasVars) || null;
+    else if (DARK_SELECTOR.test(r.selector) && hasVars(r)) dark = r;
+    if (dark) break;
+  }
   if (!light) return null;
-  return { light: vars(light[1]), dark: dark === null ? null : vars(dark) };
+  return { light: vars(light.r.text), dark: dark ? vars(dark.text) : null };
 }
 
 // Fill each role from a { name: value } map. → { colors: { role: value }, filledFrom: { role: name } }
