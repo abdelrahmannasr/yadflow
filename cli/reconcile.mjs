@@ -18,7 +18,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS, ignoreRules } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS, ignoreFileLines, ignoreRules } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
@@ -429,9 +429,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // committed, never trimmed as a whole (`run` trims).
     const committedLines = () => {
       const r = spawnSync('git', ['show', `HEAD:./${rule.source}`], { cwd: e.a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-      // As git reads it: a byte-order mark skipped, and only trailing spaces git does not see as escaped (`\ `)
-      // dropped — never a tab (review 3).
-      return r.status === 0 ? r.stdout.replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.replace(/(^|[^\\](?:\\\\)*) +$/, '$1')) : [];
+      return r.status === 0 ? ignoreFileLines(r.stdout) : [];
     };
     const teams = rule && !rule.outside && committedLines().includes(rule.pattern);
     if (teams) {

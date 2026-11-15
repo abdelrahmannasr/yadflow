@@ -161,6 +161,12 @@ export function hiddenFolders(root, paths) {
   return out;
 }
 
+// An ignore file's lines as git reads its patterns (#555): a byte-order mark at the start skipped, a line's
+// `\r` dropped (the last line's too), and only the trailing spaces git drops — those not escaped by an odd
+// run of backslashes (`\ ` stays) — dropped; a tab stays.
+export const ignoreFileLines = (text) => text.replace(/^\uFEFF/, '').split('\n')
+  .map((l) => l.replace(/\r$/, '').replace(/((?:^|[^\\])(?:\\\\)*) +$/, '$1'));
+
 // The ignore rule that hides each of `names` (repo-relative, `/`-separated): a Map of name → { source, line,
 // pattern, outside }, for the names an ignore rule hides. Asked with `--no-index`, so a rule is found whatever
 // is tracked. A negated pattern (`!x`) re-includes, so it never counts as hiding. `source` is shown with `~`

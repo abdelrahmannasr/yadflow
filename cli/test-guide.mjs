@@ -1093,6 +1093,17 @@ test('#555: an AGENTS.md the Product gitignores gets no agents-uncommitted row e
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('#555: ignoreFileLines reads an ignore file\'s lines as git does', async () => {
+  const { ignoreFileLines } = await import('./update-commit.mjs');
+  const cases = [
+    ['a  ', 'a'], ['a\t', 'a\t'], ['a\\ ', 'a\\ '], ['a\\  ', 'a\\ '], ['a\\\\  ', 'a\\\\'],
+    ['\\\\  ', '\\\\'], ['\\ ', '\\ '], ['   ', ''], ['a\r', 'a'], ['a  \r', 'a'],
+  ];
+  for (const [line, want] of cases) assert.deepEqual(ignoreFileLines(line), [want], JSON.stringify(line));
+  assert.deepEqual(ignoreFileLines('\uFEFFx\r\ny\n'), ['x', 'y', '']);
+  assert.deepEqual(ignoreFileLines('x\uFEFF'), ['x\uFEFF'], 'a mark only counts at the start');
+});
+
 test('#555: ignoreRules names a file rule and a folder rule, says whose rule it is, and never counts a negation', async () => {
   const { ignoreRules } = await import('./update-commit.mjs');
   const P = tmp();
