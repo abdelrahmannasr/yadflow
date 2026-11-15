@@ -995,3 +995,20 @@ test('E185 part 4: after a real pull (merge or rebase) the person sees one line;
   gitC(A, 'add', '-A'); gitC(A, 'commit', '-qm', 'third', '--no-verify'); gitC(A, 'push', '-q', 'origin', 'HEAD:main');
   assert.doesNotMatch(pull(['--no-rebase'], { YAD_HOOK_DISABLE: '1' }).stderr, /yad: the pull brought/);
 });
+
+test('E185 part 4: the doctor row says whether this clone has the notice, in any ledger mode', async () => {
+  const { localSetupNoticeCheck } = await import('./doctor.mjs');
+  const { localSetupNoticeActions } = await import('./plan.mjs');
+  const row = (dir) => { const checks = []; localSetupNoticeCheck(dir, checks); return checks.find((x) => x.id === 'local-setup-hook'); };
+  const dir = product();
+  assert.equal(row(dir).status, 'warn');
+  assert.match(row(dir).message, /not installed in this clone \(post-merge, post-rewrite\)/);
+  applyAll(localSetupNoticeActions(dir));
+  assert.equal(row(dir).status, 'ok');
+  put(path.join(dir, '.git', 'hooks', 'post-merge'), '#!/bin/sh\necho mine\n');
+  assert.equal(row(dir).status, 'warn');
+  assert.match(row(dir).hint, /add this line to that hook: \[ ! -f 'hooks\/local-setup-notice\.mjs' \]/);
+  const cfg = path.join(dir, '.sdlc', 'product.json');
+  put(cfg, { ...JSON.parse(read(cfg)), localSetupNotice: false });
+  assert.match(row(dir).message, /turned off for this Product/);
+});
