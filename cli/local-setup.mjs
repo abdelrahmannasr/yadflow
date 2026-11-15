@@ -298,8 +298,8 @@ export function localSetupActions(root) {
 //   ask      such a step, not answered for as it is now: yad runs no team command, so the agent asks the person
 // `recorded`: the record has an answer for the step as it is now. `changed`: it has one for an older form only.
 // `seen`: nothing is left to ask about it.
-// `noProgram` (yad guide, doctor): run only the checks that start no other program, and judge `platform-login`
-// (which runs gh or glab) by the record, like a step with no check.
+// `noProgram` (yad guide, doctor): run only the checks that start no program but git, and judge `platform-login`
+// (which runs gh or glab, and may reach the network) by the record, like a step with no check.
 export const NO_PROGRAM_CHECKS = Object.freeze(['cli-version', 'ledger-hook', 'commit-signing', 'tool']);
 export function localSetupState(root, { items = null, noProgram = false } = {}) {
   const read = readCommittedLocalSetup(root);
@@ -373,6 +373,18 @@ export function runLocalSetupList(root, { json = false } = {}) {
   info(`the steps, with what each changes, are in ${LOCAL_SETUP_DOC}; \`yad local-setup list --json\` gives them to an agent`);
   if (n.pending || n.ask) info('after each step: `yad local-setup done <id>`; to say no: `yad local-setup skip <id> --reason "<why>"`');
   return undefined;
+}
+
+// What `yad guide` and `yad doctor` say about this machine: the steps not yet answered for (`pending` and `ask`),
+// or null when there are none. Cheap: no check that starts a program other than git (NO_PROGRAM_CHECKS). Never
+// throws: a script or record that cannot be read is an `error`, for the caller to show.
+export function localSetupWaiting(root) {
+  let st;
+  try { st = localSetupState(root, { noProgram: true }); } catch (e) { return { pending: [], ask: [], changed: [], error: `could not read the steps (${e?.message ?? String(e)})`, recordError: null }; }
+  if (st.error) return { pending: [], ask: [], changed: [], error: `${LOCAL_SETUP_FILE} ${st.error}`, recordError: null };
+  const ids = (state) => st.steps.filter((s) => s.state === state).map((s) => s.id);
+  const w = { pending: ids('pending'), ask: ids('ask'), changed: st.steps.filter((s) => s.changed).map((s) => s.id), error: null, recordError: st.record.error };
+  return w.pending.length || w.ask.length || w.recordError ? w : null;
 }
 
 // ---- answering for this machine: `yad local-setup done` and `skip` ------------------------------------

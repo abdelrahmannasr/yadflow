@@ -33,6 +33,7 @@ import { seededSlugs } from './hook.mjs';
 import { setupQuestions } from './setup.mjs';
 import { reposBeside, insideGitRepo, PRODUCT_DIR } from './workspace.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
+import { localSetupWaiting } from './local-setup.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -392,7 +393,23 @@ export function installState(root, running = VERSION) {
   return { project: product?.version ?? null, yadflow: running, behind: rows.some((r) => r.behind) ? true : product?.behind ?? null, repos: rows.filter((r) => r.behind) };
 }
 
-function upkeepFor(install, { platform }) {
+// The update first (an older yad misreads the files), then this machine's local setup steps (E185).
+function upkeepFor(install, { platform, root }) {
+  const update = updateUpkeep(install, { platform });
+  const waiting = root ? localSetupWaiting(root) : null;
+  if (!waiting) return update;
+  const ids = [...waiting.pending, ...waiting.ask];
+  const why = waiting.error ? `the local setup script cannot be read (${forTerminal(waiting.error)}): read what it says, and tell the person`
+    : ids.length ? `steps for this machine are waiting (${ids.join(', ')}): follow the local-setup rule — show the person each step's \`purpose\` and \`impact\`, run one only after their yes, then record it with \`yad local-setup done\` or \`skip\``
+      : 'this machine\'s local setup record cannot be read: show the person the warning it prints';
+  return {
+    agent: [...(update?.agent ?? []), agentRun('yad local-setup list --json', why)],
+    person: update?.person ?? [],
+    localSetup: waiting,
+  };
+}
+
+function updateUpkeep(install, { platform }) {
   if (!install.behind) return null;
   const which = install.repos.map((r) => (r.repo === 'product' ? 'the Product' : r.repo)).join(', ');
   if (!platform) {
@@ -443,7 +460,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   const situation = { stage: 'ready', product: rel, platform, ledger: platform && verified ? 'verified' : 'local', solo, here: m.here ?? null, install };
   if (!m.setUp) return { ...base, situation: { ...situation, stage: 'no-product' }, ...noProduct(cwd, root) };
   // Upkeep rides every answer about this Product until it is done.
-  base.upkeep = upkeepFor(install, { platform });
+  base.upkeep = upkeepFor(install, { platform, root });
 
   const ctx = { verified, platform, solo };
   const chosen = epic ?? m.here?.epic ?? null;
@@ -504,7 +521,13 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
 export function printGuide(g) {
   const s = g.step;
   if (g.upkeep) {
-    log(`\n  ${c.bold(`Upkeep first: yadflow is v${g.situation.install.yadflow}, and ${g.situation.install.repos.map((r) => `${r.repo} is on v${r.version ?? '?'}`).join(', ')}.`)}`);
+    const install = g.situation.install;
+    if (install?.behind) log(`\n  ${c.bold(`Upkeep first: yadflow is v${install.yadflow}, and ${install.repos.map((r) => `${r.repo} is on v${r.version ?? '?'}`).join(', ')}.`)}`);
+    const ls = g.upkeep.localSetup;
+    if (ls) {
+      const n = ls.pending.length + ls.ask.length;
+      log(`\n  ${c.bold(n ? `Local setup: ${n} step(s) for this machine are waiting for your answer.` : 'Local setup: something could not be read.')}`);
+    }
     for (const a of g.upkeep.agent) hand(`${c.bold(a.run)} ${c.dim(`— ${a.why}`)}`);
     for (const p of g.upkeep.person) for (const st of p.steps) info(st);
   }

@@ -32,6 +32,7 @@ const { buildGuide, stepFacts, playbook, tok, agentRun } = await import('./guide
 const COMMAND_CLASS_MODULE = await import('./agent-rules.mjs');
 const { COMMAND_CLASS, CLASSES, ASK, RULES, HUMAN_ONLY_ACTS, NEVER, classify, askFor } = await import('./agent-rules.mjs');
 const { DEFAULT_LIFECYCLE } = await import('./lifecycle.mjs');
+const TOOLBOX_IDS = (await import('./toolbox.mjs')).TOOLBOX.map((t) => t.id);
 const { runEpicNew } = await import('./epic.mjs');
 const { gateOpen } = await import('./gate.mjs');
 
@@ -606,6 +607,52 @@ test('an install behind yadflow: the guide says so, from what is committed, and 
     commitStamp(VERSION);
     assert.equal(buildGuide(T, { epic: 'EP-pay' }).upkeep, null);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('local setup steps waiting for this machine ride the upkeep, after the update, and the guide starts no gh (E185)', async () => {
+  const { localSetupActions, runLocalSetupSkip } = await import('./local-setup.mjs');
+  const { VERSION } = await import('./manifest.mjs');
+  const T = await product();
+  const saved = [console.log, process.exitCode, process.env.PATH];
+  console.log = () => {};
+  try {
+    put(path.join(T, '.sdlc/cli-version.json'), { version: VERSION });
+    // Every shipped tool skipped, and one team step.
+    put(path.join(T, '.sdlc/toolbox.json'), { shipped: Object.fromEntries(TOOLBOX_IDS.map((id) => [id, 'skip'])) });
+    for (const a of localSetupActions(T)) if (!a.writesNothing) a.apply();
+    const file = path.join(T, '.sdlc/local-setup.json');
+    const team = { id: 'docker', title: 'Install Docker', purpose: 'runs the API', impact: 'adds Docker', when: 'optional', commands: ['brew install docker'], check: { run: 'docker --version' } };
+    put(file, { ...JSON.parse(fs.readFileSync(file, 'utf8')), team: [team] });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: local setup']);
+
+    // A gh or glab the guide started would leave a mark: none may (the login check can reach the network).
+    const calls = path.join(T, '.calls');
+    if (process.platform !== 'win32') {
+      const bin = path.join(T, '.bin');
+      fs.mkdirSync(bin);
+      for (const name of ['gh', 'glab']) { const f = path.join(bin, name); fs.writeFileSync(f, `#!/bin/sh\necho ${name} >> '${calls}'\nexit 1\n`); fs.chmodSync(f, 0o755); }
+      process.env.PATH = `${bin}${path.delimiter}${saved[2]}`;
+    }
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.ok(!fs.existsSync(calls), 'the guide started gh or glab');
+    assert.ok(g.upkeep.localSetup.ask.includes('platform-login'), 'judged by the record: not checked here');
+    assert.ok(g.upkeep.localSetup.ask.includes('docker'));
+    assert.equal(g.upkeep.agent.length, 1, 'not behind: only the local setup');
+    const run = g.upkeep.agent[0];
+    assert.deepEqual([run.run, run.class, run.ask], ['yad local-setup list --json', 'read', 'never']);
+    assert.match(run.why, /docker/);
+    assert.ok(RULES.some((r) => r.id === 'local-setup'));
+
+    // The person said no: it waits no more.
+    runLocalSetupSkip(T, { ids: ['docker'], reason: 'not for me' });
+    assert.ok(!buildGuide(T, { epic: 'EP-pay' }).upkeep.localSetup.ask.includes('docker'));
+
+    // Behind as well: the update comes first.
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(T, ['add', '-A']); git(T, ['commit', '-q', '-m', 'chore: old stamp']);
+    const both = buildGuide(T, { epic: 'EP-pay' }).upkeep;
+    assert.deepEqual(both.agent.map((x) => x.run), ['yad update --open-pr --json', 'yad local-setup list --json']);
+  } finally { [console.log, process.exitCode, process.env.PATH] = saved; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 // Two clones of one Product with an origin, for the run's own reading of what origin holds.
