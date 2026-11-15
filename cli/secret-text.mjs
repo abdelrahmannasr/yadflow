@@ -23,10 +23,10 @@ const NAME_FOR_WHERE = /[_.-](?:url|uri|file|path|name|header|id|dir|env|endpoin
 // ahead without being taken, so a name inside a value (`url=https://h/?token=…`) is read on its own too; the value
 // itself keeps `&` and `=`, so a password holding them still counts (a query string may be refused: use $VAR).
 // A quoted value is read to its closing quote, so `TOKEN="abc,defghijk"` counts whole (review 4) — but never one
-// that starts with a space, or with a shell operator then a space: in `read -p "Password: " PW` or
-// `echo "Password:"; read PW`, that quote closes the prompt, it opens nothing — while `";x9Kq2mZp7"` is a value
-// (reviews 5–7).
-const NAMED = /(?<![\w.]|[\w.]-)([A-Za-z_][\w.-]*)["']?\s*[=:]\s*(?=("(?![\s"]|[;&|](?:\s|$))[^"\n]*"|'(?![\s']|[;&|](?:\s|$))[^'\n]*'|["']?[^\s"'`,;]+))/g;
+// that starts with a space, and one that starts with a shell operator only when it holds no space: in
+// `read -p "Password: " PW` or `echo "Password:";read PW;echo "ok"`, that quote closes the prompt, it opens nothing —
+// while `";x9Kq2mZp7"` is a value (reviews 5–8). A password that starts with ; & or | AND holds a space is missed.
+const NAMED = /(?<![\w.]|[\w.]-)([A-Za-z_][\w.-]*)["']?\s*[=:]\s*(?=("(?:[;&|][^"\s]*|[^"\s;&|][^"\n]*)"|'(?:[;&|][^'\s]*|[^'\s;&|][^'\n]*)'|["']?[^\s"'`,;]+))/g;
 // A value with its quotes taken off. An unquoted one that is `&name=…` is an empty value before the next name in a
 // query (`password=&user=x`); a quoted `&…` is a real value (review 5).
 const literal = (raw) => {
