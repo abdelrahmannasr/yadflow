@@ -152,7 +152,8 @@ export function readRootVars(text) {
     const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
     walk(rules, false);
     const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
-    const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)));
+    // The first light :root rule with a `--` name: `:root { color-scheme: light dark }` before it is skipped (review 9).
+    const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)) && hasVars(r));
     let dark = null;
     for (const { r } of all) {
       if (DARK_MEDIA.test(r.selector)) dark = r.rules.find((x) => isRootish(x) && hasVars(x)) || r.rules.find(hasVars) || null;

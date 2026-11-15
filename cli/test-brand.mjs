@@ -527,6 +527,7 @@ test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark
   assert.deepEqual(readRootVars('Install:\n\n```bash\nnpm i\n```\n\n:root { --bg: #fff }\n.dark { --bg: #000 }\n'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, 'CSS outside the fences, beside a shell fence');
   assert.deepEqual(readRootVars('Use ```css``` here.\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'a line with a backtick after the run is not a fence');
   assert.deepEqual(readRootVars('````markdown\n```css\n:root{--bg:#123}\n```\n````\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), both, 'a fence inside a longer fence is its content, never the brand');
+  assert.deepEqual(readRootVars(':root { color-scheme: light dark; }\n:root{--bg:#fff}\n.dark{--bg:#000}'), both, 'a :root with no colours before the real one (review 9)');
   assert.deepEqual(readRootVars('```css\r\n:root{--bg:#fff}\r\n.dark{--bg:#000}\r\n```\r\n'), both, 'Windows line ends');
   assert.deepEqual(readRootVars(':root:NOT(.dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':not is not case-sensitive');
   assert.equal(readRootVars(':root{--bg:#fff}\nhtml:not(.dark){--x:1}').dark, null);
