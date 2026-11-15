@@ -130,7 +130,7 @@ export function signingChecks(checks, root) {
 export function localSetupChecks(checks, root) {
   const w = localSetupWaiting(root);
   if (!w) return;
-  if (w.error) { check(checks, 'local-setup', 'environment', 'warn', `local setup: ${w.error}`, 'fix it, or restore it from git; `yad local-setup` says more'); return; }
+  if (w.error) { check(checks, 'local-setup', 'environment', 'warn', `local setup: ${forTerminal(w.error)}`, 'fix it, or restore it from git; `yad local-setup` says more'); return; }
   if (w.recordError) check(checks, 'local-setup-record', 'environment', 'warn', `local setup: this machine's record ${w.recordError} — read as empty, so every step is asked again`, 'delete it (inside .git/yad/): it only remembers which steps you did or said no to');
   const ids = [...w.pending, ...w.ask];
   if (!ids.length) return;

@@ -1737,12 +1737,12 @@ Each step has a **hash** of its `commands`, `check` and `when` — not its wordi
 
 **Why yad runs no team check.** The file is committed, so anyone who can merge to the Product can edit it. If yad ran a team's check every time it listed the steps, that person could run a command on every member's machine. So a team step is always `ask`: the agent shows the check and the commands, and runs them only after the person's yes.
 
-**This machine's answers.** What a person did with each step is kept on their machine, in `.git/yad/local-setup-done.json` (in git's own folder, so never committed; every worktree of one clone shares it). `yad local-setup done <id>` records a step as done, and `yad local-setup skip <id> --reason "<why>"` records a no. Each answer is tied to the step's hash, so when a step's commands, check or `when` change, the old answer no longer counts and the step is asked again. A change to its words alone asks nothing. The states:
+**This machine's answers.** What a person did with each step is kept on their machine, in `.git/yad/local-setup-done.json` (in git's own folder, so never committed; every worktree of one clone shares it, so two worktrees on branches whose steps differ replace each other's answer for that step). `yad local-setup done <id>` records a step as done, and `yad local-setup skip <id> --reason "<why>"` records a no. Each answer is tied to the step's hash, so when a step's commands, check or `when` change, the old answer no longer counts and the step is asked again. A change to its words alone asks nothing. The states:
 
 | State | Means |
 |---|---|
 | `ok` | yad's own check passed on this machine. |
-| `pending` | yad's own check failed. `done` is refused until it passes. |
+| `pending` | yad's own check failed. `done` is refused until it passes (it runs the named steps' checks, even for a step you skipped). |
 | `done` | You did a step yad cannot check (a team step, or one yad did not write). |
 | `ask` | Such a step, not answered for as it is now. |
 | `skipped` | You said no to the step as it is now. This wins over a check. |

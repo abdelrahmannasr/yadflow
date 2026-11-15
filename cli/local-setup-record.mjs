@@ -7,6 +7,9 @@
 //
 // An answer is tied to the step's hash (stepHash: what the step runs and how it is checked). When a step's
 // commands change, the old answer no longer counts, and the person is asked again.
+//
+// One record per clone, keyed by step id: two worktrees on branches whose script differs share it, so an answer
+// given in one replaces the other's, and that step reads as changed there until it is answered again.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,14 +37,15 @@ export function readLocalSetupRecord(root) {
   let doc;
   try { doc = JSON.parse(text); } catch { return { path: file, entries: {}, error: 'does not parse' }; }
   if (!isPlainObject(doc) || (doc.steps !== undefined && !isPlainObject(doc.steps))) return { path: file, entries: {}, error: 'is not the shape yad writes' };
-  const entries = {};
+  // A null prototype: a `__proto__` key in the file is an id like any other, never this object's prototype.
+  const entries = Object.create(null);
   for (const [id, e] of Object.entries(doc.steps ?? {})) if (sound(e)) entries[id] = e;
   return { path: file, entries, error: null };
 }
 
 // The answer that counts for a step: its entry, only when made for the step as it is now.
 export const answerFor = (entries, step) => {
-  const e = entries[step.id];
+  const e = Object.hasOwn(entries, step.id) ? entries[step.id] : null;
   return e && e.hash === step.hash ? e : null;
 };
 

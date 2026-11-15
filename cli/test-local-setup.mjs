@@ -549,10 +549,24 @@ test('yad guide and doctor run no check that starts a program: the login step is
   const login = stateOf(dir, 'platform-login', { noProgram: true });
   assert.equal(login.state, 'ask');
   assert.match(login.why, /not checked here/);
-  quiet(() => runLocalSetupDone(dir, { ids: ['platform-login'] }).value);
-  // `done` ran the real check (gh is not signed in on a test machine, or not installed): refused, or recorded.
-  const after = stateOf(dir, 'platform-login', { noProgram: true });
-  assert.ok(['ask', 'done'].includes(after.state));
+  // `done` runs the step's real check: here a gh that says it is not signed in, so nothing is recorded.
+  if (process.platform !== 'win32') {
+    const bin = path.join(tmp(), 'bin');
+    put(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n');
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    const PATH = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${PATH}`;
+    try {
+      const r = quiet(() => runLocalSetupDone(dir, { ids: ['platform-login'] }));
+      assert.equal(r.code, 1);
+      assert.equal(stateOf(dir, 'platform-login', { noProgram: true }).state, 'ask');
+      // `skip` needs no check: it starts no gh at all.
+      put(path.join(bin, 'gh'), `#!/bin/sh\necho ran >> '${path.join(bin, 'ran')}'\nexit 1\n`);
+      quiet(() => runLocalSetupSkip(dir, { ids: ['platform-login'], reason: 'I use the web' }));
+      assert.ok(!fs.existsSync(path.join(bin, 'ran')), 'skip started gh');
+      assert.equal(stateOf(dir, 'platform-login', { noProgram: true }).state, 'skipped');
+    } finally { process.env.PATH = PATH; }
+  }
   assert.equal(stateOf(dir, 'yadflow-cli', { noProgram: true }).state, 'ok', 'a check that starts nothing still runs');
 });
 
@@ -573,4 +587,38 @@ test('doctor names the steps waiting on this machine, and a record it cannot rea
   row = rows(dir).find((r) => r.id === 'local-setup-record');
   assert.equal(row.status, 'warn');
   assert.match(row.message, /does not parse/);
+});
+
+test('through the CLI: done and skip answer in --json, refuse words and flags that do not belong, and the section says what changed', () => {
+  const T = tmp();
+  const dir = committedProduct();
+  let r = yad(T, dir, ['local-setup', 'done', 'docker', '--json']);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.json.done, ['docker']);
+  r = yad(T, dir, ['local-setup', 'done', 'docker', 'tool-nowhere', '--json']);
+  assert.equal(r.code, 1);
+  assert.equal(r.json.ok, false);
+  assert.deepEqual(r.json.failing.map((f) => f.id), ['tool-nowhere']);
+  r = yad(T, dir, ['local-setup', 'skip', 'tool-nowhere', '--reason', 'not here', '--json']);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.skipped, 'tool-nowhere');
+  assert.equal(r.json.required, false);
+  const list = yad(T, dir, ['local-setup', '--json']).json;
+  assert.equal(list.skipped, 1);
+  assert.deepEqual(list.steps.find((x) => x.id === 'tool-nowhere').reason, 'not here');
+  // Words and flags that do not belong.
+  assert.equal(yad(T, dir, ['local-setup', 'done', 'docker', '--reason', 'x']).code, 1);
+  assert.equal(yad(T, dir, ['local-setup', 'list', '--reason', 'x']).code, 1);
+  assert.equal(yad(T, dir, ['local-setup', 'list', 'docker']).code, 1);
+  assert.equal(yad(T, dir, ['local-setup', 'skip', 'docker', 'tool-nowhere', '--reason', 'x']).code, 1);
+  assert.equal(yad(T, dir, ['local-setup', 'done']).code, 1);
+
+  // The team changes what docker runs: the section names it as changed.
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  put(file, { ...JSON.parse(read(file)), team: [teamStep({ commands: ['brew install --cask docker@4'] })] });
+  execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qam', 'docker 4', '--no-verify'], { cwd: dir });
+  const { lines, value } = quiet(() => localSetupSection(dir));
+  assert.deepEqual(value.changed, ['docker']);
+  assert.ok(lines.some((l) => /changed since this machine last answered: docker/.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /said no to: tool-nowhere/.test(l)));
 });

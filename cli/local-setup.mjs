@@ -298,8 +298,9 @@ export function localSetupActions(root) {
 //   ask      such a step, not answered for as it is now: yad runs no team command, so the agent asks the person
 // `recorded`: the record has an answer for the step as it is now. `changed`: it has one for an older form only.
 // `seen`: nothing is left to ask about it.
-// `noProgram` (yad guide, doctor): run only the checks that start no program but git, and judge `platform-login`
-// (which runs gh or glab, and may reach the network) by the record, like a step with no check.
+// `noProgram` (yad guide, doctor): never start gh or glab, nor reach the network. The checks run are local (git
+// config, files, \`which\`); `platform-login` (gh or glab, which may reach the network) is judged by the record,
+// like a step with no check.
 export const NO_PROGRAM_CHECKS = Object.freeze(['cli-version', 'ledger-hook', 'commit-signing', 'tool']);
 export function localSetupState(root, { items = null, noProgram = false } = {}) {
   const read = readCommittedLocalSetup(root);
@@ -314,7 +315,7 @@ export function localSetupState(root, { items = null, noProgram = false } = {}) 
   let found = items;
   const out = steps.map((s) => {
     const answer = answerFor(record.entries, s);
-    const changed = !answer && !!record.entries[s.id];
+    const changed = !answer && Object.hasOwn(record.entries, s.id);
     const mark = (state, why, more = {}) => ({ ...s, state, why, recorded: !!answer, changed: changed && state !== 'ok', seen: ['ok', 'done', 'skipped'].includes(state), ...more });
     if (answer?.state === 'skipped') return mark('skipped', `you said no${answer.reason ? `: ${answer.reason}` : ''}`, { reason: answer.reason ?? null, at: answer.at ?? null });
     const checked = s.source === 'yadflow' && s.known && s.check?.builtin && (!noProgram || NO_PROGRAM_CHECKS.includes(s.check.builtin));
@@ -376,7 +377,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
 }
 
 // What `yad guide` and `yad doctor` say about this machine: the steps not yet answered for (`pending` and `ask`),
-// or null when there are none. Cheap: no check that starts a program other than git (NO_PROGRAM_CHECKS). Never
+// or null when there are none. Cheap: no gh or glab, no network (NO_PROGRAM_CHECKS). Never
 // throws: a script or record that cannot be read is an `error`, for the caller to show.
 export function localSetupWaiting(root) {
   let st;
@@ -392,10 +393,11 @@ export function localSetupWaiting(root) {
 export const DONE_USAGE = 'usage: yad local-setup done <id>… [--json]   |   yad local-setup skip <id> --reason "<why>" [--json]';
 const REASON_MAX = 500;
 
-// The steps named, from the committed script, or a refusal (returned) — shared by `done` and `skip`.
+// The steps named, from the committed script, or a refusal (returned) — shared by `done` and `skip`. Read without
+// starting gh or glab: `skip` needs no check at all, and `done` runs only the named steps' own checks.
 function stepsNamed(root, ids, verb, json) {
   if (!ids.length) return { refused: refuse(`yad local-setup ${verb} needs a step id`, `${DONE_USAGE} — \`yad local-setup list\` shows the ids`, { json }) };
-  const st = localSetupState(root);
+  const st = localSetupState(root, { noProgram: true });
   if (st.error) return { refused: refuse(`${LOCAL_SETUP_FILE} ${st.error}`, 'fix it, or restore it from git', { json }) };
   if (!st.steps.length) return { refused: refuse(`this Product has no local setup steps (${LOCAL_SETUP_FILE})`, 'run `yad update` (it writes the script), then commit it through review', { json }) };
   if (!st.record.path) return { refused: refuse(`${root} is not in a git clone, so this machine's answers have nowhere to go`, 'run it from your clone of the Product', { json }) };
@@ -411,10 +413,10 @@ function stepsNamed(root, ids, verb, json) {
 export function runLocalSetupDone(root, { ids = [], json = false, now } = {}) {
   const got = stepsNamed(root, ids, 'done', json);
   if (got.refused !== undefined || !got.steps) return got.refused;
-  // A skipped step still has its check: saying no earlier never lets `done` stand in for a check that fails.
-  const failing = got.steps.map((x) => (x.state === 'skipped' && x.source === 'yadflow' && x.known && x.check?.builtin
-    ? { ...x, ...(({ ok: passed, why }) => ({ state: passed ? 'ok' : 'pending', why }))(runBuiltinCheck(x.check, root)) } : x))
-    .filter((x) => x.state === 'pending');
+  // Every named step yad can check is checked now, whatever the record says: a no given earlier never lets `done`
+  // stand in for a check that fails.
+  const failing = got.steps.filter((x) => x.source === 'yadflow' && x.known && x.check?.builtin)
+    .map((x) => ({ x, r: runBuiltinCheck(x.check, root) })).filter(({ r }) => !r.ok).map(({ x, r }) => ({ ...x, why: r.why }));
   if (failing.length) {
     return refuse(`not done on this machine yet: ${failing.map((x) => `${x.id} (${forTerminal(x.why)})`).join('; ')} — nothing was recorded`,
       'finish the step, run its verify command, then run this again', { json, failing: failing.map((x) => ({ id: x.id, why: x.why })) });
@@ -464,7 +466,7 @@ export function localSetupSection(root) {
   // The `ask` steps under `yadflow` that yad did not write: printed apart, and `unvetted` in --json.
   const strange = ask.filter((s) => s.source === 'yadflow' && !s.known);
   log(c.bold('\nLocal setup (this machine)'));
-  if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length - skipped.length} step(s) you said yes to are done here`);
+  if (!pending.length && !ask.length) log(skipped.length === st.steps.length ? `  ${c.dim('–')} you said no to every step` : `  ${c.green('✓')} all ${st.steps.length - skipped.length} step(s) you said yes to are done here`);
   else {
     if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
     const theirs = ask.filter((s) => s.source !== 'yadflow');
