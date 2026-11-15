@@ -15,7 +15,7 @@ import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPa
 import {
   moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, orphanAgentGuardActions, allowListActions, orphanAllowListActions, repoOrphanAgentGuardActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, captureHookActions, orphanCaptureHookActions, activityHookActions, orphanActivityHookActions, repoOrphanActivityActions, legacyHookScriptActions, legacyRepoActions, legacyProductActions,
-  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
+  ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, localSetupNoticeActions, orphanLocalSetupNoticeActions, localSetupNoticeAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS, ignoreFileLines, ignoreRules } from './update-commit.mjs';
@@ -74,6 +74,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     ...orphanHookActions(root, ideTargets),
     // E48: this clone's git pre-commit hook — the person's half of the ledger guard.
     ...gitHookActions(root), ...orphanGitHookActions(root),
+    // E185 part 4: the notice after a pull — its script, and this clone's post-merge and post-rewrite hooks.
+    ...localSetupNoticeActions(root), ...orphanLocalSetupNoticeActions(root),
     // E43: the post-edit capture hook, in both ledger modes.
     ...captureHookActions(root, ideTargets), ...orphanCaptureHookActions(root, ideTargets),
     // E178: the live activity record, only while the config says `"activity": true`.
@@ -161,6 +163,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A hook yad may not write (someone else's, or a hooks folder a tool manages) has no action; say so.
   const gitHookNote = gitHookAdvice(gitHookState(root));
   if (gitHookNote) warn(gitHookNote);
+  for (const note of localSetupNoticeAdvice(root)) warn(note);
   const shownInvalid = ideState.invalid.map((v) => {
     try { return JSON.stringify(v) ?? String(v); } catch { return String(v); }
   });

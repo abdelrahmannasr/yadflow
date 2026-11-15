@@ -10,7 +10,7 @@ import {
 import { err } from './errors.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, activityHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice,
+  moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, activityHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice, localSetupNoticeActions, localSetupNoticeAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites, canonicalIdeTargets,
 } from './plan.mjs';
@@ -871,6 +871,15 @@ export async function runSetup(root, opts = {}) {
   }
   const gitHookNote = gitHookAdvice(gitHookState(root));
   if (gitHookNote) warn(gitHookNote);
+  // E185 part 4: the one-line notice after a pull, in every ledger mode (its script is committed; the hooks are
+  // this clone's).
+  const notice = localSetupNoticeActions(root);
+  if (notice.length) {
+    log(`  ${c.bold('product')} ${c.dim('(local setup notice after a pull, this clone)')}`);
+    applyActions(notice, { force: true });
+    wired.push(...notice.filter((a) => a.paths?.length));
+  }
+  for (const note of localSetupNoticeAdvice(root)) warn(note);
   // The post-edit capture hook (E43): every change to an artifact is snapshotted onto the person's private
   // `yad/wip/<name>/<epic>` branches. Both ledger modes; `"capture": false` in the Product config turns it off.
   const captureWiring = captureHookActions(root, ideTargets);

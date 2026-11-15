@@ -33,7 +33,7 @@ import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStri
 import { err } from './errors.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetupAnswered, ideTargetsQuestion, checkSetupFlags } from './setup.mjs';
-import { moduleActions, gitHookActions, agentFileActions } from './plan.mjs';
+import { moduleActions, gitHookActions, agentFileActions, localSetupNoticeActions } from './plan.mjs';
 import { writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
 import { offerToolbox } from './toolbox.mjs';
 import { localSetupActions, localSetupSection } from './local-setup.mjs';
@@ -517,6 +517,10 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   const hook = gitHookActions(product);
   for (const a of hook) a.apply();
   if (hook.length) ok('installed the git pre-commit hook in this clone');
+  // E185 part 4: the notice after a pull — only the hooks (this clone's); the script came with the clone.
+  const notice = localSetupNoticeActions(product).filter((a) => !a.paths?.length && !a.writesNothing);
+  for (const a of notice) a.apply();
+  if (notice.length) ok('installed the local setup notice after a pull in this clone (post-merge, post-rewrite)');
   // E85: the tools the team chose (the Product's toolbox.json, just cloned) that this machine lacks. A
   // new teammate is the person most likely to miss one. Offered, never installed.
   log('');

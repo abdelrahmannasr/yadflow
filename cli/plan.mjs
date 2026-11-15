@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS, REPO_AGENT_GUARD_DEST, agentGuardAdapters,
+  HOOK_WIRING, LOCAL_SETUP_NOTICE_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER, CAPTURE_WIRING, CAPTURE_ADAPTERS, AGENT_GUARD_WIRING, AGENT_GUARD_ADAPTERS, REPO_AGENT_GUARD_DEST, agentGuardAdapters,
   ACTIVITY_WIRING, ACTIVITY_ADAPTERS, REPO_ACTIVITY_DEST, activityAdapters,
   legacySkillPairs, REMOVED_SKILLS, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, LEGACY_HOOK_SCRIPTS, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath, PRODUCT_LINK, PRODUCT_LINK_DEFAULT_PATH,
@@ -1620,6 +1620,63 @@ export const gitHookActions = (root) => hookActionsFor(PRE_COMMIT_HOOK, root);
 export const orphanGitHookActions = (root) => orphanHookActionsFor(PRE_COMMIT_HOOK, root);
 // The sentence for a clone where yad may not write the hook, or null.
 export const gitHookAdvice = (st) => PRE_COMMIT_HOOK.advice(st);
+
+// ---- the local setup notice after a pull (E185 part 4) -----------------------------------------------
+//
+// git's post-merge hook (after `git pull`, `git merge`) and post-rewrite hook (after `git pull --rebase`; an
+// `--amend` is left alone) run `hooks/local-setup-notice.mjs`, which says in one line which local setup steps the
+// pull brought for this machine. It only prints and never fails the pull. Per clone like the pre-commit hook, so
+// each machine's `yad check --fix` (or setup, update, join) installs it; every ledger mode; the Product's config
+// turns it off with `"localSetupNotice": false`, and yad's exact copies are then removed.
+export const NOTICE_HOOK_MARKER = '# yadflow local-setup notice (E185)';
+const NOTICE_SCRIPT = 'hooks/local-setup-notice.mjs';
+const noticeWanted = (root) => {
+  if (!exists(productConfigPath(root))) return false;
+  const cfg = readJSON(productConfigPath(root), null);
+  return !(cfg && cfg.localSetupNotice === false);
+};
+const noticeHookScript = (name, prefix = '') => [
+  '#!/bin/sh',
+  `${NOTICE_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
+  '# After a pull, says in one line which local setup steps it brought for this machine. It only prints and',
+  '# never fails the pull. Skip it once with YAD_HOOK_DISABLE=1. yad rewrites this file; to stop it for the',
+  '# whole team, set "localSetupNotice": false in .sdlc/product.json.',
+  ...(name === 'post-rewrite' ? ['[ "$1" = rebase ] || exit 0'] : []),
+  `notice=${shQuote(`${prefix}${NOTICE_SCRIPT}`)}`,
+  'command -v node >/dev/null 2>&1 || exit 0',
+  '[ -f "$notice" ] || exit 0',
+  'node "$notice" || true',
+  'exit 0',
+  '',
+].join('\n');
+const noticeLine = (prefix = '') => {
+  const f = shQuote(`${prefix}${NOTICE_SCRIPT}`);
+  return `[ ! -f ${f} ] || node ${f} || true`;
+};
+const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => Object.freeze({
+  name,
+  marker: NOTICE_HOOK_MARKER,
+  scripts: (prefix) => [noticeHookScript(name, prefix)],
+  line: (prefix) => noticeLine(prefix),
+  applies: noticeWanted,
+  item: `${name} git hook (this clone)`,
+  advice: (st) => (st?.state === 'hooks-path' ? `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its ${name} local setup notice; to have it, add this line to ${st.editFile}: ${st.line}`
+    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; to have the local setup notice after a pull, add this line to it: ${st.line}` : null),
+})));
+
+// The script (committed, hash-tracked like the other hooks/ files) and both hooks (this clone).
+export function localSetupNoticeActions(root) {
+  if (!noticeWanted(root)) return [];
+  const ledger = readManagedLedger(root);
+  const script = LOCAL_SETUP_NOTICE_WIRING.map((w) => asNew(wiredFileAction('product', w.dest, asset(w.src), path.join(root, w.dest), { root, ledger })));
+  return [...script, ...NOTICE_HOOKS.flatMap((spec) => hookActionsFor(spec, root))];
+}
+// Turned off: yad's exact hook copies come out (the script stays: nothing runs it then, and it is the team's file).
+export const orphanLocalSetupNoticeActions = (root) => NOTICE_HOOKS.flatMap((spec) => orphanHookActionsFor(spec, root));
+// Each hook's state, for doctor: [{ name, ...gitHookState-like }].
+export const localSetupNoticeStates = (root) => NOTICE_HOOKS.map((spec) => ({ name: spec.name, ...hookStateFor(spec, root) }));
+// The sentences for hooks yad may not write here.
+export const localSetupNoticeAdvice = (root) => NOTICE_HOOKS.map((spec) => spec.advice(hookStateFor(spec, root))).filter(Boolean);
 
 // ---- background capture wiring (E43) -----------------------------------------------------------
 //
