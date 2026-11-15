@@ -3252,7 +3252,8 @@ export function localSetupNoticeCheck(root, checks) {
   const blocked = states.filter((s) => s.state === 'foreign' || s.state === 'hooks-path');
   const todo = states.filter((s) => s.state === 'missing' || s.state === 'outdated').map((s) => s.name);
   if (copy && copy.state !== 'ok') todo.push(`its script in git's folder (${copy.state})`);
-  if (!blocked.length && !todo.length) { check(checks, 'local-setup-hook', 'project', 'ok', 'the local setup notice after a pull is installed in this clone (post-merge, post-rewrite)'); return; }
+  const byHand = states.filter((s) => s.state === 'hand-wired').map((s) => s.name);
+  if (!blocked.length && !todo.length) { check(checks, 'local-setup-hook', 'project', 'ok', `the local setup notice after a pull is installed in this clone (post-merge, post-rewrite)${byHand.length ? `; ${byHand.join(' and ')} by the line in your own hook` : ''}`); return; }
   const parts = [];
   if (todo.length) parts.push(`not installed or out of date here: ${todo.join(', ')} — \`yad check --fix\` installs ${todo.length > 1 ? 'them' : 'it'}`);
   if (blocked.length) parts.push(forTerminal(localSetupNoticeAdvice(root) || ''));

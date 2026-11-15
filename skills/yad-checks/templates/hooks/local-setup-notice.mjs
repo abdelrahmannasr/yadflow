@@ -24,12 +24,15 @@ export const stepHash = (step) => createHash('sha256')
   .update(JSON.stringify({ commands: step.commands ?? [], check: step.check ?? null, when: step.when ?? 'optional' }))
   .digest('hex').slice(0, 16);
 
-// Every git call runs from the Product's folder, and never fetches (a partial clone would fetch a missing file).
-let productRoot = process.cwd();
+// Every git call runs where git runs the hook — the top of the working tree — and names the Product's files by
+// their path from there (`<prefix>.sdlc/…`). Never with -C into a subfolder: in a linked worktree git hands the hook
+// GIT_DIR and no GIT_WORK_TREE, so a -C folder would become the top (review 2). Never fetches (a partial clone).
 const git = (args) => {
-  const r = spawnSync('git', ['-C', productRoot, ...args], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: 5_000, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
+  const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true, timeout: 5_000, env: { ...process.env, GIT_NO_LAZY_FETCH: '1' } });
   return r.status === 0 ? r.stdout : null;
 };
+// The Product's folder within the repo as git paths want it: '' for the top, else `dir/`.
+const asPrefix = (p) => { const t = String(p || '').replace(/\\/g, '/').replace(/^\.(?:\/|$)|\/+$/g, ''); return t && t !== '.' ? `${t}/` : ''; };
 const parse = (text) => {
   if (text === null) return null;
   try { const v = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
@@ -61,15 +64,18 @@ export function broughtSteps(before, after, record) {
 
 export function notice(product = '.') {
   if (process.env.YAD_HOOK_DISABLE === '1') return null;
-  productRoot = path.resolve(process.cwd(), product);
+  const at = asPrefix(product);
+  // The team turned it off (a hand line in a hook of its own still runs this copy): say nothing.
+  const cfg = parse(git(['show', `HEAD:./${at}.sdlc/product.json`]));
+  if (cfg && cfg.localSetupNotice === false) return null;
   // No ORIG_HEAD: no move to compare. One without the file: the pull brought the script itself.
   if (git(['rev-parse', '-q', '--verify', 'ORIG_HEAD^{commit}']) === null) return null;
-  const before = git(['show', `ORIG_HEAD:./${FILE}`]) ?? '';
-  const after = git(['show', `HEAD:./${FILE}`]);
+  const before = git(['show', `ORIG_HEAD:./${at}${FILE}`]) ?? '';
+  const after = git(['show', `HEAD:./${at}${FILE}`]);
   if (after === null || before === after) return null;
-  // Read relative to the Product (an older git than 2.31 has no --path-format).
+  // Read relative to where git runs (an older git than 2.31 has no --path-format).
   const commonOut = (git(['rev-parse', '--git-common-dir']) || '').trim();
-  const common = commonOut ? path.resolve(productRoot, commonOut) : '';
+  const common = commonOut ? path.resolve(process.cwd(), commonOut) : '';
   let record = null;
   if (common) { try { record = parse(fs.readFileSync(path.join(common, 'yad', 'local-setup-done.json'), 'utf8')); } catch { /* none yet */ } }
   const ids = broughtSteps(parse(before), parse(after), record);

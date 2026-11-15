@@ -1549,7 +1549,8 @@ function hookStateFor(spec, root) {
   let text = null;
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
-  if (!text.includes(spec.marker)) return { applies: true, file, expected, prefix, line, state: 'foreign' };
+  // A hook of the team's own that already runs ours by the line yad gave (`spec.wired`): nothing to say (review 2).
+  if (!text.includes(spec.marker)) return { applies: true, file, expected, prefix, line, state: spec.wired?.(text) ? 'hand-wired' : 'foreign' };
   // Git silently skips a hook that is not executable (everywhere but Windows), so right bytes without the
   // bit are not an installed hook.
   let runnable = true;
@@ -1564,7 +1565,7 @@ function hookStateFor(spec, root) {
 // and are reported by the spec's advice instead.
 function hookActionsFor(spec, root) {
   const st = hookStateFor(spec, root);
-  if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path') return [];
+  if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path' || st.state === 'hand-wired') return [];
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
@@ -1645,7 +1646,9 @@ function noticeCopyPath(root) {
   return r.ok && r.stdout ? path.join(path.resolve(root, r.stdout), 'yad', 'local-setup-notice.mjs') : null;
 }
 // The hook finds the copy through git at run time, and tells it where the Product is within the repo.
-const NOTICE_FIND = 'notice="$(git rev-parse --git-common-dir 2>/dev/null)/yad/local-setup-notice.mjs"';
+// When git cannot say where its folder is, nothing runs: never a fixed path (review 2).
+const NOTICE_FIND = 'd="$(git rev-parse --git-common-dir 2>/dev/null)" && [ -n "$d" ] || exit 0; notice="$d/yad/local-setup-notice.mjs"';
+const NOTICE_FIND_LINE = 'd="$(git rev-parse --git-common-dir 2>/dev/null)"; notice="$d/yad/local-setup-notice.mjs"';
 const noticeHookScript = (name, prefix = '') => [
   '#!/bin/sh',
   `${NOTICE_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
@@ -1662,7 +1665,7 @@ const noticeHookScript = (name, prefix = '') => [
 ].join('\n');
 // The one line a person adds to a hook yad will not touch. post-rewrite's keeps the rebase-only rule.
 const noticeLine = (name, prefix = '') => {
-  const body = `{ ${NOTICE_FIND}; [ ! -f "$notice" ] || node "$notice" ${shQuote(prefix || '.')} || true; }`;
+  const body = `{ ${NOTICE_FIND_LINE}; [ -z "$d" ] || [ ! -f "$notice" ] || node "$notice" ${shQuote(prefix || '.')} || true; }`;
   return name === 'post-rewrite' ? `[ "$1" != rebase ] || ${body}` : body;
 };
 const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => Object.freeze({
@@ -1671,6 +1674,8 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
   scripts: (prefix) => [noticeHookScript(name, prefix)],
   line: (prefix) => noticeLine(name, prefix),
   applies: noticeWanted,
+  // The line yad gives runs our copy: a hook that holds it is wired by hand.
+  wired: (text) => text.includes('/yad/local-setup-notice.mjs'),
   item: `${name} git hook (this clone)`,
   advice: () => null,
 })));
@@ -1701,7 +1706,8 @@ export function orphanLocalSetupNoticeActions(root) {
   const out = NOTICE_HOOKS.flatMap((spec) => orphanHookActionsFor(spec, root));
   if (exists(productConfigPath(root)) && !noticeWanted(root)) {
     const copy = noticeCopyState(root);
-    if (copy && copy.state === 'ok') out.push({ scope: 'product', item: 'local setup notice script (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(copy.file, { force: true }) });
+    // yad's own file in git's folder, which nobody edits: removed whatever its version (review 2).
+    if (copy && copy.state !== 'missing') out.push({ scope: 'product', item: 'local setup notice script (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(copy.file, { force: true }) });
   }
   return out;
 }
