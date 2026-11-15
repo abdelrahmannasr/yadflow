@@ -503,13 +503,18 @@ test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark
     "It's dark too:", '### Dark', '```css', '@media (prefers-color-scheme: dark) { :root { --bg: #000; --primary: #eee } }', '```', '',
   ].join('\n');
   assert.deepEqual(readRootVars(md), { light: { '--primary': '#111', '--q': '"a\\"b"', '--bg': '#fff' }, dark: { '--bg': '#000', '--primary': '#eee' } });
-  const tw = (t) => readRootVars(t);
-  assert.deepEqual(tw(':root{--bg:#fff}\nhtml.dark{--bg:#000}').dark, { '--bg': '#000' });
-  assert.deepEqual(tw(':root.dark{--bg:#000}\n:root{--bg:#fff}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':root.dark is never the light look');
-  assert.deepEqual(tw(':root{--bg:#fff}\n.dark-mode{--bg:#000}').dark, { '--bg': '#000' });
-  assert.equal(tw(':root{--bg:#fff}\n.darkmode{--bg:#000}').dark, null);
-  assert.equal(tw(':root{--bg:#fff}\n.dark-blue{--bg:#000}').dark, null);
-  assert.deepEqual(tw(':root{--bg:#fff}\nDark mode:\n@media (prefers-color-scheme: dark){:root{--bg:#000}}').dark, { '--bg': '#000' });
+  assert.deepEqual(readRootVars(':root{--bg:#fff}\nhtml.dark{--bg:#000}').dark, { '--bg': '#000' });
+  assert.deepEqual(readRootVars(':root.dark{--bg:#000}\n:root{--bg:#fff}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':root.dark is never the light look');
+  assert.deepEqual(readRootVars(':root{--bg:#fff}\n.dark-mode{--bg:#000}').dark, { '--bg': '#000' });
+  assert.equal(readRootVars(':root{--bg:#fff}\n.darkmode{--bg:#000}').dark, null);
+  assert.equal(readRootVars(':root{--bg:#fff}\n.dark-blue{--bg:#000}').dark, null);
+  assert.deepEqual(readRootVars(':root{--bg:#fff}\nDark mode:\n@media (prefers-color-scheme: dark){:root{--bg:#000}}').dark, { '--bg': '#000' });
+  // Review 5: `:not(.dark)` is the light look; a `/*` in prose is not a comment; a quote inside a value.
+  assert.deepEqual(readRootVars(':root:not(.dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  assert.equal(readRootVars(':root{--bg:#fff}\nhtml:not(.dark){--x:1}').dark, null);
+  assert.deepEqual(readRootVars(':root:not([data-theme="dark"]){--bg:#fff}\n[data-theme="dark"]{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  assert.deepEqual(readRootVars('Tokens live in `styles/*.css`.\n\n```css\n:root{--bg:#fff} /* x */\n:root.dark{--bg:#000}\n```'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  assert.deepEqual(readRootVars("/* the team's tokens */\n:root{--font: 'Inter',\n  sans-serif; --bg:#fff}").light, { '--font': "'Inter',\n  sans-serif", '--bg': '#fff' });
 });
 
 test('#553 review 2: primary is checked as link text in yad brand check, never in the doctor row; yadflow\'s own look passes', async () => {

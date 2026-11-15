@@ -62,7 +62,12 @@ export function cssRules(src) {
   const flush = () => { if (stack.length > 1) stack[stack.length - 1].text += `${pending};`; pending = ''; };
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
-    if (ch === '/' && src[i + 1] === '*') { const end = src.indexOf('*/', i + 2); i = end < 0 ? src.length : end + 1; continue; }
+    // A comment: inside a rule, or at the start of a line outside one — never `styles/*.css` in prose (review 5).
+    if (ch === '/' && src[i + 1] === '*' && (stack.length > 1 || /(?:^|\n)[ \t]*$/.test(src.slice(Math.max(0, i - 64), i)))) {
+      const end = src.indexOf('*/', i + 2);
+      i = end < 0 ? src.length : end + 1;
+      continue;
+    }
     // A quoted string, only inside a rule (an apostrophe in prose is not one: review 4). It ends at its quote
     // or at a newline, as CSS ends a string; a backslash escapes the next character.
     if ((ch === '"' || ch === "'") && stack.length > 1) {
@@ -94,6 +99,8 @@ const DARK_SELECTOR = /\[data-theme=["']?dark["']?\]|\.dark(?:-mode|-theme)?(?![
 const DARK_MEDIA = /(?:^|\n)\s*@media\b[^{\n]*prefers-color-scheme\s*:\s*dark/;
 const ROOT = /(?:^|[\s,]):root\b/;
 const hasVars = (r) => /--[A-Za-z0-9_-]+\s*:/.test(r.text);
+// A selector without its `:not(…)` groups: `:root:not(.dark)` is the light look, never a dark one (review 5).
+const bare = (sel) => sel.replace(/:not\([^)]*\)/g, '');
 const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);
 
 // The `--name: value` pairs of the first `:root` rule that is not a dark one, and of the dark rule when there
@@ -104,11 +111,11 @@ export function readRootVars(text) {
   const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
   walk(cssRules(String(text || '')), false);
   const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
-  const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(r.selector));
+  const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)));
   let dark = null;
   for (const { r } of all) {
     if (DARK_MEDIA.test(r.selector)) dark = r.rules.find((x) => isRootish(x) && hasVars(x)) || r.rules.find(hasVars) || null;
-    else if (DARK_SELECTOR.test(r.selector) && hasVars(r)) dark = r;
+    else if (DARK_SELECTOR.test(bare(r.selector)) && hasVars(r)) dark = r;
     if (dark) break;
   }
   if (!light) return null;
