@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, writeJSON } from './lib.mjs';
+import { productConfigPath } from './manifest.mjs';
 import { BRAND_FILE, BRAND_VERSION, ROLES, isColor, FAMILY_RE, IMAGE_CAP, checkBrand, readBrand, contrastProblems, sourceFingerprint, brandPath } from './brand.mjs';
 
 export const BRAND_USAGE = 'usage: yad brand [show] [--json] · yad brand init [--from <DESIGN.md>] [--logo <file>] [--mark <file>] [--force] · yad brand check [--json]';
@@ -49,6 +50,24 @@ export function readFrontMatter(text) {
   return root;
 }
 
+// The dark block's own declarations, read in one pass with a depth count (linear; review 1 and 2): the text at
+// the block's top level, never a nested rule's and never past the block's end. An `@media` block holds a rule,
+// so its first nested block (`:root`) is read instead. → text, or null when there is no block.
+function darkDeclarations(src, at) {
+  const open = src.indexOf('{', at);
+  if (open < 0) return null;
+  const media = /@media|prefers-color-scheme/.test(src.slice(Math.max(0, at - 16), open));
+  const want = media ? 2 : 1;
+  let depth = 0, text = '', entered = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{') { depth++; if (depth === want) entered++; continue; }
+    if (ch === '}') { depth--; if (depth === 0 || (depth < want && entered)) break; continue; }
+    if (depth === want && entered === 1) text += ch;
+  }
+  return text;
+}
+
 // The `--name: value` pairs of the first `:root { … }` block, and of a dark block (`@media (prefers-color-
 // scheme: dark)` or `[data-theme="dark"]` / `.dark`) when there is one.
 export function readRootVars(text) {
@@ -56,11 +75,9 @@ export function readRootVars(text) {
   const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;}]+)/g)].map((x) => [x[1], x[2].replace(/\/\*[\s\S]*?\*\//g, '').trim()]));
   const darkAt = src.search(/prefers-color-scheme:\s*dark|\[data-theme=["']?dark["']?\]|\.dark\s*\{/);
   const light = /:root\s*\{([^}]*)\}/.exec(darkAt > 0 ? src.slice(0, darkAt) : src);
-  // The dark block's own declarations: the first run of text between braces after it that holds a `--` name.
-  // No nested quantifier, so a long or nested block is read in linear time (review 1: the old pattern hung).
-  const dark = darkAt > 0 ? [...src.slice(darkAt).matchAll(/\{([^{}]*)/g)].find((x) => x[1].includes('--')) ?? null : null;
+  const dark = darkAt > 0 ? darkDeclarations(src, darkAt) : null;
   if (!light) return null;
-  return { light: vars(light[1]), dark: dark ? vars(dark[1]) : null };
+  return { light: vars(light[1]), dark: dark === null ? null : vars(dark) };
 }
 
 // Fill each role from a { name: value } map. → { colors: { role: value }, filledFrom: { role: name } }
@@ -136,7 +153,7 @@ export function brandFromDesign(root, text, { name = null, from = 'DESIGN.md', l
   const images = findFiles(root, (n) => /\.(svg|png|webp|jpe?g)$/i.test(n)).filter((f) => smallEnough(root, f));
   const logoFile = logo || prefer(images.filter((f) => /logo|wordmark/i.test(path.posix.basename(f))));
   const markFile = mark || prefer(images.filter((f) => /mark|icon|favicon|symbol/i.test(path.posix.basename(f)))) || logoFile;
-  const productName = (() => { try { const n = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'product.json'), 'utf8')).name; return typeof n === 'string' && n.trim() ? n : null; } catch { return null; } })();
+  const productName = (() => { try { const n = JSON.parse(fs.readFileSync(productConfigPath(root), 'utf8')).name; return typeof n === 'string' && n.trim() ? n : null; } catch { return null; } })();
   const title = name || (typeof fm?.name === 'string' && fm.name) || (typeof fm?.title === 'string' && fm.title) || productName || (/^#\s+(.+)$/m.exec(String(text).replace(/^---[\s\S]*?\n---/, ''))?.[1]) || path.basename(root);
   const cleanName = String(title).split(/\s+[—–-]\s+|\s+\(/)[0].trim().slice(0, 80);
   const brand = {
@@ -154,7 +171,7 @@ export async function runBrand(root, { action = 'show', args = [], from = null, 
   if (action === 'show' || action === 'check') {
     const r = readBrand(root);
     const exists = fs.existsSync(r.file);
-    const contrastLines = contrastProblems(r.brand);
+    const contrastLines = contrastProblems(r.brand, { links: true });
     let stale = null;
     if (r.origin === 'product' && r.brand.source) {
       const src = brandPath(root, r.brand.source);

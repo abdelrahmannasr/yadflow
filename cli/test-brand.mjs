@@ -349,7 +349,7 @@ test('#553: the doctor row — none is fine, a broken file and a changed DESIGN.
 
 // ---- review 1 -----------------------------------------------------------------------------------
 
-test('#553 review 1: a long or nested dark block and a huge colour are read in linear time', async () => {
+test('#553 review 1: a long or nested dark block and a huge colour are read in linear time', { timeout: 5000 }, async () => {
   const { isColor } = await import('./brand.mjs');
   const dark = `.dark {${Array.from({ length: 40 }, (_, i) => ` --c${i}: #000;`).join('')} .card { color: red; } }`;
   let t = Date.now();
@@ -381,6 +381,12 @@ test('#553 review 1: a source that is a folder is said, never a crash; a hand-ma
   const { ws, root } = product({ files: { 'design/x.txt': 'x' } });
   try {
     put(path.join(root, BRAND_FILE), { version: 1, name: 'Hand', source: 'design', colors: { light: { primary: '#2B7358' } } });
+    // With a fingerprint too: that is the path that once read the folder and threw.
+    const withHash = product({ files: { 'design/x.txt': 'x' } });
+    try {
+      put(path.join(withHash.root, BRAND_FILE), { version: 1, name: 'Hand', source: 'design', sourceHash: 'sha256:00', colors: { light: { primary: '#2B7358' } } });
+      assert.match((await captured(() => runBrand(withHash.root, { action: 'check', json: true }))).stale, /cannot be read/);
+    } finally { done(withHash.ws); }
     const r = await captured(() => runBrand(root, { action: 'check', json: true }));
     const out = r;
     assert.match(out.stale, /cannot be read/);
@@ -411,7 +417,7 @@ test('#553 review 1: contrast reads each channel\'s own unit, and returns nothin
 test('#553 review 1: a dark scheme without its primary takes the light one made lighter, not yadflow\'s purple', () => {
   const { ws, root } = product();
   try {
-    put(path.join(root, BRAND_FILE), { version: 1, name: 'X', colors: { light: { primary: '#2B7358', accent: 'rgb(1 2 3)' }, dark: { bg: '#0D291F' } } });
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'X', colors: { light: { primary: '#2B7358', accent: 'hsl(1 2% 3%)' }, dark: { bg: '#0D291F' } } });
     const r = readBrand(root);
     assert.equal(r.origin, 'product');
     assert.notEqual(r.brand.colors.dark.primary, YADFLOW_BRAND.colors.dark.primary);
@@ -454,7 +460,7 @@ test('#553 review 1: the served map and brain style sheets carry the brand; the 
     }
     const U = await import('./usage.mjs');
     const page = U.renderHtml(U.analyze([], { since: null, until: null }), '2026-11-15', { brandCss: brandForPage(root, 'usage').css });
-    assert.ok(page.indexOf('--brand-primary') > page.indexOf('--bg'));
+    assert.ok(page.includes('--bg') && page.indexOf('--brand-primary') > page.indexOf('--bg'));
   } finally { done(ws); }
   const plain = tmp();
   try {
@@ -463,4 +469,36 @@ test('#553 review 1: the served map and brain style sheets carry the brand; the 
     assert.notEqual(r.status, 0);
     assert.equal(fs.existsSync(path.join(plain, BRAND_FILE)), false);
   } finally { done(plain); }
+});
+
+// ---- review 2 -----------------------------------------------------------------------------------
+
+test('#553 review 2: the dark block is read inside itself only, at its own level', () => {
+  const dark = (t) => readRootVars(`:root{--bg:#fff}\n${t}`).dark;
+  assert.deepEqual(dark('@media (prefers-color-scheme: dark) { :root { --bg:#000; --text:#eee } }'), { '--bg': '#000', '--text': '#eee' });
+  assert.deepEqual(dark('[data-theme=dark] { --bg:#000 }'), { '--bg': '#000' });
+  assert.deepEqual(dark('.dark{ --bg:#000; .card{ --bg:#222 } --text:#eee }'), { '--bg': '#000', '--text': '#eee' }, 'after a nested rule too, never the nested one');
+  assert.deepEqual(dark('.dark{ .card{ color:red } --bg:#000 }'), { '--bg': '#000' });
+  assert.deepEqual(dark('@media (prefers-color-scheme: dark){ body{color:var(--x)} }\n.btn{ --pad:4px; --bg:#f00 }'), {}, 'never a later component\'s');
+});
+
+test('#553 review 2: primary is checked as link text in yad brand check, never in the doctor row; yadflow\'s own look passes', async () => {
+  const { brandChecks } = await import('./doctor.mjs');
+  assert.deepEqual(contrastProblems(YADFLOW_BRAND, { links: true }), [], 'yadflow\'s own look reads');
+  const { ws, root } = product();
+  try {
+    put(path.join(root, BRAND_FILE), { version: 1, name: 'Sky', colors: { light: { primary: '#0ea5e9' } } });
+    const r = await captured(() => runBrand(root, { action: 'check', json: true }));
+    assert.ok(r.contrast.some((x) => /primary \(links\)/.test(x)), r.contrast.join(' | '));
+    const checks = [];
+    brandChecks(root, checks);
+    assert.equal(checks.find((x) => x.id === 'brand').status, 'ok', 'a button colour never warns in doctor');
+  } finally { done(ws); }
+});
+
+test('#553 review 2: a dark primary is made lighter from rgb() too; one yadflow cannot read is yadflow\'s', async () => {
+  const { lighter } = await import('./brand.mjs');
+  assert.match(lighter('rgb(20 80 60)'), /^#[0-9a-f]{6}$/);
+  assert.equal(lighter('hsl(1 2% 3%)'), null);
+  assert.match(lighter('oklch(60% 0.2 250 / 50%)'), /^oklch\(0\.800 0\.2 250 \/ 50%\)$/);
 });

@@ -52,7 +52,7 @@ export const YADFLOW_BRAND = Object.freeze({
   version: BRAND_VERSION, name: 'yadflow', source: null, sourceHash: null, logo: null, mark: null,
   colors: {
     light: { bg: '#ffffff', surface: '#f7f5fb', text: '#1b1530', muted: '#5f5873', border: '#e4dff0', primary: '#6316db', accent: '#fb2576' },
-    dark: { bg: '#120e1c', surface: '#1c1729', text: '#f1edfa', muted: '#a59cba', border: '#2f2842', primary: '#8b5cf6', accent: '#ff6490' },
+    dark: { bg: '#120e1c', surface: '#1c1729', text: '#f1edfa', muted: '#a59cba', border: '#2f2842', primary: '#9466f8', accent: '#ff6490' },
   },
   fonts: { heading: null, body: null, mono: null },
   status: null,
@@ -158,7 +158,8 @@ function completeBrand(b) {
   const ownDark = b.colors?.dark;
   const derive = (role) => (b.colors?.light?.[role] && lighter(light[role])) || YADFLOW_BRAND.colors.dark[role];
   const dark = { ...YADFLOW_BRAND.colors.dark, primary: derive('primary'), accent: derive('accent'), ...(ownDark || {}) };
-  return { ...b, colors: { light, dark, derivedDark: !ownDark }, fonts: b.fonts || { heading: null, body: null, mono: null } };
+  // `derivedDark`: the brand gave no dark colours of its own, so its dark look is made from the light one.
+  return { ...b, colors: { light, dark, derivedDark: !ownDark || !Object.keys(ownDark).length }, fonts: b.fonts || { heading: null, body: null, mono: null } };
 }
 
 // ---- colour maths (for contrast, and the derived dark scheme) --------------------------------------
@@ -197,8 +198,8 @@ export function contrast(a, b) {
   const [hi, lo] = [luminance(x), luminance(y)].sort((p, q) => q - p);
   return (hi + 0.05) / (lo + 0.05);
 }
-// A colour made lighter for a dark background: hex in, hex out; oklch() with its lightness raised; anything
-// else → null, and yadflow's dark colour is used instead (review 1).
+// A colour made lighter for a dark background: oklch() with its lightness raised; any other colour yadflow can
+// read (hex, rgb()) → a lighter hex; one it cannot read → null, and yadflow's dark colour is used (reviews 1, 2).
 export function lighter(value) {
   const ok = /^oklch\(\s*([\d.]+)(%?)(\s+[\d.]+%?\s+[-\d.]+(?:deg)?\s*(?:\/\s*[\d.]+%?\s*)?)\)$/i.exec(String(value).trim());
   if (ok) {
@@ -206,20 +207,23 @@ export function lighter(value) {
     return `oklch(${(L + (1 - L) * 0.5).toFixed(3)}${ok[3]})`;
   }
   const rgb = linearRgb(value);
-  if (!rgb || !/^#/.test(value)) return null;
+  if (!rgb) return null;
   const toS = (c) => { const s = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055; return Math.round(clamp01(s) * 255); };
   const mixed = rgb.map((c) => c + (1 - c) * 0.35);
   return `#${mixed.map((c) => toS(c).toString(16).padStart(2, '0')).join('')}`;
 }
 
-// Text that is hard to read. → [text]; a colour yadflow cannot read is skipped, never guessed.
-export function contrastProblems(brand) {
+// Text that is hard to read. → [text]; a colour yadflow cannot read is skipped, never guessed. `links`: also
+// `primary`, which the pages use as link text, so it needs 4.5:1 like text (review 2). `yad brand check` asks
+// for it; `yad doctor` does not, so a brand colour chosen for buttons never warns on every run.
+export function contrastProblems(brand, { links = false } = {}) {
   const out = [];
+  const pairs = [['text', 4.5, 'text'], ['muted', 3, 'muted'], ...(links ? [['primary', 4.5, 'primary (links)']] : [])];
   for (const scheme of ['light', 'dark']) {
     const c = brand.colors[scheme];
-    for (const [role, min] of [['text', 4.5], ['muted', 3], ['primary', 3]]) {
+    for (const [role, min, label] of pairs) {
       const r = contrast(c[role], c.bg);
-      if (r !== null && r < min) out.push(`${scheme}: ${role} on bg is ${r.toFixed(1)}:1 — under ${min}:1, hard to read`);
+      if (r !== null && r < min) out.push(`${scheme}: ${label} on bg is ${r.toFixed(1)}:1 — under ${min}:1, hard to read`);
     }
   }
   return out;
