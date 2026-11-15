@@ -649,6 +649,8 @@ test('E185 part 3: looksSecret finds a token or a literal key, never a name for 
   for (const s of ['export API_KEY=$API_KEY', 'token: <your token>', 'password={{ vault }}', 'SECRET=${SECRET}', 'npm i -g pnpm', 'git config commit.gpgsign true', 'see the api key docs']) assert.equal(looksSecret(s), false, s);
   // Review 1: more secrets found, and names for where a value is no longer taken for one.
   for (const s of ['docker login -p hunter2hunter', 'docker login --password hunter2hunter', 'mysql -uroot -phunter2x', 'curl https://user:hunter2x@host', 'postgres://app:secretpw1@localhost/db', 'sk_live_abcdefghijkl12', 'aws configure set aws_secret_access_key abcd1234efgh5678']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['kubectl create secret generic app --from-literal=password=supersecret1', 'curl "https://api.example.com/x?user=me&api_key=1234567890abcdef"', 'curl -d foo=bar&token=abcdefgh12345 https://x', 'echo url=https://h/?token=SECRETSECRET123']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['gh auth login && mkdir -p ~/.config/foo', 'aws sso login --profile dev && mkdir -p .aws/cache', 'az login; cp -p src/file dest/file']) assert.equal(looksSecret(s), false, s);
   for (const s of ['export TOKEN_URL=https://auth.example.com/token', 'export PASSWORD_FILE=/etc/secrets/pw', 'export SECRET_NAME=prod-db-creds', 'export API_KEY_HEADER=X-Api-Key', 'docker run -p 8080:80 app', 'mkdir -p build/out', 'postgres://app:$PGPASS@localhost/db', 'git config --global user.signingkey ABCDEF1234567890', 'npm config set //registry.npmjs.org/:_authToken=${NPM_TOKEN}']) assert.equal(looksSecret(s), false, s);
   const { redactTokens } = await import('./scan.mjs');
   assert.equal(redactTokens('a ghp_abcdefghij1234 b'), 'a [redacted] b', 'yad scan still redacts the same way');
@@ -811,7 +813,7 @@ test('E185 part 3 review 1: a committed team step that breaks a rule is said, an
   const { runLocalSetupAdd } = await import('./local-setup.mjs');
   const dir = committedProduct(undefined, [teamStep({ id: 'env-file', commands: Array.from({ length: 11 }, () => 'true') })]);
   const s = quiet(() => localSetupSection(dir, { invite: true }));
-  assert.ok(s.lines.some((l) => /1 step\(s\) in \.sdlc\/local-setup\.json are left out because they break a rule/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /1 part\(s\) of \.sdlc\/local-setup\.json are left out because they break a rule/.test(l)), s.lines.join('\n'));
   assert.ok(!s.lines.some((l) => /no steps from your team yet/.test(l)));
   const r = quiet(() => runLocalSetupAdd(dir, { from: stepFile(tmp(), newStep()) }));
   assert.ok(r.lines.some((l) => /already one of your team's steps \(one yad ignores now/.test(l)), r.lines.join(' | '));
@@ -829,11 +831,55 @@ test('E185 part 3 review 1: --from is read from where yad runs, and only as a fi
   assert.ok(d.lines.some((l) => /cannot read .* as a file/.test(l)), d.lines.join(' | '));
 });
 
-test('E185 part 3 review 1: a toolbox tool of the team\'s own takes the step limits where it is entered', async () => {
-  const { customProblems } = await import('./toolbox.mjs');
+test('E185 part 3 review 2: a toolbox tool takes the step limits when it is entered; a file written before still reads', async () => {
+  const { customProblems, enteredToolProblems } = await import('./toolbox.mjs');
   const tool = { id: 'mytool', role: 'does a thing', fallback: 'nothing', detect: { bins: ['mytool'] } };
-  assert.deepEqual(customProblems(tool), []);
-  assert.ok(customProblems({ ...tool, role: 'x'.repeat(401) }).some((p) => /role says what it does, on one plain line/.test(p)));
-  assert.ok(customProblems({ ...tool, fallback: 'a\tb' }).some((p) => /fallback says/.test(p)));
-  assert.ok(customProblems({ ...tool, install: [{ type: 'script', command: 'x'.repeat(501) }] }).some((p) => /install, when set/.test(p)));
+  assert.deepEqual(enteredToolProblems(tool), []);
+  assert.ok(enteredToolProblems({ ...tool, role: 'x'.repeat(401) }).some((p) => /role is one plain line/.test(p)));
+  assert.ok(enteredToolProblems({ ...tool, fallback: 'a\tb' }).some((p) => /fallback is one plain line/.test(p)));
+  assert.ok(enteredToolProblems({ ...tool, install: [{ type: 'script', command: 'x'.repeat(501) }] }).some((p) => /install holds at most/.test(p)));
+  // Custom tools shipped in 4.2.0: one already in a team's file keeps counting, whatever its length.
+  assert.deepEqual(customProblems({ ...tool, role: `${'x'.repeat(500)}\nmore`, install: [{ type: 'script', command: 'x'.repeat(900) }] }), []);
+});
+
+// ---- E185 part 3, review 2 -------------------------------------------------------------------------
+
+test('E185 part 3 review 2: looksSecret reads long text in time that grows with its length', { timeout: 10000 }, async () => {
+  const { looksSecret } = await import('./secret-text.mjs');
+  const t = Date.now();
+  for (const s of ['a'.repeat(160000), 'a=b'.repeat(50000), 'a:/'.repeat(50000), 'x://y'.repeat(30000), ' login -p'.repeat(20000)]) looksSecret(s);
+  assert.ok(Date.now() - t < 3000, `${Date.now() - t} ms`);
+  assert.equal(looksSecret(`${'x'.repeat(3000)} export API_KEY=abcd1234efgh`), true, 'a secret far into a long line is still found');
+});
+
+test('E185 part 3 review 2: the invite is update\'s, not check --fix\'s; a team list that is not a list is said; code spans keep their text', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const dir = committedProduct(undefined, []);
+  const fix = quiet(() => reconcile(dir, { fix: true }));
+  await fix.value;
+  assert.ok(!fix.lines.some((l) => /no steps from your team yet/.test(l)), 'check --fix');
+  const up = quiet(() => reconcile(dir, { fix: true, scope: 'changed', invite: true }));
+  await up.value;
+  assert.ok(up.lines.some((l) => /no steps from your team yet/.test(l)), up.lines.join('\n'));
+  const odd = committedProduct(undefined, { not: 'a list' });
+  const s = quiet(() => localSetupSection(odd, { invite: true }));
+  assert.ok(s.lines.some((l) => /left out because they break a rule/.test(l)), s.lines.join('\n'));
+  assert.ok(!s.lines.some((l) => /no steps from your team yet/.test(l)));
+  const lines = localSetupDocLines({ yadflow: [], team: [teamStep({ purpose: 'run `make <target>` & see <b>' })] }).join('\n');
+  assert.match(lines, /run `make <target>` &amp; see &lt;b&gt;/);
+});
+
+test('E185 part 3 review 2: an invisible character Unicode only marks as ignorable is refused too', async () => {
+  const { stepProblems } = await import('./local-setup.mjs');
+  for (const ch of ['\u034F', '\u17B4', '\u17B5']) assert.ok(stepProblems(teamStep({ commands: [`echo a${ch}b`] }), 'team').length, `U+${ch.codePointAt(0).toString(16)}`);
+});
+
+test('E185 part 3 review 2: a pipe given as --from is refused, never read', { skip: process.platform === 'win32' }, async () => {
+  const { runLocalSetupAdd } = await import('./local-setup.mjs');
+  const dir = committedProduct();
+  const fifo = path.join(tmp(), 'step.pipe');
+  execFileSync('mkfifo', [fifo]);
+  const r = quiet(() => runLocalSetupAdd(dir, { from: fifo }));
+  assert.equal(r.code, 1);
+  assert.ok(r.lines.some((l) => /cannot read .* as a file/.test(l)), r.lines.join(' | '));
 });

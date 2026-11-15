@@ -34,7 +34,7 @@ const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)}
 const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr, invite = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -520,7 +520,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     });
   }
   const toolbox = toolboxSection(root, toolboxAt);
-  const localSetup = localSetupSection(root, { invite: true });
+  // `invite`: `yad update` asks for the line inviting the team's own steps; `check --fix` does not (E185 part 3).
+  const localSetup = localSetupSection(root, { invite });
   return { fix: true, counts, gaps, items: itemsOf(actions), applied, modified: modified.length, commits, workspaceFile, toolbox, localSetup };
 }
 

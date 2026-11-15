@@ -204,7 +204,9 @@ function localSetupJsonAction(root) {
 // are single lines. Prose is put on one line; code is shown exactly as written, in a span or fence longer than any
 // run of backticks inside it, so an agent that copies from LOCAL-SETUP.md runs what the JSON says.
 // HTML is written as text (review: an unclosed `<details>` would fold every later step out of sight).
-const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Inside a code span (`make <target>`) the text is shown as written: there HTML is text already.
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const md = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').trim().replace(/(`+)(.*?)\1|[^`]+|`+/g, (m, ticks) => (ticks ? m : esc(m)));
 const longestTicks = (s) => Math.max(0, ...[...String(s).matchAll(/`+/g)].map((m) => m[0].length));
 const code = (s) => {
   const t = String(s);
@@ -485,7 +487,7 @@ function workingScript(root) {
 function writeTeam(root, doc, team) {
   const next = { ...doc, team };
   const view = markedBlockAction(root, LOCAL_SETUP_DOC, localSetupDocLines(next), { markers: LOCAL_SETUP_MARKERS, what: 'the local setup steps' });
-  if (view.writesNothing) return `${LOCAL_SETUP_DOC} cannot be updated (${forTerminal(view.reason || 'its yadflow markers are not ones yad can trust')}) — fix its markers (or delete both of them), then run this again`;
+  if (view.writesNothing) return `${LOCAL_SETUP_DOC} cannot be updated (said above) — fix its markers (or delete both of them), then run this again`;
   writeJSON(localSetupPath(root), next);
   view.apply();
   return null;
@@ -498,7 +500,9 @@ const yadflowsId = (id) => YADFLOW_IDS.includes(id) || id.startsWith('tool-');
 
 const gitName = (root) => {
   const r = spawnSync('git', ['config', 'user.name'], { cwd: root, encoding: 'utf8', windowsHide: true });
-  const name = r.status === 0 ? Array.from(r.stdout.replace(/\s+/g, ' ').trim()).slice(0, 80).join('') : '';
+  // Cut to 80 as stepProblems counts (string length), never inside a character pair.
+  let name = r.status === 0 ? r.stdout.replace(/\s+/g, ' ').trim() : '';
+  while (name.length > 80) name = Array.from(name).slice(0, -1).join('');
   return name && plainLine(name) && !/<!--|--!?>/.test(name) ? name : null;
 };
 const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`, 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
@@ -573,10 +577,14 @@ export function localSetupSection(root, { invite = false } = {}) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { ...EMPTY, error: 'could not read' }; }
   if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
-  if (!st.steps.length) return { ...EMPTY, error: null };
+  // A step the script holds but yad left out (it breaks a rule, or the list is not a list) is said here too, not
+  // only in `list` — even when it leaves no step at all (reviews 1, 2).
+  const ignored = st.problems.filter((p) => / is ignored — | is listed twice|should be a list — ignored/.test(p));
+  if (!st.steps.length) {
+    if (ignored.length) warn(`local setup: ${ignored.length} part(s) of ${LOCAL_SETUP_FILE} are left out because they break a rule — \`yad local-setup list\` says which and why`);
+    return { ...EMPTY, error: null };
+  }
   if (st.record.error) warn(recordWarning(st.record));
-  // A step the script holds but yad left out (it breaks a rule) is said here too, not only in `list` (review 1).
-  const ignored = st.problems.filter((p) => / is ignored — | is listed twice/.test(p));
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
   const skipped = st.steps.filter((s) => s.state === 'skipped');
@@ -596,7 +604,7 @@ export function localSetupSection(root, { invite = false } = {}) {
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
   if (skipped.length) info(c.dim(`${skipped.length} step(s) you said no to: ${skipped.map((s) => s.id).join(', ')}`));
-  if (ignored.length) warn(`local setup: ${ignored.length} step(s) in ${LOCAL_SETUP_FILE} are left out because they break a rule — \`yad local-setup list\` says which and why`);
+  if (ignored.length) warn(`local setup: ${ignored.length} part(s) of ${LOCAL_SETUP_FILE} are left out because they break a rule — \`yad local-setup list\` says which and why`);
   // E185 part 3: on setup and update only, a team with no step of its own yet (and none left out) is told how.
   if (invite && !ignored.length && !st.steps.some((s) => s.source === 'team')) info(c.dim('no steps from your team yet — add this project\'s own with `yad local-setup add --from <step.json>`, or ask the agent to propose them'));
   return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), skipped: skipped.map((s) => s.id), changed: changed.map((s) => s.id), error: null };

@@ -843,11 +843,9 @@ export function customProblems(t) {
   const need = (ok, what) => { if (!ok) out.push(what); };
   need(typeof t.id === 'string' && TOOL_ID.test(t.id), 'id is lower-case words joined by -');
   need(!(typeof t.id === 'string' && shippedTool(t.id)), 'id is not the id of a shipped tool');
-  // A tool's words become a local setup step every member's agent reads (E185): one plain line each, with nothing
-  // hidden, and short enough for the step's limits — said here, where the tool is entered (review 1).
-  need(t.name === undefined || (plainLine(t.name) && t.name.length <= 80), 'name, when set, is one plain line of at most 80 characters');
-  need(plainLine(t.role) && t.role.length <= 400, 'role says what it does, on one plain line of at most 400 characters');
-  need(plainLine(t.fallback) && t.fallback.length <= 400, 'fallback says what happens without it, on one plain line of at most 400 characters');
+  need(t.name === undefined || (typeof t.name === 'string' && t.name.length > 0), 'name, when set, is text');
+  need(typeof t.role === 'string' && t.role.trim().length > 0, 'role says what it does');
+  need(typeof t.fallback === 'string' && t.fallback.trim().length > 0, 'fallback says what happens without it');
   const d = t.detect;
   const kinds = Object.values(DETECT_KINDS);
   need(isObject(d) && Object.keys(d).every((k) => kinds.includes(k) && isStringList(d[k])) && kinds.some((k) => d[k]?.length),
@@ -856,9 +854,22 @@ export function customProblems(t) {
   // look at a file the shared file chose, so it is refused.
   need(!isObject(d) || !Array.isArray(d.bins) || d.bins.every((b) => typeof b !== 'string' || (!/[\\/]/.test(b) && b !== '.' && b !== '..')),
     'detect.bins names programs, not paths (no / or \\)');
-  need(t.install === undefined || (Array.isArray(t.install) && t.install.length <= STEP_LIMITS.commands && t.install.every((r) => INSTALL_TYPES.includes(r?.type) && plainLine(r?.command) && r.command.length <= STEP_LIMITS.command)),
-    `install, when set, is a list of at most ${STEP_LIMITS.commands} { type: ${INSTALL_TYPES.join(' | ')}, command } with one plain line of at most ${STEP_LIMITS.command} characters each`);
+  need(t.install === undefined || (Array.isArray(t.install) && t.install.every((r) => INSTALL_TYPES.includes(r?.type) && typeof r?.command === 'string' && r.command.length > 0)),
+    `install, when set, is a list of { type: ${INSTALL_TYPES.join(' | ')}, command }`);
   need(t.source === undefined || t.source === null || (typeof t.source === 'string' && /^https:\/\//.test(t.source)), 'source, when set, is an https URL');
+  return out;
+}
+
+// The stricter words a tool entered NOW must have (E185 part 3): they become a local setup step every member's agent
+// reads, so one plain line each, nothing hidden, within the step's limits. Only for `yad toolbox add` — a file
+// written before keeps reading as it did (custom tools shipped in 4.2.0; review 2), and a step built from a tool
+// that breaks a limit is left out of the local setup script with a warning, never the tool itself.
+export function enteredToolProblems(t) {
+  const out = [];
+  if (t.name !== undefined && !(plainLine(t.name) && t.name.length <= 80)) out.push('name is one plain line of at most 80 characters');
+  if (!(plainLine(t.role) && t.role.length <= 400)) out.push('role is one plain line of at most 400 characters');
+  if (!(plainLine(t.fallback) && t.fallback.length <= 400)) out.push('fallback is one plain line of at most 400 characters');
+  if (Array.isArray(t.install) && (t.install.length > STEP_LIMITS.commands || t.install.some((r) => !plainLine(r?.command) || r.command.length > STEP_LIMITS.command))) out.push(`install holds at most ${STEP_LIMITS.commands} commands, each one plain line of at most ${STEP_LIMITS.command} characters`);
   return out;
 }
 
@@ -1426,7 +1437,7 @@ export function runToolboxAdd(productRoot, { id, custom = false, json = false, .
       entry.install = [r.route];
     }
     if (flags.source !== undefined) entry.source = flags.source;
-    const problems = customProblems(entry);
+    const problems = [...customProblems(entry), ...enteredToolProblems(entry)];
     if (problems.length) return refuse(`cannot add ${id}: ${problems.join('; ')}`, ADD_USAGE, { json });
     save(productRoot, doc, isObject(doc.shipped) ? doc.shipped : {}, [...list, entry]);
     ok(`${id} added — a tool of this project's own, in use here`);
