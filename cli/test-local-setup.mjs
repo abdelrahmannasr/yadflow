@@ -312,6 +312,28 @@ test('a team toolbox tool whose words yad\'s reader would refuse is left out whe
   assert.equal(step.vetted, false);
 });
 
+test('the machine section puts team steps and steps yad did not write on separate lines; only the second says not vetted', () => {
+  const dir = product();
+  applyAll(localSetupActions(dir));
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  const doc = JSON.parse(read(file));
+  doc.team = [teamStep()];
+  doc.yadflow.push({ id: 'extra', title: 't', purpose: 'p', impact: 'i', when: 'required', commands: ['c'], check: { builtin: 'cli-version', min: VERSION } });
+  put(file, doc);
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  let res;
+  try { res = localSetupSection(dir); } finally { console.log = orig; }
+  const team = lines.find((l) => /from your team, to check with you: docker$/.test(l));
+  const odd = lines.find((l) => /not what this yadflow writes — not vetted, to check with you: extra$/.test(l));
+  assert.ok(team && !/not vetted/.test(team), lines.join('\n'));
+  assert.ok(odd, lines.join('\n'));
+  assert.deepEqual(res.unvetted, ['extra']);
+  assert.ok(res.ask.includes('docker') && res.ask.includes('extra'));
+  assert.equal(res.error, null);
+});
+
 test('a script with a byte-order mark is read; a broken one is said to exist, with its error', () => {
   const dir = product();
   applyAll(localSetupActions(dir));

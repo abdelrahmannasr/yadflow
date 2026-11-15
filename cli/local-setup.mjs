@@ -353,9 +353,9 @@ export function runLocalSetupList(root, { json = false } = {}) {
 // Returns the part of that command's --json answer it adds: `{ pending, ask }` (step ids).
 export function localSetupSection(root) {
   let st;
-  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], error: 'could not read' }; }
-  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { pending: [], ask: [], error: st.error }; }
-  if (!st.steps.length) return { pending: [], ask: [], error: null };
+  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], unvetted: [], error: 'could not read' }; }
+  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { pending: [], ask: [], unvetted: [], error: st.error }; }
+  if (!st.steps.length) return { pending: [], ask: [], unvetted: [], error: null };
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
   log(c.bold('\nLocal setup (this machine)'));
@@ -363,10 +363,12 @@ export function localSetupSection(root) {
   else {
     if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
     const theirs = ask.filter((s) => s.source === 'team');
-    const strange = ask.filter((s) => s.source !== 'team');
+    const strange = ask.filter((s) => s.source === 'yadflow' && !s.known);
     if (theirs.length) log(`  ${c.cyan('?')} ${theirs.length} step(s) from your team, to check with you: ${theirs.map((s) => s.id).join(', ')}`);
     if (strange.length) log(`  ${c.yellow('!')} ${strange.length} yadflow step(s) that are not what this yadflow writes — not vetted, to check with you: ${strange.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
-  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), error: null };
+  // `unvetted`: the `ask` steps under `yadflow` that yad did not write, so an agent reading setup's, update's or
+  // join's --json can tell them from the team's.
+  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: ask.filter((s) => s.source === 'yadflow' && !s.known).map((s) => s.id), error: null };
 }
