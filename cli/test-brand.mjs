@@ -511,6 +511,10 @@ test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark
   assert.deepEqual(readRootVars(':root{--bg:#fff}\nDark mode:\n@media (prefers-color-scheme: dark){:root{--bg:#000}}').dark, { '--bg': '#000' });
   // Review 5: `:not(.dark)` is the light look; a `/*` in prose is not a comment; a quote inside a value.
   assert.deepEqual(readRootVars(':root:not(.dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  // Review 6: a comment after a brace or inside a selector is still a comment; nested :not() brackets.
+  assert.deepEqual(readRootVars('.dark { --bg: #000 } /* end .dark */\n:root { --bg: #fff }'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  assert.deepEqual(readRootVars(':root /* .dark lives below */ { --bg: #fff }\n.dark { --bg: #000 }'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  assert.deepEqual(readRootVars(':root:not(:is(.x), .dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
   assert.equal(readRootVars(':root{--bg:#fff}\nhtml:not(.dark){--x:1}').dark, null);
   assert.deepEqual(readRootVars(':root:not([data-theme="dark"]){--bg:#fff}\n[data-theme="dark"]{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
   assert.deepEqual(readRootVars('Tokens live in `styles/*.css`.\n\n```css\n:root{--bg:#fff} /* x */\n:root.dark{--bg:#000}\n```'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });

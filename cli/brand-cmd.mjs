@@ -62,8 +62,9 @@ export function cssRules(src) {
   const flush = () => { if (stack.length > 1) stack[stack.length - 1].text += `${pending};`; pending = ''; };
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
-    // A comment: inside a rule, or at the start of a line outside one — never `styles/*.css` in prose (review 5).
-    if (ch === '/' && src[i + 1] === '*' && (stack.length > 1 || /(?:^|\n)[ \t]*$/.test(src.slice(Math.max(0, i - 64), i)))) {
+    // A comment: inside a rule, or outside one after a space, a brace, `;` or `,` (or at the start) — never the
+    // `/*` of a path like `styles/*.css` in prose (reviews 5, 6).
+    if (ch === '/' && src[i + 1] === '*' && (stack.length > 1 || i === 0 || /[\s{};,]/.test(src[i - 1]))) {
       const end = src.indexOf('*/', i + 2);
       i = end < 0 ? src.length : end + 1;
       continue;
@@ -99,8 +100,17 @@ const DARK_SELECTOR = /\[data-theme=["']?dark["']?\]|\.dark(?:-mode|-theme)?(?![
 const DARK_MEDIA = /(?:^|\n)\s*@media\b[^{\n]*prefers-color-scheme\s*:\s*dark/;
 const ROOT = /(?:^|[\s,]):root\b/;
 const hasVars = (r) => /--[A-Za-z0-9_-]+\s*:/.test(r.text);
-// A selector without its `:not(…)` groups: `:root:not(.dark)` is the light look, never a dark one (review 5).
-const bare = (sel) => sel.replace(/:not\([^)]*\)/g, '');
+// A selector without its `:not(…)` groups, nested brackets and all: `:root:not(.dark)` is the light look,
+// never a dark one (reviews 5, 6).
+function bare(sel) {
+  let out = '', depth = 0;
+  for (let i = 0; i < sel.length; i++) {
+    if (!depth && sel.startsWith(':not(', i)) { depth = 1; i += 4; continue; }
+    if (depth) { if (sel[i] === '(') depth++; else if (sel[i] === ')') depth--; continue; }
+    out += sel[i];
+  }
+  return out;
+}
 const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);
 
 // The `--name: value` pairs of the first `:root` rule that is not a dark one, and of the dark rule when there
