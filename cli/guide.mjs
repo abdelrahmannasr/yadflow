@@ -400,7 +400,7 @@ function upkeepFor(install, { platform, root }) {
   if (!waiting) return update;
   const ids = [...waiting.pending, ...waiting.ask];
   const why = waiting.error ? `the local setup script cannot be read (${forTerminal(waiting.error)}): read what it says, and tell the person`
-    : ids.length ? `steps for this machine are waiting (${ids.join(', ')}): follow the local-setup rule — show the person each step's \`purpose\` and \`impact\`, run one only after their yes, then record it with \`yad local-setup done\` or \`skip\``
+    : ids.length ? `steps for this machine are waiting (${ids.join(', ')}): follow the local-setup rule — show the person each step's \`purpose\`, \`impact\` and \`commands\`, run one only after their yes, then record it with \`yad local-setup done\` or \`skip\``
       : 'this machine\'s local setup record cannot be read: show the person the warning it prints';
   return {
     agent: [...(update?.agent ?? []), agentRun('yad local-setup list --json', why)],
