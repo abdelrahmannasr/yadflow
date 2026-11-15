@@ -53,7 +53,7 @@ export function readFrontMatter(text) {
 // A DESIGN.md's CSS as rules, in ONE pass (linear; reviews 1–3): comments and quoted text are skipped, so a
 // brace or a selector inside them never counts. Each rule: { selector, text (its own declarations, never a
 // nested rule's), rules (nested) }. A selector is the text since the last rule or statement, cut at a blank
-// line or a code fence, so prose before a CSS block is never part of one.
+// line or a code fence line (with its info string), so prose before a CSS block is never part of one.
 export const CSS_DEPTH = 16;
 export function cssRules(src) {
   const top = { selector: '', text: '', rules: [] };
@@ -63,16 +63,19 @@ export function cssRules(src) {
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
     if (ch === '/' && src[i + 1] === '*') { const end = src.indexOf('*/', i + 2); i = end < 0 ? src.length : end + 1; continue; }
-    if (ch === '"' || ch === "'") {
-      const end = src.indexOf(ch, i + 1);
-      pending += src.slice(i, end < 0 ? src.length : end + 1);
-      i = end < 0 ? src.length : end;
+    // A quoted string, only inside a rule (an apostrophe in prose is not one: review 4). It ends at its quote
+    // or at a newline, as CSS ends a string; a backslash escapes the next character.
+    if ((ch === '"' || ch === "'") && stack.length > 1) {
+      let j = i + 1;
+      while (j < src.length && src[j] !== ch && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      pending += src.slice(i, Math.min(j + 1, src.length));
+      i = j;
       continue;
     }
     if (deeper) { if (ch === '{') deeper++; else if (ch === '}') deeper--; continue; }
     if (ch === '{' && stack.length > CSS_DEPTH) { deeper = 1; pending = ''; continue; }
     if (ch === '{') {
-      const rule = { selector: pending.split(/\n\s*\n|```/).pop().trim(), text: '', rules: [] };
+      const rule = { selector: pending.split(/\n\s*\n|```[^\n]*/).pop().trim(), text: '', rules: [] };
       stack[stack.length - 1].rules.push(rule);
       stack.push(rule);
       pending = '';
@@ -85,8 +88,10 @@ export function cssRules(src) {
   return top.rules;
 }
 
-const DARK_SELECTOR = /\[data-theme=["']?dark["']?\]|(?:^|[\s,>+~])\.dark\b/;
-const DARK_MEDIA = /^@media\b[^{]*prefers-color-scheme\s*:\s*dark/;
+// `.dark`, `:root.dark`, `html.dark`, `.dark-mode`, `.dark-theme` — never `.darkmode` or `.dark-blue`. The media
+// query is matched on the selector's own line, so a heading or prose line just above it never hides it.
+const DARK_SELECTOR = /\[data-theme=["']?dark["']?\]|\.dark(?:-mode|-theme)?(?![\w-])/;
+const DARK_MEDIA = /(?:^|\n)\s*@media\b[^{\n]*prefers-color-scheme\s*:\s*dark/;
 const ROOT = /(?:^|[\s,]):root\b/;
 const hasVars = (r) => /--[A-Za-z0-9_-]+\s*:/.test(r.text);
 const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);

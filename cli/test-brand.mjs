@@ -494,6 +494,24 @@ test('#553 review 2: the dark block is read inside itself only, at its own level
     { light: { '--bg': '#fff', '--ink': '#111' }, dark: { '--bg': '#000' } }, 'prose before the CSS is never a selector');
 });
 
+// Review 4: a real DESIGN.md is markdown — an apostrophe in a heading or prose, fences with an info string, a
+// heading right above the dark block, Tailwind's `html.dark` and `:root.dark`.
+test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark is read in full', () => {
+  const md = [
+    "# Acme's design system", '', "The team's colours are below. A \"quote\" too.", '',
+    '```css', ':root { --primary: #111; --q: "a\\"b"; --bg: #fff }', '```', '',
+    "It's dark too:", '### Dark', '```css', '@media (prefers-color-scheme: dark) { :root { --bg: #000; --primary: #eee } }', '```', '',
+  ].join('\n');
+  assert.deepEqual(readRootVars(md), { light: { '--primary': '#111', '--q': '"a\\"b"', '--bg': '#fff' }, dark: { '--bg': '#000', '--primary': '#eee' } });
+  const tw = (t) => readRootVars(t);
+  assert.deepEqual(tw(':root{--bg:#fff}\nhtml.dark{--bg:#000}').dark, { '--bg': '#000' });
+  assert.deepEqual(tw(':root.dark{--bg:#000}\n:root{--bg:#fff}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':root.dark is never the light look');
+  assert.deepEqual(tw(':root{--bg:#fff}\n.dark-mode{--bg:#000}').dark, { '--bg': '#000' });
+  assert.equal(tw(':root{--bg:#fff}\n.darkmode{--bg:#000}').dark, null);
+  assert.equal(tw(':root{--bg:#fff}\n.dark-blue{--bg:#000}').dark, null);
+  assert.deepEqual(tw(':root{--bg:#fff}\nDark mode:\n@media (prefers-color-scheme: dark){:root{--bg:#000}}').dark, { '--bg': '#000' });
+});
+
 test('#553 review 2: primary is checked as link text in yad brand check, never in the doctor row; yadflow\'s own look passes', async () => {
   const { brandChecks } = await import('./doctor.mjs');
   assert.deepEqual(contrastProblems(YADFLOW_BRAND, { links: true }), [], 'yadflow\'s own look reads');
