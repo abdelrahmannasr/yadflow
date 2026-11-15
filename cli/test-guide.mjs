@@ -1034,6 +1034,20 @@ test('#555: a committed .gitignore rule stays the team\'s beside an unrelated ed
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
 
+test('#555: a committed .gitignore with a byte-order mark and Windows line endings still holds the team\'s rule', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/18' });
+    put(path.join(A, '.gitignore'), '\uFEFF.claude/settings.json  \r\nnode_modules/\r\n');
+    git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('#555: a rule line added to a committed .gitignore but not committed is this machine\'s: the row stays', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const { P, A } = await twoClones();

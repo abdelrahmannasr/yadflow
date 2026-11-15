@@ -415,7 +415,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     // file are theirs to keep or share — no row (E157 update review 12).
     if (ours !== undefined && base !== null && k.same(ours, base)) continue;
     // A file with no committed copy that an ignore rule hides can never ride a PR/MR (git refuses to add it,
-    // #555). A rule the repo has committed, unchanged, is the team's choice: the file stays on each machine,
+    // #555). A rule whose line is in its ignore file's committed copy is the team's choice: the file stays on each machine,
     // where each person's `yad update` or `yad check --fix` writes it — said once, no row. Any other rule (a
     // global ignore, `.git/info/exclude`, or a `.gitignore` line not committed) is only this machine's: the row
     // stays, naming the rule and the way out — also when the file is yad's alone, which staging would
@@ -426,10 +426,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const at = rule ? `${rule.source}${rule.line ? `:${rule.line}` : ''}` : '';
     // The team's rule is one its committed ignore file holds: the same line in `HEAD:<source>`, wherever it
     // sits there, so an unrelated edit to that file not yet committed changes nothing (review 2). Read as
-    // committed, never trimmed as a whole (`run` trims); git drops a line's trailing blanks, so they are too.
+    // committed, never trimmed as a whole (`run` trims).
     const committedLines = () => {
       const r = spawnSync('git', ['show', `HEAD:./${rule.source}`], { cwd: e.a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-      return r.status === 0 ? r.stdout.split(/\r?\n/).map((l) => l.replace(/[ \t]+$/, '')) : [];
+      // As git reads it: a byte-order mark skipped, and only trailing spaces git does not see as escaped (`\ `)
+      // dropped — never a tab (review 3).
+      return r.status === 0 ? r.stdout.replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.replace(/(^|[^\\](?:\\\\)*) +$/, '$1')) : [];
     };
     const teams = rule && !rule.outside && committedLines().includes(rule.pattern);
     if (teams) {
