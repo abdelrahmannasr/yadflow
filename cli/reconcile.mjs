@@ -424,9 +424,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const tracked = e.head !== null || run('git', ['ls-files', '--error-unmatch', '--', e.a.shared], { cwd: e.a.root }).ok;
     const rule = tracked ? null : ignoreRules(e.a.root, [e.a.shared]).get(e.a.shared);
     const at = rule ? `${rule.source}${rule.line ? `:${rule.line}` : ''}` : '';
-    const teams = rule && !rule.outside
-      && run('git', ['ls-files', '--error-unmatch', '--', rule.source], { cwd: e.a.root }).ok
-      && run('git', ['diff', '--quiet', 'HEAD', '--', rule.source], { cwd: e.a.root }).ok;
+    // The team's rule is one its committed ignore file holds: the same line in `HEAD:<source>`, wherever it
+    // sits there, so an unrelated edit to that file not yet committed changes nothing (review 2). Read as
+    // committed, never trimmed as a whole (`run` trims); git drops a line's trailing blanks, so they are too.
+    const committedLines = () => {
+      const r = spawnSync('git', ['show', `HEAD:./${rule.source}`], { cwd: e.a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+      return r.status === 0 ? r.stdout.split(/\r?\n/).map((l) => l.replace(/[ \t]+$/, '')) : [];
+    };
+    const teams = rule && !rule.outside && committedLines().includes(rule.pattern);
     if (teams) {
       info(`${repoLabel(root, e.a.root)}: ${e.a.shared} is ignored by ${at}, so it stays on each machine; the update leaves it out of the PR/MR`);
       continue;

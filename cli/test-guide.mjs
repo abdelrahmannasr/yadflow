@@ -1017,6 +1017,39 @@ for (const [label, hide, source] of [
   });
 }
 
+// The team's rule is a line the committed ignore file holds (review 2): an unrelated edit not yet committed, or
+// the line moved, keeps it the team's; the line added but not committed is this machine's.
+test('#555: a committed .gitignore rule stays the team\'s beside an unrelated edit not yet committed', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/16' });
+    put(path.join(A, '.gitignore'), 'node_modules/\n.claude/settings.json\n');
+    git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+    put(path.join(A, '.gitignore'), '.env.local\nnode_modules/\n.claude/settings.json\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    assert.ok(r.commits.some((c) => c.opened), JSON.stringify(r.commits));
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
+test('#555: a rule line added to a committed .gitignore but not committed is this machine\'s: the row stays', async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, A } = await twoClones();
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/17' });
+    put(path.join(A, '.gitignore'), 'node_modules/\n');
+    git(A, ['add', '.gitignore']); git(A, ['commit', '-q', '-m', 'chore: ignore']); git(A, ['push', '-q']);
+    put(path.join(A, '.gitignore'), 'node_modules/\n.claude/settings.json\n');
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    const r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator });
+    const row = r.commits.find((c) => c.reason === 'settings-uncommitted');
+    assert.ok(row, JSON.stringify(r.commits));
+    assert.match(row.hint, /\(\.gitignore:2, `\.claude\/settings\.json`, not committed\)/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
+
 test('#555: the local setup file\'s row names its own steps, never the hook entries', async () => {
   const { reconcile } = await import('./reconcile.mjs');
   const { P, A } = await twoClones();
