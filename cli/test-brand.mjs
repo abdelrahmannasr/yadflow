@@ -515,6 +515,13 @@ test('#553 review 4: a markdown DESIGN.md with apostrophes, fences and html.dark
   assert.deepEqual(readRootVars('.dark { --bg: #000 } /* end .dark */\n:root { --bg: #fff }'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
   assert.deepEqual(readRootVars(':root /* .dark lives below */ { --bg: #fff }\n.dark { --bg: #000 }'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
   assert.deepEqual(readRootVars(':root:not(:is(.x), .dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
+  // Review 7: in a DESIGN.md with fences only their content is CSS, so no prose `/*` (or anything) can hide it.
+  const fenced = (prose) => readRootVars(`# Design\n\n${prose}\n\n\`\`\`css\n:root{--bg:#fff} /* light */\n.dark{--bg:#000}\n\`\`\`\n`);
+  for (const prose of ['Use the glob /*.css for all.', 'Files: /* everything', 'Run `rm dist /*`.', "It's {all} here: .dark { --bg: #f00 }"]) {
+    assert.deepEqual(fenced(prose), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, prose);
+  }
+  assert.deepEqual(readRootVars('```bash\nrm -rf dist/* "x\n```\n\n```css\n:root{--bg:#fff}\n.dark{--bg:#000}\n```'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, 'a shell fence is never CSS beside a CSS one');
+  assert.deepEqual(readRootVars(':root:NOT(.dark){--bg:#fff}\n.dark{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } }, ':not is not case-sensitive');
   assert.equal(readRootVars(':root{--bg:#fff}\nhtml:not(.dark){--x:1}').dark, null);
   assert.deepEqual(readRootVars(':root:not([data-theme="dark"]){--bg:#fff}\n[data-theme="dark"]{--bg:#000}'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });
   assert.deepEqual(readRootVars('Tokens live in `styles/*.css`.\n\n```css\n:root{--bg:#fff} /* x */\n:root.dark{--bg:#000}\n```'), { light: { '--bg': '#fff' }, dark: { '--bg': '#000' } });

@@ -54,8 +54,9 @@ export function readFrontMatter(text) {
 // brace or a selector inside them never counts. Each rule: { selector, text (its own declarations, never a
 // nested rule's), rules (nested) }. A selector is the text since the last rule or statement, cut at a blank
 // line or a code fence line (with its info string), so prose before a CSS block is never part of one.
+// `css`: the text is CSS only (a fence's content), so a comment or a string starts anywhere, as in CSS.
 export const CSS_DEPTH = 16;
-export function cssRules(src) {
+export function cssRules(src, { css = false } = {}) {
   const top = { selector: '', text: '', rules: [] };
   const stack = [top];
   let pending = '', deeper = 0; // braces past CSS_DEPTH are counted, never kept: no design system nests so far
@@ -64,14 +65,14 @@ export function cssRules(src) {
     const ch = src[i];
     // A comment: inside a rule, or outside one after a space, a brace, `;` or `,` (or at the start) — never the
     // `/*` of a path like `styles/*.css` in prose (reviews 5, 6).
-    if (ch === '/' && src[i + 1] === '*' && (stack.length > 1 || i === 0 || /[\s{};,]/.test(src[i - 1]))) {
+    if (ch === '/' && src[i + 1] === '*' && (css || stack.length > 1 || i === 0 || /[\s{};,]/.test(src[i - 1]))) {
       const end = src.indexOf('*/', i + 2);
       i = end < 0 ? src.length : end + 1;
       continue;
     }
     // A quoted string, only inside a rule (an apostrophe in prose is not one: review 4). It ends at its quote
     // or at a newline, as CSS ends a string; a backslash escapes the next character.
-    if ((ch === '"' || ch === "'") && stack.length > 1) {
+    if ((ch === '"' || ch === "'") && (css || stack.length > 1)) {
       let j = i + 1;
       while (j < src.length && src[j] !== ch && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
       pending += src.slice(i, Math.min(j + 1, src.length));
@@ -105,7 +106,7 @@ const hasVars = (r) => /--[A-Za-z0-9_-]+\s*:/.test(r.text);
 function bare(sel) {
   let out = '', depth = 0;
   for (let i = 0; i < sel.length; i++) {
-    if (!depth && sel.startsWith(':not(', i)) { depth = 1; i += 4; continue; }
+    if (!depth && sel.slice(i, i + 5).toLowerCase() === ':not(') { depth = 1; i += 4; continue; }
     if (depth) { if (sel[i] === '(') depth++; else if (sel[i] === ')') depth--; continue; }
     out += sel[i];
   }
@@ -116,10 +117,28 @@ const isRootish = (r) => /(?:^|[\s,])(?::root|html|body)\b/.test(r.selector);
 // The `--name: value` pairs of the first `:root` rule that is not a dark one, and of the dark rule when there
 // is one: an `@media (prefers-color-scheme: dark)` block's `:root`, `html` or `body` rule (else its first rule
 // with a `--` name), or a `[data-theme="dark"]` / `.dark` rule anywhere, inside another `@media` too.
+// The text inside a markdown file's code fences, or null when it has none (review 7: when a DESIGN.md has
+// fences, only their content is read as CSS, so no prose can ever be taken for it). Linear: one pass by line.
+// The CSS fences (`css`, `scss`, `less`) when there are any, else every fence, so a shell or JSON fence's `/*`
+// or quote is never read as CSS beside a CSS one.
+export function fencedText(text) {
+  const all = [], styled = [];
+  let open = null, isCss = false, any = false;
+  for (const line of String(text).split('\n')) {
+    const fence = /^\s*(```|~~~)\s*([\w-]*)/.exec(line);
+    if (fence && !open) { open = fence[1]; isCss = /^(?:css|scss|less|postcss)$/i.test(fence[2]); any = true; continue; }
+    if (fence && line.trim().startsWith(open)) { open = null; all.push(''); if (isCss) styled.push(''); continue; }
+    if (open) { all.push(line); if (isCss) styled.push(line); }
+  }
+  if (!any) return null;
+  return (styled.length ? styled : all).join('\n');
+}
+
 export function readRootVars(text) {
   const all = [];
   const walk = (list, darkMedia) => { for (const r of list) { all.push({ r, darkMedia }); walk(r.rules, darkMedia || DARK_MEDIA.test(r.selector)); } };
-  walk(cssRules(String(text || '')), false);
+  const fenced = fencedText(String(text || ''));
+  walk(fenced === null ? cssRules(String(text || '')) : cssRules(fenced, { css: true }), false);
   const vars = (block) => Object.fromEntries([...block.matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+)/g)].map((x) => [x[1], x[2].trim()]));
   const light = all.find(({ r, darkMedia }) => !darkMedia && ROOT.test(r.selector) && !DARK_SELECTOR.test(bare(r.selector)));
   let dark = null;
