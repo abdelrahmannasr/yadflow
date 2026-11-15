@@ -622,3 +622,31 @@ test('through the CLI: done and skip answer in --json, refuse words and flags th
   assert.ok(lines.some((l) => /changed since this machine last answered: docker/.test(l)), lines.join('\n'));
   assert.ok(lines.some((l) => /said no to: tool-nowhere/.test(l)));
 });
+
+// ---- E185 part 3 --------------------------------------------------------------------------------
+
+test('E185 part 3: a step stays readable — length caps, plain prose, person and addedBy kinds', async () => {
+  const { stepProblems, STEP_LIMITS } = await import('./local-setup.mjs');
+  assert.deepEqual(stepProblems(teamStep(), 'team'), []);
+  assert.deepEqual(stepProblems(teamStep({ purpose: 'two lines\nof purpose', person: true, addedBy: null }), 'team'), [], 'prose may wrap');
+  const bad = (extra, re) => assert.ok(stepProblems(teamStep(extra), 'team').some((p) => re.test(p)), JSON.stringify(extra).slice(0, 80));
+  bad({ title: 'x'.repeat(STEP_LIMITS.title + 1) }, /title should be one plain line/);
+  bad({ title: 'a\nb' }, /title should be one plain line/);
+  bad({ purpose: 'x'.repeat(STEP_LIMITS.text + 1) }, /purpose should be plain text/);
+  bad({ impact: 'looks​plain' }, /impact should be plain text/);
+  bad({ impact: 'bell\u0007' }, /impact should be plain text/);
+  bad({ commands: Array.from({ length: STEP_LIMITS.commands + 1 }, () => 'true') }, /at most 10 commands/);
+  bad({ commands: ['x'.repeat(STEP_LIMITS.command + 1)] }, /at most 10 commands of at most 500/);
+  bad({ verify: 'x'.repeat(STEP_LIMITS.command + 1) }, /verify should be one line/);
+  bad({ check: { run: 'x'.repeat(STEP_LIMITS.command + 1) } }, /check should be/);
+  bad({ person: 'yes' }, /`person` should be true or false/);
+  bad({ addedBy: 7 }, /`addedBy` should be a name/);
+});
+
+test('E185 part 3: looksSecret finds a token or a literal key, never a name for where it comes from', async () => {
+  const { looksSecret } = await import('./secret-text.mjs');
+  for (const s of ['ghp_abcdefghij1234', 'export API_KEY=abcd1234efgh', 'password: "hunter22hunter"', 'curl -H "x" sk-abcdefghijklmnop1234', '-----BEGIN RSA PRIVATE KEY-----']) assert.equal(looksSecret(s), true, s);
+  for (const s of ['export API_KEY=$API_KEY', 'token: <your token>', 'password={{ vault }}', 'SECRET=${SECRET}', 'npm i -g pnpm', 'git config commit.gpgsign true', 'see the api key docs']) assert.equal(looksSecret(s), false, s);
+  const { redactTokens } = await import('./scan.mjs');
+  assert.equal(redactTokens('a ghp_abcdefghij1234 b'), 'a [redacted] b', 'yad scan still redacts the same way');
+});

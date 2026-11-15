@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { run, readJSON, forTerminal, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
+import { redact, redactTokens } from './secret-text.mjs';
+export { redact, redactTokens };
 import { productIdentity } from './members.mjs';
 import { prTarget } from './pr-list.mjs';
 import { repoSources } from './standup.mjs';
@@ -68,11 +70,7 @@ export const fingerprint = (f) => createHash('sha256').update(JSON.stringify([f.
 
 // ---- making text safe to post ------------------------------------------------------------------------
 
-const SECRET = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|glpat-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?|-----BEGIN[^-]*-----|[A-Za-z0-9+_=-]{40,})/g;
-// Text a person wrote keeps its commit hashes and long names: only tokens with a known prefix are redacted.
-const PREFIXED = /(gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|glpat-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?|-----BEGIN[^-]*-----)/g;
-export const redactTokens = (s) => String(s ?? '').replace(PREFIXED, '[redacted]');
-export const redact = (s) => String(s ?? '').replace(SECRET, '[redacted]');
+// The patterns live in cli/secret-text.mjs, shared with the local setup script (E185 part 3).
 const plain = (s, max) => { const t = forTerminal(redact(s)).replace(/\s+/g, ' ').trim(); return t.length > max ? `${t.slice(0, max - 1)}…` : t; };
 // An invisible space after each trigger stops a mention or a reference. GitHub reads backslashes and HTML entities as
 // the real character before it looks for one, so neither of those is enough (checked against its renderer).

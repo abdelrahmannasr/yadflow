@@ -49,20 +49,32 @@ const MARKER = /<!--|--!?>/;
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/u;
 const oneLine = (v) => isText(v) && forTerminal(v) === v && !HIDDEN.test(v);
 
+// How long each part of a step may be (E185 part 3): a step is read by every member, so it stays readable.
+export const STEP_LIMITS = Object.freeze({ title: 120, text: 600, commands: 10, command: 500 });
+// Prose may wrap onto several lines, but holds nothing hidden either.
+const prose = (v) => isText(v) && !/[\p{Cf}\p{Zl}\p{Zp}]|[^\P{Cc}\n]|(?![ \n])\p{Zs}/u.test(v);
+
 export function stepProblems(s, source) {
   const p = [];
   if (!isPlainObject(s)) return ['it is not an object'];
   if (typeof s.id !== 'string' || !STEP_ID.test(s.id)) p.push('its id should be lowercase letters, digits and dashes');
   for (const k of ['title', 'purpose', 'impact']) if (!isText(s[k])) p.push(`it has no ${k}`);
+  if (isText(s.title) && (!oneLine(s.title) || s.title.length > STEP_LIMITS.title)) p.push(`its title should be one plain line of at most ${STEP_LIMITS.title} characters`);
+  for (const k of ['purpose', 'impact']) {
+    if (isText(s[k]) && (!prose(s[k]) || s[k].length > STEP_LIMITS.text)) p.push(`its ${k} should be plain text of at most ${STEP_LIMITS.text} characters`);
+  }
   if (!isTextList(s.commands)) p.push('it has no commands');
   else if (!s.commands.every(oneLine)) p.push('each command should be one line');
+  else if (s.commands.length > STEP_LIMITS.commands || s.commands.some((x) => x.length > STEP_LIMITS.command)) p.push(`it may hold at most ${STEP_LIMITS.commands} commands of at most ${STEP_LIMITS.command} characters each`);
+  if (s.person !== undefined && typeof s.person !== 'boolean') p.push('its `person` should be true or false');
+  if (s.addedBy != null && typeof s.addedBy !== 'string') p.push('its `addedBy` should be a name');
   if (!WHEN.includes(s.when)) p.push('its `when` should be "required" or "optional"');
-  if (s.verify != null && !oneLine(s.verify)) p.push('its verify should be one line');
+  if (s.verify != null && (!oneLine(s.verify) || s.verify.length > STEP_LIMITS.command)) p.push(`its verify should be one line of at most ${STEP_LIMITS.command} characters`);
   if (s.check != null) {
     if (!isPlainObject(s.check)) p.push('its check should be an object');
     else if (source === 'yadflow' && !BUILTIN_CHECKS.includes(s.check.builtin)) p.push('its check is not one yad knows');
     // A team's check is a command and nothing else: a `builtin` beside it would hide the command in the view.
-    else if (source === 'team' && (!oneLine(s.check.run) || Object.keys(s.check).length !== 1)) p.push('its check should be `{ "run": "<one command>" }`');
+    else if (source === 'team' && (!oneLine(s.check.run) || s.check.run.length > STEP_LIMITS.command || Object.keys(s.check).length !== 1)) p.push('its check should be `{ "run": "<one command>" }`');
   }
   const words = [s.title, s.purpose, s.impact, s.verify, s.addedBy, ...(Array.isArray(s.commands) ? s.commands : []), s.check?.run];
   if (words.some((w) => typeof w === 'string' && MARKER.test(w))) p.push('it holds `<!--`, `-->` or `--!>`, which LOCAL-SETUP.md cannot show safely');
