@@ -37,7 +37,8 @@ const isTextList = (v) => Array.isArray(v) && v.length > 0 && v.every(isText);
 // A comment marker anywhere in a step could become one of yad's marker lines in LOCAL-SETUP.md, and no amount of
 // removing text makes that safe (taking out one `<!--` can join the letters around it into another). So a step
 // holding one is refused, and every command is shown exactly as written.
-const MARKER = /<!--|-->/;
+// `--!>` too: browsers end a comment there as well.
+const MARKER = /<!--|--!?>/;
 // One plain line: nothing `forTerminal` would change — no control character, and none of the invisible or
 // direction-changing ones (U+202E and its kind), which would let LOCAL-SETUP.md show a reviewer one command while
 // the agent runs another.
@@ -63,7 +64,7 @@ export function stepProblems(s, source) {
     else if (source === 'team' && (!oneLine(s.check.run) || Object.keys(s.check).length !== 1)) p.push('its check should be `{ "run": "<one command>" }`');
   }
   const words = [s.title, s.purpose, s.impact, s.verify, s.addedBy, ...(Array.isArray(s.commands) ? s.commands : []), s.check?.run];
-  if (words.some((w) => typeof w === 'string' && MARKER.test(w))) p.push('it holds `<!--` or `-->`, which LOCAL-SETUP.md cannot show safely');
+  if (words.some((w) => typeof w === 'string' && MARKER.test(w))) p.push('it holds `<!--`, `-->` or `--!>`, which LOCAL-SETUP.md cannot show safely');
   return p;
 }
 

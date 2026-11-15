@@ -149,11 +149,11 @@ test('yad runs its own checks and never a team\'s: a team step is `ask`', () => 
 
 test('a step holding a comment marker is refused, nested ones too, so the view can never get a second marker line', () => {
   // Taking one `<!--` out of the second would join its letters into a new one: the step is refused instead.
-  for (const bad of [`x ${LOCAL_SETUP_MARKERS.end}`, '<<!--!-- yadflow:local-setup:end --<!-->', 'a --> b', 'a <!-- b']) {
+  for (const bad of [`x ${LOCAL_SETUP_MARKERS.end}`, '<<!--!-- yadflow:local-setup:end --<!-->', 'a --> b', 'a <!-- b', 'a --!> b']) {
     for (const field of ['title', 'purpose', 'impact', 'verify', 'addedBy']) {
       const { steps, problems } = readSteps({ team: [teamStep({ [field]: bad })] });
       assert.deepEqual(steps, [], `${field}: ${bad}`);
-      assert.match(problems[0], /holds `<!--` or `-->`/);
+      assert.match(problems[0], /holds `<!--`, `-->` or `--!>`/);
     }
     assert.equal(readSteps({ team: [teamStep({ commands: [bad] })] }).steps.length, 0);
     assert.equal(readSteps({ team: [teamStep({ check: { run: bad } })] }).steps.length, 0);
@@ -364,7 +364,7 @@ test('the steps come from what the Product records: platform, ledger and the tea
   assert.ok(verified.includes('ledger-hook') && verified.includes('commit-signing'));
   assert.ok(!ids({ platform: 'none' }, { shipped: { repomix: 'skip' } }).includes('tool-repomix'));
   // The CLI step names this release: each release's update asks each machine again.
-  assert.match(yadflowSteps(product())[0].commands[0], new RegExp(`yadflow@${VERSION.replace(/\./g, '\\.')}$`));
+  assert.equal(yadflowSteps(product())[0].commands[0], `npm install -g yadflow@${VERSION}`);
   // A shipped tool's step is its E165 recipe; a team's own tool keeps the team's install commands.
   assert.deepEqual(yadflowSteps(product()).find((s) => s.id === 'tool-repomix').commands, ['yad toolbox connect repomix --json']);
   // A person's step says so: the agent hands it over.
