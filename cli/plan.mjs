@@ -1544,13 +1544,18 @@ function hookStateFor(spec, root) {
     // beside it, `.husky/<name>`. Name that one, or the advice sends them to a file husky rewrites.
     const dir = hooksPath.stdout.replace(/[\\/]+$/, '');
     const edit = /(^|[\\/])_$/.test(dir) ? `${dir.replace(/[\\/]?_$/, '') || '.'}/${spec.name}` : `${dir}/${spec.name}`;
-    // The hook the person edits there may already hold yad's line (review 3). A tool's runner (husky) calls it,
-    // so its execute bit is the tool's business.
+    // The hook the person edits there may already hold yad's line (reviews 3, 4). Read where git itself resolved
+    // it (`file`: `~`, relative and absolute settings alike), husky's beside its `_` folder. husky's runner calls
+    // its hook with sh, so its execute bit is husky's business; in any other folder git runs it, and skips one it
+    // cannot run (everywhere but Windows).
     if (spec.wired) {
-      const top = run('git', ['-C', root, 'rev-parse', '--show-toplevel']);
+      const husky = /(^|[\\/])_$/.test(dir);
+      const read = husky ? path.join(path.dirname(path.dirname(file)), spec.name) : file;
       let edited = null;
-      try { edited = fs.readFileSync(path.resolve(top.ok && top.stdout ? top.stdout : root, edit), 'utf8'); } catch { /* none */ }
-      if (edited !== null && spec.wired(edited, prefix)) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hand-wired' };
+      try { edited = fs.readFileSync(read, 'utf8'); } catch { /* none */ }
+      let canRun = true;
+      if (!husky && process.platform !== 'win32') { try { canRun = (fs.statSync(read).mode & 0o111) !== 0; } catch { canRun = false; } }
+      if (edited !== null && canRun && spec.wired(edited, prefix)) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hand-wired' };
     }
     return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hooks-path' };
   }
@@ -1690,7 +1695,8 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
   applies: noticeWanted,
   // Wired by hand: a line that is not a comment and runs our copy for this Product's folder — and, for
   // post-rewrite, only on a rebase (review 3: a mention of the path alone is not enough).
-  wired: (text, prefix) => text.split(/\r?\n/).some((l) => !/^\s*#/.test(l) && l.includes('/yad/local-setup-notice.mjs')
+  // A line ending in a carriage return is not one sh can run (`}` and the CR read as one word).
+  wired: (text, prefix) => text.split('\n').some((l) => !l.endsWith('\r') && !/^\s*#/.test(l) && l.includes('/yad/local-setup-notice.mjs')
     && l.includes(`node "$notice" ${shQuote(prefix || '.')}`) && (name !== 'post-rewrite' || l.includes('[ "$1" != rebase ]'))),
   item: `${name} git hook (this clone)`,
   advice: () => null,

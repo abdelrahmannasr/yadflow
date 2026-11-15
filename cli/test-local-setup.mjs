@@ -1158,3 +1158,29 @@ test('E185 part 4 review 3: a husky hook with yad\'s line is wired; the line kee
   const cwd = process.cwd();
   try { process.chdir(dir); assert.equal(notice('.'), null); } finally { process.chdir(cwd); }
 });
+
+test('E185 part 4 review 4: a plain hooks folder and a ~ hooksPath are read where git runs them; a CRLF line is not wired', { skip: process.platform === 'win32' }, async () => {
+  const { localSetupNoticeStates } = await import('./plan.mjs');
+  const dir = product();
+  gitIn(dir, 'config', 'core.hooksPath', '.githooks');
+  const [merge] = localSetupNoticeStates(dir);
+  const f = path.join(dir, '.githooks', 'post-merge');
+  put(f, `#!/bin/sh\n${merge.line}\n`);
+  fs.chmodSync(f, 0o644);
+  assert.equal(localSetupNoticeStates(dir)[0].state, 'hooks-path', 'git skips a hook it cannot run');
+  fs.chmodSync(f, 0o755);
+  assert.equal(localSetupNoticeStates(dir)[0].state, 'hand-wired');
+  put(f, `#!/bin/sh\r\n${merge.line}\r\n`);
+  assert.equal(localSetupNoticeStates(dir)[0].state, 'hooks-path', 'a CRLF line sh cannot run');
+  // ~ in core.hooksPath: read where git resolves it.
+  const home = tmp();
+  const prev = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    gitIn(dir, 'config', 'core.hooksPath', '~/.myhooks');
+    const at = path.join(home, '.myhooks', 'post-merge');
+    put(at, `#!/bin/sh\n${localSetupNoticeStates(dir)[0].line}\n`);
+    fs.chmodSync(at, 0o755);
+    assert.equal(localSetupNoticeStates(dir)[0].state, 'hand-wired');
+  } finally { process.env.HOME = prev; }
+});
