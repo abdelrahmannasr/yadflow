@@ -1239,7 +1239,8 @@ data) and `LOCAL-SETUP.md` (the same steps as text).
   only after the person says yes.
 - Each machine remembers its answers (inside `.git`, never committed): `done` for a step the person did,
   `skip` for a no. After an update, only the steps that are new or that changed are asked again. `yad guide`
-  and `yad doctor` say when steps are waiting.
+  and `yad doctor` say when steps are waiting, and after a `git pull` that brings new or changed steps, a
+  git hook prints one line saying so.
 
 ```bash
 yad local-setup                               # the steps this machine still needs, with why and what each changes
