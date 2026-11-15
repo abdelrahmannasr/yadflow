@@ -1507,18 +1507,27 @@ export const gitHookLine = (prefix = '') => {
   return `[ ! -f ${guard} ] || node ${guard} --staged || [ $? -ne 2 ] || exit 1`;
 };
 
-// Where this clone's pre-commit hook is, and whose it is. `{ applies: false }` when there is nothing to
-// install (a local ledger, or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with
-// `state` one of: 'missing' | 'ok' | 'outdated' (ours, different bytes) | 'foreign' (a hook that is not
-// ours) | 'hooks-path' (core.hooksPath is set). The last two carry `line`, the one to add by hand.
-export function gitHookState(root) {
-  if (!isVerifiedLedger(readJSON(productConfigPath(root)))) return { applies: false };
-  const where = run('git', ['-C', root, 'rev-parse', '--git-path', 'hooks/pre-commit', '--show-prefix']);
+// A git hook yad writes into this clone, described once: the pre-commit ledger guard (E48) and the pull notices
+// (E185) take every rule below the same way. `spec`:
+//   name      the hook's file name in git's hooks folder ('pre-commit')
+//   marker    the line that makes a copy yad's own
+//   scripts   (prefix) → every text yad has written for it, today's first
+//   line      (prefix) → the one line a person adds to a hook yad will not touch
+//   applies   (root) → whether this Product wants the hook at all
+//   item      the action's name in `yad check`
+//   advice    (st) → the sentence for a hook yad may not write
+// Where the hook is, and whose it is. `{ applies: false }` when there is nothing to install (the spec says no,
+// or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with `state` one of: 'missing' | 'ok'
+// | 'outdated' (ours, different bytes) | 'foreign' (a hook that is not ours) | 'hooks-path' (core.hooksPath is
+// set). The last two carry `line`, the one to add by hand.
+function hookStateFor(spec, root) {
+  if (!spec.applies(root)) return { applies: false };
+  const where = run('git', ['-C', root, 'rev-parse', '--git-path', `hooks/${spec.name}`, '--show-prefix']);
   if (!where.ok) return { applies: false };
   const [hookRel, prefix = ''] = where.stdout.split('\n');
   const file = path.resolve(root, hookRel);
-  const expected = gitPreCommitScript(prefix);
-  const line = gitHookLine(prefix);
+  const [expected] = spec.scripts(prefix);
+  const line = spec.line(prefix);
   const hooksPath = run('git', ['-C', root, 'config', '--get', 'core.hooksPath']);
   // A core.hooksPath that names the default folder anyway (some tools set it so) is not a tool's folder.
   // `--path-format` needs git 2.31; an older git fails the call, and the setting is then treated as a tool's.
@@ -1532,29 +1541,29 @@ export function gitHookState(root) {
     || (path.basename(hooksDir) === 'hooks' && samePath(path.dirname(hooksDir), common.stdout)));
   if (hooksPath.ok && hooksPath.stdout && !isDefault) {
     // husky points core.hooksPath at `.husky/_`, a folder it generates; the hook a person edits is the one
-    // beside it, `.husky/pre-commit`. Name that one, or the advice sends them to a file husky rewrites.
+    // beside it, `.husky/<name>`. Name that one, or the advice sends them to a file husky rewrites.
     const dir = hooksPath.stdout.replace(/[\\/]+$/, '');
-    const edit = /(^|[\\/])_$/.test(dir) ? `${dir.replace(/[\\/]?_$/, '') || '.'}/pre-commit` : `${dir}/pre-commit`;
+    const edit = /(^|[\\/])_$/.test(dir) ? `${dir.replace(/[\\/]?_$/, '') || '.'}/${spec.name}` : `${dir}/${spec.name}`;
     return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hooks-path' };
   }
   let text = null;
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
-  if (!text.includes(GIT_HOOK_MARKER)) return { applies: true, file, expected, prefix, line, state: 'foreign' };
+  if (!text.includes(spec.marker)) return { applies: true, file, expected, prefix, line, state: 'foreign' };
   // Git silently skips a hook that is not executable (everywhere but Windows), so right bytes without the
   // bit are not an installed hook.
   let runnable = true;
   if (process.platform !== 'win32') { try { runnable = (fs.statSync(file).mode & 0o111) !== 0; } catch { runnable = false; } }
   if (text === expected && runnable) return { applies: true, file, expected, prefix, state: 'ok' };
   // `earlier`: a text an earlier yad wrote, so nothing in it is anyone's edit.
-  const why = text === expected ? 'not-executable' : gitPreCommitScripts(prefix).includes(text) ? 'earlier' : 'changed';
+  const why = text === expected ? 'not-executable' : spec.scripts(prefix).includes(text) ? 'earlier' : 'changed';
   return { applies: true, file, expected, prefix, state: 'outdated', why };
 }
 
 // The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
-// and are reported by `gitHookAdvice` instead.
-export function gitHookActions(root) {
-  const st = gitHookState(root);
+// and are reported by the spec's advice instead.
+function hookActionsFor(spec, root) {
+  const st = hookStateFor(spec, root);
   if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path') return [];
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
@@ -1563,7 +1572,7 @@ export function gitHookActions(root) {
   const backup = st.state === 'outdated' && st.why === 'changed' ? backupPathFor(st.file) : null;
   return [{
     scope: 'product',
-    item: 'pre-commit git hook (this clone)',
+    item: spec.item,
     status,
     root,
     paths: [],
@@ -1577,28 +1586,40 @@ export function gitHookActions(root) {
   }];
 }
 
-// A local ledger: the hook yad installed while the Product was verified has nothing to guard. Removed
-// only when its bytes are exactly what yad writes — an edited copy is left for its owner.
-export function orphanGitHookActions(root) {
-  if (isVerifiedLedger(readJSON(productConfigPath(root)))) return [];
-  const where = run('git', ['-C', root, 'rev-parse', '--git-path', 'hooks/pre-commit', '--show-prefix']);
+// A hook the Product no longer wants (the spec says no): removed only when its bytes are exactly what yad
+// writes — an edited copy is left for its owner. Only on a Product: elsewhere nothing of yad's was written.
+function orphanHookActionsFor(spec, root) {
+  if (!exists(productConfigPath(root)) || spec.applies(root)) return [];
+  const where = run('git', ['-C', root, 'rev-parse', '--git-path', `hooks/${spec.name}`, '--show-prefix']);
   if (!where.ok) return [];
   const [hookRel, prefix = ''] = where.stdout.split('\n');
   const file = path.resolve(root, hookRel);
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  if (!gitPreCommitScripts(prefix).includes(text)) return [];
-  return [{ scope: 'product', item: 'pre-commit git hook (this clone) (removed)', status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
+  if (!spec.scripts(prefix).includes(text)) return [];
+  return [{ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
+const PRE_COMMIT_HOOK = Object.freeze({
+  name: 'pre-commit',
+  marker: GIT_HOOK_MARKER,
+  scripts: (prefix) => gitPreCommitScripts(prefix),
+  line: (prefix) => gitHookLine(prefix),
+  applies: (root) => isVerifiedLedger(readJSON(productConfigPath(root))),
+  item: 'pre-commit git hook (this clone)',
+  // A tool that owns the hook (the pre-commit framework, husky v4) may rewrite it on reinstall, which drops
+  // an added line, so the advice says to check after one.
+  advice: (st) => (st?.state === 'hooks-path' ? `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to ${st.editFile}: ${st.line}`
+    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}` : null),
+});
+
+// The pre-commit hook (E48), as it always was.
+export const gitHookState = (root) => hookStateFor(PRE_COMMIT_HOOK, root);
+export const gitHookActions = (root) => hookActionsFor(PRE_COMMIT_HOOK, root);
+// A local ledger: the hook yad installed while the Product was verified has nothing to guard.
+export const orphanGitHookActions = (root) => orphanHookActionsFor(PRE_COMMIT_HOOK, root);
 // The sentence for a clone where yad may not write the hook, or null.
-// A tool that owns the hook (the pre-commit framework, husky v4) may rewrite it on reinstall, which drops
-// an added line, so the advice says to check after one.
-export function gitHookAdvice(st) {
-  if (st?.state === 'hooks-path') return `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to ${st.editFile}: ${st.line}`;
-  if (st?.state === 'foreign') return `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}`;
-  return null;
-}
+export const gitHookAdvice = (st) => PRE_COMMIT_HOOK.advice(st);
 
 // ---- background capture wiring (E43) -----------------------------------------------------------
 //
