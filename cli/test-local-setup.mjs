@@ -321,10 +321,12 @@ test('the machine section puts team steps and steps yad did not write on separat
   doc.yadflow.push({ id: 'extra', title: 't', purpose: 'p', impact: 'i', when: 'required', commands: ['c'], check: { builtin: 'cli-version', min: VERSION } });
   put(file, doc);
   const lines = [];
-  const orig = console.log;
+  // Both: lines go to stderr while a --json run is open (cli/lib.mjs `log`).
+  const orig = { log: console.log, error: console.error };
   console.log = (...a) => lines.push(a.join(' '));
+  console.error = (...a) => lines.push(a.join(' '));
   let res;
-  try { res = localSetupSection(dir); } finally { console.log = orig; }
+  try { res = localSetupSection(dir); } finally { Object.assign(console, orig); }
   const team = lines.find((l) => /from your team, to check with you: docker$/.test(l));
   const odd = lines.find((l) => /not what this yadflow writes — not vetted, to check with you: extra$/.test(l));
   assert.ok(team && !/not vetted/.test(team), lines.join('\n'));

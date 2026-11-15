@@ -350,7 +350,8 @@ export function runLocalSetupList(root, { json = false } = {}) {
 }
 
 // The few lines setup, update, check and join print about this machine. Never fails the command it is part of.
-// Returns the part of that command's --json answer it adds: `{ pending, ask }` (step ids).
+// Returns the part of that command's --json answer it adds: `{ pending, ask, unvetted, error }` (step ids, and why
+// the committed script could not be read, or null).
 export function localSetupSection(root) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], unvetted: [], error: 'could not read' }; }
@@ -358,17 +359,16 @@ export function localSetupSection(root) {
   if (!st.steps.length) return { pending: [], ask: [], unvetted: [], error: null };
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
+  // The `ask` steps under `yadflow` that yad did not write: printed apart, and `unvetted` in --json.
+  const strange = ask.filter((s) => s.source === 'yadflow' && !s.known);
   log(c.bold('\nLocal setup (this machine)'));
   if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length} step(s) are done here`);
   else {
     if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
     const theirs = ask.filter((s) => s.source === 'team');
-    const strange = ask.filter((s) => s.source === 'yadflow' && !s.known);
     if (theirs.length) log(`  ${c.cyan('?')} ${theirs.length} step(s) from your team, to check with you: ${theirs.map((s) => s.id).join(', ')}`);
     if (strange.length) log(`  ${c.yellow('!')} ${strange.length} yadflow step(s) that are not what this yadflow writes — not vetted, to check with you: ${strange.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
-  // `unvetted`: the `ask` steps under `yadflow` that yad did not write, so an agent reading setup's, update's or
-  // join's --json can tell them from the team's.
-  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: ask.filter((s) => s.source === 'yadflow' && !s.known).map((s) => s.id), error: null };
+  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), error: null };
 }
