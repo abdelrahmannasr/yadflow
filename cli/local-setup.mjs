@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { c, emitJSON, forTerminal, info, log, warn, writeJSON, isPlainObject } from './lib.mjs';
+import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
 import { productConfigPath, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import {
@@ -20,6 +20,7 @@ import {
   yadflowSteps, cliMinimum, fileCliMin, stepHash, runBuiltinCheck, localSetupPath,
 } from './local-setup-steps.mjs';
 import { detectInstalled } from './detect.mjs';
+import { readLocalSetupRecord, answerFor, writeLocalSetupAnswers } from './local-setup-record.mjs';
 
 export const LOCAL_SETUP_MARKERS = Object.freeze({
   begin: '<!-- yadflow:local-setup:begin — written by yad from .sdlc/local-setup.json; edit outside these lines, `yad update` rewrites them -->',
@@ -290,11 +291,21 @@ export function localSetupActions(root) {
 
 // ---- this machine -----------------------------------------------------------------------------------
 
-// Every step with its state here: `ok` (yad's own check passed), `pending` (it failed), or `ask` (a team step, or
-// one with no check: yad runs no team command, so the agent asks the person).
-export function localSetupState(root, { items = null } = {}) {
+// Every step with its state here, from yad's own checks and this machine's record (cli/local-setup-record.mjs):
+//   skipped  the person said no to the step as it is now (the record), whatever a check says
+//   ok       yad's own check passed            pending  it failed
+//   done     the person did a step yad cannot check (a team step, one with no check, one yad did not write)
+//   ask      such a step, not answered for as it is now: yad runs no team command, so the agent asks the person
+// `recorded`: the record has an answer for the step as it is now. `changed`: it has one for an older form only.
+// `seen`: nothing is left to ask about it.
+// `noProgram` (yad guide, doctor): run only the checks that start no other program, and judge `platform-login`
+// (which runs gh or glab) by the record, like a step with no check.
+export const NO_PROGRAM_CHECKS = Object.freeze(['cli-version', 'ledger-hook', 'commit-signing', 'tool']);
+export function localSetupState(root, { items = null, noProgram = false } = {}) {
   const read = readCommittedLocalSetup(root);
-  if (!read.doc) return { exists: read.error !== null, committed: read.committed, error: read.error, steps: [], problems: [] };
+  const record = readLocalSetupRecord(root);
+  const base = { committed: read.committed, record: { path: record.path, error: record.error } };
+  if (!read.doc) return { ...base, exists: read.error !== null, error: read.error, steps: [], problems: [] };
   const { steps, problems } = readSteps(read.doc, { ours: oursFor(read.doc, root) });
   // The file says which catalogue wrote it, and whoever writes the file can say anything: the reason is only a
   // possibility, and never softens "not vetted".
@@ -302,18 +313,28 @@ export function localSetupState(root, { items = null } = {}) {
   if (unknown.length) problems.push(`${LOCAL_SETUP_FILE}: ${unknown.length} yadflow step(s) are not what this yadflow writes (${unknown.map((s) => s.id).join(', ')}) — not vetted${unknown.some((s) => s.otherRelease) ? '; the file says another yadflow version wrote it' : ''}; \`yad update\` rewrites them`);
   let found = items;
   const out = steps.map((s) => {
-    if (s.source !== 'yadflow' || !s.check?.builtin) return { ...s, state: 'ask', why: s.check?.run ? 'yad does not run a team\'s check' : 'it has no check' };
-    // A step yad did not write: its check is the file's too, so it never decides what the agent is told.
-    if (!s.known) return { ...s, state: 'ask', why: 'it is not what this yadflow writes, so the person decides' };
+    const answer = answerFor(record.entries, s);
+    const changed = !answer && !!record.entries[s.id];
+    const mark = (state, why, more = {}) => ({ ...s, state, why, recorded: !!answer, changed: changed && state !== 'ok', seen: ['ok', 'done', 'skipped'].includes(state), ...more });
+    if (answer?.state === 'skipped') return mark('skipped', `you said no${answer.reason ? `: ${answer.reason}` : ''}`, { reason: answer.reason ?? null, at: answer.at ?? null });
+    const checked = s.source === 'yadflow' && s.known && s.check?.builtin && (!noProgram || NO_PROGRAM_CHECKS.includes(s.check.builtin));
+    if (!checked) {
+      if (answer?.state === 'done') return mark('done', 'you did it on this machine', { at: answer.at ?? null });
+      // A step yad did not write: its check is the file's too, so it never decides what the agent is told.
+      const why = s.source === 'yadflow' && !s.known ? 'it is not what this yadflow writes, so the person decides'
+        : s.check?.run ? 'yad does not run a team\'s check'
+          : s.check?.builtin ? 'not checked here — `yad local-setup` checks it' : 'it has no check';
+      return mark('ask', why);
+    }
     if (s.check.builtin === 'tool' && !found) found = detectInstalled(root).items;
     const r = runBuiltinCheck(s.check, root, { items: found });
-    return { ...s, state: r.ok ? 'ok' : 'pending', why: r.why };
+    return mark(r.ok ? 'ok' : 'pending', r.why);
   });
-  return { exists: true, committed: read.committed, error: null, steps: out, problems };
+  return { ...base, exists: true, error: null, steps: out, problems };
 }
 
-const MARK = { ok: () => c.green('✓'), pending: () => c.yellow('•'), ask: () => c.cyan('?') };
-const counts = (steps) => ({ pending: steps.filter((s) => s.state === 'pending').length, ask: steps.filter((s) => s.state === 'ask').length });
+const MARK = { ok: () => c.green('✓'), done: () => c.green('✓'), skipped: () => c.dim('–'), pending: () => c.yellow('•'), ask: () => c.cyan('?') };
+const counts = (steps) => ({ pending: steps.filter((s) => s.state === 'pending').length, ask: steps.filter((s) => s.state === 'ask').length, skipped: steps.filter((s) => s.state === 'skipped').length });
 
 // `yad local-setup [list] [--json]`. Reads only: runs yad's own checks, never a step.
 export function runLocalSetupList(root, { json = false } = {}) {
@@ -322,7 +343,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   if (!st.steps.length && (st.error || !st.exists)) {
     const why = st.error ? `${LOCAL_SETUP_FILE} ${st.error}` : `this Product has no ${LOCAL_SETUP_FILE} yet`;
     const hint = st.error ? 'fix the file, or restore it from git' : 'run `yad update` (it writes the script), then commit it through review';
-    if (json) return emitJSON({ ok: true, ...where, exists: st.exists, committed: st.committed, error: st.error, steps: [], pending: 0, ask: 0, problems: st.error ? [why] : [], hint });
+    if (json) return emitJSON({ ok: true, ...where, exists: st.exists, committed: st.committed, error: st.error, steps: [], pending: 0, ask: 0, skipped: 0, record: st.record, problems: st.error ? [why] : [], hint });
     (st.error ? warn : info)(why);
     info(hint);
     return undefined;
@@ -331,45 +352,117 @@ export function runLocalSetupList(root, { json = false } = {}) {
   if (json) {
     return emitJSON({
       ok: true, ...where, exists: true, committed: st.committed, error: null,
-      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, known, otherRelease = false, vetted, addedBy = null, hash, state, why }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, known, otherRelease, vetted, addedBy, hash, state, why })),
-      ...n, problems: st.problems,
+      steps: st.steps.map(({ id, source, title, purpose, impact, when, commands, check, verify, person = false, known, otherRelease = false, vetted, addedBy = null, hash, state, why, recorded, changed, seen, reason = null, at = null }) => ({ id, source, title, purpose, impact, when, commands, check: check ?? null, verify: verify ?? null, person, known, otherRelease, vetted, addedBy, hash, state, why, recorded, changed, seen, reason, at })),
+      ...n, record: st.record, problems: st.problems,
     });
   }
   for (const p of st.problems) warn(p);
-  log(c.bold(`\nyad local-setup — ${st.steps.length} step(s): ${n.pending} not done here, ${n.ask} to check with you`));
+  if (st.record.error) warn(recordWarning(st.record));
+  log(c.bold(`\nyad local-setup — ${st.steps.length} step(s): ${n.pending} not done here, ${n.ask} to check with you${n.skipped ? `, ${n.skipped} you said no to` : ''}`));
   if (!st.committed) warn(`${LOCAL_SETUP_FILE} is not committed yet — this is the copy on disk`);
   for (const s of st.steps) {
     log(`  ${MARK[s.state]()} ${c.bold(forTerminal(s.title))} ${c.dim(`(${s.id}, ${s.when}${s.source === 'team' ? ', from your team' : !s.known ? `, not vetted${s.otherRelease ? ' — possibly from another yadflow version' : ''}` : ''})`)}`);
-    if (s.state === 'ok') continue;
+    if (s.state === 'ok' || s.state === 'done') continue;
+    if (s.state === 'skipped') { log(`      ${c.dim(`you said no${s.reason ? `: ${forTerminal(s.reason)}` : ''} — \`yad local-setup done ${s.id}\` once you do it`)}`); continue; }
+    if (s.changed) log(`      ${c.yellow('changed since this machine last answered for it')}`);
     log(`      ${c.dim(`why: ${forTerminal(s.purpose)}`)}`);
     log(`      ${c.dim(`changes for you: ${forTerminal(s.impact)}`)}`);
     for (const cmd of s.commands) log(`      ${c.dim(`run: ${forTerminal(cmd)}`)}`);
     if (s.state === 'ask' && s.check?.run) log(`      ${c.dim(`already done if this succeeds: ${forTerminal(s.check.run)}`)}`);
   }
   info(`the steps, with what each changes, are in ${LOCAL_SETUP_DOC}; \`yad local-setup list --json\` gives them to an agent`);
+  if (n.pending || n.ask) info('after each step: `yad local-setup done <id>`; to say no: `yad local-setup skip <id> --reason "<why>"`');
   return undefined;
 }
 
+// ---- answering for this machine: `yad local-setup done` and `skip` ------------------------------------
+
+export const DONE_USAGE = 'usage: yad local-setup done <id>… [--json]   |   yad local-setup skip <id> --reason "<why>" [--json]';
+const REASON_MAX = 500;
+
+// The steps named, from the committed script, or a refusal (returned) — shared by `done` and `skip`.
+function stepsNamed(root, ids, verb, json) {
+  if (!ids.length) return { refused: refuse(`yad local-setup ${verb} needs a step id`, `${DONE_USAGE} — \`yad local-setup list\` shows the ids`, { json }) };
+  const st = localSetupState(root);
+  if (st.error) return { refused: refuse(`${LOCAL_SETUP_FILE} ${st.error}`, 'fix it, or restore it from git', { json }) };
+  if (!st.steps.length) return { refused: refuse(`this Product has no local setup steps (${LOCAL_SETUP_FILE})`, 'run `yad update` (it writes the script), then commit it through review', { json }) };
+  if (!st.record.path) return { refused: refuse(`${root} is not in a git clone, so this machine's answers have nowhere to go`, 'run it from your clone of the Product', { json }) };
+  if (st.record.error) return { refused: refuse(recordWarning(st.record), 'delete the file, then run this again', { json }) };
+  const byId = new Map(st.steps.map((x) => [x.id, x]));
+  const unknown = [...new Set(ids)].filter((id) => !byId.has(id));
+  if (unknown.length) return { refused: refuse(`not a step in ${LOCAL_SETUP_FILE}: ${unknown.map((id) => forTerminal(id)).join(', ')}`, '`yad local-setup list` shows the ids', { json }) };
+  return { steps: [...new Set(ids)].map((id) => byId.get(id)), st };
+}
+
+// `yad local-setup done <id>…`: the person did these steps on this machine. A step yad can check must pass its
+// check first (the check, not the word, says it is done); every id passes or nothing is written.
+export function runLocalSetupDone(root, { ids = [], json = false, now } = {}) {
+  const got = stepsNamed(root, ids, 'done', json);
+  if (got.refused !== undefined || !got.steps) return got.refused;
+  // A skipped step still has its check: saying no earlier never lets `done` stand in for a check that fails.
+  const failing = got.steps.map((x) => (x.state === 'skipped' && x.source === 'yadflow' && x.known && x.check?.builtin
+    ? { ...x, ...(({ ok: passed, why }) => ({ state: passed ? 'ok' : 'pending', why }))(runBuiltinCheck(x.check, root)) } : x))
+    .filter((x) => x.state === 'pending');
+  if (failing.length) {
+    return refuse(`not done on this machine yet: ${failing.map((x) => `${x.id} (${forTerminal(x.why)})`).join('; ')} — nothing was recorded`,
+      'finish the step, run its verify command, then run this again', { json, failing: failing.map((x) => ({ id: x.id, why: x.why })) });
+  }
+  const file = writeLocalSetupAnswers(root, got.steps.map((x) => ({ id: x.id, hash: x.hash, state: 'done' })), { now });
+  const done = got.steps.map((x) => x.id);
+  if (json) return emitJSON({ ok: true, product: root, done, record: file });
+  ok(`recorded on this machine: ${done.join(', ')} done`);
+  return { done, record: file };
+}
+
+// `yad local-setup skip <id> --reason "<why>"`: the person said no. It holds until the step changes.
+export function runLocalSetupSkip(root, { ids = [], reason, json = false, now } = {}) {
+  if (ids.length > 1) return refuse('yad local-setup skip takes one step id: the reason is the person\'s, for that step', DONE_USAGE, { json });
+  const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim() : '';
+  if (!why) return refuse('yad local-setup skip needs --reason "<why>": the person\'s own words, so the team can see why later', DONE_USAGE, { json });
+  if (why.length > REASON_MAX || forTerminal(why) !== why) return refuse(`the reason must be one plain line of at most ${REASON_MAX} characters`, DONE_USAGE, { json });
+  const got = stepsNamed(root, ids, 'skip', json);
+  if (got.refused !== undefined || !got.steps) return got.refused;
+  const [x] = got.steps;
+  const file = writeLocalSetupAnswers(root, [{ id: x.id, hash: x.hash, state: 'skipped', reason: why }], { now });
+  const required = x.when === 'required';
+  if (json) return emitJSON({ ok: true, product: root, skipped: x.id, reason: why, required, record: file });
+  ok(`recorded on this machine: ${x.id} skipped — it is asked again only when the step changes`);
+  if (required) warn(`${x.id} is marked required: ${forTerminal(x.purpose)}`);
+  info(`changed your mind? do the step, then \`yad local-setup done ${x.id}\``);
+  return { skipped: x.id, reason: why, required, record: file };
+}
+
+// The warning for a record that cannot be read: it is read as empty, so every answer would be asked again.
+const recordWarning = (r) => `local setup: this machine's record (${forTerminal(r.path)}) ${r.error} — read as empty, so every step is asked again; delete it, it only remembers your answers`;
+
 // The few lines setup, update, check and join print about this machine. Never fails the command it is part of.
-// Returns the part of that command's --json answer it adds: `{ pending, ask, unvetted, error }` (step ids, and why
-// the committed script could not be read, or null).
+// Returns the part of that command's --json answer it adds: `{ pending, ask, unvetted, skipped, changed, error }`
+// (step ids, and why the committed script could not be read, or null).
+const EMPTY = Object.freeze({ pending: [], ask: [], unvetted: [], skipped: [], changed: [] });
 export function localSetupSection(root) {
   let st;
-  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { pending: [], ask: [], unvetted: [], error: 'could not read' }; }
-  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { pending: [], ask: [], unvetted: [], error: st.error }; }
-  if (!st.steps.length) return { pending: [], ask: [], unvetted: [], error: null };
+  try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { ...EMPTY, error: 'could not read' }; }
+  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
+  if (!st.steps.length) return { ...EMPTY, error: null };
+  if (st.record.error) warn(recordWarning(st.record));
   const pending = st.steps.filter((s) => s.state === 'pending');
   const ask = st.steps.filter((s) => s.state === 'ask');
+  const skipped = st.steps.filter((s) => s.state === 'skipped');
+  const changed = st.steps.filter((s) => s.changed);
   // The `ask` steps under `yadflow` that yad did not write: printed apart, and `unvetted` in --json.
   const strange = ask.filter((s) => s.source === 'yadflow' && !s.known);
   log(c.bold('\nLocal setup (this machine)'));
-  if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length} step(s) are done here`);
+  if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length - skipped.length} step(s) you said yes to are done here`);
   else {
     if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
-    const theirs = ask.filter((s) => s.source === 'team');
+    const theirs = ask.filter((s) => s.source !== 'yadflow');
+    const unchecked = ask.filter((s) => s.source === 'yadflow' && s.known);
     if (theirs.length) log(`  ${c.cyan('?')} ${theirs.length} step(s) from your team, to check with you: ${theirs.map((s) => s.id).join(', ')}`);
+    if (unchecked.length) log(`  ${c.cyan('?')} ${unchecked.length} step(s) yad cannot check, to check with you: ${unchecked.map((s) => s.id).join(', ')}`);
     if (strange.length) log(`  ${c.yellow('!')} ${strange.length} yadflow step(s) that are not what this yadflow writes — not vetted, to check with you: ${strange.map((s) => s.id).join(', ')}`);
+    if (changed.length) info(`${changed.length} of them changed since this machine last answered: ${changed.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
-  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), error: null };
+  if (skipped.length) info(c.dim(`${skipped.length} step(s) you said no to: ${skipped.map((s) => s.id).join(', ')}`));
+  return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), unvetted: strange.map((s) => s.id), skipped: skipped.map((s) => s.id), changed: changed.map((s) => s.id), error: null };
 }

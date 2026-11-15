@@ -282,6 +282,11 @@ ${c.bold('Where am I / what next')}
                                        machine needs (.sdlc/local-setup.json, shown in LOCAL-SETUP.md),
                                        each with why and what it changes, and whether it is done here.
                                        Runs only yad's own checks, never a step
+  yad local-setup done <id>…           Record on this machine that you did these steps (a step yad can
+                                       check must pass its check first)
+  yad local-setup skip <id> --reason <text>   Record that you said no to a step; it is asked again
+                                       only when the step changes. Both write inside .git, never a file
+                                       anyone commits
   yad detect [--json] [--dir <folder>] Which skills, agents, MCP servers and plugins are installed
                                        for the agents that work here — in this folder and in your
                                        home folder, and which agents read each place. Read-only;
@@ -716,7 +721,7 @@ const ACTIONS = {
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove', 'connect'], default: 'list' },
-  'local-setup': { known: ['list'], default: 'list' },
+  'local-setup': { known: ['list', 'done', 'skip'], default: 'list' },
   signing: { known: ['check'], default: 'check' },
   ci: { known: ['check'], default: 'check' },
   member: { known: ['add', 'list', 'remove'], default: 'list' },
@@ -1039,13 +1044,17 @@ async function main() {
       break;
     }
     case 'local-setup': {
-      // E185. Reads the Product's committed script and runs yad's own checks for this machine; writes nothing.
-      const [, action = 'list', extra] = o._;
-      const usage = 'usage: yad local-setup [list] [--json] [--dir <the Product>]';
-      if (action !== 'list') { refuse(`unknown local-setup action: ${action} (list)`, usage); break; }
-      if (extra) { refuse(`yad local-setup list takes no more words (got: ${extra})`, usage); break; }
+      // E185. `list` reads the Product's committed script and runs yad's own checks for this machine. `done` and
+      // `skip` write only this machine's answers, inside git's own folder (cli/local-setup-record.mjs).
+      const [, action = 'list', ...words] = o._;
+      const usage = 'usage: yad local-setup [list] [--json] | done <id>… | skip <id> --reason "<why>"   [--dir <the Product>]';
+      if (!['list', 'done', 'skip'].includes(action)) { refuse(`unknown local-setup action: ${action} (list, done, skip)`, usage); break; }
+      if (action === 'list' && words.length) { refuse(`yad local-setup list takes no more words (got: ${words.join(' ')})`, usage); break; }
+      if (action !== 'skip' && o.reason !== undefined) { refuse(`--reason goes with yad local-setup skip`, usage); break; }
       if (!commands.hasProduct(o.dir)) { refuse(`no Product here (${o.dir}) — the local setup script is the Product's .sdlc/local-setup.json`, 'run it from the Product, or from a repo it registers'); break; }
-      result = commands.runLocalSetupList(o.dir, { json: o.json });
+      result = action === 'list' ? commands.runLocalSetupList(o.dir, { json: o.json })
+        : action === 'done' ? commands.runLocalSetupDone(o.dir, { ids: words, json: o.json })
+          : commands.runLocalSetupSkip(o.dir, { ids: words, reason: o.reason, json: o.json });
       break;
     }
     case 'detect': {

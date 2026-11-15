@@ -55,7 +55,7 @@ export { runDocs } from '../cli/docs.mjs';
 export { runDetect } from '../cli/detect.mjs';
 export { runToolboxAdd, runToolboxCheck, runToolboxList, runToolboxRemove } from '../cli/toolbox.mjs';
 export { runToolboxConnect } from '../cli/toolbox-connect.mjs';
-export { runLocalSetupList } from '../cli/local-setup.mjs';
+export { runLocalSetupList, runLocalSetupDone, runLocalSetupSkip } from '../cli/local-setup.mjs';
 export { runDoctor } from '../cli/doctor.mjs';
 export { runSigningCheck } from '../cli/signing.mjs';
 export { runCiCheck } from '../cli/ci-check.mjs';

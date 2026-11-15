@@ -27,7 +27,8 @@ process.env.YAD_PLATFORM_LOGIN = '0';
 process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 
-const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS } = await import('./local-setup.mjs');
+const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS, runLocalSetupDone, runLocalSetupSkip } = await import('./local-setup.mjs');
+const { localSetupRecordPath, readLocalSetupRecord } = await import('./local-setup-record.mjs');
 const { yadflowSteps, stepHash, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC } = await import('./local-setup-steps.mjs');
 const { applyMarkedBlock } = await import('./marked-block.mjs');
 const { VERSION } = await import('./manifest.mjs');
@@ -420,4 +421,137 @@ test('yad new writes the script; an old project gets it back on its next update;
   assert.ok(after.json.steps.find((s) => s.id === 'yadflow-cli').state === 'ok');
   assert.equal(yad(T, P, ['local-setup', 'nope']).code, 1);
   assert.equal(yad(T, T, ['local-setup']).code, 1, 'no Product here');
+});
+
+// ---- this machine's record (E185 part 2) ---------------------------------------------------------------
+
+// A Product with its script written and committed, plus one team step, so the record has something of each kind.
+// Its toolbox has a tool of the team's own that no machine has, so one step yad checks always fails.
+const MISSING_TOOL = { id: 'nowhere', role: 'does a thing', fallback: 'nothing', detect: { bins: ['yad-e185-no-such-program'] }, install: [{ type: 'script', command: 'brew install nowhere' }] };
+function committedProduct(config, team = [teamStep()]) {
+  const dir = product(config);
+  put(path.join(dir, '.sdlc/toolbox.json'), { custom: [MISSING_TOOL] });
+  applyAll(localSetupActions(dir));
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  put(file, { ...JSON.parse(read(file)), team });
+  const g = (...a) => execFileSync('git', a, { cwd: dir, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+  g('add', '-A');
+  g('-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'setup', '--no-verify');
+  return dir;
+}
+const quiet = (fn) => {
+  const saved = [console.log, console.error, process.exitCode];
+  const lines = [];
+  console.log = (...a) => lines.push(a.join(' '));
+  console.error = (...a) => lines.push(a.join(' '));
+  try { return { value: fn(), lines, code: process.exitCode }; } finally { [console.log, console.error] = saved; process.exitCode = saved[2]; }
+};
+const stateOf = (dir, id, opts) => localSetupState(dir, opts).steps.find((s) => s.id === id);
+
+test('the record lives in git\'s own folder, so it is never committed, and every worktree of the clone shares it', () => {
+  const dir = committedProduct();
+  const file = localSetupRecordPath(dir);
+  assert.equal(file, path.join(fs.realpathSync(path.join(dir, '.git')), 'yad', 'local-setup-done.json'));
+  quiet(() => runLocalSetupDone(dir, { ids: ['docker'] }));
+  assert.ok(fs.existsSync(file));
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }), '', 'nothing in the repo changed');
+  const wt = path.join(tmp(), 'wt');
+  execFileSync('git', ['worktree', 'add', '-q', '--detach', wt], { cwd: dir });
+  assert.equal(localSetupRecordPath(wt), file);
+  assert.equal(stateOf(wt, 'docker').state, 'done');
+});
+
+test('done records a team step; a step yad can check is refused while its check fails, and nothing is written', () => {
+  const dir = committedProduct();
+  assert.equal(stateOf(dir, 'docker').state, 'ask');
+  const r = quiet(() => runLocalSetupDone(dir, { ids: ['docker'] }));
+  assert.deepEqual(r.value.done, ['docker']);
+  const docker = stateOf(dir, 'docker');
+  assert.equal(docker.state, 'done');
+  assert.ok(docker.seen && docker.recorded && !docker.changed);
+
+  // A tool step yad checks, and the tool is not here: its check fails.
+  const pending = stateOf(dir, 'tool-nowhere');
+  assert.equal(pending.state, 'pending', 'a tool that is not installed here');
+  const before = read(localSetupRecordPath(dir));
+  const refused = quiet(() => runLocalSetupDone(dir, { ids: ['docker', pending.id] }));
+  assert.equal(refused.code, 1);
+  assert.equal(read(localSetupRecordPath(dir)), before, 'every id passes or nothing is written');
+  assert.equal(quiet(() => runLocalSetupDone(dir, { ids: ['nope'] })).code, 1, 'an id that is not a step');
+  assert.equal(quiet(() => runLocalSetupDone(dir, { ids: [] })).code, 1);
+});
+
+test('skip needs a reason, holds until the step changes, and done and skip replace each other', () => {
+  const dir = committedProduct();
+  assert.equal(quiet(() => runLocalSetupSkip(dir, { ids: ['docker'] })).code, 1, 'no reason');
+  assert.equal(quiet(() => runLocalSetupSkip(dir, { ids: ['docker'], reason: '   ' })).code, 1);
+  assert.equal(quiet(() => runLocalSetupSkip(dir, { ids: ['docker', 'yadflow-cli'], reason: 'x' })).code, 1, 'one id');
+  assert.equal(quiet(() => runLocalSetupSkip(dir, { ids: ['docker'], reason: 'a\u001b[2Jb' })).code, 1, 'one plain line');
+  quiet(() => runLocalSetupSkip(dir, { ids: ['docker'], reason: 'I run the API  in the cloud' }));
+  let docker = stateOf(dir, 'docker');
+  assert.equal(docker.state, 'skipped');
+  assert.equal(docker.reason, 'I run the API in the cloud');
+  const section = quiet(() => localSetupSection(dir)).value;
+  assert.deepEqual(section.skipped, ['docker']);
+  assert.ok(!section.ask.includes('docker') && !section.pending.includes('docker'));
+
+  // A skipped step yad checks still needs its check to pass before `done`.
+  const pending = stateOf(dir, 'tool-nowhere');
+  quiet(() => runLocalSetupSkip(dir, { ids: [pending.id], reason: 'not for me' }));
+  assert.equal(stateOf(dir, pending.id).state, 'skipped', 'a no wins over a check');
+  assert.equal(quiet(() => runLocalSetupDone(dir, { ids: [pending.id] })).code, 1);
+
+  quiet(() => runLocalSetupDone(dir, { ids: ['docker'] }));
+  assert.equal(stateOf(dir, 'docker').state, 'done');
+
+  // The team changes what the step runs: the old answer no longer counts.
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  put(file, { ...JSON.parse(read(file)), team: [teamStep({ commands: ['brew install --cask docker@4'] })] });
+  execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qam', 'docker 4', '--no-verify'], { cwd: dir });
+  docker = stateOf(dir, 'docker');
+  assert.equal(docker.state, 'ask');
+  assert.ok(docker.changed && !docker.recorded && !docker.seen);
+  assert.deepEqual(quiet(() => localSetupSection(dir)).value.changed, ['docker']);
+  // Its wording alone changes nothing (the hash covers what a step runs).
+  quiet(() => runLocalSetupDone(dir, { ids: ['docker'] }));
+  put(file, { ...JSON.parse(read(file)), team: [teamStep({ commands: ['brew install --cask docker@4'], purpose: 'runs the API and the queue' })] });
+  execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', 'commit', '-qam', 'words', '--no-verify'], { cwd: dir });
+  assert.equal(stateOf(dir, 'docker').state, 'done');
+});
+
+test('a record that does not parse reads as empty, with a warning, and is never overwritten', () => {
+  const dir = committedProduct();
+  const file = localSetupRecordPath(dir);
+  put(file, '{ not json');
+  const rec = readLocalSetupRecord(dir);
+  assert.deepEqual(rec.entries, {});
+  assert.equal(rec.error, 'does not parse');
+  assert.equal(stateOf(dir, 'docker').state, 'ask');
+  const r = quiet(() => runLocalSetupDone(dir, { ids: ['docker'] }));
+  assert.equal(r.code, 1);
+  assert.equal(read(file), '{ not json');
+  assert.ok(quiet(() => localSetupSection(dir)).lines.some((l) => /read as empty/.test(l)));
+  // An entry of the wrong shape is left out; the others count.
+  const hash = stateOf(dir, 'docker').hash;
+  put(file, { steps: { docker: { hash, state: 'done' }, other: { hash: 1, state: 'done' }, x: 'no' } });
+  assert.deepEqual(Object.keys(readLocalSetupRecord(dir).entries), ['docker']);
+  // A write keeps every other entry and key.
+  put(file, { note: 'mine', steps: { gone: { hash: 'h', state: 'done', at: 't' } } });
+  quiet(() => runLocalSetupSkip(dir, { ids: ['docker'], reason: 'no' }));
+  const doc = JSON.parse(read(file));
+  assert.equal(doc.note, 'mine');
+  assert.ok(doc.steps.gone && doc.steps.docker.state === 'skipped');
+  assert.equal(doc.schemaVersion, undefined, 'not a .sdlc file: no shape stamp');
+});
+
+test('yad guide and doctor run no check that starts a program: the login step is judged by the record', () => {
+  const dir = committedProduct({ platform: 'github', ledger: 'local', git_url: 'https://github.com/o/r.git' });
+  const login = stateOf(dir, 'platform-login', { noProgram: true });
+  assert.equal(login.state, 'ask');
+  assert.match(login.why, /not checked here/);
+  quiet(() => runLocalSetupDone(dir, { ids: ['platform-login'] }).value);
+  // `done` ran the real check (gh is not signed in on a test machine, or not installed): refused, or recorded.
+  const after = stateOf(dir, 'platform-login', { noProgram: true });
+  assert.ok(['ask', 'done'].includes(after.state));
+  assert.equal(stateOf(dir, 'yadflow-cli', { noProgram: true }).state, 'ok', 'a check that starts nothing still runs');
 });

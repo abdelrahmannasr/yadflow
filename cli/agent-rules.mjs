@@ -92,8 +92,11 @@ export const COMMAND_CLASS = {
   // records the team's choice — a team-wide file, as `toolbox add` writes — so only on the person's yes to
   // the question the read gave (the connect-tool rule); --replace changes the team's current tool.
   'toolbox connect': { class: 'read', flags: { verify: 'on-request', replace: 'on-request' } },
-  // E185: reads the Product's local setup script and runs yad's own checks for this machine. Runs no step.
+  // E185: `list` reads the Product's local setup script and runs yad's own checks for this machine; `done` and
+  // `skip` record this machine's answers inside .git. None runs a step. A no is the person's: `skip` on request.
+  'local-setup done': { class: 'local-write' },
   'local-setup list': { class: 'read' },
+  'local-setup skip': { class: 'on-request' },
   'skill list': { class: 'read' },
   'skill recommend': { class: 'read' },
   'skill bind': { class: 'on-request' },
