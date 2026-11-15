@@ -66,7 +66,8 @@ export function notice(product = '.') {
   if (process.env.YAD_HOOK_DISABLE === '1') return null;
   const at = asPrefix(product);
   // The team turned it off (a hand line in a hook of its own still runs this copy): say nothing.
-  const cfg = parse(git(['show', `HEAD:./${at}.sdlc/product.json`]));
+  // The Product config, or its older name when that is all there is (`.sdlc/hub.json`).
+  const cfg = parse(git(['show', `HEAD:./${at}.sdlc/product.json`]) ?? git(['show', `HEAD:./${at}.sdlc/hub.json`]));
   if (cfg && cfg.localSetupNotice === false) return null;
   // No ORIG_HEAD: no move to compare. One without the file: the pull brought the script itself.
   if (git(['rev-parse', '-q', '--verify', 'ORIG_HEAD^{commit}']) === null) return null;

@@ -1090,7 +1090,18 @@ test('E185 part 4 review 2: a hook of the team\'s own with yad\'s line is wired;
   applyAll(localSetupActions(dir));
   applyAll(localSetupNoticeActions(dir));
   // Put yad's own line in a hook of the team's.
-  put(path.join(dir, '.git', 'hooks', 'post-merge'), '#!/bin/sh\necho mine\nd="$(git rev-parse --git-common-dir 2>/dev/null)"; notice="$d/yad/local-setup-notice.mjs"; [ -z "$d" ] || [ ! -f "$notice" ] || node "$notice" \'.\' || true\n');
+  const { localSetupNoticeStates: states } = await import('./plan.mjs');
+  const own = path.join(dir, '.git', 'hooks', 'post-merge');
+  // A mention of the path in a comment is not a wired hook (review 3).
+  put(own, '#!/bin/sh\necho mine\n# notice="$d/yad/local-setup-notice.mjs"; node "$notice" \'.\'\n');
+  fs.chmodSync(own, 0o755);
+  assert.equal(states(dir)[0].state, 'foreign');
+  put(own, '#!/bin/sh\necho mine\n{ d="$(git rev-parse --git-common-dir 2>/dev/null)" || d=; notice="$d/yad/local-setup-notice.mjs"; [ -z "$d" ] || [ ! -f "$notice" ] || node "$notice" \'.\' || true; }\n');
+  if (process.platform !== 'win32') {
+    fs.chmodSync(own, 0o644);
+    assert.equal(states(dir)[0].state, 'foreign', 'git skips a hook it cannot run');
+  }
+  fs.chmodSync(own, 0o755);
   assert.equal(localSetupNoticeStates(dir)[0].state, 'hand-wired');
   assert.equal(localSetupNoticeAdvice(dir), null);
   const checks = []; localSetupNoticeCheck(dir, checks);
@@ -1118,4 +1129,32 @@ test('E185 part 4 review 2: a hook of the team\'s own with yad\'s line is wired;
     gitC(dir, 'update-ref', 'ORIG_HEAD', 'HEAD~2');
     assert.match(notice('.'), /\(docker\)/, 'on again');
   } finally { process.chdir(cwd); }
+});
+
+test('E185 part 4 review 3: a husky hook with yad\'s line is wired; the line keeps a set -e hook going; hub.json\'s off switch counts', { skip: process.platform === 'win32' }, async () => {
+  const { localSetupNoticeActions, localSetupNoticeStates, localSetupNoticeAdvice } = await import('./plan.mjs');
+  const dir = product();
+  applyAll(localSetupActions(dir));
+  applyAll(localSetupNoticeActions(dir));
+  gitIn(dir, 'config', 'core.hooksPath', '.husky/_');
+  assert.deepEqual(localSetupNoticeStates(dir).map((s) => s.state), ['hooks-path', 'hooks-path']);
+  const [merge, rewrite] = localSetupNoticeStates(dir);
+  put(path.join(dir, '.husky', 'post-merge'), `set -e\n${merge.line}\necho after\n`);
+  put(path.join(dir, '.husky', 'post-rewrite'), `${rewrite.line}\n`);
+  assert.deepEqual(localSetupNoticeStates(dir).map((s) => s.state), ['hand-wired', 'hand-wired']);
+  assert.equal(localSetupNoticeAdvice(dir), null);
+  // The line never stops a `set -e` hook, even when git cannot name its folder.
+  const r = spawnSync('sh', ['-e', path.join(dir, '.husky', 'post-merge')], { cwd: tmp(), encoding: 'utf8', env: { ...process.env, PATH: process.env.PATH, GIT_DIR: '/nonexistent' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /after/);
+  // A Product on the older config name turns the script off too.
+  const { notice } = await import(NOTICE);
+  fs.renameSync(path.join(dir, '.sdlc', 'product.json'), path.join(dir, '.sdlc', 'hub.json'));
+  put(path.join(dir, '.sdlc', 'hub.json'), { name: 'Orchard', localSetupNotice: false });
+  gitC(dir, 'add', '-A'); gitC(dir, 'commit', '-qm', 'one', '--no-verify');
+  const file = path.join(dir, LOCAL_SETUP_FILE);
+  put(file, { ...JSON.parse(read(file)), team: [teamStep()] }); gitC(dir, 'add', '-A'); gitC(dir, 'commit', '-qm', 'two', '--no-verify');
+  gitC(dir, 'update-ref', 'ORIG_HEAD', 'HEAD~1');
+  const cwd = process.cwd();
+  try { process.chdir(dir); assert.equal(notice('.'), null); } finally { process.chdir(cwd); }
 });

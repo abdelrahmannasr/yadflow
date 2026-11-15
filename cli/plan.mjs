@@ -1544,13 +1544,26 @@ function hookStateFor(spec, root) {
     // beside it, `.husky/<name>`. Name that one, or the advice sends them to a file husky rewrites.
     const dir = hooksPath.stdout.replace(/[\\/]+$/, '');
     const edit = /(^|[\\/])_$/.test(dir) ? `${dir.replace(/[\\/]?_$/, '') || '.'}/${spec.name}` : `${dir}/${spec.name}`;
+    // The hook the person edits there may already hold yad's line (review 3). A tool's runner (husky) calls it,
+    // so its execute bit is the tool's business.
+    if (spec.wired) {
+      const top = run('git', ['-C', root, 'rev-parse', '--show-toplevel']);
+      let edited = null;
+      try { edited = fs.readFileSync(path.resolve(top.ok && top.stdout ? top.stdout : root, edit), 'utf8'); } catch { /* none */ }
+      if (edited !== null && spec.wired(edited, prefix)) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hand-wired' };
+    }
     return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hooks-path' };
   }
   let text = null;
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
-  // A hook of the team's own that already runs ours by the line yad gave (`spec.wired`): nothing to say (review 2).
-  if (!text.includes(spec.marker)) return { applies: true, file, expected, prefix, line, state: spec.wired?.(text) ? 'hand-wired' : 'foreign' };
+  // A hook of the team's own that already runs ours by the line yad gave (`spec.wired`), and that git can run (its
+  // execute bit, everywhere but Windows): nothing to say (reviews 2, 3).
+  if (!text.includes(spec.marker)) {
+    let canRun = true;
+    if (process.platform !== 'win32') { try { canRun = (fs.statSync(file).mode & 0o111) !== 0; } catch { canRun = false; } }
+    return { applies: true, file, expected, prefix, line, state: canRun && spec.wired?.(text, prefix) ? 'hand-wired' : 'foreign' };
+  }
   // Git silently skips a hook that is not executable (everywhere but Windows), so right bytes without the
   // bit are not an installed hook.
   let runnable = true;
@@ -1648,7 +1661,8 @@ function noticeCopyPath(root) {
 // The hook finds the copy through git at run time, and tells it where the Product is within the repo.
 // When git cannot say where its folder is, nothing runs: never a fixed path (review 2).
 const NOTICE_FIND = 'd="$(git rev-parse --git-common-dir 2>/dev/null)" && [ -n "$d" ] || exit 0; notice="$d/yad/local-setup-notice.mjs"';
-const NOTICE_FIND_LINE = 'd="$(git rev-parse --git-common-dir 2>/dev/null)"; notice="$d/yad/local-setup-notice.mjs"';
+// `|| d=`: a failing git never stops a team's hook that runs under `set -e` (review 3).
+const NOTICE_FIND_LINE = 'd="$(git rev-parse --git-common-dir 2>/dev/null)" || d=; notice="$d/yad/local-setup-notice.mjs"';
 const noticeHookScript = (name, prefix = '') => [
   '#!/bin/sh',
   `${NOTICE_HOOK_MARKER} — installed in this clone by \`yad check --fix\`.`,
@@ -1674,8 +1688,10 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
   scripts: (prefix) => [noticeHookScript(name, prefix)],
   line: (prefix) => noticeLine(name, prefix),
   applies: noticeWanted,
-  // The line yad gives runs our copy: a hook that holds it is wired by hand.
-  wired: (text) => text.includes('/yad/local-setup-notice.mjs'),
+  // Wired by hand: a line that is not a comment and runs our copy for this Product's folder — and, for
+  // post-rewrite, only on a rebase (review 3: a mention of the path alone is not enough).
+  wired: (text, prefix) => text.split(/\r?\n/).some((l) => !/^\s*#/.test(l) && l.includes('/yad/local-setup-notice.mjs')
+    && l.includes(`node "$notice" ${shQuote(prefix || '.')}`) && (name !== 'post-rewrite' || l.includes('[ "$1" != rebase ]'))),
   item: `${name} git hook (this clone)`,
   advice: () => null,
 })));
