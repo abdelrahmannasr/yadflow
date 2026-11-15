@@ -343,10 +343,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
         // yad's block is merged into (E158 review 1).
         let head;
         if (a.kind === 'text') {
-          const r = spawnSync('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+          const r = spawnSync('git', ['show', `HEAD:./${a.shared}`], { cwd: a.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
           head = r.status === 0 ? r.stdout : null;
         } else {
-          const r = run('git', ['show', `HEAD:${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
+          const r = run('git', ['show', `HEAD:./${a.shared}`], { cwd: a.root, maxBuffer: 64 * 1024 * 1024 });
           head = r.ok ? r.stdout : null;
         }
         shared.set(file, { a, merges: [], disk: sharedText(file), head });

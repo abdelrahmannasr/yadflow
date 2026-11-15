@@ -43,7 +43,8 @@ const MARKER = /<!--|-->/;
 // the agent runs another.
 // Also every format and separator character (zero-width spaces, soft hyphens, tag characters): `exa\u200bmple.com`
 // reads as `example.com`.
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+// And every space but the plain one: a no-break space looks like a space and is not one to the shell.
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/u;
 const oneLine = (v) => isText(v) && forTerminal(v) === v && !HIDDEN.test(v);
 
 export function stepProblems(s, source) {
@@ -361,7 +362,10 @@ export function localSetupSection(root) {
   if (!pending.length && !ask.length) log(`  ${c.green('✓')} all ${st.steps.length} step(s) are done here`);
   else {
     if (pending.length) log(`  ${c.yellow('•')} ${pending.length} step(s) are not done here: ${pending.map((s) => s.id).join(', ')}`);
-    if (ask.length) log(`  ${c.cyan('?')} ${ask.length} step(s) from your team, to check with you: ${ask.map((s) => s.id).join(', ')}`);
+    const theirs = ask.filter((s) => s.source === 'team');
+    const strange = ask.filter((s) => s.source !== 'team');
+    if (theirs.length) log(`  ${c.cyan('?')} ${theirs.length} step(s) from your team, to check with you: ${theirs.map((s) => s.id).join(', ')}`);
+    if (strange.length) log(`  ${c.yellow('!')} ${strange.length} yadflow step(s) that are not what this yadflow writes — not vetted, to check with you: ${strange.map((s) => s.id).join(', ')}`);
     info(`see them with \`yad local-setup\` — each says why it is needed and what it changes for you (${LOCAL_SETUP_DOC})`);
   }
   return { pending: pending.map((s) => s.id), ask: ask.map((s) => s.id), error: null };

@@ -160,6 +160,7 @@ test('a step holding a comment marker is refused, nested ones too, so the view c
   }
   // A command must be one line: a newline would put a line of its own into the view.
   assert.equal(readSteps({ team: [teamStep({ commands: ['a\nb'] })] }).steps.length, 0);
+  assert.equal(readSteps({ team: [teamStep({ commands: ['echo a b'] })] }).steps.length, 1, 'a plain space is fine');
 });
 
 test('commands are shown exactly as written, backticks and all; the view is stable', () => {
@@ -272,7 +273,7 @@ test('a file saying another catalogue wrote it never softens "not vetted": the r
 });
 
 test('a command with an invisible or direction-changing character is refused', () => {
-  for (const ch of ['\u202e', '\u2066', '\u200f', '\u2028', '\u0007', '\u200b', '\u00ad', '\u2060', '\ufeff', '\u{e0041}']) {
+  for (const ch of ['\u202e', '\u2066', '\u200f', '\u2028', '\u0007', '\u200b', '\u00ad', '\u2060', '\ufeff', '\u{e0041}', '\u00a0', '\u2003', '\u3000']) {
     assert.equal(readSteps({ team: [teamStep({ commands: [`echo a${ch}b`] })] }).steps.length, 0, JSON.stringify(ch));
     assert.equal(readSteps({ team: [teamStep({ check: { run: `true${ch}` } })] }).steps.length, 0, JSON.stringify(ch));
   }
