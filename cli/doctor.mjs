@@ -32,6 +32,7 @@ import { readOwners } from './owners.mjs';
 import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 import { signingDoctorLine } from './signing.mjs';
+import { localSetupWaiting } from './local-setup.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
 import { previewPattern, PREVIEW_KEY } from './preview.mjs';
@@ -122,6 +123,19 @@ export function envChecks(checks, { nodeVersion = process.versions.node } = {}) 
 export function signingChecks(checks, root) {
   const line = signingDoctorLine(root);
   check(checks, 'signing', 'environment', line.status, line.message, line.hint, { alwaysHint: true });
+}
+
+// E185 — this machine against the Product's local setup script: the steps not answered for yet. The same cheap
+// reading `yad guide` makes (no gh, no network); `yad local-setup` runs every check. Silent with no script.
+export function localSetupChecks(checks, root) {
+  const w = localSetupWaiting(root);
+  if (!w) return;
+  if (w.error) { check(checks, 'local-setup', 'environment', 'warn', `local setup: ${w.error}`, 'fix it, or restore it from git; `yad local-setup` says more'); return; }
+  if (w.recordError) check(checks, 'local-setup-record', 'environment', 'warn', `local setup: this machine's record ${w.recordError} — read as empty, so every step is asked again`, 'delete it (inside .git/yad/): it only remembers which steps you did or said no to');
+  const ids = [...w.pending, ...w.ask];
+  if (!ids.length) return;
+  check(checks, 'local-setup', 'environment', 'warn', `local setup: ${ids.length} step(s) for this machine are waiting for your answer: ${ids.join(', ')}${w.changed.length ? ` (${w.changed.length} changed since you answered)` : ''}`,
+    'your agent can go through them with you: `yad local-setup` shows why each is needed and what it changes for you');
 }
 
 // #352 — the machine setup local work depends on (cli/machine.mjs): the active Node against each repo's
@@ -2886,6 +2900,7 @@ export function collectDoctor(root, { headCount = null } = {}) {
   const checks = [];
   envChecks(checks);
   signingChecks(checks, root);
+  localSetupChecks(checks, root);
   machineChecks(checks, root);
   projectChecks(checks, root, { headCount });
   riskMapChecks(checks, root);

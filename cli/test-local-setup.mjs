@@ -555,3 +555,22 @@ test('yad guide and doctor run no check that starts a program: the login step is
   assert.ok(['ask', 'done'].includes(after.state));
   assert.equal(stateOf(dir, 'yadflow-cli', { noProgram: true }).state, 'ok', 'a check that starts nothing still runs');
 });
+
+test('doctor names the steps waiting on this machine, and a record it cannot read; nothing with no script', async () => {
+  const { localSetupChecks } = await import('./doctor.mjs');
+  const rows = (dir) => { const checks = []; localSetupChecks(checks, dir); return checks; };
+  assert.deepEqual(rows(product()), [], 'no script: nothing to say');
+  const dir = committedProduct();
+  let [row] = rows(dir);
+  assert.equal(row.id, 'local-setup');
+  assert.equal(row.status, 'warn');
+  assert.match(row.message, /docker/);
+  assert.match(row.message, /tool-nowhere/);
+  quiet(() => runLocalSetupSkip(dir, { ids: ['docker'], reason: 'no' }));
+  quiet(() => runLocalSetupSkip(dir, { ids: ['tool-nowhere'], reason: 'no' }));
+  assert.ok(!rows(dir).some((r) => r.id === 'local-setup' && /docker|tool-nowhere/.test(r.message)));
+  put(localSetupRecordPath(dir), '{');
+  row = rows(dir).find((r) => r.id === 'local-setup-record');
+  assert.equal(row.status, 'warn');
+  assert.match(row.message, /does not parse/);
+});
