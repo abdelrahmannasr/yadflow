@@ -54,7 +54,7 @@ export function FlowOverviewSection() {
                     borderColor: 'var(--color-border-default)',
                   }}
                 >
-                  <span style={{ color: readable(path.color) }}><Icon name={path.icon} size={18} /></span>
+                  <span className="flex shrink-0" style={{ color: readable(path.color) }}><Icon name={path.icon} size={18} /></span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-slate-200 font-medium">{path.label}</span>
                     <p className="text-xs text-slate-500 truncate">{path.description}</p>

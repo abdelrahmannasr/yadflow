@@ -115,7 +115,7 @@ export function SystemLogsTerminal() {
                 <span className="w-16 shrink-0 text-slate-600">
                   {log.timestamp.toLocaleTimeString('en-US', { hour12: false })}
                 </span>
-                <span style={{ color: readable(LEVEL_COLORS[log.level]) }}>{log.source}</span>
+                <span style={{ color: readable(LEVEL_COLORS[log.level] ?? 'var(--color-tint-slate-500)') }}>{log.source}</span>
                 <span className="text-slate-300">{log.message}</span>
               </div>
             );

@@ -13349,7 +13349,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f', '0.0.6': 'sha256:095be46dfa09e92d6998d5401cd1f6fcf71c6c408129887cd0d641875aaee655', '0.0.7': 'sha256:f7f1feb59a9831b29a84f9e0154949949766fc8914b648a4777e48e6c61c71fc' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f', '0.0.6': 'sha256:095be46dfa09e92d6998d5401cd1f6fcf71c6c408129887cd0d641875aaee655', '0.0.7': 'sha256:629a4bc9c45ce39f31c389ebc29fcf17f5eeb76257ce7bc55e0166819e666421' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
@@ -13387,23 +13387,57 @@ test('docs shell: the light look sets every colour the dark look does, and the b
   assert.ok(tints.size > 1);
   for (const t of tints) assert.ok(dark.has(t) && light.has(t), `${t} is set in both looks`);
 
-  // Text colours: a literal colour or a data colour given as text must go through readable() (or be one of
-  // the page's own variables), so it reads in the light look too. A colour that gets alpha digits appended
-  // stays plain (that is the data module's hex, never a var()).
-  const bare = [];
-  for (const [f, t] of src) {
-    if (!f.startsWith('src/components') && !f.startsWith('src/pages')) continue;
-    for (const line of t.split('\n')) {
-      // A whole value that is a name (`color: role.color,`): a data colour. A hex on a style line (or a
-      // ternary of hexes there): a literal drawn as text. A hex in a table (`P1: { color: '#ef4444' }`) is
-      // the data itself, wrapped where it is drawn, so it is not read here.
-      for (const m of line.matchAll(/(?<![\w-])color: (?!readable\(|['"`]var\()([A-Za-z_][\w.]*(?:\[[^\]]+\])?)\s*(?=[,}])/g)) {
-        if (!['true', 'false', 'undefined'].includes(m[1])) bare.push(`${f}: color: ${m[1]}`);
-      }
-      if (/style=\{\{\s*color\s*[,}]/.test(line)) bare.push(`${f}: style={{ color }}`);
-      if (line.includes('style={{')) for (const m of line.matchAll(/(?<![\w-])color: (?!readable\()([^,}]*['"]#[0-9a-fA-F]{3,8}['"][^,}]*)/g)) bare.push(`${f}: color: ${m[1].trim()}`);
+  // Text colours: a literal colour or a data colour drawn as text must go through readable() (or be one of the
+  // page's own variables), so it reads in the light look too. Every `color:` value is read whole (it may span
+  // lines), and every result it can take (each branch of `? :`, `||`, `??`) is checked, not the conditions.
+  // A value that is one quoted hex is a data table's entry (`P1: { color: '#ef4444' }`), wrapped where it is
+  // drawn, unless it sits on a JSX style line.
+  const PAREN = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+  const VALUE = new RegExp(String.raw`(?<![\w-])color:\s*((?:[^,;{}()]|${PAREN})+)`, 'g');
+  const OK_RESULT = /^(?:readable\(|['"`]var\(--color-|['"](?:white|transparent|inherit)['"]$|undefined$)/;
+  function splitTop(v) {
+    const out = []; let depth = 0, quote = null, cur = '';
+    for (let i = 0; i < v.length; i++) {
+      const ch = v[i];
+      if (quote) { cur += ch; if (ch === quote && v[i - 1] !== '\\') quote = null; continue; }
+      if (ch === "'" || ch === '"' || ch === '`') { quote = ch; cur += ch; continue; }
+      if (ch === '(' || ch === '[') depth++;
+      if (ch === ')' || ch === ']') depth--;
+      const two = v.slice(i, i + 2);
+      if (depth === 0 && (two === '||' || two === '??')) { out.push([cur, 'or']); cur = ''; i++; continue; }
+      if (depth === 0 && (ch === '?' || ch === ':')) { out.push([cur, ch]); cur = ''; continue; }
+      cur += ch;
     }
+    out.push([cur, 'end']);
+    return out.filter(([, sep]) => sep !== '?').map(([x]) => x.trim()); // a part ending in `?` is a condition
   }
+  function textColourProblems(text) {
+    const found = [];
+    for (const m of text.matchAll(/text-\[\$\{/g)) found.push(`a class built at run time: ${text.slice(m.index, m.index + 30)}`);
+    if (/style=\{\{\s*color\s*[,}]/.test(text)) found.push('style={{ color }}');
+    for (const m of text.matchAll(VALUE)) {
+      const v = m[1].trim();
+      if (/^string\b/.test(v)) continue; // a type
+      const line = text.slice(text.lastIndexOf('\n', m.index) + 1, text.indexOf('\n', m.index));
+      if (/^['"]#[0-9a-fA-F]{3,8}['"]$/.test(v) && !line.includes('style={{')) continue; // a data table's entry
+      for (const r of splitTop(v)) if (r && !OK_RESULT.test(r)) found.push(`color: ${v.replace(/\s+/g, ' ')} (${r})`);
+    }
+    return found;
+  }
+  // The scanner itself: each shape a review found drawn bare must be caught, and the wrapped shapes pass.
+  const SAMPLE = [
+    "color: activeSubPathId === sub.id ? selectedPath.color : 'var(--color-text-secondary)',",
+    "color: r.level === 'high' ? '#ef4444' : r.level === 'medium' ? '#f59e0b' : '#22c55e',",
+    "color: LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)',",
+    "color: isActive\n  ? roleColor\n  : 'var(--color-text-muted)',",
+    'style={{ color }}',
+    '<Icon className={`text-[${path.color}]`} />',
+  ];
+  for (const s of SAMPLE) assert.ok(textColourProblems(s).length > 0, `the scanner catches: ${s}`);
+  for (const s of ["color: isActive ? readable(roleColor) : 'var(--color-text-muted)',", "color: readable(LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)'),", "P1: { color: '#ef4444', bg: 'x' },", 'color: string;', "color: isCurrent\n  ? 'var(--color-on-primary)'\n  : 'white',"]) {
+    assert.deepEqual(textColourProblems(s), [], `the scanner passes: ${s}`);
+  }
+  const bare = src.filter(([f]) => f.startsWith('src/components') || f.startsWith('src/pages')).flatMap(([f, t]) => textColourProblems(t).map((x) => `${f}: ${x}`));
   assert.deepEqual(bare, [], 'every literal or data colour used as text goes through readable()');
 
   // No fixed dark or white overlay the light look cannot reach, in components or data, and no Tailwind
