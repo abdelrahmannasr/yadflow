@@ -597,7 +597,7 @@ Task: EP-checkout-S03-T01
 Contract-Change: yes
 ```
 
-- `Task:` is required (except for `chore`, `ci`, `build` and `test` commits).
+- `Task:` is required (except for `chore`, `ci`, `build`, `test` and `docs` commits).
 - `Contract-Change: yes` only when the contract surface changed.
 - An AI `Co-Authored-By:` line is **off by default**; it is added only with `--ai <id>`, from the fixed
   list yadflow ships (claude, copilot, cursor, coderabbit, none). `config.yaml` shows that list,
@@ -1487,7 +1487,7 @@ assistant writes `epics/EP-<name>/epic.md`, opens its review, and stops. A teamm
 `yad next` names the next step.
 
 **Small changes.** Use `yad epic new <slug> --profile chore` for decided upkeep. Commits of type
-`chore`, `ci`, `build` or `test` need no task link. `yad skip` and `yad defer` pass over optional steps.
+`chore`, `ci`, `build`, `test` or `docs` need no task link. `yad skip` and `yad defer` pass over optional steps.
 
 **Upgrading.** `yad update` applies only what changed. Coming from 3.x, read
 [upgrading to 4.0](migrations/upgrading-to-4.md) first.

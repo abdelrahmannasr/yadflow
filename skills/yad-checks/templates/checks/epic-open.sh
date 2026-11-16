@@ -7,7 +7,7 @@
 #
 # The owning epic lives in the PRODUCT repo (via specs/<story>/link.md `product-repo`). When it is not
 # reachable from CI, the seal cannot be read, so the commit PASSes with a note (degraded, fail-open here
-# because lineage/spec-link still gate the link itself). Per commit; ci/chore/build/test exempt.
+# because lineage/spec-link still gate the link itself). Per commit; ci/chore/build/test/docs exempt.
 # Fails CLOSED on an unresolvable base.
 set -euo pipefail
 
@@ -65,7 +65,7 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   exit 1
 fi
 RANGE="${BASE}..HEAD"
-EXEMPT='ci|chore|build|test'
+EXEMPT='ci|chore|build|test|docs'
 
 # --- shared link.md resolution (byte-identical in contract-check / lineage-check / epic-open /
 # --- reconcile-debt-check; the gates are deliberately standalone, so it is duplicated, not sourced) ---

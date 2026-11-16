@@ -7,7 +7,7 @@
 #
 # Thread-scoped (only the affected thread is frozen, never the whole repo). Reads the PRODUCT repo via
 # specs/<story>/link.md `product-repo`; degrades to PASS-with-note when it is not reachable. Per commit;
-# ci/chore/build/test exempt. Fails CLOSED on an unresolvable base.
+# ci/chore/build/test/docs exempt. Fails CLOSED on an unresolvable base.
 set -euo pipefail
 
 # --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
@@ -64,7 +64,7 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   exit 1
 fi
 RANGE="${BASE}..HEAD"
-EXEMPT='ci|chore|build|test'
+EXEMPT='ci|chore|build|test|docs'
 
 # --- shared link.md resolution (byte-identical in contract-check / lineage-check / epic-open /
 # --- reconcile-debt-check; the gates are deliberately standalone, so it is duplicated, not sourced) ---

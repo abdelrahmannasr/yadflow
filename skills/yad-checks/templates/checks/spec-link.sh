@@ -2,8 +2,8 @@
 # spec-link gate (Phase 3 build plan §C).
 # Every NON-MAINTENANCE commit must link a real story/spec: it must carry a
 # `Task: <story>-<task>` trailer whose <story> resolves to a specs/<story>/link.md.
-# Maintenance commits (ci/chore/build/test) are EXEMPT — CI wiring, dependency bumps,
-# and test-infra changes legitimately link no story. The exemption covers the ABSENCE of
+# Maintenance commits (ci/chore/build/test/docs) are EXEMPT — CI wiring, dependency bumps,
+# test-infra and documentation-only changes legitimately link no story. The exemption covers the ABSENCE of
 # a link, never a BROKEN one: a maintenance commit that carries a Task trailer is still
 # resolved, so `chore: x` + `Task: EP-ghost-S01-T01` fails exactly like any other commit
 # claiming a story that does not exist. Checked per commit (not aggregated across the
@@ -67,7 +67,7 @@ fi
 RANGE="${BASE}..HEAD"
 
 # Conventional-Commits types exempt from the spec-link requirement (optional (scope) and breaking !).
-EXEMPT='ci|chore|build|test'
+EXEMPT='ci|chore|build|test|docs'
 # The letters are spelled out so no locale widens them; matched whole with bash `=~`.
 STORY_RE='^EP-[abcdefghijklmnopqrstuvwxyz0123456789-]+-S[0123456789]+$'
 
@@ -158,7 +158,7 @@ while IFS= read -r sha; do
     continue
   fi
   if [ -z "$task" ]; then
-    echo "FAIL [spec-link]: ${short} '${subject}' has no 'Task:' trailer — add one naming the task it implements, as 'Task: EP-<slug>-S<n>-T<NN>'. \`yad commit --task <id>\` writes it, and reads the id from a branch named like feat/EP-<slug>-S01-T01-<words> when no --task is given. For a commit already made, reword it (git commit --amend, or git rebase -i ${BASE}) and force-push. A ci, chore, build or test commit needs no trailer."
+    echo "FAIL [spec-link]: ${short} '${subject}' has no 'Task:' trailer — add one naming the task it implements, as 'Task: EP-<slug>-S<n>-T<NN>'. \`yad commit --task <id>\` writes it, and reads the id from a branch named like feat/EP-<slug>-S01-T01-<words> when no --task is given. For a commit already made, reword it (git commit --amend, or git rebase -i ${BASE}) and force-push. A ci, chore, build, test or docs commit needs no trailer."
     rc=1
     continue
   fi

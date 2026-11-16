@@ -102,17 +102,32 @@ test('spec-link gate: commit without a Task trailer fails', () => {
   assert.match(r.out, /has no 'Task:' trailer/);
   // #351: the fix, the command that writes it, how to repair a commit already made, and who is exempt.
   assert.match(r.out, /add one naming the task it implements, as 'Task: EP-<slug>-S<n>-T<NN>'\. `yad commit --task <id>` writes it/);
-  assert.match(r.out, /reword it \(git commit --amend, or git rebase -i main\) and force-push\. A ci, chore, build or test commit needs no trailer\./);
+  assert.match(r.out, /reword it \(git commit --amend, or git rebase -i main\) and force-push\. A ci, chore, build, test or docs commit needs no trailer\./);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('spec-link gate: maintenance commit (ci/chore/build/test) is exempt', () => {
+test('spec-link gate: maintenance commit (ci/chore/build/test/docs) is exempt', () => {
   const T = scaffoldRepo();
-  // No Task trailer, no spec — a chore commit must still PASS (CI wiring / dep bumps link no story).
+  // No Task trailer, no spec — a chore commit must still PASS (CI wiring / dep bumps link no story),
+  // and so must a docs commit (a documentation-only change implements no task).
   commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
+  commit(T, 'docs(readme): fix a typo', { 'README.md': 'x\n' });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit, no Task trailer \(exempt\)/);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'docs\(readme\): fix a typo' — maintenance commit, no Task trailer \(exempt\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: a type that only starts like an exempt one is not exempt', () => {
+  const T = scaffoldRepo();
+  // `docsy:` and `doc:` are not `docs:` — the type is matched whole, so neither buys the exemption.
+  commit(T, 'docsy: unlinked change', { 'src/a.js': 'x' });
+  commit(T, 'doc: unlinked change', { 'src/b.js': 'x' });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /'docsy: unlinked change' has no 'Task:' trailer/);
+  assert.match(r.out, /'doc: unlinked change' has no 'Task:' trailer/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -2828,27 +2843,33 @@ test('contract-check gate: says so when the product lock is not reachable', () =
 // The exemption rule has to hold in every gate that has one, or `chore(x): …` + a Task trailer walks
 // past the sealed-epic / orphan-thread / frozen-thread checks while spec-link happily resolves it.
 for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
-  test(`${g.name} gate: an exempt commit that CLAIMS a story is still gated (issue #157)`, () => {
-    const T = scaffoldRepo();
-    g.seed(path.join(T, 'product'));
-    commit(T, 'chore(deps): bump x\n\nTask: EP-demo-S01-T01', {
-      'package.json': '{}',
-      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
+  for (const subject of ['chore(deps): bump x', 'docs: explain x']) {
+    test(`${g.name} gate: an exempt commit that CLAIMS a story is still gated (issue #157) — '${subject}'`, () => {
+      const T = scaffoldRepo();
+      g.seed(path.join(T, 'product'));
+      commit(T, `${subject}\n\nTask: EP-demo-S01-T01`, {
+        'package.json': '{}',
+        'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `a maintenance subject must not buy a pass past this gate:\n${r.out}`);
+      assert.match(r.out, g.expect);
+      fs.rmSync(T, { recursive: true, force: true });
     });
-    const r = runGate(g.script, T);
-    assert.equal(r.code, 1, `a maintenance subject must not buy a pass past this gate:\n${r.out}`);
-    assert.match(r.out, g.expect);
-    fs.rmSync(T, { recursive: true, force: true });
-  });
 
-  test(`${g.name} gate: a maintenance commit with no Task trailer stays exempt`, () => {
-    const T = scaffoldRepo();
-    g.seed(path.join(T, 'product'));
-    commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
-    const r = runGate(g.script, T);
-    assert.equal(r.code, 0, r.out);
-    fs.rmSync(T, { recursive: true, force: true });
-  });
+    test(`${g.name} gate: a maintenance commit with no Task trailer stays exempt — '${subject}'`, () => {
+      const T = scaffoldRepo();
+      g.seed(path.join(T, 'product'));
+      commit(T, subject, { 'package.json': '{}' });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 0, r.out);
+      // The exempt PASS, not the "deferring to spec-link" note an unlisted type gets: the four gates
+      // share one list, so a type spec-link waives is waived here too. reconcile-debt says nothing
+      // about a commit it skips, exempt or not, so only its exit code can be checked.
+      if (g.name !== 'reconcile-debt') assert.ok(r.out.includes(`'${subject}' — maintenance commit, no Task trailer (exempt)`), r.out);
+      fs.rmSync(T, { recursive: true, force: true });
+    });
+  }
 }
 
 // ---------- E117: the PR does not choose where the Product is read from ----------

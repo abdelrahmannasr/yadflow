@@ -297,8 +297,8 @@ the trailer. With no `--task`, `yad commit` reads the id from a branch named lik
 
 **Exemptions:**
 
-- A commit whose type is `ci`, `chore`, `build` or `test` (with an optional scope and `!`) needs no
-  trailer. If such a commit does have one, the trailer is still checked.
+- A commit whose type is `ci`, `chore`, `build`, `test` or `docs` (with an optional scope and `!`) needs
+  no trailer. If such a commit does have one, the trailer is still checked.
 - Merge commits are skipped.
 - A commit listed in `.sdlc/gate-exempt` on the base. See
   [Waiving a commit already on a shared branch](#waiving-a-commit-already-on-a-shared-branch).
@@ -307,7 +307,7 @@ the trailer. With no `--task`, `yad commit` reads the id from a branch named lik
 
 | Message (after `FAIL [spec-link]: <sha> …`) | What to change |
 |---|---|
-| `'<subject>' has no 'Task:' trailer — add one naming the task it implements, as 'Task: EP-<slug>-S<n>-T<NN>'. …` | Reword the commit to add the trailer (`git commit --amend`, or `git rebase -i <base>` for an older commit) and force-push. Next time use `yad commit --task <id>`. For maintenance work, use a `ci`, `chore`, `build` or `test` type. |
+| `'<subject>' has no 'Task:' trailer — add one naming the task it implements, as 'Task: EP-<slug>-S<n>-T<NN>'. …` | Reword the commit to add the trailer (`git commit --amend`, or `git rebase -i <base>` for an older commit) and force-push. Next time use `yad commit --task <id>`. For maintenance or documentation-only work, use a `ci`, `chore`, `build`, `test` or `docs` type. |
 | `'<subject>' has a malformed Task trailer '<value>' (expected <story>-T<NN>).` | The value must end in `-T` and a number, such as `EP-checkout-S01-T02`. |
 | `<task> — '<story>' is not a story ID (expected EP-<slug>-S<n>, the slug in lowercase letters, digits and dashes).` | Fix the id: lowercase slug, then `-S` and a number. |
 | `<task> references specs/<story>/ but link.md is missing — run the yad-spec skill for <story> in this repo …` | Run the `yad-spec` skill for that story, which writes `link.md`, or fix the story id in the trailer. |
@@ -447,7 +447,7 @@ the Product. An epic with no type counts as `feature`.
 
 **Exemptions:**
 
-- `ci`, `chore`, `build` and `test` commits with no `Task:` trailer.
+- `ci`, `chore`, `build`, `test` and `docs` commits with no `Task:` trailer.
 - Merge commits.
 - A commit listed in `.sdlc/gate-exempt` on the base. See
   [Waiving a commit already on a shared branch](#waiving-a-commit-already-on-a-shared-branch).
@@ -477,7 +477,7 @@ change epic that threads to it.
 
 **Exemptions:**
 
-- `ci`, `chore`, `build` and `test` commits with no `Task:` trailer.
+- `ci`, `chore`, `build`, `test` and `docs` commits with no `Task:` trailer.
 - Merge commits.
 - A commit listed in `.sdlc/gate-exempt` on the base. See
   [Waiving a commit already on a shared branch](#waiving-a-commit-already-on-a-shared-branch).
@@ -506,7 +506,7 @@ another epic, no other change may ship on that thread.
 
 **Exemptions:**
 
-- `ci`, `chore`, `build` and `test` commits with no `Task:` trailer.
+- `ci`, `chore`, `build`, `test` and `docs` commits with no `Task:` trailer.
 - Merge commits.
 - A commit listed in `.sdlc/gate-exempt` on the base. See
   [Waiving a commit already on a shared branch](#waiving-a-commit-already-on-a-shared-branch).
@@ -802,7 +802,7 @@ with Node and installs the exact npm or pnpm version `packageManager` names.
 
 | Trailer | Written by | Read by | Meaning |
 |---|---|---|---|
-| `Task: EP-<slug>-S<n>-T<NN>` | `yad commit --task <id>` (or the branch name) | spec-link, lineage-check, epic-open, reconcile-debt, commit-message (order only) | The task this commit implements. Not needed on `ci`, `chore`, `build` and `test` commits. |
+| `Task: EP-<slug>-S<n>-T<NN>` | `yad commit --task <id>` (or the branch name) | spec-link, lineage-check, epic-open, reconcile-debt, commit-message (order only) | The task this commit implements. Not needed on `ci`, `chore`, `build`, `test` and `docs` commits. |
 | `Contract-Change: yes` | `yad commit --contract-change` | contract-check, commit-message (order only) | This change moves the contract surface, which was locked again upstream first. |
 | `Ledger-Override: <why>` | `yad commit --manual --reason "<why>"` | ledger-guard (quoted only) | Why a person committed past the local ledger hook. It never makes the gate pass. |
 | `Co-Authored-By: …` | git, or your tools | commit-message (order only) | Another author. |

@@ -189,7 +189,7 @@ only the rules apply.
 
 - `yad epic new <id> --profile chore` gives a short route with just the epic and the stories. This
   route cannot change the shared contract.
-- Commits of type `chore`, `ci`, `build` or `test` (the start of the commit title, for example
+- Commits of type `chore`, `ci`, `build`, `test` or `docs` (the start of the commit title, for example
   `chore:` or `chore(deps):`) do not need a task link.
 - `yad skip` and `yad defer` pass over optional steps, such as the UI design.
 

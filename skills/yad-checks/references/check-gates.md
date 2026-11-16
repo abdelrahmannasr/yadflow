@@ -72,8 +72,8 @@ Every gate stops on its failure except **risk-map**, which is advisory: there a 
 - Checks every non-merge commit in `<base>..HEAD` **per commit** (not aggregated across the range),
   so the report names each offending commit and one bad commit never masks the rest.
 - Maintenance commits are **exempt**: a Conventional-Commits subject of type `ci`, `chore`, `build`,
-  or `test` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
-  bumps, and test-infra changes legitimately link no story.
+  `test` or `docs` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
+  bumps, test-infra and documentation-only changes legitimately link no story.
 - The exemption waives the **requirement** for a link, never the **validity** of one that is claimed.
   A maintenance commit that *does* carry a `Task:` trailer is resolved like any other: a malformed id
   or a missing `specs/<story>/link.md` **FAILS**. Otherwise the trailer is decorative on exempt
@@ -446,7 +446,7 @@ all shipped:
 After the contract locks and code ships, a change must not mutate a locked artifact — it becomes a new
 epic threaded to its parent (`config.yaml` `change:`). These three gates keep that discipline. All three
 resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md` (`epic` + `product-repo`)
-→ the Product epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
+→ the Product epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test|docs`
 commits **with no `Task:` trailer** are exempt — like spec-link, the exemption waives the requirement
 for an owning epic, never the validity of one that is claimed, so a maintenance subject cannot buy a
 pass past the sealed-epic / orphan-thread / frozen-thread checks. The one deliberate exception is the

@@ -3,7 +3,7 @@
 # must link a real story (spec-link enforces that), and the OWNING epic must be a valid node in a
 # feature thread — a change/defect/hotfix epic MUST thread to a real parent. This is the
 # "every code change has an owning epic in a thread" enforcement. Per commit; maintenance commits
-# (ci/chore/build/test) are exempt. Fails CLOSED on an unresolvable base.
+# (ci/chore/build/test/docs) are exempt. Fails CLOSED on an unresolvable base.
 #
 # The owning epic lives in the PRODUCT repo (reached via specs/<story>/link.md's `product-repo` path,
 # exactly like contract-check). When the product repo is not reachable from CI, lineage is verified
@@ -64,7 +64,7 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   exit 1
 fi
 RANGE="${BASE}..HEAD"
-EXEMPT='ci|chore|build|test'
+EXEMPT='ci|chore|build|test|docs'
 
 # --- shared link.md resolution (byte-identical in contract-check / lineage-check / epic-open /
 # --- reconcile-debt-check; the gates are deliberately standalone, so it is duplicated, not sourced) ---

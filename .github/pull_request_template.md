@@ -6,7 +6,7 @@
 <!-- What this PR does, in one or two sentences. -->
 
 ## Story / task
-<!-- The spec-link gate fails any commit with no `Task: <story>-<task>` trailer, except ci/chore/build/test commits.
+<!-- The spec-link gate fails any commit with no `Task: <story>-<task>` trailer, except ci/chore/build/test/docs commits.
      With no story yet: write "none" — spec-link then fails, but it does not block the merge. -->
 - Story / task: `EP-<slug>-S0N-T0N`
 - Spec: `specs/EP-<slug>-S0N/` (link.md points back to the Product)
@@ -31,7 +31,7 @@
 
 ## Checklist
 - [ ] Commits follow [Conventional Commits](CONTRIBUTING.md) (they drive semantic-release)
-- [ ] Every commit except ci/chore/build/test carries a `Task: <story>-<task>` trailer (spec-link gate)
+- [ ] Every commit except ci/chore/build/test/docs carries a `Task: <story>-<task>` trailer (spec-link gate)
 - [ ] No contract-surface change without `Contract-Change: yes` + a re-locked contract (contract-check gate)
 - [ ] `npm test` and `npm run test:e2e` pass locally
 - [ ] New behavior is covered by tests (coverage gate: ≥70% lines/branches)
