@@ -13412,17 +13412,27 @@ test('docs shell: the light look sets every colour the dark look does, and the b
     out.push([cur, 'end']);
     return out.filter(([, sep]) => sep !== '?').map(([x]) => x.trim()); // a part ending in `?` is a condition
   }
+  // Is `at` inside an open style={{ … }} object? Braces are counted, so a `${…}` or a nested object before
+  // the colour does not end it.
+  function inStyleObject(text, at) {
+    const s = text.lastIndexOf('style={{', at);
+    if (s < 0) return false;
+    let d = 0;
+    for (let i = s + 6; i < at; i++) { if (text[i] === '{') d++; else if (text[i] === '}' && --d === 0) return false; }
+    return d >= 2;
+  }
   function textColourProblems(text) {
     const found = [];
     for (const m of text.matchAll(/text-\[\$\{/g)) found.push(`a class built at run time: ${text.slice(m.index, m.index + 30)}`);
-    for (const m of text.matchAll(/text-\[#([0-9a-fA-F]{3,8})\]/g)) if (!/^f{3}(?:f{3})?$/i.test(m[1])) found.push(`a fixed text colour class: text-[#${m[1]}]`);
-    if (/style=\{\{(?:[^{}]*?,)?\s*color\s*[,}]/.test(text)) found.push('style={{ color }}');
+    for (const m of text.matchAll(/text-\[#([0-9a-fA-F]{3,8})\]/g)) if (!/^f{3,4}$|^f{6}(?:[0-9a-f]{2})?$/i.test(m[1])) found.push(`a fixed text colour class: text-[#${m[1]}]`);
+    // The shorthand `color` as a key (not `${color}` in a template literal) inside a style object.
+    for (const m of text.matchAll(/(?<=(?<!\$)\{\s*|,\s*)color\s*[,}]/g)) if (inStyleObject(text, m.index)) found.push('style={{ color }}');
     for (const m of text.matchAll(VALUE)) {
       const v = m[1].trim();
       if (/^string\b/.test(v)) continue; // a type
       // Inside a style={{ … }} object (on this line or across lines), a lone hex is drawn; elsewhere it is a
       // data table's entry.
-      const inStyle = /style=\{\{[^{}]*$/.test(text.slice(0, m.index));
+      const inStyle = inStyleObject(text, m.index);
       if (/^['"]#[0-9a-fA-F]{3,8}['"]$/.test(v) && !inStyle) continue;
       for (const r of splitTop(v)) if (r && !OK_RESULT.test(r)) found.push(`color: ${v.replace(/\s+/g, ' ')} (${r})`);
     }
@@ -13440,6 +13450,9 @@ test('docs shell: the light look sets every colour the dark look does, and the b
     "<span style={{ fontSize: 12,\n  color: '#ef4444' }}>",
     '<span style={{ fontSize: 12, color }}>',
     '<span className="text-[#f59e0b]">',
+    "<span style={{ width: `${w}px`, color: '#ef4444' }}>",
+    '<span style={{ background: `${c}20`, color }}>',
+    '<span style={{ ...(a ? { opacity: 1 } : {}), color }}>',
   ];
   for (const s of SAMPLE) assert.ok(textColourProblems(s).length > 0, `the scanner catches: ${s}`);
   // Each sample is caught for its own reason, not a neighbour's.
