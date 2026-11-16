@@ -1,0 +1,57 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/checks/agent-guard.mjs\""
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(yad guide:*)",
+      "Bash(yad help:*)",
+      "Bash(yad doctor:*)",
+      "Bash(yad detect:*)",
+      "Bash(yad signing check:*)",
+      "Bash(yad ci check:*)",
+      "Bash(yad toolbox list:*)",
+      "Bash(yad toolbox check:*)",
+      "Bash(yad local-setup list:*)",
+      "Bash(yad skill list:*)",
+      "Bash(yad skill recommend:*)",
+      "Bash(yad foundation status:*)",
+      "Bash(yad status:*)",
+      "Bash(yad next:*)",
+      "Bash(yad gate status:*)",
+      "Bash(yad gate review:*)",
+      "Bash(yad gate walkthrough:*)",
+      "Bash(yad review context:*)",
+      "Bash(yad review chat:*)",
+      "Bash(yad review cards:*)",
+      "Bash(yad review walkthrough:*)",
+      "Bash(yad member list:*)",
+      "Bash(yad worktree list:*)",
+      "Bash(yad reports list:*)",
+      "Bash(yad brand show:*)",
+      "Bash(yad brand check:*)",
+      "Bash(yad claims:*)",
+      "Bash(yad owners:*)",
+      "Bash(yad history list:*)",
+      "Bash(yad history show:*)",
+      "Bash(yad history search:*)",
+      "Bash(yad repo list:*)",
+      "Bash(yad risk-map check:*)",
+      "Bash(yad codeowners check:*)",
+      "Bash(yad story frames:*)",
+      "Bash(yad docs list:*)",
+      "Bash(yad thread:*)",
+      "Bash(yad reconcile check:*)"
+    ]
+  }
+}
