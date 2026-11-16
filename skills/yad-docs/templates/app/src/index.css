@@ -27,6 +27,80 @@
     --color-border-light: #453c53;
     --color-border-default: #342e40;
     --color-border-strong: #141118;
+
+    /* Overlays and panels: the page's own colours, so the light look and a brand reach them too. */
+    --color-ink: #ffffff;
+    --color-glass: color-mix(in srgb, var(--color-bg-tertiary) 40%, transparent);
+    --color-hairline: color-mix(in srgb, var(--color-ink) 5%, transparent);
+    --color-grid: color-mix(in srgb, var(--color-ink) 3%, transparent);
+    --color-scroll-thumb: #4a4059;
+    --color-scroll-thumb-hover: #5d5270;
+
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Noto Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Courier New', Courier, monospace;
+
+    color-scheme: dark;
+  }
+
+  /* The light look: the viewer's setting picks it. The page's colours turn light, and so do the Tailwind
+     colours the components use for text (white, slate, and the -300/-400 tints), each to a shade that
+     reads on white. Tailwind reads these variables when the page runs, so no component changes class. */
+  @media (prefers-color-scheme: light) {
+    :root {
+      --color-bg-primary: #ffffff;
+      --color-bg-secondary: #f7f5fb;
+      --color-bg-tertiary: #ece8f4;
+      --color-bg-brand-soft: #efe7fd;
+      --color-bg-accent-soft: #fde7ef;
+
+      --color-surface-dark: #f7f5fb;
+      --color-surface-highlight: #ece8f4;
+      --color-surface-darker: #f2eff8;
+
+      --color-text-primary: #1b1530;
+      --color-text-secondary: #4a4360;
+      --color-text-muted: #6b6480;
+
+      --color-primary: #6316db;
+      --color-primary-hover: #4f0fb5;
+      --color-primary-soft: #e6dafc;
+
+      --color-accent: #c8105a;
+      --color-accent-hover: #a50d4a;
+      --color-accent-soft: #fde4ee;
+
+      --color-border-light: #d9d3e6;
+      --color-border-default: #e4dff0;
+      --color-border-strong: #c9c1da;
+
+      --color-ink: var(--color-text-primary);
+      --color-scroll-thumb: #cfc8dd;
+      --color-scroll-thumb-hover: #b8b0c9;
+
+      /* Text Tailwind colours follow the page's own text colours, so a brand's text reaches them too. */
+      --color-white: var(--color-text-primary);
+      --color-slate-100: var(--color-text-primary);
+      --color-slate-200: var(--color-text-primary);
+      --color-slate-300: var(--color-text-secondary);
+      --color-slate-400: var(--color-text-secondary);
+      --color-slate-500: var(--color-text-muted);
+      --color-slate-600: var(--color-text-muted);
+      --color-emerald-400: #047857;
+      --color-green-400: #15803d;
+      --color-cyan-400: #0e7490;
+      --color-amber-300: #b45309;
+      --color-amber-400: #b45309;
+      --color-rose-400: #be123c;
+      --color-red-300: #b91c1c;
+      --color-red-400: #b91c1c;
+      --color-blue-300: #1d4ed8;
+      --color-blue-400: #1d4ed8;
+      --color-purple-400: #7e22ce;
+      --color-violet-400: #6d28d9;
+
+      color-scheme: light;
+    }
   }
 
   * {
@@ -42,7 +116,7 @@
   }
 
   body {
-    font-family: 'Noto Sans', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-body);
     background: var(--color-bg-primary);
     color: var(--color-text-primary);
     -webkit-font-smoothing: antialiased;
@@ -50,7 +124,7 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', sans-serif;
+    font-family: var(--font-display);
   }
 
   ::-webkit-scrollbar {
@@ -74,20 +148,20 @@
 
 /* Utility classes */
 .glass-panel {
-  background: rgba(47, 41, 56, 0.4);
+  background: var(--color-glass);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-hairline);
 }
 
 .flow-grid {
   background-size: 40px 40px;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(to right, var(--color-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid) 1px, transparent 1px);
 }
 
 .code-block {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
   background: var(--color-surface-darker);
   border: 1px solid var(--color-surface-highlight);
   border-radius: 0.5rem;
@@ -95,11 +169,11 @@
 }
 
 .font-display {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-display);
 }
 
 .font-body {
-  font-family: 'Noto Sans', sans-serif;
+  font-family: var(--font-body);
 }
 
 /* Logs terminal scrollbar */
@@ -112,10 +186,11 @@
 }
 
 .logs-scrollbar::-webkit-scrollbar-thumb {
-  background: #4a4059;
+  background: var(--color-scroll-thumb);
   border-radius: 10px;
 }
 
 .logs-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #5d5270;
+  background: var(--color-scroll-thumb-hover);
 }
+
