@@ -12,7 +12,7 @@ interface TestCase {
 const PRIORITY_COLORS = {
   critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
   high: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  medium: { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
+  medium: { color: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)' },
 };
 
 const TEST_CASES: TestCase[] = [
@@ -95,7 +95,7 @@ export function TestPlanSection() {
     <div className="space-y-4">
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-bold text-slate-200">Test Coverage</span>
@@ -122,7 +122,7 @@ export function TestPlanSection() {
             <div
               key={tc.id}
               className="rounded-lg border overflow-hidden"
-              style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+              style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
             >
               <button
                 onClick={() => setExpandedId(isExpanded ? null : tc.id)}

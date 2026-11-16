@@ -23,10 +23,10 @@ export function RiderUIStatesTable() {
       </div>
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
         <table className="w-full text-left text-sm">
-          <thead style={{ background: 'rgba(255,255,255,0.05)' }}>
+          <thead style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
             <tr>
               <th className="px-4 py-3 font-semibold text-slate-300">State</th>
               <th className="px-4 py-3 font-semibold text-slate-300">Schema Value</th>

@@ -23,15 +23,15 @@ export function StatusMachineSection() {
     <div className="space-y-5">
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <span className="text-sm font-bold text-slate-200">TRIP_STATUS → BOOKING_STATUS Mapping</span>
           <span className="text-[10px] font-bold text-slate-400">{STATUS_MAPPINGS.length} entries</span>
         </div>
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: 'rgba(255,255,255,0.05)' }}>
+            <tr style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
               <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400">Trip Status</th>
               <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400">Booking Status</th>
               <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-400">Category</th>
@@ -39,7 +39,7 @@ export function StatusMachineSection() {
           </thead>
           <tbody>
             {STATUS_MAPPINGS.map((m) => {
-              const color = CATEGORY_COLORS[m.category] || '#64748b';
+              const color = CATEGORY_COLORS[m.category] || 'var(--color-slate-500, #64748b)';
               return (
                 <tr
                   key={m.tripStatus}
@@ -65,7 +65,7 @@ export function StatusMachineSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Terminal States</h4>
         <p className="text-xs text-slate-400 mb-3">
@@ -77,7 +77,7 @@ export function StatusMachineSection() {
             <span
               key={s}
               className="px-2.5 py-1 rounded-md text-xs font-mono border"
-              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)', color: '#f87171' }}
+              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)', color: 'var(--color-red-400, #f87171)' }}
             >
               <Icon name="block" size={12} className="inline mr-1" />
               {s}

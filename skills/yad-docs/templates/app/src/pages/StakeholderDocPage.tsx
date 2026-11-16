@@ -31,7 +31,7 @@ export function StakeholderDocPage() {
             <p className="text-slate-400">Unknown role: {roleSlug}</p>
             <button
               onClick={() => navigate('/docs')}
-              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium text-white"
+              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium text-[#fff]"
               style={{ background: 'var(--color-primary)' }}
             >
               Back to Documentation Hub

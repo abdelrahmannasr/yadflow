@@ -28,7 +28,7 @@ export function HandlerLogicSnippet({ step }: HandlerLogicSnippetProps) {
         }}
       >
         <div className="mb-2 pb-2"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+          style={{ borderBottom: '1px solid color-mix(in srgb, var(--color-ink) 5%, transparent)' }}
         >
           <span className="text-[10px] text-slate-400">{functionName}() — {fileName}</span>
         </div>

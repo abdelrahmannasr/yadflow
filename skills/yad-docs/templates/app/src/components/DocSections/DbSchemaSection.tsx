@@ -24,15 +24,15 @@ export function DbSchemaSection() {
     <div className="space-y-5">
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <Icon name="storage" size={16} className="text-emerald-400" />
           <span className="text-sm font-bold text-slate-200">Trip Schema — Booking Fields</span>
         </div>
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: 'rgba(255,255,255,0.05)' }}>
+            <tr style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
               <th className="px-4 py-2 text-left text-xs font-semibold text-slate-400">Field</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-slate-400">Type</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-slate-400">Description</th>
@@ -60,12 +60,12 @@ export function DbSchemaSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Indexes</h4>
         <div className="space-y-2">
           {INDEXES.map((idx) => (
-            <div key={idx.name} className="flex items-start gap-3 p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={idx.name} className="flex items-start gap-3 p-2 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-ink) 2%, transparent)' }}>
               <Icon name="sort" size={14} className="text-amber-400 mt-0.5 shrink-0" />
               <div>
                 <code className="text-xs font-mono text-slate-300">{idx.fields}</code>
@@ -78,7 +78,7 @@ export function DbSchemaSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Common Query Patterns</h4>
         <div className="space-y-4">

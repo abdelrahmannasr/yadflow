@@ -101,9 +101,9 @@ export const FlowCanvas: React.FC = () => {
       <div className="absolute top-4 left-4 right-4 z-30 flex justify-between items-start pointer-events-none">
         <div className="pointer-events-auto rounded-lg p-3 border shadow-xl"
           style={{
-            background: 'rgba(30,26,37,0.8)',
+            background: 'color-mix(in srgb, var(--color-bg-secondary) 80%, transparent)',
             backdropFilter: 'blur(12px)',
-            borderColor: 'rgba(255,255,255,0.05)',
+            borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
           }}
         >
           <h1 className="text-white text-xl font-bold font-display">
@@ -119,8 +119,8 @@ export const FlowCanvas: React.FC = () => {
             onClick={zoomIn}
             className="h-10 w-10 flex items-center justify-center rounded-lg text-white border transition-colors"
             style={{
-              background: 'rgba(30,26,37,0.8)',
-              borderColor: 'rgba(255,255,255,0.05)',
+              background: 'color-mix(in srgb, var(--color-bg-secondary) 80%, transparent)',
+              borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
             }}
           >
             <Icon name="zoom_in" size={20} />
@@ -129,8 +129,8 @@ export const FlowCanvas: React.FC = () => {
             onClick={zoomOut}
             className="h-10 w-10 flex items-center justify-center rounded-lg text-white border transition-colors"
             style={{
-              background: 'rgba(30,26,37,0.8)',
-              borderColor: 'rgba(255,255,255,0.05)',
+              background: 'color-mix(in srgb, var(--color-bg-secondary) 80%, transparent)',
+              borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
             }}
           >
             <Icon name="zoom_out" size={20} />
@@ -139,8 +139,8 @@ export const FlowCanvas: React.FC = () => {
             onClick={resetZoom}
             className="h-10 w-10 flex items-center justify-center rounded-lg text-white border transition-colors"
             style={{
-              background: 'rgba(30,26,37,0.8)',
-              borderColor: 'rgba(255,255,255,0.05)',
+              background: 'color-mix(in srgb, var(--color-bg-secondary) 80%, transparent)',
+              borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
             }}
           >
             <Icon name="center_focus_strong" size={20} />
@@ -242,7 +242,7 @@ export const FlowCanvas: React.FC = () => {
         <div
           className="absolute left-4 bottom-4 z-30 rounded-lg border px-3 py-2"
           style={{
-            background: 'rgba(30,26,37,0.85)',
+            background: 'color-mix(in srgb, var(--color-bg-secondary) 85%, transparent)',
             backdropFilter: 'blur(8px)',
             borderColor: 'var(--color-border-default)',
           }}

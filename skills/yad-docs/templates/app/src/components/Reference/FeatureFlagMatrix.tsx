@@ -28,7 +28,7 @@ export function FeatureFlagMatrix() {
         </div>
         <span
           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border"
-          style={{ color: '#fbbf24', background: 'rgba(251,191,36,0.1)', borderColor: 'rgba(251,191,36,0.2)' }}
+          style={{ color: 'var(--color-amber-400, #fbbf24)', background: 'rgba(251,191,36,0.1)', borderColor: 'rgba(251,191,36,0.2)' }}
         >
           QA Focus
         </span>
@@ -39,7 +39,7 @@ export function FeatureFlagMatrix() {
             key={flag.name}
             className="p-3 rounded-lg border"
             style={{
-              background: 'rgba(20,17,24,0.5)',
+              background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
               borderColor: 'var(--color-border-default)',
             }}
           >
@@ -47,7 +47,7 @@ export function FeatureFlagMatrix() {
               <span className="text-xs font-mono text-slate-200">{flag.name}</span>
               <span
                 className="text-[10px] px-2 py-0.5 rounded font-medium"
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}
+                style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)', color: 'var(--color-text-muted)' }}
               >
                 Default: {flag.defaultValue ? 'true' : 'false'}
               </span>

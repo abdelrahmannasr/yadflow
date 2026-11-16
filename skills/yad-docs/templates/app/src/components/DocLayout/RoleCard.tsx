@@ -14,7 +14,7 @@ export function RoleCard({ role }: RoleCardProps) {
       onClick={() => navigate(`/docs/${role.slug}`)}
       className="group text-left rounded-xl border p-5 transition-all hover:border-opacity-60"
       style={{
-        background: 'rgba(20,17,24,0.5)',
+        background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
         borderColor: 'var(--color-border-default)',
       }}
       onMouseEnter={(e) => {
@@ -23,7 +23,7 @@ export function RoleCard({ role }: RoleCardProps) {
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = 'var(--color-border-default)';
-        e.currentTarget.style.background = 'rgba(20,17,24,0.5)';
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)';
       }}
     >
       <div className="flex items-start justify-between mb-3">
@@ -55,7 +55,7 @@ export function RoleCard({ role }: RoleCardProps) {
         <span
           className="text-[10px] font-medium px-2 py-0.5 rounded border text-slate-400"
           style={{
-            background: 'rgba(255,255,255,0.03)',
+            background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)',
             borderColor: 'var(--color-border-default)',
           }}
         >

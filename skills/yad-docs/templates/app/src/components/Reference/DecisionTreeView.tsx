@@ -17,7 +17,7 @@ export function DecisionTreeView() {
         className="rounded-xl border overflow-hidden font-mono text-sm"
         style={{
           borderColor: 'var(--color-border-default)',
-          background: 'rgba(20,17,24,0.5)',
+          background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
         }}
       >
         {branches.map((branch, i) => (

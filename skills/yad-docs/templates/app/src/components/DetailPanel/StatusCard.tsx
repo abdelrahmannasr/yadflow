@@ -19,7 +19,7 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
         <span className="text-[10px] font-mono px-2 py-0.5 rounded border"
           style={{
             background: 'rgba(59,130,246,0.2)',
-            color: 'rgb(147,197,253)',
+            color: 'var(--color-blue-300, rgb(147,197,253))',
             borderColor: 'rgba(59,130,246,0.3)',
           }}
         >
@@ -39,7 +39,7 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
       {/* Side effects badges */}
       {Object.keys(step.sideEffects).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t"
-          style={{ borderColor: 'rgba(255,255,255,0.05)' }}
+          style={{ borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}
         >
           {step.sideEffects.jobs && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
@@ -50,7 +50,7 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
           )}
           {step.sideEffects.notifications && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
-              style={{ background: 'rgba(251,37,118,0.15)', color: '#fb2576' }}
+              style={{ background: 'color-mix(in srgb, var(--color-accent-hover) 15%, transparent)', color: '#fb2576' }}
             >
               <Icon name="notifications" size={12} /> {step.sideEffects.notifications}
             </span>

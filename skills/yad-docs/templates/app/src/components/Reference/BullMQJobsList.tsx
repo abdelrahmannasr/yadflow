@@ -19,7 +19,7 @@ export function BullMQJobsList() {
             key={job.name}
             className="p-3 rounded-lg border hover:border-purple-500/30 transition-colors"
             style={{
-              background: 'rgba(20,17,24,0.5)',
+              background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
               borderColor: 'var(--color-border-default)',
             }}
           >
@@ -45,7 +45,7 @@ export function BullMQJobsList() {
                   </span>
                   <span
                     className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 border"
-                    style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'var(--color-border-default)' }}
+                    style={{ background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)', borderColor: 'var(--color-border-default)' }}
                   >
                     queue: {job.queue}
                   </span>

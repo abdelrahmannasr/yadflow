@@ -53,14 +53,14 @@ export function ApiReferenceSection() {
         <div
           key={ep.path}
           className="rounded-xl border overflow-hidden"
-          style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <div className="px-4 py-3 flex items-center gap-3 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
             <span
               className="text-[10px] font-bold px-2 py-0.5 rounded"
               style={{
                 background: ep.method === 'PUT' ? 'rgba(251,191,36,0.15)' : 'rgba(96,165,250,0.15)',
-                color: ep.method === 'PUT' ? '#fbbf24' : '#60a5fa',
+                color: ep.method === 'PUT' ? 'var(--color-amber-400, #fbbf24)' : 'var(--color-blue-400, #60a5fa)',
               }}
             >
               {ep.method}
@@ -87,9 +87,9 @@ export function ApiReferenceSection() {
                   <span
                     className="px-2 py-1 rounded text-[11px] font-mono border"
                     style={{
-                      background: 'rgba(255,255,255,0.03)',
+                      background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)',
                       borderColor: 'var(--color-border-default)',
-                      color: '#94a3b8',
+                      color: 'var(--color-slate-400, #94a3b8)',
                     }}
                   >
                     {mw}

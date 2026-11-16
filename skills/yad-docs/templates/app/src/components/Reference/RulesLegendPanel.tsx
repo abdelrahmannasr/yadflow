@@ -17,7 +17,7 @@ const CANCELABILITY_RULES = [
   { status: '<= ACCEPTED', canCancel: 'Yes', color: '#22c55e', dotColor: '#22c55e' },
   { status: 'DRIVING', canCancel: 'Maybe (Fee Applies)', color: '#eab308', dotColor: '#eab308' },
   { status: 'COMPLETED', canCancel: 'No', color: '#ef4444', dotColor: '#3b82f6' },
-  { status: 'CANCELLED', canCancel: 'No', color: '#ef4444', dotColor: '#64748b' },
+  { status: 'CANCELLED', canCancel: 'No', color: '#ef4444', dotColor: 'var(--color-slate-500, #64748b)' },
 ];
 
 const MESSAGE_LEGEND = [
@@ -90,11 +90,11 @@ export function RulesLegendPanel() {
                 <div className="rounded-xl border overflow-hidden"
                   style={{
                     borderColor: 'var(--color-border-default)',
-                    background: 'rgba(20,17,24,0.5)',
+                    background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                   }}
                 >
                   <table className="w-full text-left text-sm">
-                    <thead style={{ background: 'rgba(255,255,255,0.05)' }}>
+                    <thead style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
                       <tr>
                         <th className="px-4 py-3 font-semibold text-slate-300 w-1/2">Ride Status</th>
                         <th className="px-4 py-3 font-semibold text-slate-300 w-1/2 text-right">Rider Can Cancel?</th>
@@ -143,7 +143,7 @@ export function RulesLegendPanel() {
                       <div key={type}
                         className="flex items-center justify-between p-3 rounded-lg border group hover:border-[var(--color-primary)] transition-colors"
                         style={{
-                          background: 'rgba(20,17,24,0.5)',
+                          background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                           borderColor: 'var(--color-border-default)',
                         }}
                       >
@@ -199,7 +199,7 @@ export function RulesLegendPanel() {
               }}
             >
               <Tooltip content="Coming soon" className="flex-1">
-                <button disabled className="w-full py-3 px-4 rounded-lg text-white text-sm font-bold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
+                <button disabled className="w-full py-3 px-4 rounded-lg text-[#fff] text-sm font-bold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
                   style={{ background: 'var(--color-primary)' }}
                 >
                   <Icon name="download" size={18} />
@@ -208,7 +208,7 @@ export function RulesLegendPanel() {
               </Tooltip>
               <Tooltip content="Coming soon">
                 <button disabled className="p-3 rounded-lg text-slate-300 opacity-50 cursor-not-allowed"
-                  style={{ background: 'rgba(255,255,255,0.05)' }}
+                  style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}
                 >
                   <Icon name="settings" size={20} />
                 </button>

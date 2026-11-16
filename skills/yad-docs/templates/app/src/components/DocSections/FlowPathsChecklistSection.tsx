@@ -31,7 +31,7 @@ export function FlowPathsChecklistSection() {
     <div className="space-y-4">
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-bold text-slate-200">Verification Progress</span>
@@ -39,7 +39,7 @@ export function FlowPathsChecklistSection() {
             {done}/{total} ({pct}%)
           </span>
         </div>
-        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
           <div
             className="h-full rounded-full transition-all"
             style={{
@@ -53,14 +53,14 @@ export function FlowPathsChecklistSection() {
       <div className="space-y-1.5">
         {PATHS.map((path) => {
           const isChecked = checked.has(path.id);
-          const catColor = CATEGORY_COLORS[path.category] || '#64748b';
+          const catColor = CATEGORY_COLORS[path.category] || 'var(--color-slate-500, #64748b)';
           return (
             <button
               key={path.id}
               onClick={() => toggle(path.id)}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-all"
               style={{
-                background: isChecked ? 'rgba(34,197,94,0.05)' : 'rgba(20,17,24,0.3)',
+                background: isChecked ? 'rgba(34,197,94,0.05)' : 'color-mix(in srgb, var(--color-bg-primary) 30%, transparent)',
                 borderColor: isChecked ? 'rgba(34,197,94,0.2)' : 'var(--color-border-default)',
               }}
             >
@@ -73,7 +73,7 @@ export function FlowPathsChecklistSection() {
               <div className="flex-1 min-w-0">
                 <span
                   className="text-sm font-medium"
-                  style={{ color: isChecked ? '#94a3b8' : '#e2e8f0', textDecoration: isChecked ? 'line-through' : 'none' }}
+                  style={{ color: isChecked ? 'var(--color-slate-400, #94a3b8)' : 'var(--color-slate-200, #e2e8f0)', textDecoration: isChecked ? 'line-through' : 'none' }}
                 >
                   Path {path.id}: {path.label}
                 </span>

@@ -113,7 +113,7 @@ export const StepList = () => {
                     className="h-7 w-7 rounded-full flex items-center justify-center"
                     style={{
                       background: 'var(--color-primary)',
-                      boxShadow: '0 0 0 3px rgba(97,22,218,0.25)',
+                      boxShadow: '0 0 0 3px color-mix(in srgb, var(--color-primary) 25%, transparent)',
                     }}
                     animate={{ scale: [1, 1.08, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
@@ -195,7 +195,7 @@ export const StepList = () => {
                       className="flex flex-col gap-2 p-3 mt-2 rounded-lg border"
                       style={{
                         background: 'var(--color-surface-dark)',
-                        borderColor: isCurrent ? 'rgba(97,22,218,0.3)' : 'var(--color-border-default)',
+                        borderColor: isCurrent ? 'color-mix(in srgb, var(--color-primary) 30%, transparent)' : 'var(--color-border-default)',
                       }}
                     >
                       <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>

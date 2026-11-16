@@ -49,7 +49,7 @@ export function DataMigrationSection() {
     <div className="space-y-5">
       <div
         className="rounded-xl border p-5"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <p className="text-sm text-slate-400 leading-relaxed">
           The <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-slate-300">booking_status</code> field is
@@ -62,11 +62,11 @@ export function DataMigrationSection() {
         <div
           key={phase.phase}
           className="rounded-xl border overflow-hidden"
-          style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <div
             className="px-4 py-2.5 border-b"
-            style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}
+            style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}
           >
             <span className="text-sm font-bold text-slate-200">{phase.phase}</span>
           </div>
@@ -83,7 +83,7 @@ export function DataMigrationSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Validation Queries</h4>
         <div className="space-y-2">

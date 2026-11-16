@@ -38,7 +38,7 @@ const PHASES = [
   {
     phase: 'Phase 4 — Enhancements',
     status: 'planned',
-    color: '#64748b',
+    color: 'var(--color-slate-500, #64748b)',
     items: [
       'Ops dashboard for booking status monitoring',
       'Analytics events for booking funnel tracking',
@@ -69,9 +69,9 @@ export function PMRoadmapSection() {
           <div
             key={phase.phase}
             className="rounded-xl border overflow-hidden"
-            style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
           >
-            <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+            <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full" style={{ background: phase.color }} />
                 <span className="text-sm font-bold text-slate-200">{phase.phase}</span>
@@ -101,7 +101,7 @@ export function PMRoadmapSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Risk Register</h4>
         <div className="space-y-2">
@@ -109,7 +109,7 @@ export function PMRoadmapSection() {
             <div
               key={i}
               className="flex items-start gap-3 p-2.5 rounded-lg"
-              style={{ background: 'rgba(255,255,255,0.02)' }}
+              style={{ background: 'color-mix(in srgb, var(--color-ink) 2%, transparent)' }}
             >
               <span
                 className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5"

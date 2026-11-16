@@ -40,10 +40,10 @@ export function DriverIntegrationSection() {
         <div
           key={ep.path}
           className="rounded-xl border overflow-hidden"
-          style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <div className="px-4 py-3 flex items-center gap-3 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--color-amber-400, #fbbf24)' }}>
               {ep.method}
             </span>
             <code className="text-sm text-slate-200 font-mono">{ep.path}</code>
@@ -58,13 +58,13 @@ export function DriverIntegrationSection() {
 
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <span className="text-sm font-bold text-slate-200">Valid Driver Transitions</span>
         </div>
         <table className="w-full text-sm">
-          <thead style={{ background: 'rgba(255,255,255,0.05)' }}>
+          <thead style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
             <tr>
               <th className="px-4 py-2 text-left text-xs font-semibold text-slate-400">From</th>
               <th className="px-4 py-2 text-center text-xs font-semibold text-slate-400"></th>
@@ -87,14 +87,14 @@ export function DriverIntegrationSection() {
 
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <span className="text-sm font-bold text-slate-200">DAC (Driver Action Cards)</span>
         </div>
         <div className="p-3 space-y-2">
           {DAC_CARDS.map((card) => (
-            <div key={card.action} className="flex items-start gap-3 p-2.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={card.action} className="flex items-start gap-3 p-2.5 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-ink) 2%, transparent)' }}>
               <Icon name="credit_card" size={16} className="text-cyan-400 mt-0.5 shrink-0" />
               <div>
                 <div className="flex items-center gap-2">
@@ -110,7 +110,7 @@ export function DriverIntegrationSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Integration Checklist</h4>
         <ul className="space-y-2">

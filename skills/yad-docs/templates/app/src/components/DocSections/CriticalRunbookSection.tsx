@@ -14,7 +14,7 @@ interface Incident {
 const SEVERITY_COLORS = {
   P1: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.2)' },
   P2: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.2)' },
-  P3: { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
+  P3: { color: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
 };
 
 const INCIDENTS: Incident[] = [
@@ -113,7 +113,7 @@ export function CriticalRunbookSection() {
             className="rounded-xl border overflow-hidden transition-colors"
             style={{
               borderColor: isExpanded ? sc.border : 'var(--color-border-default)',
-              background: 'rgba(20,17,24,0.5)',
+              background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
             }}
           >
             <button
@@ -140,8 +140,8 @@ export function CriticalRunbookSection() {
                 >
                   <div className="px-4 pb-4 space-y-4 border-t" style={{ borderColor: 'var(--color-border-default)' }}>
                     {[
-                      { title: 'Symptoms', items: incident.symptoms, icon: 'warning', color: '#fbbf24' },
-                      { title: 'Diagnosis', items: incident.diagnosis, icon: 'search', color: '#60a5fa' },
+                      { title: 'Symptoms', items: incident.symptoms, icon: 'warning', color: 'var(--color-amber-400, #fbbf24)' },
+                      { title: 'Diagnosis', items: incident.diagnosis, icon: 'search', color: 'var(--color-blue-400, #60a5fa)' },
                       { title: 'Resolution', items: incident.resolution, icon: 'build', color: '#22c55e' },
                     ].map((section) => (
                       <div key={section.title} className="pt-3">

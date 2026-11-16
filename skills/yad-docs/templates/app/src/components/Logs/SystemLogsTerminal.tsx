@@ -6,7 +6,7 @@ const LEVEL_COLORS: Record<string, string> = {
   info: '#22c55e',
   warn: '#eab308',
   error: '#ef4444',
-  debug: '#64748b',
+  debug: 'var(--color-slate-500, #64748b)',
 };
 
 function isHighlightEntry(message: string): boolean {
@@ -61,7 +61,7 @@ export function SystemLogsTerminal() {
           <button
             onClick={() => exportLogs(logs)}
             className="text-[10px] text-slate-400 hover:text-white transition-colors px-2 py-0.5 rounded flex items-center gap-1"
-            style={{ background: 'rgba(255,255,255,0.05)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}
           >
             <Icon name="download" size={12} />
             Export
@@ -69,7 +69,7 @@ export function SystemLogsTerminal() {
           <button
             onClick={clearLogs}
             className="text-[10px] text-slate-400 hover:text-white transition-colors px-2 py-0.5 rounded"
-            style={{ background: 'rgba(255,255,255,0.05)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}
           >
             Clear
           </button>
@@ -105,8 +105,8 @@ export function SystemLogsTerminal() {
                 key={log.id}
                 className={`flex gap-3 px-2 py-0.5 rounded transition-all ${isLast ? 'animate-pulse' : ''}`}
                 style={{
-                  color: LEVEL_COLORS[log.level] || '#64748b',
-                  background: isHighlight ? 'rgba(97,22,218,0.08)' : 'transparent',
+                  color: LEVEL_COLORS[log.level] || 'var(--color-slate-500, #64748b)',
+                  background: isHighlight ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'transparent',
                   borderLeft: isHighlight ? '2px solid var(--color-primary)' : '2px solid transparent',
                   opacity: index < logs.length - 3 ? 0.7 : 1,
                 }}

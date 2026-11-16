@@ -189,7 +189,7 @@ export function CommandPalette() {
                     </div>
                     <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded"
                       style={{
-                        background: item.type === 'path' ? 'rgba(97,22,218,0.15)' : 'rgba(255,255,255,0.05)',
+                        background: item.type === 'path' ? 'color-mix(in srgb, var(--color-primary) 15%, transparent)' : 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
                         color: item.type === 'path' ? 'var(--color-primary)' : 'var(--color-text-muted)',
                       }}
                     >

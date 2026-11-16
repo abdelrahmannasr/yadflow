@@ -5,10 +5,10 @@ interface MiddlewareStep {
 }
 
 const TYPE_COLORS = {
-  validate: { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
+  validate: { color: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)' },
   persist: { color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
   sideEffect: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  notify: { color: '#fb2576', bg: 'rgba(251,37,118,0.1)' },
+  notify: { color: '#fb2576', bg: 'color-mix(in srgb, var(--color-accent-hover) 10%, transparent)' },
 };
 
 const CHAINS: { title: string; endpoint: string; color: string; steps: MiddlewareStep[] }[] = [
@@ -61,9 +61,9 @@ export function MiddlewareChainSection() {
         <div
           key={chain.endpoint}
           className="rounded-xl border overflow-hidden"
-          style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
-          <div className="px-4 py-3 border-b flex items-center gap-3" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+          <div className="px-4 py-3 border-b flex items-center gap-3" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
             <div className="w-2 h-2 rounded-full" style={{ background: chain.color }} />
             <span className="text-sm font-bold text-slate-200">{chain.title}</span>
             <code className="text-[10px] font-mono text-slate-500 ml-auto">{chain.endpoint}</code>

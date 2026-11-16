@@ -97,9 +97,9 @@ export const PathSelector = () => {
                     onClick={() => selectPath(path.id)}
                     className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-left transition-all relative overflow-hidden"
                     style={{
-                      background: isSelected ? 'rgba(97,22,218,0.1)' : 'transparent',
-                      border: isSelected ? '1px solid rgba(97,22,218,0.2)' : '1px solid transparent',
-                      color: isSelected ? 'white' : 'var(--color-text-secondary)',
+                      background: isSelected ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)' : 'transparent',
+                      border: isSelected ? '1px solid color-mix(in srgb, var(--color-primary) 20%, transparent)' : '1px solid transparent',
+                      color: isSelected ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                     }}
                     whileHover={{
                       backgroundColor: isSelected ? undefined : 'var(--color-surface-highlight)',

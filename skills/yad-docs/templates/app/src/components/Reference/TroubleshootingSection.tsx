@@ -5,9 +5,9 @@ import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
 import { ERROR_CODES } from '../../data/referenceData';
 
 const SEVERITY_COLORS = {
-  info: { text: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
-  warn: { text: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.2)' },
-  critical: { text: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
+  info: { text: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
+  warn: { text: 'var(--color-amber-400, #fbbf24)', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.2)' },
+  critical: { text: 'var(--color-red-400, #f87171)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
 };
 
 export function TroubleshootingSection() {
@@ -33,7 +33,7 @@ export function TroubleshootingSection() {
               className="rounded-lg border overflow-hidden transition-colors"
               style={{
                 borderColor: isExpanded ? colors.border : 'var(--color-border-default)',
-                background: 'rgba(20,17,24,0.5)',
+                background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
               }}
             >
               <button

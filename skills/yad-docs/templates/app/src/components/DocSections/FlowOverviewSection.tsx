@@ -22,7 +22,7 @@ export function FlowOverviewSection() {
     <div className="space-y-4">
       <div
         className="rounded-xl border p-5"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <p className="text-sm text-slate-400 leading-relaxed">
           The booking status sync feature covers <strong className="text-white">{PATHS.length} distinct flow paths</strong> organized
@@ -31,7 +31,7 @@ export function FlowOverviewSection() {
       </div>
 
       {Object.entries(grouped).map(([category, paths]) => {
-        const color = CATEGORY_COLORS[category] || '#64748b';
+        const color = CATEGORY_COLORS[category] || 'var(--color-slate-500, #64748b)';
         return (
           <div key={category}>
             <div className="flex items-center gap-2 mb-2">
@@ -49,7 +49,7 @@ export function FlowOverviewSection() {
                   key={path.id}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg border hover:bg-white/5 transition-colors"
                   style={{
-                    background: 'rgba(20,17,24,0.3)',
+                    background: 'color-mix(in srgb, var(--color-bg-primary) 30%, transparent)',
                     borderColor: 'var(--color-border-default)',
                   }}
                 >

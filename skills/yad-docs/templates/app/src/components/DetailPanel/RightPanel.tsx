@@ -68,10 +68,10 @@ export function RightPanel() {
         <div className="p-4 border-t flex flex-col gap-2" style={{ borderColor: 'var(--color-border-default)' }}>
           <button
             onClick={() => navigate(`/path/${selectedPath.id}`)}
-            className="w-full py-2.5 rounded-lg text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-lg text-[#fff] text-sm font-medium transition-colors flex items-center justify-center gap-2"
             style={{
               background: 'var(--color-primary)',
-              boxShadow: '0 4px 15px rgba(97,22,218,0.2)',
+              boxShadow: '0 4px 15px color-mix(in srgb, var(--color-primary) 20%, transparent)',
             }}
           >
             <Icon name="open_in_new" size={18} />
@@ -82,8 +82,8 @@ export function RightPanel() {
               disabled
               className="w-full py-2.5 rounded-lg text-slate-300 text-sm font-medium border flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                borderColor: 'rgba(255,255,255,0.05)',
+                background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
+                borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
               }}
             >
               <Icon name="bug_report" size={18} />

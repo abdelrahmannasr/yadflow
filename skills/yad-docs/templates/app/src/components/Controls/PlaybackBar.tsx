@@ -51,12 +51,12 @@ export const PlaybackBar = () => {
       {/* Ambient glow */}
       <div
         className="absolute inset-0 pointer-events-none overflow-hidden"
-        style={{ background: 'rgba(30,26,37,0.9)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-secondary) 90%, transparent)' }}
       >
         <div
           className="absolute left-1/2 -translate-x-1/2 top-0 w-1/3 h-full"
           style={{
-            background: 'rgba(97,22,218,0.05)',
+            background: 'color-mix(in srgb, var(--color-primary) 5%, transparent)',
             filter: 'blur(100px)',
           }}
         />
@@ -65,7 +65,7 @@ export const PlaybackBar = () => {
       <div
         className="relative"
         style={{
-          borderTop: '1px solid rgba(255,255,255,0.1)',
+          borderTop: '1px solid color-mix(in srgb, var(--color-ink) 10%, transparent)',
         }}
       >
         {/* Header: label + timer */}
@@ -118,12 +118,12 @@ export const PlaybackBar = () => {
                         ? 'var(--color-primary)'
                         : isActive
                           ? 'white'
-                          : 'rgba(255,255,255,0.15)',
+                          : 'color-mix(in srgb, var(--color-ink) 15%, transparent)',
                       border: isActive ? '3px solid var(--color-primary)' : 'none',
                       boxShadow: isActive
-                        ? '0 0 12px rgba(97,22,218,0.6)'
+                        ? '0 0 12px color-mix(in srgb, var(--color-primary) 60%, transparent)'
                         : isCompleted
-                          ? '0 0 6px rgba(97,22,218,0.3)'
+                          ? '0 0 6px color-mix(in srgb, var(--color-primary) 30%, transparent)'
                           : 'none',
                     }}
                   />
@@ -131,7 +131,7 @@ export const PlaybackBar = () => {
                     className="text-[9px] font-medium transition-colors"
                     style={{
                       color: isActive
-                        ? 'white'
+                        ? 'var(--color-text-primary)'
                         : isCompleted
                           ? 'var(--color-primary)'
                           : 'var(--color-text-muted)',
@@ -147,7 +147,7 @@ export const PlaybackBar = () => {
           {/* Progress bar */}
           <div
             className="relative h-1.5 w-full rounded-full overflow-hidden"
-            style={{ background: 'rgba(255,255,255,0.08)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-ink) 8%, transparent)' }}
           >
             <motion.div
               className="h-full rounded-full"
@@ -176,12 +176,12 @@ export const PlaybackBar = () => {
           {/* Play / Pause */}
           <motion.button
             onClick={playbackState === 'playing' ? pause : play}
-            className="h-14 w-14 rounded-full flex items-center justify-center text-white transition-transform active:scale-95"
+            className="h-14 w-14 rounded-full flex items-center justify-center text-[#fff] transition-transform active:scale-95"
             style={{
               background: 'var(--color-primary)',
-              boxShadow: '0 0 20px rgba(97,22,218,0.5)',
+              boxShadow: '0 0 20px color-mix(in srgb, var(--color-primary) 50%, transparent)',
             }}
-            whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(97,22,218,0.8)' }}
+            whileHover={{ scale: 1.05, boxShadow: '0 0 30px color-mix(in srgb, var(--color-primary) 80%, transparent)' }}
             whileTap={{ scale: 0.95 }}
             aria-label={playbackState === 'playing' ? 'Pause' : 'Play'}
           >
@@ -210,19 +210,19 @@ export const PlaybackBar = () => {
           </button>
 
           {/* Divider */}
-          <div className="h-8 w-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
+          <div className="h-8 w-px" style={{ background: 'color-mix(in srgb, var(--color-ink) 10%, transparent)' }} />
 
           {/* Speed control */}
-          <div className="flex rounded-lg p-0.5" style={{ background: 'rgba(255,255,255,0.05)' }}>
+          <div className="flex rounded-lg p-0.5" style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
             {[1, 2, 3].map((s) => (
               <button
                 key={s}
                 onClick={() => setSpeed(s)}
                 className="px-3 py-1 rounded-md text-xs font-bold transition-all"
                 style={{
-                  background: speed === s ? 'rgba(97,22,218,0.2)' : 'transparent',
-                  color: speed === s ? 'white' : 'var(--color-text-muted)',
-                  border: speed === s ? '1px solid rgba(97,22,218,0.3)' : '1px solid transparent',
+                  background: speed === s ? 'color-mix(in srgb, var(--color-primary) 20%, transparent)' : 'transparent',
+                  color: speed === s ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                  border: speed === s ? '1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)' : '1px solid transparent',
                 }}
               >
                 {s}x
@@ -231,7 +231,7 @@ export const PlaybackBar = () => {
           </div>
 
           {/* Divider */}
-          <div className="h-8 w-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
+          <div className="h-8 w-px" style={{ background: 'color-mix(in srgb, var(--color-ink) 10%, transparent)' }} />
 
           {/* Replay Step */}
           <button
@@ -262,7 +262,7 @@ export const PlaybackBar = () => {
           </button>
 
           {/* Divider */}
-          <div className="h-8 w-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
+          <div className="h-8 w-px" style={{ background: 'color-mix(in srgb, var(--color-ink) 10%, transparent)' }} />
 
           {/* Logs toggle */}
           <button

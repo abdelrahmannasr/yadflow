@@ -32,7 +32,7 @@ export const SystemComponent: React.FC<SystemComponentProps> = React.memo(
       }
       return {
         boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-        borderColor: 'rgba(255,255,255,0.05)',
+        borderColor: 'color-mix(in srgb, var(--color-ink) 5%, transparent)',
       };
     }, [isActive, isReceiving, component.color]);
 
@@ -49,7 +49,7 @@ export const SystemComponent: React.FC<SystemComponentProps> = React.memo(
             transform: 'translate(-50%, -50%)',
             background: isActive
               ? `linear-gradient(135deg, ${component.color}12, ${component.color}06)`
-              : 'rgba(47, 41, 56, 0.4)',
+              : 'color-mix(in srgb, var(--color-bg-tertiary) 40%, transparent)',
             backdropFilter: 'blur(12px)',
             ...glowStyle,
             minWidth: '116px',
@@ -81,12 +81,12 @@ export const SystemComponent: React.FC<SystemComponentProps> = React.memo(
           </div>
 
           {/* Icon with gradient background */}
-          <div className="h-14 w-14 rounded-2xl flex items-center justify-center text-white shadow-lg mb-1"
+          <div className="h-14 w-14 rounded-2xl flex items-center justify-center text-[#fff] shadow-lg mb-1"
             style={{
               background: `linear-gradient(135deg, ${component.color}, ${component.color}99)`,
             }}
           >
-            <Icon name={iconName} size={28} className="text-white" />
+            <Icon name={iconName} size={28} className="text-[#fff]" />
           </div>
 
           {/* Label */}

@@ -27,7 +27,7 @@ export function CancelabilitySection() {
     <div className="space-y-4">
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <p className="text-sm text-slate-400 leading-relaxed">
           Cancellation is only possible before a booking reaches a <strong className="text-white">terminal state</strong>.
@@ -38,10 +38,10 @@ export function CancelabilitySection() {
 
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
         <table className="w-full text-sm">
-          <thead style={{ background: 'rgba(255,255,255,0.05)' }}>
+          <thead style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
             <tr>
               <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400">Booking Status</th>
               <th className="px-4 py-2.5 text-center text-xs font-semibold text-slate-400">Rider</th>

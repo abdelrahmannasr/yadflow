@@ -59,9 +59,9 @@ export function MonitoringAlertingSection() {
     <div className="space-y-5">
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <span className="text-sm font-bold text-slate-200">Key Metrics & Alert Thresholds</span>
         </div>
         <div className="divide-y" style={{ borderColor: 'var(--color-border-default)' }}>
@@ -71,7 +71,7 @@ export function MonitoringAlertingSection() {
                 <code className="text-xs font-mono text-cyan-400">{m.name}</code>
                 <span
                   className="text-[9px] px-1.5 py-0.5 rounded font-medium"
-                  style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--color-text-muted)' }}
+                  style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)', color: 'var(--color-text-muted)' }}
                 >
                   {m.type}
                 </span>
@@ -89,7 +89,7 @@ export function MonitoringAlertingSection() {
 
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Grafana Dashboard Panels</h4>
         <div className="space-y-1.5">

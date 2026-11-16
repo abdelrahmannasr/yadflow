@@ -76,7 +76,7 @@ export const AnimatedMessage: React.FC<AnimatedMessageProps> = React.memo(
             top: 0,
             translateX: '-50%',
             translateY: '-50%',
-            border: '1px solid rgba(255,255,255,0.2)',
+            border: '1px solid color-mix(in srgb, var(--color-ink) 20%, transparent)',
           }}
           initial={{ x: x1, y: y1, opacity: 0, scale: 0.5 }}
           animate={{

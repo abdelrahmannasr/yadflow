@@ -19,7 +19,7 @@ export function StakeholderToggle() {
   return (
     <div className="flex items-center gap-2 px-6 py-3 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
       <span className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mr-1 shrink-0">View:</span>
-      <div className="flex overflow-x-auto rounded-lg p-0.5 gap-0.5" style={{ background: 'rgba(255,255,255,0.05)' }}>
+      <div className="flex overflow-x-auto rounded-lg p-0.5 gap-0.5" style={{ background: 'color-mix(in srgb, var(--color-ink) 5%, transparent)' }}>
         {VIEWS.map(({ id, label, icon }) => (
           <button
             key={id}
@@ -28,7 +28,7 @@ export function StakeholderToggle() {
             style={{
               background: view === id ? 'var(--color-primary)' : 'transparent',
               color: view === id ? 'white' : 'var(--color-text-muted)',
-              border: view === id ? '1px solid rgba(97,22,218,0.3)' : '1px solid transparent',
+              border: view === id ? '1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)' : '1px solid transparent',
             }}
           >
             <Icon name={icon} size={13} />

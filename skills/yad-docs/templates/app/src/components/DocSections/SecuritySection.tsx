@@ -50,11 +50,11 @@ export function SecuritySection() {
         <div
           key={layer.layer}
           className="rounded-xl border overflow-hidden"
-          style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <div
             className="px-4 py-2.5 border-b flex items-center gap-2"
-            style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}
+            style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}
           >
             <Icon name="shield" size={16} className="text-emerald-400" />
             <span className="text-sm font-bold text-slate-200">{layer.layer}</span>

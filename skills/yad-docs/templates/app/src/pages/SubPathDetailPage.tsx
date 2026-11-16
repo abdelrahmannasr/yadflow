@@ -73,10 +73,10 @@ export function SubPathDetailPage() {
             </button>
             <button
               onClick={() => { selectPath(path.id); navigate('/'); }}
-              className="px-4 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2 transition-colors"
+              className="px-4 py-2 rounded-lg text-[#fff] text-sm font-medium flex items-center gap-2 transition-colors"
               style={{
                 background: 'var(--color-primary)',
-                boxShadow: '0 4px 15px rgba(97,22,218,0.2)',
+                boxShadow: '0 4px 15px color-mix(in srgb, var(--color-primary) 20%, transparent)',
               }}
             >
               <Icon name="play_arrow" size={18} />
@@ -127,7 +127,7 @@ export function SubPathDetailPage() {
                   <div className="rounded-lg p-4 flex flex-col gap-3 flex-1 border"
                     style={{
                       background: 'var(--color-bg-primary)',
-                      borderColor: idx === 0 ? 'rgba(97,22,218,0.5)' : 'var(--color-border-default)',
+                      borderColor: idx === 0 ? 'color-mix(in srgb, var(--color-primary) 50%, transparent)' : 'var(--color-border-default)',
                     }}
                   >
                     <div className="text-slate-300 text-sm font-semibold uppercase tracking-wider">
@@ -181,7 +181,7 @@ export function SubPathDetailPage() {
                       <td className="px-6 py-4">
                         <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium"
                           style={{
-                            background: 'rgba(97,22,218,0.1)',
+                            background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)',
                             color: 'var(--color-primary)',
                           }}
                         >
@@ -212,7 +212,7 @@ export function SubPathDetailPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-white text-xl font-bold font-display">Step Detail Panel</h2>
-              <div className="p-2 rounded-lg" style={{ background: 'rgba(97,22,218,0.2)' }}>
+              <div className="p-2 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-primary) 20%, transparent)' }}>
                 <Icon name="info" size={20} className="text-[var(--color-primary)]" />
               </div>
             </div>

@@ -20,7 +20,7 @@ export function RoleSelectPage() {
 
         <div
           className="mt-8 rounded-xl border p-5 text-center"
-          style={{ background: 'rgba(20,17,24,0.3)', borderColor: 'var(--color-border-default)' }}
+          style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 30%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <p className="text-sm text-slate-400">
             Each role page includes tailored documentation sections and relevant flow paths.

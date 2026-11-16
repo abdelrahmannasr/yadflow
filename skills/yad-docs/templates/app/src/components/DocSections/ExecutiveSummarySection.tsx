@@ -20,7 +20,7 @@ export function ExecutiveSummarySection() {
     <div className="space-y-5">
       <div
         className="rounded-xl border p-5"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-2">What is Sync Booking Status?</h4>
         <p className="text-sm text-slate-400 leading-relaxed">
@@ -36,7 +36,7 @@ export function ExecutiveSummarySection() {
           <div
             key={m.label}
             className="rounded-lg border p-3 text-center"
-            style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
           >
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
@@ -52,7 +52,7 @@ export function ExecutiveSummarySection() {
 
       <div
         className="rounded-xl border p-5"
-        style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+        style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
       >
         <h4 className="text-sm font-bold text-slate-200 mb-3">Key Points</h4>
         <ul className="space-y-2">

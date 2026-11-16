@@ -48,7 +48,7 @@ export function PerformanceTestingSection() {
           <div
             key={m.metric}
             className="rounded-lg border p-3"
-            style={{ background: 'rgba(20,17,24,0.5)', borderColor: 'var(--color-border-default)' }}
+            style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
           >
             <Icon name={m.icon} size={18} className="text-cyan-400 mb-2" />
             <div className="text-xs text-slate-200 font-medium">{m.metric}</div>
@@ -59,9 +59,9 @@ export function PerformanceTestingSection() {
 
       <div
         className="rounded-xl border overflow-hidden"
-        style={{ borderColor: 'var(--color-border-default)', background: 'rgba(20,17,24,0.5)' }}
+        style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)' }}
       >
-        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'rgba(255,255,255,0.03)' }}>
+        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--color-border-default)', background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)' }}>
           <span className="text-sm font-bold text-slate-200">Load Test Scenarios</span>
         </div>
         <div className="divide-y" style={{ borderColor: 'var(--color-border-default)' }}>

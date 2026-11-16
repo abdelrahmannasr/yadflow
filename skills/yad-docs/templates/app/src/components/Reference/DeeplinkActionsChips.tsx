@@ -28,9 +28,9 @@ export function DeeplinkActionsChips() {
                 key={action.value}
                 className="px-2.5 py-1.5 rounded-md text-xs font-mono border cursor-default hover:bg-white/5 transition-colors"
                 style={{
-                  background: 'rgba(20,17,24,0.5)',
+                  background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                   borderColor: 'var(--color-border-default)',
-                  color: '#94a3b8',
+                  color: 'var(--color-slate-400, #94a3b8)',
                 }}
                 title={action.description}
               >
@@ -52,9 +52,9 @@ export function DeeplinkActionsChips() {
                 key={action.value}
                 className="px-2.5 py-1.5 rounded-md text-xs font-mono border cursor-default hover:bg-white/5 transition-colors"
                 style={{
-                  background: 'rgba(20,17,24,0.5)',
+                  background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                   borderColor: 'var(--color-border-default)',
-                  color: '#94a3b8',
+                  color: 'var(--color-slate-400, #94a3b8)',
                 }}
                 title={action.description}
               >
