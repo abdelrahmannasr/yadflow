@@ -1,5 +1,5 @@
 // The lifecycle definition — the phases, steps and routes as one versioned JSON file (E134, the first row
-// of the lifecycle spine; docs/roadmap-idea-1.md, "The lifecycle spine").
+// of the lifecycle spine; docs/design-rules.md, "The lifecycle spine").
 //
 // WHERE THE LIFECYCLE LIVES NOW. yadflow ships its default as `cli/lifecycle/defaults/<n>.json`. Until
 // E134 the same facts were lists written in `cli/epic-state.mjs` (`STEPS`, `LIFECYCLE_PROFILES`,

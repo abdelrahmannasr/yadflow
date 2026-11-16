@@ -23,7 +23,7 @@ nothing to flip.
 }
 ```
 
-Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2):
+Three rules go with it, and they are permanent (`docs/design-rules.md`, Part 2):
 
 1. **A file with no version counts as version 1.** Nothing has to be rewritten to be readable. Files
    written before the stamp existed are read as shape 1, and get the key the next time the engine
@@ -309,7 +309,7 @@ Every other review gate — `analysis-review`, `epic-review`, `ui-design-review`
 
 ### The step states (shape 7)
 
-`status` is one of eight words. Seven are the model (`docs/roadmap-idea-1.md`, Part 1); `in_review` is
+`status` is one of eight words. Seven are the model (`docs/design-rules.md`, Part 1); `in_review` is
 the eighth, and is `in_progress` on a step that is a review gate.
 
 | State | Meaning | Chain continues past it | Artifact written here | Must record |

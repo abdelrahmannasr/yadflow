@@ -11,7 +11,7 @@ exists, what it is and is not, the smallest thing worth shipping, and the rough 
 `roadmap.md` is the menu of features; each feature is later taken into the normal `yad-epic` flow,
 which reads it for project context.
 
-**What the Foundation is.** The roadmap (`docs/roadmap-idea-1.md`, Part 1) has two levels. The
+**What the Foundation is.** The roadmap (`docs/design-rules.md`, Part 1) has two levels. The
 **Product** level runs once per product and holds the Foundation. The **Feature** level runs once per
 epic and walks the six phases. The Foundation has its own gate: one approval before feature work
 begins. That approval is **reported, not enforced** in this release — `yad next` says when feature

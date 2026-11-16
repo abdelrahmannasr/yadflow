@@ -8,7 +8,7 @@
 //   * `yad doctor --json`      — the deterministic half of its findings (cli/doctor.mjs)
 //   * the gate predicate       — pass/fail + rule per review step (cli/epic-state.mjs)
 //
-// Roadmap rule (docs/roadmap-idea-1.md, Part 2 rule 6): a real v3 project, frozen — if it breaks, the
+// Roadmap rule (docs/design-rules.md, Part 2 rule 6): a real v3 project, frozen — if it breaks, the
 // change is wrong. No exceptions. So there is deliberately NO regeneration flag here. A diff in the
 // snapshot is a finding to explain, not a file to refresh: updating `golden-v3.expected.json` means
 // stating in the PR which behaviour changed and why that is intended.

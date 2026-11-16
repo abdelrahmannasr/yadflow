@@ -3,8 +3,8 @@ body:
     attributes:
       value: >
         Thanks for the idea. Start with the problem, not the solution: the problem helps us find
-        the best fix. Check the [roadmap](https://github.com/abdelrahmannasr/yadflow/blob/main/docs/roadmap-idea-1.md)
-        to see if it is already planned.
+        the best fix. Search the open ideas here and the
+        [issues](https://github.com/abdelrahmannasr/yadflow/issues) first, to see if it is already suggested.
   - type: textarea
     id: problem
     attributes:

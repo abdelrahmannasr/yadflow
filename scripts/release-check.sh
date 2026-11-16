@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The release check — the gate a release has to clear before anything reaches npm.
 #
-# Rule 10 of the change-safety rules (docs/roadmap-idea-1.md, Part 8): a release is a human decision.
+# Rule 10 of the change-safety rules (docs/design-rules.md, Part 8): a release is a human decision.
 # A person decides by fast-forwarding `release` to `main`; this decides whether that decision is SAFE
 # to carry out. Semantic-release runs only after this passes (.github/workflows/release.yml).
 #

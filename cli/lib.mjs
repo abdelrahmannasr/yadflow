@@ -284,7 +284,7 @@ export function dirMatches(src, dest) {
 }
 
 // ---- file shape (schemaVersion) -----------------------------------------
-// Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file the engine writes
+// Rule 1 of the change-safety rules (docs/design-rules.md, Part 2): every file the engine writes
 // states its shape, and a file with no version counts as 1.
 //
 // Both halves live here, in the one JSON reader/writer pair, rather than at the ~30 call sites. Two

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Did the file shape move since the last release, and if so is its migration guide here?
 #
-# Rule 7 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): file-shape changes ship together
+# Rule 7 of the change-safety rules (docs/design-rules.md, Part 2): file-shape changes ship together
 # with the migration guide. This is the half of that rule a machine can hold.
 #
 # The comparison is between the SCHEMA_VERSION in the working tree and the one in the last released

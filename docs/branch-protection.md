@@ -60,7 +60,7 @@ to many repos from an organization. Set these on the default branch:
 | Block force pushes | on | A force-push can rewrite the ledger's history |
 | Restrict deletions | on | |
 | Require signed commits | **off** on the Product; your choice on a code repo | On the Product, yad's CI writes the ledger in unsigned commits, so this rule would refuse them (#432) |
-| Require review from Code Owners | **on**, with the gate-file lines in [Who may change the gates](#who-may-change-the-gates-426) | Without it a pull request can change the gates and pass them. For the rest of your code, CODEOWNERS stays your choice: yad reads it as a hint and never writes it ([E69](roadmap-idea-1.md)) |
+| Require review from Code Owners | **on**, with the gate-file lines in [Who may change the gates](#who-may-change-the-gates-426) | Without it a pull request can change the gates and pass them. For the rest of your code, CODEOWNERS stays your choice: yad reads it as a hint and never writes it (E69) |
 
 ### The status checks to require
 
@@ -220,7 +220,7 @@ On GitLab the root `.gitlab-ci.yml` decides whether the yad fragments are includ
 it is on the list. A CI file kept outside `.gitlab/ci/` (for example `ci/*.yml`) needs its own line; yad
 reads only these paths.
 
-yad never writes `CODEOWNERS` ([E69](roadmap-idea-1.md)): a name it wrote would become an owner the
+yad never writes `CODEOWNERS` (E69): a name it wrote would become an owner the
 platform enforces. In a repo where yad's gates are installed, `yad codeowners check` and `yad doctor` warn
 when `checks/` or a CI file has no owner whose review can be required, and print the lines above. A repo
 connected for code context only, with no gates, gets no such warning.

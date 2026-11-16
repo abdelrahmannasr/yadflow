@@ -313,14 +313,6 @@ The record is worth trusting because people approve what goes into it.
 - the CI checks
 - the Review Companion
 
-**Planned, not built yet** (see the [roadmap](docs/roadmap-idea-1.md)):
-
-- a context brief for each task: E24, E82, E89 and E90
-- a cross-repository map with its own staleness tracking: E83
-- a release and deployment phase: E32
-- a single handoff view, an explicit `superseded` status, one combined freshness report, and a
-  browsable example project: E126 to E129
-
 ## Documentation
 
 - **Learn:** [yadflow, explained](docs/YADFLOW-EXPLAINED.md) (every part in plain words, for technical

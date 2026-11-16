@@ -214,7 +214,7 @@ export const LEARNING_PRIMARY = 'deeptutor';
 
 // The shape (schema version) every file the engine writes declares, as `"schemaVersion": <n>`.
 //
-// Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file states its shape,
+// Rule 1 of the change-safety rules (docs/design-rules.md, Part 2): every file states its shape,
 // and a file with no version counts as 1.
 //
 // Raising this number is not a one-line change. Three things move together, or a project is left

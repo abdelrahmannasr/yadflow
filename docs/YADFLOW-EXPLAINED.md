@@ -1594,7 +1594,7 @@ how much the AI may do alone. Here are common set-ups.
 | Hooks | Draft saving and the agent guard run in Claude Code and Cursor only. The Cursor wiring follows Cursor's published format but has not yet been tried in a live session. |
 | Platforms | GitHub and GitLab for review PRs and CI; with none, reviews run locally. |
 
-**Planned or proposed, not built yet** (see the [roadmap](roadmap-idea-1.md)). E126 to E129 are
+**Planned or proposed, not built yet.** E126 to E129 are
 proposals, not yet decided:
 
 | Item | What it would add |

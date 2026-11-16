@@ -12,7 +12,7 @@ silent drift.
 ## Why it exists
 
 The roadmap is about to change how the engine reads and writes its files. The rule that keeps that
-safe (`docs/roadmap-idea-1.md`, Part 2 rule 6) is: keep one real v3 project frozen, and if a change
+safe (`docs/design-rules.md`, Part 2 rule 6) is: keep one real v3 project frozen, and if a change
 alters how the engine sees it, the change is wrong.
 
 `cli/test-golden.mjs` runs three read-only views over this project and compares them to the committed

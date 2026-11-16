@@ -21,7 +21,7 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // ---- the per-step gate rule (E7) -----------------------------------------------------------------
 //
 // HOW MANY HUMAN APPROVALS a step asks for, as a NUMBER derived from the step's own recorded data.
-// `needed = base + risk step` — the roadmap's tier-1 rule (docs/roadmap-idea-1.md, Part 3). There is
+// `needed = base + risk step` — the roadmap's tier-1 rule (docs/design-rules.md, Part 3). There is
 // no name and no role anywhere in it, which is the whole point: a rule that names a person, a role or
 // a step goes stale the moment the team changes, and "repository access is the roster" replaces it.
 //
@@ -1220,7 +1220,7 @@ function loadBuildStates(dir) {
 // hard-coded in about thirty places with two boolean flags beside them, and every reader decided for
 // itself what each one implied.
 //
-// The roadmap's model (docs/roadmap-idea-1.md, Part 1, "Step states") names SEVEN states. The table
+// The roadmap's model (docs/design-rules.md, Part 1, "Step states") names SEVEN states. The table
 // below has EIGHT rows, because `in_review` is kept beside them (see the note at the end of this
 // comment). The two questions those thirty readers were really asking are its two columns:
 //

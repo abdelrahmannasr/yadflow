@@ -1,6 +1,6 @@
 // `yad migrate` — the one command that moves a project's files from one shape to the next.
 //
-// Rule 4 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): one real upgrade command —
+// Rule 4 of the change-safety rules (docs/design-rules.md, Part 2): one real upgrade command —
 // preview, back up, rewrite, report, safe to run twice.
 //
 // The shape of a file is its `schemaVersion` (cli/lib.mjs stamps it; manifest.mjs holds the engine's
@@ -218,7 +218,7 @@ export const MIGRATIONS = [
     from: 6,
     to: 7,
     title: "every step's `status` is a word from the step-state model",
-    // The seven states the roadmap names (docs/roadmap-idea-1.md, Part 1, "Step states") become the
+    // The seven states the roadmap names (docs/design-rules.md, Part 1, "Step states") become the
     // values `status` actually holds. Three rewrites, all inside `stampStepStates`:
     //
     //   `blocked` with no `record`  ->  `todo`       the old spelling of "not started"

@@ -11,7 +11,7 @@
 // is made per match, not per line, so a line that says `GitHub` does not hide a `hub` beside it.
 //
 // Each rule is as narrow as its reason. A rule that matched the bare word would hide every miss, which
-// is how an earlier keep list went wrong (`docs/roadmap-idea-1.md`, E30). So a line rule claims only the
+// is how an earlier keep list went wrong (`docs/design-rules.md`, E30). So a line rule claims only the
 // characters its pattern covers: `.sdlc/hub.json` on a line keeps that one hit, not a second `hub`
 // beside it.
 //
@@ -29,7 +29,7 @@ export const HIT = /(?<!git)hub/gi;
 // compares against, or a guide whose job is to name the old names.
 export const FILE_RULES = [
   { rule: 'history', why: 'the release history — old entries keep the words they shipped with', test: (f) => f === 'CHANGELOG.md' },
-  { rule: 'history', why: 'the decision record — each row keeps the words of the day it was decided', test: (f) => f === 'docs/roadmap-idea-1.md' },
+  { rule: 'history', why: 'the decision record — each row keeps the words of the day it was decided', test: (f) => f === 'docs/design-rules.md' },
   { rule: 'history', why: 'notes written before the rename, kept as they were', test: (f) => f === 'RESEARCH-NOTES.md' || f === 'docs/phase-4-build-plan.md' },
   { rule: 'migration-guide', why: 'a shape guide describes the files of its own day', test: (f) => /^docs\/migrations\/shape-\d+\.md$/.test(f) },
   { rule: 'migration-guide', why: 'the hub → Product guide names every old name, with a before and after', test: (f) => f === 'docs/migrations/hub-to-product.md' },
