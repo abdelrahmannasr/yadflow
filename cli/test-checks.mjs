@@ -27,11 +27,14 @@ const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk
 // Strip ambient git identity env (see cli/test.mjs for why) — and the vars the gates resolve their
 // base from: SDLC_BASE (the base branch), and SDLC_PRODUCT_CONFIG / SDLC_HUB_CONFIG (which settings
 // file to read default_branch out of; E122 added the first). The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking either would
-// silence the no-base tests below on exactly the machines that followed the docs. Per-test overrides
-// still work — runGate merges its `env` argument on top of this.
+// silence the no-base tests below on exactly the machines that followed the docs. YAD_TEST_MAX_WORKERS
+// too: yad-checks.yml's build-test-lint job sets it, and this suite runs inside that job when a repo
+// wired with yad tests itself (this one does), so the "no cap env" test would read the job's cap.
+// Per-test overrides still work — runGate merges its `env` argument on top of this.
 const GIT_ENV = Object.fromEntries(
   Object.entries(process.env).filter(
-    ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE' && k !== 'SDLC_HUB_CONFIG' && k !== 'SDLC_PRODUCT_CONFIG',
+    ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)
+      && !['SDLC_BASE', 'SDLC_HUB_CONFIG', 'SDLC_PRODUCT_CONFIG', 'YAD_TEST_MAX_WORKERS'].includes(k),
   ),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
