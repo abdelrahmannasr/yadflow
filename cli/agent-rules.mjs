@@ -254,6 +254,8 @@ export const COMMAND_CLASS = {
   'docs sync': { class: 'local-write' },
   // Builds the sites here; publishing is the CI workflow's, on a push.
   'docs deploy': { class: 'local-write' },
+  // Writes the Product's brand into a generated site's files (E186).
+  'docs brand': { class: 'local-write' },
   thread: { class: 'read' },
   'reconcile check': { class: 'read' },
   'reconcile refresh': { class: 'local-write' },

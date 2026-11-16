@@ -16,6 +16,7 @@ import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
 import { contractSurfaceHash } from './epic-state.mjs';
+import { brandFingerprint, siteBrandFingerprint, runDocsBrand } from './docs-brand.mjs';
 
 // ---- registry + site locations ------------------------------------------------------------------
 function loadDocs(root) {
@@ -121,9 +122,14 @@ export function shellVersion() {
 export const LEGACY_SHELL_VERSION = '0.0.0';
 
 // Compare a build manifest to the current world; list the concrete reasons it is stale.
-export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion } = {}) {
+export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion, brand } = {}) {
   const reasons = [];
   if (!manifest) return { stale: true, reasons: ['never built'] };
+  // E186: the brand the site wears (`brand.wears`, read from its index.css; undefined for a site made before
+  // the template had a brand block) against the Product's brand now (`brand.now`, null for yadflow's look).
+  if (brand && brand.wears !== undefined && brand.wears !== brand.now) {
+    reasons.push(brand.now ? 'the Product\'s brand changed (yad docs brand <site>)' : 'the Product\'s brand was removed or cannot be used (yad docs brand <site>)');
+  }
   if (artifactHash && manifest.artifactHash && artifactHash !== manifest.artifactHash) {
     reasons.push('authored artifacts changed');
   }
@@ -311,6 +317,8 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
       const s = freshness(root, t, registry);
       if (s.stale) {
         warn(`${label(t)} — ${c.yellow('stale')}: ${s.reasons.join('; ')}`);
+        // A refresh puts the Product's brand on a site whose brand changed first (E186), then builds it.
+        if (sync === 'refresh' && s.reasons.some((r) => r.startsWith('the Product\'s brand'))) await runDocsBrand(root, { site: path.relative(root, siteDir(root, t)) });
         const b = sync === 'refresh' ? buildSite(root, t, { npmOptional: true }) : { built: null, error: null };
         sites.push({ site: label(t), stale: true, built: b.built, error: b.error });
       } else {
@@ -351,7 +359,7 @@ function freshness(root, t, registry) {
     // (yad-docs-overview, Step 3), so a shell upgrade is not a reason to rebuild it.
     const files = ['skills/sdlc/config.yaml', 'skills/sdlc/module-help.csv', 'docs/diagrams/sdlc-overview.mmd']
       .map((f) => path.join(root, f)).filter(exists);
-    return docsStale(manifest, { artifactHash: docsArtifactHash(files) });
+    return docsStale(manifest, { artifactHash: docsArtifactHash(files), brand: siteBrand(root, t) });
   }
   const epicMeta = readJSON(path.join(root, 'epics', t.epic, '.sdlc/state.json'), {});
   const repos = epicMeta.repos || [];
@@ -360,7 +368,14 @@ function freshness(root, t, registry) {
     artifactHash: docsArtifactHash(docsArtifactFiles(root, t.epic), surface || ''),
     repoHeads: repoHeadsFor(root, repos, registry),
     shellVersion: shellVersion(),
+    brand: siteBrand(root, t),
   });
+}
+// The brand a site wears, and the Product's brand now (E186).
+function siteBrand(root, t) {
+  let css;
+  try { css = fs.readFileSync(path.join(siteDir(root, t), 'src', 'index.css'), 'utf8'); } catch { return undefined; }
+  return { wears: siteBrandFingerprint(css), now: brandFingerprint(root) };
 }
 function reportFreshness(root, t) {
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });

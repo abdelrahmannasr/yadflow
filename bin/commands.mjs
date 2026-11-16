@@ -53,6 +53,7 @@ export { runRiskMap } from '../cli/riskmap-command.mjs';
 export { runCodeowners } from '../cli/codeowners-command.mjs';
 export { runStory } from '../cli/story-frames.mjs';
 export { runDocs } from '../cli/docs.mjs';
+export { runDocsBrand } from '../cli/docs-brand.mjs';
 export { runDetect } from '../cli/detect.mjs';
 export { runToolboxAdd, runToolboxCheck, runToolboxList, runToolboxRemove } from '../cli/toolbox.mjs';
 export { runToolboxConnect } from '../cli/toolbox-connect.mjs';

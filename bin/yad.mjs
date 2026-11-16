@@ -550,6 +550,7 @@ ${c.bold('Interactive docs (generated sites)')}
   yad docs build [--epic <id>|--overview]    npm-build a generated doc site
   yad docs deploy [--epic <id>|--overview]   Build + report the Pages deploy
   yad docs sync [--check|--refresh|--wire]   Staleness sweep; --wire installs the Pages CI
+  yad docs brand <site folder> [--json]      A generated site wears the Product's brand (E186)
 
 ${c.bold('Options')}
   --dir <path>          Target project root. Without it, a Product command finds the Product from
@@ -730,7 +731,7 @@ const ACTIONS = {
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
   story: { known: ['frames'] },
-  docs: { known: ['list', 'build', 'deploy', 'sync'], default: 'list' },
+  docs: { known: ['list', 'build', 'deploy', 'sync', 'brand'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
   toolbox: { known: ['list', 'check', 'add', 'remove', 'connect'], default: 'list' },
@@ -780,7 +781,8 @@ function writesProduct(cmd, o) {
   if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
   if (cmd === 'worktree') return o._[1] === 'add' || o._[1] === 'remove';
   // `--wire` writes a CI workflow; `--refresh` only rebuilds sites the folder already holds.
-  if (cmd === 'docs') return action === 'sync' && !!o.wire;
+  // `brand` writes the brand into a generated site of the Product (E186).
+  if (cmd === 'docs') return (action === 'sync' && !!o.wire) || action === 'brand';
   return false;
 }
 
@@ -1577,6 +1579,12 @@ async function main() {
       break;
     case 'docs': {
       const [, action] = o._;
+      if (action === 'brand') {
+        // E186. A generated site wears the Product's brand: the site folder is the one word after `brand`.
+        if (noProduct()) break;
+        result = await commands.runDocsBrand(o.dir, { site: o._[2], args: o._.slice(3), json: !!o.json });
+        break;
+      }
       if (o.epic && !commands.isValidEpicId(o.epic)) { refuse(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`); break; }
       const sync = o.wire ? 'wire' : o.refresh ? 'refresh' : 'check';
       if (noProduct()) break;
