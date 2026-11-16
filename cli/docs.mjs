@@ -325,9 +325,11 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
           if (brand && brand.wears !== undefined && brand.wears !== brand.now) {
             const done = applyBrand(root, path.relative(root, siteDir(root, t)));
             if (!done.ok) {
-              warn(`${label(t)} — the brand could not be put on: ${done.error}`);
+              const error = `${label(t)}: the brand could not be put on: ${done.error}`;
+              warn(error);
+              if (done.hint) hand(done.hint);
               process.exitCode = 1;
-              sites.push({ site: label(t), stale: true, built: false, error: `${label(t)}: the brand could not be put on: ${done.error}` });
+              sites.push({ site: label(t), stale: true, built: false, error });
               continue;
             }
             if (done.result.wrote.length) info(`${label(t)} — brand written (${done.result.wrote.join(', ')})`);

@@ -341,7 +341,7 @@ test('docs brand: the fingerprint names the block\'s version, and doubled marker
   try {
     // Worked out here from the same files: the block's version line first, then brand.json and each file.
     const h = createHash('sha256');
-    h.update('yad-brand-block:1\n');
+    h.update('yad-brand-block:1\n'); // typed, not imported: a new block version must update this test on purpose
     for (const rel of [BRAND_FILE, 'design/fern.woff2', 'design/mark.svg']) {
       const buf = fs.readFileSync(path.join(root, rel));
       h.update(`${rel}:${buf.length}\n`);
@@ -379,5 +379,23 @@ test('docs brand: sync --refresh — a refused brand never becomes the answer, t
     endJSON();
     assert.equal(siteBrandFingerprint(site('src/index.css')), brandFingerprint(root));
   } finally { process.exitCode = 0; done(ws); }
+});
+
+test('docs brand: a folder with no src, a site with no src/data, and a dangling link each get their own refusal', async () => {
+  const cases = [
+    ['the parent folder', (root) => root, 'epics/EP-x', /has no src folder: is it the folder of a generated doc site\?/],
+    ['no src/data', (root) => fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }), SITE, /has no src\/data folder: the site is incomplete/],
+    ['src/data a dangling link', (root) => { fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }); fs.symlinkSync(path.join(root, 'nowhere'), path.join(root, SITE, 'src/data')); }, SITE, /reached through no link/],
+  ];
+  for (const [name, setUp, site, want] of cases) {
+    const { ws, root } = branded();
+    try {
+      setUp(root);
+      const out = await captured(() => runDocsBrand(root, { site, json: true }));
+      assert.equal(out.ok, false, name);
+      assert.match(out.error, want, name);
+      process.exitCode = 0;
+    } finally { done(ws); }
+  }
 });
 

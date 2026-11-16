@@ -223,7 +223,9 @@ export function applyBrand(root, site) {
     const want = path.join(dir, srcDir ? path.join('src', 'data') : 'src');
     let missing = false;
     try { fs.lstatSync(want); } catch (e) { missing = e.code === 'ENOENT'; }
-    return no(missing ? `${shown} has no ${srcDir ? 'src/data' : 'src'} folder (a site made by an older yad-docs skill)` : `${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the yad-docs skill');
+    if (missing && !srcDir) return no(`${shown} has no src folder: is it the folder of a generated doc site?`, DOCS_BRAND_USAGE);
+    if (missing) return no(`${shown} has no src/data folder: the site is incomplete`, 'make the site again with the skill that made it (yad-docs, or yad-docs-overview for docs/sdlc-site)');
+    return no(`${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the skill that made it');
   }
   const cssAt = path.join(srcDir, 'index.css');
   const htmlAt = path.join(dir, 'index.html');
