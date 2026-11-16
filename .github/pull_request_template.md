@@ -1,19 +1,19 @@
-<!-- Yadflow's own PR template: yad's code-repo template (yad-pr-template), merged with this repo's
-     own fields. The yadflow Product (private yadflow-product) drives the work; this repo is its
-     `engine` code repo. One atomic task per PR (or a few small tasks of one story). -->
+<!-- Yadflow's own PR template: yad's code-repo template (yad-pr-template), merged by hand with this
+     repo's own fields. Keep the "Domains / repos touched:" label: risk-route.sh and `yad open-pr` read it.
+     One atomic task per PR (or a few small tasks of one story). -->
 
 ## Summary
 <!-- What this PR does, in one or two sentences. -->
 
 ## Story / task
-<!-- When an epic drives this PR, its commits MUST carry a `Task: <story>-<task>` trailer (the spec-link gate checks this).
-     Dependency bumps, releases and other housekeeping with no story: write "none". -->
+<!-- The spec-link gate fails a feat/fix/docs/refactor/perf commit with no `Task: <story>-<task>` trailer
+     (ci/chore/build/test commits are exempt). With no story yet: write "none" — that gate shows red, advisory. -->
 - Story / task: `EP-<slug>-S0N-T0N`
 - Spec: `specs/EP-<slug>-S0N/` (link.md points back to the Product)
 
 ## Impact & Risk
 <!-- Fill every field. risk-route.sh + the engineer review read this block. -->
-- **Areas touched:** <cli | skills | checks | ci | docs | …>
+- **Domains / repos touched:** <cli | skills | checks | ci | docs | …>
 - **Check-gate behavior touched:** no <!-- yes => the safety story changed; explain in Testing -->
 - **Contract surface touched:** no <!-- yes => needs Contract-Change + a re-locked contract (contract-check) -->
 - **Risk level:** low <!-- low | medium | high — high (or a touched contract surface) raises the advisory approver count -->
@@ -31,7 +31,7 @@
 
 ## Checklist
 - [ ] Commits follow [Conventional Commits](CONTRIBUTING.md) (they drive semantic-release)
-- [ ] Commits carry a `Task: <story>-<task>` trailer when an epic drives this PR (spec-link gate)
+- [ ] feat/fix/docs/refactor/perf commits carry a `Task: <story>-<task>` trailer (spec-link gate)
 - [ ] No contract-surface change without `Contract-Change: yes` + a re-locked contract (contract-check gate)
 - [ ] `npm test` and `npm run test:e2e` pass locally
 - [ ] New behavior is covered by tests (coverage gate: ≥70% lines/branches)
