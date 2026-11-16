@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import type { FlowStep } from '../../data/types';
 import { Icon } from '../shared/Icon';
 
@@ -19,7 +20,7 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
         <span className="text-[10px] font-mono px-2 py-0.5 rounded border"
           style={{
             background: 'rgba(59,130,246,0.2)',
-            color: 'var(--color-blue-300, rgb(147,197,253))',
+            color: 'var(--color-tint-blue-300)',
             borderColor: 'rgba(59,130,246,0.3)',
           }}
         >
@@ -43,28 +44,28 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
         >
           {step.sideEffects.jobs && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
-              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}
+              style={{ background: 'rgba(245,158,11,0.15)', color: readable('#f59e0b') }}
             >
               <Icon name="work" size={12} /> {step.sideEffects.jobs}
             </span>
           )}
           {step.sideEffects.notifications && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
-              style={{ background: 'color-mix(in srgb, var(--color-accent-hover) 15%, transparent)', color: '#fb2576' }}
+              style={{ background: 'color-mix(in srgb, var(--color-accent-hover) 15%, transparent)', color: readable('#fb2576') }}
             >
               <Icon name="notifications" size={12} /> {step.sideEffects.notifications}
             </span>
           )}
           {step.sideEffects.dac && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
-              style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6' }}
+              style={{ background: 'rgba(139,92,246,0.15)', color: readable('#8b5cf6') }}
             >
               <Icon name="assignment" size={12} /> {step.sideEffects.dac}
             </span>
           )}
           {step.sideEffects.pubsub && (
             <span className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md"
-              style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}
+              style={{ background: 'rgba(16,185,129,0.15)', color: readable('#10b981') }}
             >
               <Icon name="cell_tower" size={12} /> {step.sideEffects.pubsub}
             </span>

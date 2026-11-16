@@ -90,7 +90,7 @@ export function DataMigrationSection() {
           {VALIDATION_QUERIES.map((q) => (
             <div key={q.label}>
               <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{q.label}</span>
-              <pre className="mt-1 text-[11px] font-mono text-emerald-400 bg-black/30 rounded-lg px-3 py-2 overflow-x-auto">
+              <pre className="mt-1 text-[11px] font-mono text-emerald-400 bg-[var(--color-surface-darker)] rounded-lg px-3 py-2 overflow-x-auto">
                 {q.query}
               </pre>
             </div>

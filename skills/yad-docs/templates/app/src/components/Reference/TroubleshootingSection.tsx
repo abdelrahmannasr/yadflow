@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon } from '../shared/Icon';
@@ -5,9 +6,9 @@ import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
 import { ERROR_CODES } from '../../data/referenceData';
 
 const SEVERITY_COLORS = {
-  info: { text: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
-  warn: { text: 'var(--color-amber-400, #fbbf24)', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.2)' },
-  critical: { text: 'var(--color-red-400, #f87171)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
+  info: { text: 'var(--color-tint-blue-400)', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.2)' },
+  warn: { text: 'var(--color-tint-amber-400)', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.2)' },
+  critical: { text: 'var(--color-tint-red-400)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
 };
 
 export function TroubleshootingSection() {
@@ -43,14 +44,14 @@ export function TroubleshootingSection() {
                 <div className="flex items-center gap-3">
                   <span
                     className="text-xs font-mono font-bold"
-                    style={{ color: colors.text }}
+                    style={{ color: readable(colors.text) }}
                   >
                     {error.code}
                   </span>
                   {error.httpStatus && (
                     <span
                       className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}
+                      style={{ background: colors.bg, color: readable(colors.text), border: `1px solid ${colors.border}` }}
                     >
                       {error.httpStatus}
                     </span>

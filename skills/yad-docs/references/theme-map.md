@@ -27,9 +27,13 @@ from a higher tier); only a wholesale absence stamps `theme: default`.
 
 ## Token → custom-property mapping
 
-Map design tokens onto these properties (the exact set the shell defines), once in the dark `:root`
-and once in the light one. Names match the reference `index.css` — do not rename or add properties.
-The defaults below are the dark look's; the light look's are in the reference file's light block.
+Map design tokens onto these 20 properties, once in the dark `:root` and once in the light one. **Change
+only the values of these 20 lines; leave every other line of both `:root` blocks exactly as copied**: the
+overlay, canvas, on-primary and tint variables, the `--font-*` variables, `color-scheme`, and in the light
+block the Tailwind remaps (`--color-white`, `--color-slate-*`, the -300/-400 tints). Each of those is used
+by the components, and one left out breaks the page (no font, a panel with no background, white headings
+on a white page). Names match the reference `index.css` — do not rename or add properties. The defaults
+below are the dark look's; the light look's are in the reference file's light block.
 
 | Design token (role) | CSS custom property | Default (reference) |
 |---------------------|---------------------|---------------------|
@@ -62,11 +66,16 @@ The defaults below are the dark look's; the light look's are in the reference fi
 - The background ramp (`bg-primary` → `bg-tertiary` → `surface-*`) is darkest→lighter in the dark
   look and lightest→darker in the light look; preserve that ordering when mapping a source's neutrals.
   A source with only one scheme: map it onto its own look and keep the reference values in the other.
-- Always emit the **full property set** in the **fixed order above** (matching the reference file), in
-  both looks, with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
+- Always set **all 20 values** in the **fixed order above** (matching the reference file), in both
+  looks, with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
 
 ## Fonts + utilities (never themed)
 Headings/`.font-display` → **Space Grotesk**; body/`.font-body` → **Noto Sans**. The `.glass-panel`,
 `.flow-grid`, `.code-block`, scrollbar, and `.logs-scrollbar` utilities are copied verbatim from the
 shell. Icons are **Material Symbols** names (e.g. `phone_iphone`, `terminal`, `bar_chart`) carried in
 the data files, not the theme.
+
+## The Product's brand (never themed here)
+`src/data/brand.ts`, the `yad-brand` block at the end of `index.css`, and the `yad-brand:head` block in
+`index.html` belong to `yad docs brand <site>` (E186). Copy them as they are and never write them: that
+command fills them from the Product's `.sdlc/brand.json`, and a later copy of the shell must not undo it.

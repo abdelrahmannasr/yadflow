@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 interface MiddlewareStep {
   name: string;
   description: string;
@@ -5,7 +6,7 @@ interface MiddlewareStep {
 }
 
 const TYPE_COLORS = {
-  validate: { color: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)' },
+  validate: { color: 'var(--color-tint-blue-400)', bg: 'rgba(96,165,250,0.1)' },
   persist: { color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
   sideEffect: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
   notify: { color: '#fb2576', bg: 'color-mix(in srgb, var(--color-accent-hover) 10%, transparent)' },
@@ -76,7 +77,7 @@ export function MiddlewareChainSection() {
                   <div className="flex flex-col items-center pt-1">
                     <div
                       className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold"
-                      style={{ background: tc.bg, color: tc.color }}
+                      style={{ background: tc.bg, color: readable(tc.color) }}
                     >
                       {i + 1}
                     </div>
@@ -89,7 +90,7 @@ export function MiddlewareChainSection() {
                       <span className="text-xs font-mono font-semibold text-slate-200">{step.name}</span>
                       <span
                         className="text-[9px] px-1.5 py-0.5 rounded font-medium"
-                        style={{ background: tc.bg, color: tc.color }}
+                        style={{ background: tc.bg, color: readable(tc.color) }}
                       >
                         {step.type}
                       </span>

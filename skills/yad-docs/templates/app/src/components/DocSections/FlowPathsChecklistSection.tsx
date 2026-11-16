@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState } from 'react';
 import { Icon } from '../shared/Icon';
 import { PATHS } from '../../data/paths';
@@ -53,7 +54,7 @@ export function FlowPathsChecklistSection() {
       <div className="space-y-1.5">
         {PATHS.map((path) => {
           const isChecked = checked.has(path.id);
-          const catColor = CATEGORY_COLORS[path.category] || 'var(--color-slate-500, #64748b)';
+          const catColor = CATEGORY_COLORS[path.category] || '#64748b';
           return (
             <button
               key={path.id}
@@ -73,14 +74,14 @@ export function FlowPathsChecklistSection() {
               <div className="flex-1 min-w-0">
                 <span
                   className="text-sm font-medium"
-                  style={{ color: isChecked ? 'var(--color-slate-400, #94a3b8)' : 'var(--color-slate-200, #e2e8f0)', textDecoration: isChecked ? 'line-through' : 'none' }}
+                  style={{ color: isChecked ? '#94a3b8' : '#e2e8f0', textDecoration: isChecked ? 'line-through' : 'none' }}
                 >
                   Path {path.id}: {path.label}
                 </span>
               </div>
               <span
                 className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
-                style={{ background: `${catColor}15`, color: catColor }}
+                style={{ background: `${catColor}15`, color: readable(catColor) }}
               >
                 {path.category}
               </span>

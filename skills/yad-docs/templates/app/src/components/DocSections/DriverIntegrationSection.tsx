@@ -43,7 +43,7 @@ export function DriverIntegrationSection() {
           style={{ background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)', borderColor: 'var(--color-border-default)' }}
         >
           <div className="px-4 py-3 flex items-center gap-3 border-b" style={{ borderColor: 'var(--color-border-default)' }}>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--color-amber-400, #fbbf24)' }}>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--color-tint-amber-400)' }}>
               {ep.method}
             </span>
             <code className="text-sm text-slate-200 font-mono">{ep.path}</code>
@@ -51,7 +51,7 @@ export function DriverIntegrationSection() {
           <div className="px-4 py-3">
             <p className="text-xs text-slate-400 mb-2">{ep.description}</p>
             <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Request Body</span>
-            <pre className="mt-1 text-[11px] font-mono text-emerald-400 bg-black/30 rounded-lg px-3 py-2">{ep.body}</pre>
+            <pre className="mt-1 text-[11px] font-mono text-emerald-400 bg-[var(--color-surface-darker)] rounded-lg px-3 py-2">{ep.body}</pre>
           </div>
         </div>
       ))}

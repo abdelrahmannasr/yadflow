@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 
 const METRICS = [
@@ -40,7 +41,7 @@ export function ExecutiveSummarySection() {
           >
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
-              style={{ background: `${m.color}20`, color: m.color }}
+              style={{ background: `${m.color}20`, color: readable(m.color) }}
             >
               <Icon name={m.icon} size={18} />
             </div>

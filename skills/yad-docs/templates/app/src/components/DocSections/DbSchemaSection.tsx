@@ -86,7 +86,7 @@ export function DbSchemaSection() {
             <div key={q.name}>
               <div className="text-xs font-semibold text-slate-300 mb-1">{q.name}</div>
               <p className="text-[11px] text-slate-500 mb-2">{q.description}</p>
-              <pre className="text-[11px] font-mono text-emerald-400 bg-black/30 rounded-lg px-3 py-2 overflow-x-auto whitespace-pre-wrap">
+              <pre className="text-[11px] font-mono text-emerald-400 bg-[var(--color-surface-darker)] rounded-lg px-3 py-2 overflow-x-auto whitespace-pre-wrap">
                 {q.query}
               </pre>
             </div>

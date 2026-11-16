@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import React from "react";
 import type { MessageType } from "../../data/types";
 import { MESSAGE_COLORS } from "../../data/types";
@@ -14,7 +15,7 @@ export const Badge: React.FC<BadgeProps> = React.memo(({ type, label }) => {
       className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
       style={{
         backgroundColor: `${color}20`,
-        color: color,
+        color: readable(color),
         border: `1px solid ${color}40`,
       }}
     >

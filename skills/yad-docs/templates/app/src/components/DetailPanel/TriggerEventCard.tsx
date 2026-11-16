@@ -21,7 +21,7 @@ export function TriggerEventCard({ step }: TriggerEventCardProps) {
         }}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-bold px-1.5 rounded text-[#fff]"
+          <span className="text-[10px] font-bold px-1.5 rounded text-[var(--color-on-primary)]"
             style={{ background: 'var(--color-primary)' }}
           >
             {step.actor.toUpperCase()}

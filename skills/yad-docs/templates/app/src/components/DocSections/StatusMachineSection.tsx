@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 import { STATUS_MAPPINGS } from '../../data/referenceData';
 
@@ -39,7 +40,7 @@ export function StatusMachineSection() {
           </thead>
           <tbody>
             {STATUS_MAPPINGS.map((m) => {
-              const color = CATEGORY_COLORS[m.category] || 'var(--color-slate-500, #64748b)';
+              const color = CATEGORY_COLORS[m.category] || '#64748b';
               return (
                 <tr
                   key={m.tripStatus}
@@ -77,7 +78,7 @@ export function StatusMachineSection() {
             <span
               key={s}
               className="px-2.5 py-1 rounded-md text-xs font-mono border"
-              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)', color: 'var(--color-red-400, #f87171)' }}
+              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)', color: readable('#f87171') }}
             >
               <Icon name="block" size={12} className="inline mr-1" />
               {s}

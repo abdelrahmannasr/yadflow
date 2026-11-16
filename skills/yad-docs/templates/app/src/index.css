@@ -35,6 +35,20 @@
     --color-grid: color-mix(in srgb, var(--color-ink) 3%, transparent);
     --color-scroll-thumb: #4a4059;
     --color-scroll-thumb-hover: #5d5270;
+    --color-canvas: #1b172d;
+    /* Text on a solid primary fill (buttons, the play button, active tabs). */
+    --color-on-primary: #ffffff;
+
+    /* Status tints the components use as text. In the dark look they are the colours as drawn; the light
+       look darkens them. --color-tint-share is how much of a data colour readable() keeps (src/utils). */
+    --color-tint-share: 100%;
+    --color-tint-amber-400: #fbbf24;
+    --color-tint-blue-300: rgb(147,197,253);
+    --color-tint-blue-400: #60a5fa;
+    --color-tint-red-400: #f87171;
+    --color-tint-violet-400: #a78bfa;
+    --color-tint-slate-400: #94a3b8;
+    --color-tint-slate-500: #64748b;
 
     --font-display: 'Space Grotesk', sans-serif;
     --font-body: 'Noto Sans', system-ui, -apple-system, sans-serif;
@@ -77,6 +91,17 @@
       --color-ink: var(--color-text-primary);
       --color-scroll-thumb: #cfc8dd;
       --color-scroll-thumb-hover: #b8b0c9;
+      --color-canvas: #f4f2f9;
+      --color-on-primary: #ffffff;
+
+      --color-tint-share: 62%;
+      --color-tint-amber-400: #b45309;
+      --color-tint-blue-300: #1d4ed8;
+      --color-tint-blue-400: #1d4ed8;
+      --color-tint-red-400: #b91c1c;
+      --color-tint-violet-400: #6d28d9;
+      --color-tint-slate-400: #475569;
+      --color-tint-slate-500: #475569;
 
       /* Text Tailwind colours follow the page's own text colours, so a brand's text reaches them too. */
       --color-white: var(--color-text-primary);

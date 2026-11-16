@@ -4,6 +4,9 @@
 shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 (`FlowPath` / `FlowStep` / `AnimatedMessage` / `SystemComponent` / `StakeholderView` / `RoleConfig` /
 `DocSectionConfig`). The generation is the AI step; it must be **deterministic** (rules at the bottom).
+`src/data/brand.ts` is not one of them: it is the Product's brand, written only by `yad docs brand`
+(E186). Copy it as it is. A colour a data module gives for text (a role's, a section's) is drawn as it is in
+the dark look and mixed toward the text colour in the light one (`src/utils/readable.ts`), so any tint reads.
 
 ## Artifact → data-structure table
 

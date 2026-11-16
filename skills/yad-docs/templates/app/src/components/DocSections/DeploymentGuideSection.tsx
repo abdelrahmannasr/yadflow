@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 
 const ENV_CONFIGS = [
@@ -35,7 +36,7 @@ export function DeploymentGuideSection() {
             <div key={env.env} className="flex items-center gap-3">
               <span
                 className="text-xs font-bold w-24 px-2 py-1 rounded text-center"
-                style={{ background: `${env.color}15`, color: env.color, border: `1px solid ${env.color}25` }}
+                style={{ background: `${env.color}15`, color: readable(env.color), border: `1px solid ${env.color}25` }}
               >
                 {env.env}
               </span>
@@ -69,7 +70,7 @@ export function DeploymentGuideSection() {
             <div key={i} className="flex items-start gap-3">
               <div
                 className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5"
-                style={{ background: 'rgba(123,89,230,0.15)', color: '#7b59e6' }}
+                style={{ background: 'rgba(123,89,230,0.15)', color: readable('#7b59e6') }}
               >
                 {i + 1}
               </div>

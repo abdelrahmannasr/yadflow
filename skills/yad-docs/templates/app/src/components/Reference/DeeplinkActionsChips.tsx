@@ -30,7 +30,7 @@ export function DeeplinkActionsChips() {
                 style={{
                   background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                   borderColor: 'var(--color-border-default)',
-                  color: 'var(--color-slate-400, #94a3b8)',
+                  color: 'var(--color-tint-slate-400)',
                 }}
                 title={action.description}
               >
@@ -54,7 +54,7 @@ export function DeeplinkActionsChips() {
                 style={{
                   background: 'color-mix(in srgb, var(--color-bg-primary) 50%, transparent)',
                   borderColor: 'var(--color-border-default)',
-                  color: 'var(--color-slate-400, #94a3b8)',
+                  color: 'var(--color-tint-slate-400)',
                 }}
                 title={action.description}
               >

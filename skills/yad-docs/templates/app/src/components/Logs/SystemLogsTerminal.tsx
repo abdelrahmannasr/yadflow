@@ -6,7 +6,7 @@ const LEVEL_COLORS: Record<string, string> = {
   info: '#22c55e',
   warn: '#eab308',
   error: '#ef4444',
-  debug: 'var(--color-slate-500, #64748b)',
+  debug: 'var(--color-tint-slate-500)',
 };
 
 function isHighlightEntry(message: string): boolean {
@@ -105,7 +105,7 @@ export function SystemLogsTerminal() {
                 key={log.id}
                 className={`flex gap-3 px-2 py-0.5 rounded transition-all ${isLast ? 'animate-pulse' : ''}`}
                 style={{
-                  color: LEVEL_COLORS[log.level] || 'var(--color-slate-500, #64748b)',
+                  color: LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)',
                   background: isHighlight ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'transparent',
                   borderLeft: isHighlight ? '2px solid var(--color-primary)' : '2px solid transparent',
                   opacity: index < logs.length - 3 ? 0.7 : 1,

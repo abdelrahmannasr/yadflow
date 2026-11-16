@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFlowStore } from '../../store/useFlowStore';
 import { Icon } from '../shared/Icon';
@@ -17,7 +18,7 @@ const CANCELABILITY_RULES = [
   { status: '<= ACCEPTED', canCancel: 'Yes', color: '#22c55e', dotColor: '#22c55e' },
   { status: 'DRIVING', canCancel: 'Maybe (Fee Applies)', color: '#eab308', dotColor: '#eab308' },
   { status: 'COMPLETED', canCancel: 'No', color: '#ef4444', dotColor: '#3b82f6' },
-  { status: 'CANCELLED', canCancel: 'No', color: '#ef4444', dotColor: 'var(--color-slate-500, #64748b)' },
+  { status: 'CANCELLED', canCancel: 'No', color: '#ef4444', dotColor: 'var(--color-tint-slate-500)' },
 ];
 
 const MESSAGE_LEGEND = [
@@ -115,7 +116,7 @@ export function RulesLegendPanel() {
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border"
                               style={{
                                 background: `${rule.color}15`,
-                                color: rule.color,
+                                color: readable(rule.color),
                                 borderColor: `${rule.color}30`,
                               }}
                             >
@@ -149,7 +150,7 @@ export function RulesLegendPanel() {
                       >
                         <div className="flex items-center gap-3">
                           <div className="flex items-center justify-center w-10 h-10 rounded-lg"
-                            style={{ background: `${color}20`, color: color }}
+                            style={{ background: `${color}20`, color: readable(color) }}
                           >
                             <Icon name={iconName} size={20} />
                           </div>
@@ -199,7 +200,7 @@ export function RulesLegendPanel() {
               }}
             >
               <Tooltip content="Coming soon" className="flex-1">
-                <button disabled className="w-full py-3 px-4 rounded-lg text-[#fff] text-sm font-bold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
+                <button disabled className="w-full py-3 px-4 rounded-lg text-[var(--color-on-primary)] text-sm font-bold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
                   style={{ background: 'var(--color-primary)' }}
                 >
                   <Icon name="download" size={18} />

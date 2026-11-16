@@ -1,3 +1,4 @@
+import { readable } from '../utils/readable';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { DocPageShell } from '../components/DocLayout/DocPageShell';
@@ -31,7 +32,7 @@ export function StakeholderDocPage() {
             <p className="text-slate-400">Unknown role: {roleSlug}</p>
             <button
               onClick={() => navigate('/docs')}
-              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium text-[#fff]"
+              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium text-[var(--color-on-primary)]"
               style={{ background: 'var(--color-primary)' }}
             >
               Back to Documentation Hub
@@ -60,7 +61,7 @@ export function StakeholderDocPage() {
         <button
           onClick={() => navigate('/')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          style={{ background: `${role.color}20`, color: role.color }}
+          style={{ background: `${role.color}20`, color: readable(role.color) }}
           onMouseEnter={(e) => (e.currentTarget.style.background = `${role.color}30`)}
           onMouseLeave={(e) => (e.currentTarget.style.background = `${role.color}20`)}
         >

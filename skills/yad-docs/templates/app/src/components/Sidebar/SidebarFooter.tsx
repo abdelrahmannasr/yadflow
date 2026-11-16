@@ -26,7 +26,7 @@ export function SidebarFooter() {
       </button>
       <button
         onClick={play}
-        className="flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-[#fff] text-sm font-medium transition-colors"
+        className="flex-1 flex items-center justify-center gap-2 h-10 rounded-lg text-[var(--color-on-primary)] text-sm font-medium transition-colors"
         style={{
           background: 'var(--color-primary)',
           boxShadow: '0 4px 15px color-mix(in srgb, var(--color-primary) 25%, transparent)',

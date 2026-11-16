@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFlowStore } from '../../store/useFlowStore';
@@ -118,7 +119,7 @@ export const StepList = () => {
                     animate={{ scale: [1, 1.08, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
                   >
-                    <Icon name="sync" size={14} className="text-white" />
+                    <Icon name="sync" size={14} className="text-[var(--color-on-primary)]" />
                   </motion.div>
                 ) : isCompleted ? (
                   <div
@@ -157,7 +158,7 @@ export const StepList = () => {
                     className="text-[10px] px-1.5 py-0.5 rounded font-medium"
                     style={{
                       background: isCurrent ? 'var(--color-primary)' : 'var(--color-surface-highlight)',
-                      color: isCurrent ? 'white' : isCompleted ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
+                      color: isCurrent ? 'var(--color-on-primary)' : isCompleted ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
                     }}
                   >
                     {isCurrent ? 'Current' : isCompleted ? 'Completed' : 'Pending'}
@@ -205,7 +206,7 @@ export const StepList = () => {
                         className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2"
                         style={{ borderTop: '1px solid var(--color-surface-highlight)' }}
                       >
-                        <div className="flex items-center gap-1.5" style={{ color: actorColor }}>
+                        <div className="flex items-center gap-1.5" style={{ color: readable(actorColor) }}>
                           <Icon name={actorIcon} size={16} />
                           <span className="text-xs font-medium">{step.actor}</span>
                         </div>

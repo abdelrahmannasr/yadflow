@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState } from 'react';
 import { Icon } from '../shared/Icon';
 
@@ -12,7 +13,7 @@ interface TestCase {
 const PRIORITY_COLORS = {
   critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)' },
   high: { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-  medium: { color: 'var(--color-blue-400, #60a5fa)', bg: 'rgba(96,165,250,0.1)' },
+  medium: { color: 'var(--color-tint-blue-400)', bg: 'rgba(96,165,250,0.1)' },
 };
 
 const TEST_CASES: TestCase[] = [
@@ -104,7 +105,7 @@ export function TestPlanSection() {
               const count = TEST_CASES.filter((t) => t.priority === p).length;
               const pc = PRIORITY_COLORS[p];
               return (
-                <span key={p} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: pc.bg, color: pc.color }}>
+                <span key={p} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: pc.bg, color: readable(pc.color) }}>
                   {p}: {count}
                 </span>
               );
@@ -129,7 +130,7 @@ export function TestPlanSection() {
                 className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors"
               >
                 <span className="text-[10px] font-mono font-bold text-slate-500 w-14 shrink-0">{tc.id}</span>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: pc.bg, color: pc.color }}>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: pc.bg, color: readable(pc.color) }}>
                   {tc.priority}
                 </span>
                 <span className="text-sm text-slate-200 text-left flex-1">{tc.scenario}</span>

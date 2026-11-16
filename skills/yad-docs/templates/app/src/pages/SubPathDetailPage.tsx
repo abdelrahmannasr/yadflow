@@ -1,3 +1,4 @@
+import { readable } from '../utils/readable';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { PATHS } from '../data/paths';
@@ -24,7 +25,7 @@ export function SubPathDetailPage() {
           <button
             onClick={() => navigate('/')}
             className="text-sm px-4 py-2 rounded-lg"
-            style={{ background: 'var(--color-primary)', color: 'white' }}
+            style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}
           >
             Go Back
           </button>
@@ -45,7 +46,7 @@ export function SubPathDetailPage() {
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider"
-                style={{ background: `${path.color}25`, color: path.color, border: `1px solid ${path.color}40` }}
+                style={{ background: `${path.color}25`, color: readable(path.color), border: `1px solid ${path.color}40` }}
               >
                 Path {path.id}
               </span>
@@ -73,7 +74,7 @@ export function SubPathDetailPage() {
             </button>
             <button
               onClick={() => { selectPath(path.id); navigate('/'); }}
-              className="px-4 py-2 rounded-lg text-[#fff] text-sm font-medium flex items-center gap-2 transition-colors"
+              className="px-4 py-2 rounded-lg text-[var(--color-on-primary)] text-sm font-medium flex items-center gap-2 transition-colors"
               style={{
                 background: 'var(--color-primary)',
                 boxShadow: '0 4px 15px color-mix(in srgb, var(--color-primary) 20%, transparent)',

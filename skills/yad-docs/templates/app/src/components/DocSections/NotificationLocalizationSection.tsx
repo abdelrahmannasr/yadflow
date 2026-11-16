@@ -37,7 +37,7 @@ export function NotificationLocalizationSection() {
           All booking notifications use <code className="text-xs bg-white/5 px-1 rounded text-slate-300">sendBookingNotificationWithConfig</code> which
           wraps the standard notification service. The payload follows this structure:
         </p>
-        <pre className="text-[11px] font-mono text-emerald-400 bg-black/30 rounded-lg p-3 overflow-x-auto">
+        <pre className="text-[11px] font-mono text-emerald-400 bg-[var(--color-surface-darker)] rounded-lg p-3 overflow-x-auto">
           {JSON.stringify(PUSH_PAYLOAD_EXAMPLE, null, 2)}
         </pre>
       </div>

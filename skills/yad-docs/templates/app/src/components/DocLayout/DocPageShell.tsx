@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../shared/Icon';
@@ -61,7 +62,7 @@ export function DocPageShell({
             {icon && (
               <div
                 className="w-10 h-10 rounded-lg flex items-center justify-center"
-                style={{ background: `${iconColor}20`, color: iconColor }}
+                style={{ background: `${iconColor}20`, color: readable(iconColor) }}
               >
                 <Icon name={icon} size={22} />
               </div>

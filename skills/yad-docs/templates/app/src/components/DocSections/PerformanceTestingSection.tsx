@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 
 const SCENARIOS = [
@@ -77,7 +78,7 @@ export function PerformanceTestingSection() {
               <div className="mt-1.5">
                 <span
                   className="text-[10px] font-mono px-2 py-0.5 rounded border"
-                  style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.2)', color: '#22c55e' }}
+                  style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.2)', color: readable('#22c55e') }}
                 >
                   Target: {s.metric}
                 </span>

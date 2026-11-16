@@ -60,7 +60,7 @@ export function ApiReferenceSection() {
               className="text-[10px] font-bold px-2 py-0.5 rounded"
               style={{
                 background: ep.method === 'PUT' ? 'rgba(251,191,36,0.15)' : 'rgba(96,165,250,0.15)',
-                color: ep.method === 'PUT' ? 'var(--color-amber-400, #fbbf24)' : 'var(--color-blue-400, #60a5fa)',
+                color: ep.method === 'PUT' ? 'var(--color-tint-amber-400)' : 'var(--color-tint-blue-400)',
               }}
             >
               {ep.method}
@@ -89,7 +89,7 @@ export function ApiReferenceSection() {
                     style={{
                       background: 'color-mix(in srgb, var(--color-ink) 3%, transparent)',
                       borderColor: 'var(--color-border-default)',
-                      color: 'var(--color-slate-400, #94a3b8)',
+                      color: 'var(--color-tint-slate-400)',
                     }}
                   >
                     {mw}

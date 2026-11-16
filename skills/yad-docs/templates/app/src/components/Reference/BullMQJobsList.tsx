@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
 import { BULLMQ_JOBS } from '../../data/referenceData';
@@ -26,7 +27,7 @@ export function BullMQJobsList() {
             <div className="flex items-start gap-3">
               <div
                 className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0 mt-0.5"
-                style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}
+                style={{ background: 'rgba(168,85,247,0.15)', color: readable('#a855f7') }}
               >
                 <Icon name="timer" size={18} />
               </div>
@@ -38,7 +39,7 @@ export function BullMQJobsList() {
                 <div className="flex flex-wrap gap-2">
                   <span
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border"
-                    style={{ color: '#a855f7', background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.2)' }}
+                    style={{ color: readable('#a855f7'), background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.2)' }}
                   >
                     <Icon name="schedule" size={10} />
                     {job.timing}

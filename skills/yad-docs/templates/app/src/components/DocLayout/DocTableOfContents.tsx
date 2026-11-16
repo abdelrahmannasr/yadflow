@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState, useEffect } from 'react';
 import { Icon } from '../shared/Icon';
 
@@ -45,7 +46,7 @@ export function DocTableOfContents({ items, roleLabel, roleIcon, roleColor }: Do
       <div className="flex items-center gap-2 mb-6 px-2">
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ background: `${roleColor}20`, color: roleColor }}
+          style={{ background: `${roleColor}20`, color: readable(roleColor) }}
         >
           <Icon name={roleIcon} size={18} />
         </div>

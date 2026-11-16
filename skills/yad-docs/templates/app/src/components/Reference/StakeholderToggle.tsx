@@ -27,7 +27,7 @@ export function StakeholderToggle() {
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all whitespace-nowrap shrink-0"
             style={{
               background: view === id ? 'var(--color-primary)' : 'transparent',
-              color: view === id ? 'white' : 'var(--color-text-muted)',
+              color: view === id ? 'var(--color-on-primary)' : 'var(--color-text-muted)',
               border: view === id ? '1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)' : '1px solid transparent',
             }}
           >

@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
 import { RIDER_UI_STATES } from '../../data/referenceData';
@@ -16,7 +17,7 @@ export function RiderUIStatesTable() {
         </div>
         <span
           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border"
-          style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)' }}
+          style={{ color: readable('#10b981'), background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)' }}
         >
           Mobile Dev Focus
         </span>

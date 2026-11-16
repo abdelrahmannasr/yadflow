@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../shared/Icon';
 import type { RoleConfig } from '../../data/roles';
@@ -29,7 +30,7 @@ export function RoleCard({ role }: RoleCardProps) {
       <div className="flex items-start justify-between mb-3">
         <div
           className="w-11 h-11 rounded-xl flex items-center justify-center"
-          style={{ background: `${role.color}20`, color: role.color }}
+          style={{ background: `${role.color}20`, color: readable(role.color) }}
         >
           <Icon name={role.icon} size={24} />
         </div>
@@ -45,7 +46,7 @@ export function RoleCard({ role }: RoleCardProps) {
         <span
           className="text-[10px] font-bold px-2 py-0.5 rounded border"
           style={{
-            color: role.color,
+            color: readable(role.color),
             background: `${role.color}15`,
             borderColor: `${role.color}25`,
           }}

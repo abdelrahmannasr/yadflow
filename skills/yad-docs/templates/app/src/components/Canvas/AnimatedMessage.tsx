@@ -91,7 +91,7 @@ export const AnimatedMessage: React.FC<AnimatedMessageProps> = React.memo(
             ease: 'easeInOut',
           }}
         >
-          <span className="text-[9px] font-bold leading-none text-white drop-shadow-sm">
+          <span className="text-[9px] font-bold leading-none text-[#fff] drop-shadow-sm">
             {label}
           </span>
         </motion.div>

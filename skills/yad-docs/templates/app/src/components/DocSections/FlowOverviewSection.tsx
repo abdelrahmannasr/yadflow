@@ -31,7 +31,7 @@ export function FlowOverviewSection() {
       </div>
 
       {Object.entries(grouped).map(([category, paths]) => {
-        const color = CATEGORY_COLORS[category] || 'var(--color-slate-500, #64748b)';
+        const color = CATEGORY_COLORS[category] || 'var(--color-tint-slate-500)';
         return (
           <div key={category}>
             <div className="flex items-center gap-2 mb-2">

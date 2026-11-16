@@ -16,7 +16,7 @@ export function DriverUIStatesTable() {
         </div>
         <span
           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border"
-          style={{ color: 'var(--color-violet-400, #a78bfa)', background: 'rgba(167,139,250,0.1)', borderColor: 'rgba(167,139,250,0.2)' }}
+          style={{ color: 'var(--color-tint-violet-400)', background: 'rgba(167,139,250,0.1)', borderColor: 'rgba(167,139,250,0.2)' }}
         >
           Mobile Dev Focus
         </span>

@@ -28,7 +28,7 @@ export function FeatureFlagMatrix() {
         </div>
         <span
           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border"
-          style={{ color: 'var(--color-amber-400, #fbbf24)', background: 'rgba(251,191,36,0.1)', borderColor: 'rgba(251,191,36,0.2)' }}
+          style={{ color: 'var(--color-tint-amber-400)', background: 'rgba(251,191,36,0.1)', borderColor: 'rgba(251,191,36,0.2)' }}
         >
           QA Focus
         </span>

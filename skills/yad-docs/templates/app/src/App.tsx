@@ -80,7 +80,7 @@ function Dashboard() {
 
       {/* Main Canvas Area */}
       <main className="flex-1 flex flex-col overflow-hidden relative flow-grid"
-        style={{ background: 'var(--color-bg-secondary)' }}
+        style={{ background: 'var(--color-canvas)' }}
       >
         {/* Canvas */}
         <div className="flex-1 overflow-hidden">

@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 
 const PHASES = [
@@ -38,7 +39,7 @@ const PHASES = [
   {
     phase: 'Phase 4 — Enhancements',
     status: 'planned',
-    color: 'var(--color-slate-500, #64748b)',
+    color: 'var(--color-tint-slate-500)',
     items: [
       'Ops dashboard for booking status monitoring',
       'Analytics events for booking funnel tracking',
@@ -78,7 +79,7 @@ export function PMRoadmapSection() {
               </div>
               <span
                 className="text-[10px] font-bold px-2 py-0.5 rounded"
-                style={{ background: sc.bg, color: sc.color }}
+                style={{ background: sc.bg, color: readable(sc.color) }}
               >
                 {sc.label}
               </span>

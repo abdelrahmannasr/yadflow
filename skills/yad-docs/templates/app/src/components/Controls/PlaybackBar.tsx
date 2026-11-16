@@ -176,7 +176,7 @@ export const PlaybackBar = () => {
           {/* Play / Pause */}
           <motion.button
             onClick={playbackState === 'playing' ? pause : play}
-            className="h-14 w-14 rounded-full flex items-center justify-center text-[#fff] transition-transform active:scale-95"
+            className="h-14 w-14 rounded-full flex items-center justify-center text-[var(--color-on-primary)] transition-transform active:scale-95"
             style={{
               background: 'var(--color-primary)',
               boxShadow: '0 0 20px color-mix(in srgb, var(--color-primary) 50%, transparent)',

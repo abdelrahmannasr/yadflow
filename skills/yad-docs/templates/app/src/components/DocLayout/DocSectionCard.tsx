@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { useState, forwardRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Icon } from '../shared/Icon';
@@ -24,7 +25,7 @@ export const DocSectionCard = forwardRef<HTMLElement, DocSectionCardProps>(
           <div className="flex items-center gap-3">
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: `${iconColor}20`, color: iconColor }}
+              style={{ background: `${iconColor}20`, color: readable(iconColor) }}
             >
               <Icon name={icon} size={18} />
             </div>

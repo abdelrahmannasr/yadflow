@@ -147,7 +147,7 @@ the default-theme degrade), the **deploy URL** or "build-only", and the **stalen
   refresh is a human decision (`yad repo refresh`).
 - **Degrade gracefully.** No docs target → build-only (local `dist/`). No design tokens → default theme.
   Absent inputs → omitted sections. No error — the site is additive.
-- **Copy the shell verbatim.** Generate only `src/data/*.ts`, the two `:root` blocks of `index.css`, and the Vite
+- **Copy the shell verbatim.** Generate only the five data modules in `src/data/` (never `src/data/brand.ts`: `yad docs brand` writes it), the 20 colour values in the two `:root` blocks of `index.css`, and the Vite
   base. Never hand-edit `templates/app/`.
 
 ## Reference

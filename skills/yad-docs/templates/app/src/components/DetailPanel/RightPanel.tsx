@@ -68,7 +68,7 @@ export function RightPanel() {
         <div className="p-4 border-t flex flex-col gap-2" style={{ borderColor: 'var(--color-border-default)' }}>
           <button
             onClick={() => navigate(`/path/${selectedPath.id}`)}
-            className="w-full py-2.5 rounded-lg text-[#fff] text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-lg text-[var(--color-on-primary)] text-sm font-medium transition-colors flex items-center justify-center gap-2"
             style={{
               background: 'var(--color-primary)',
               boxShadow: '0 4px 15px color-mix(in srgb, var(--color-primary) 20%, transparent)',
