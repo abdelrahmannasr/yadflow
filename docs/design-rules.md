@@ -9,7 +9,9 @@
 > Part 6 (the waves) and the task table of Part 7 — moved to the maintainer's private issue tracker,
 > which is now the source of truth for what is planned and what shipped. A row ID such as `E108` named
 > in the code or the docs is that tracker's issue title. The old file, tables included, stays in git
-> history: `git show 980bc42a:docs/roadmap-idea-1.md`.
+> history: `git show 980bc42a:docs/roadmap-idea-1.md` — a reader without access to the tracker finds
+> every row there. The kept parts are copied word for word, so a few sentences still say a row is
+> "below" (E75 in Part 1, E135–E144 in Part 5): those rows are in that old file.
 >
 > This is the outcome of a product brainstorming session. Everything here is a decision we made
 > together, or a rule that follows from one.
@@ -748,7 +750,8 @@ visible in plain git.
 | A harness vendor builds it in | **Cross-harness neutrality is the moat.** Claude Code will never rank Codex's skills |
 
 The orchestrator's task rows (E89–E103) moved to the private issue tracker with the rest of the
-task list.
+task list. The rule that ordered them stays: E50, E51 and E55 are the manual version of the orchestrator. They
+ship first and gather the evidence; the ranker is built on that data, never before it.
 
 ---
 

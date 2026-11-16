@@ -11,7 +11,8 @@
 // is made per match, not per line, so a line that says `GitHub` does not hide a `hub` beside it.
 //
 // Each rule is as narrow as its reason. A rule that matched the bare word would hide every miss, which
-// is how an earlier keep list went wrong (`docs/design-rules.md`, E30). So a line rule claims only the
+// is how an earlier keep list went wrong (row E30 of the old roadmap,
+// `git show 980bc42a:docs/roadmap-idea-1.md`). So a line rule claims only the
 // characters its pattern covers: `.sdlc/hub.json` on a line keeps that one hit, not a second `hub`
 // beside it.
 //
