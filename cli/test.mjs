@@ -13349,7 +13349,7 @@ test('docs shell: the template cannot change without a new shell version', (t) =
   const tracked = listed.split('\0').filter(Boolean).sort();
   const h = createHash('sha256');
   for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
-  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f', '0.0.6': 'sha256:095be46dfa09e92d6998d5401cd1f6fcf71c6c408129887cd0d641875aaee655', '0.0.7': 'sha256:629a4bc9c45ce39f31c389ebc29fcf17f5eeb76257ce7bc55e0166819e666421' };
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab', '0.0.1': 'sha256:be50c6ef089dba1056f6903c5221ebac0657e774dd7c8a209acd3d526da4c169', '0.0.2': 'sha256:a13af7b17ea075bf23c51e1466a17093fd0d607f7859e6e32350b116fe95a5b7', '0.0.3': 'sha256:fc4159b5a6906285d80f28937a5e3afc3df48abcb3ce7767dc58e722b92a2c0c', '0.0.4': 'sha256:ea34620715a820b35ea76d878cdf01eeac59b228a1369ad935b1dd35d348d699', '0.0.5': 'sha256:a7c6d4e01ed49b4c640c1d21fbc4d4a37cfc60577d634f3eee828b72623da35f', '0.0.6': 'sha256:095be46dfa09e92d6998d5401cd1f6fcf71c6c408129887cd0d641875aaee655', '0.0.7': 'sha256:d2ecdd4f874d9296415a1a37daf63697ec798e0a5a46aaf2d4a979e2fd1dc9f0' };
   assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
     `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
@@ -13391,7 +13391,8 @@ test('docs shell: the light look sets every colour the dark look does, and the b
   // page's own variables), so it reads in the light look too. Every `color:` value is read whole (it may span
   // lines), and every result it can take (each branch of `? :`, `||`, `??`) is checked, not the conditions.
   // A value that is one quoted hex is a data table's entry (`P1: { color: '#ef4444' }`), wrapped where it is
-  // drawn, unless it sits on a JSX style line.
+  // drawn, unless it sits inside a JSX style object. 'white' is allowed: it is text on a coloured fill. Not
+  // read here: a JSX colour prop (`color={x}`), an SVG fill, a quoted 'color' key — none draws text today.
   const PAREN = String.raw`\((?:[^()]|\([^()]*\))*\)`;
   const VALUE = new RegExp(String.raw`(?<![\w-])color:\s*((?:[^,;{}()]|${PAREN})+)`, 'g');
   const OK_RESULT = /^(?:readable\(|['"`]var\(--color-|['"](?:white|transparent|inherit)['"]$|undefined$)/;
@@ -13414,12 +13415,15 @@ test('docs shell: the light look sets every colour the dark look does, and the b
   function textColourProblems(text) {
     const found = [];
     for (const m of text.matchAll(/text-\[\$\{/g)) found.push(`a class built at run time: ${text.slice(m.index, m.index + 30)}`);
-    if (/style=\{\{\s*color\s*[,}]/.test(text)) found.push('style={{ color }}');
+    for (const m of text.matchAll(/text-\[#([0-9a-fA-F]{3,8})\]/g)) if (!/^f{3}(?:f{3})?$/i.test(m[1])) found.push(`a fixed text colour class: text-[#${m[1]}]`);
+    if (/style=\{\{(?:[^{}]*?,)?\s*color\s*[,}]/.test(text)) found.push('style={{ color }}');
     for (const m of text.matchAll(VALUE)) {
       const v = m[1].trim();
       if (/^string\b/.test(v)) continue; // a type
-      const line = text.slice(text.lastIndexOf('\n', m.index) + 1, text.indexOf('\n', m.index));
-      if (/^['"]#[0-9a-fA-F]{3,8}['"]$/.test(v) && !line.includes('style={{')) continue; // a data table's entry
+      // Inside a style={{ … }} object (on this line or across lines), a lone hex is drawn; elsewhere it is a
+      // data table's entry.
+      const inStyle = /style=\{\{[^{}]*$/.test(text.slice(0, m.index));
+      if (/^['"]#[0-9a-fA-F]{3,8}['"]$/.test(v) && !inStyle) continue;
       for (const r of splitTop(v)) if (r && !OK_RESULT.test(r)) found.push(`color: ${v.replace(/\s+/g, ' ')} (${r})`);
     }
     return found;
@@ -13432,9 +13436,16 @@ test('docs shell: the light look sets every colour the dark look does, and the b
     "color: isActive\n  ? roleColor\n  : 'var(--color-text-muted)',",
     'style={{ color }}',
     '<Icon className={`text-[${path.color}]`} />',
+    "<span\n  style={{\n    color: '#ef4444',\n  }}\n>",
+    "<span style={{ fontSize: 12,\n  color: '#ef4444' }}>",
+    '<span style={{ fontSize: 12, color }}>',
+    '<span className="text-[#f59e0b]">',
   ];
   for (const s of SAMPLE) assert.ok(textColourProblems(s).length > 0, `the scanner catches: ${s}`);
-  for (const s of ["color: isActive ? readable(roleColor) : 'var(--color-text-muted)',", "color: readable(LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)'),", "P1: { color: '#ef4444', bg: 'x' },", 'color: string;', "color: isCurrent\n  ? 'var(--color-on-primary)'\n  : 'white',"]) {
+  // Each sample is caught for its own reason, not a neighbour's.
+  assert.match(textColourProblems("color: isActive\n  ? roleColor\n  : 'var(--color-text-muted)',").join(), /\(roleColor\)/);
+  assert.match(textColourProblems("color: LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)',").join(), /\(LEVEL_COLORS\[log\.level\]\)/);
+  for (const s of ["color: isActive ? readable(roleColor) : 'var(--color-text-muted)',", "color: readable(LEVEL_COLORS[log.level] || 'var(--color-tint-slate-500)'),", "P1: { color: '#ef4444', bg: 'x' },", 'color: string;', '<div className="text-[#fff]">', "color: isCurrent\n  ? 'var(--color-on-primary)'\n  : 'white',"]) {
     assert.deepEqual(textColourProblems(s), [], `the scanner passes: ${s}`);
   }
   const bare = src.filter(([f]) => f.startsWith('src/components') || f.startsWith('src/pages')).flatMap(([f, t]) => textColourProblems(t).map((x) => `${f}: ${x}`));

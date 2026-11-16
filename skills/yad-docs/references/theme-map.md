@@ -67,9 +67,8 @@ below are the dark look's; the light look's are in the reference file's light bl
 - The background ramp (`bg-primary` → `bg-tertiary` → `surface-*`) is darkest→lighter in the dark
   look and lightest→darker in the light look; preserve that ordering when mapping a source's neutrals.
   A source with only one scheme: map it onto its own look and keep the reference values in the other.
-- Always set **all 21 values** (the 20 above in their **fixed order**, and `--color-on-primary` on its own
-  line where the reference file has it), in both
-  looks, with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
+- Always set **all 21 values** in both looks (the 20 above in their **fixed order**, and
+  `--color-on-primary` after them, where `src/index.css` has it), with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
 
 ## Fonts + utilities (never themed)
 Headings/`.font-display` → **Space Grotesk**; body/`.font-body` → **Noto Sans**. The `.glass-panel`,
