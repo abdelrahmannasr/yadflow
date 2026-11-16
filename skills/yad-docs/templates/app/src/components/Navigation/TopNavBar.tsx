@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../shared/Icon';
 import { Tooltip } from '../shared/Tooltip';
 import { useFlowStore } from '../../store/useFlowStore';
+import { brand } from '../../data/brand';
 
 export function TopNavBar() {
   const navigate = useNavigate();
@@ -17,8 +18,8 @@ export function TopNavBar() {
     >
       <div className="flex items-center gap-8">
         <div className="flex items-center gap-2 text-white">
-          <img src={`${import.meta.env.BASE_URL}yadflow-icon.png`} alt="yadflow" className="h-9 w-9 object-contain" />
-          <span className="text-lg font-bold font-display text-white tracking-tight">yadflow</span>
+          <img src={brand.mark ?? `${import.meta.env.BASE_URL}yadflow-icon.png`} alt="" className="h-9 w-9 object-contain" />
+          <span className="text-lg font-bold font-display text-white tracking-tight">{brand.name}</span>
         </div>
         <button
           onClick={toggleCommandPalette}

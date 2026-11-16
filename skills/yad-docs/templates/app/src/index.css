@@ -194,3 +194,7 @@
   background: var(--color-scroll-thumb-hover);
 }
 
+/* The Product's brand: `yad docs brand <site>` writes it between these two lines. Outside every layer, so it
+   wins over the looks above. Empty: the site keeps the looks above. */
+/* yad-brand:begin */
+/* yad-brand:end */
