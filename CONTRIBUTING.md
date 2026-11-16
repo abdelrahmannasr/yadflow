@@ -24,16 +24,16 @@ The same yad gates you would wire into your own code repos run here too:
 
 | What | Where | What it means for a PR |
 |---|---|---|
-| The check gates (spec-link, contract-check, build-test-lint, commit-message, pr-title, pr-template, …) | `checks/` and `.github/workflows/yad-checks.yml`, `yad-pr-text.yml`, `yad-update-guard.yml` | They run on every PR. Only `verified-commits` is a required check on `main` (it also runs from `yad-verified-commits.yml`); the others are advisory for now, so a red one does not block a merge. |
-| The `Task:` trailer | each commit | The spec-link gate fails a `feat`, `fix`, `docs`, `refactor` or `perf` commit with no `Task: <story>-<task>` trailer. `ci`, `chore`, `build` and `test` commits are exempt. Until the Product drives all the work, a PR with no story shows spec-link red. |
+| The check gates (spec-link, contract-check, build-test-lint, commit-message, pr-title, pr-template, …) | `checks/` and `.github/workflows/yad-checks.yml`, `yad-pr-text.yml`, `yad-update-guard.yml` | `yad-checks.yml` and `yad-pr-text.yml` run on every PR; `yad-update-guard.yml` checks each push to `main`. Among these gates only `verified-commits` is a required check on `main` (it also runs from `yad-verified-commits.yml`); the others are advisory for now, so a red one does not block a merge. |
+| The `Task:` trailer | each commit | The spec-link gate fails any commit with no `Task: <story>-<task>` trailer, except `ci`, `chore`, `build` and `test` commits. Until the Product drives all the work, a PR with a `feat`, `fix`, `docs` (or other non-exempt) commit and no story fails spec-link, but that does not block the merge. |
 | Where the Product lives | `.sdlc/product-link.json` | CI checks the private Product out with a read-only `YAD_PRODUCT_TOKEN` secret. A PR from a fork, or from Dependabot, gets no such secret, so the gates that read the Product only defer there. |
 | The AI agent rules | the yadflow block in `AGENTS.md` and `CLAUDE.md`, and the hook in `.claude/settings.json` | An AI agent working here follows yad's rules. The hook (`checks/agent-guard.mjs`) refuses a merge, an approval or a force push before it runs. It is a speed bump, not proof. |
 | The PR template | `.github/pull_request_template.md` | yad's code-repo template merged by hand with this repo's own fields. Keep the `Domains / repos touched:` label: `checks/risk-route.sh` and `yad open-pr` read it. |
 
 yad owns these files: `yad update`, run from the Product, keeps them current. A file changed here (the PR
-template, or a workflow Dependabot bumped) is reported `modified` and left alone. Never run
-`yad update --overwrite-local` for the PR template: it puts yad's plain template back (the old one is
-saved as `.yad-orig`). Edit AGENTS.md and CLAUDE.md outside the `yadflow:begin`/`yadflow:end` markers only.
+template, or a workflow Dependabot bumped) is reported `modified` and left alone. Do not run
+`yad update --overwrite-local` while the PR template is changed here: it replaces every hand-edited managed
+file with yad's copy, the PR template included (each old copy is kept as `.yad-orig`). Edit AGENTS.md and CLAUDE.md outside the `yadflow:begin`/`yadflow:end` markers only.
 
 ---
 
