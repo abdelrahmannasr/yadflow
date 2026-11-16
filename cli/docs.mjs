@@ -327,7 +327,7 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
             if (!done.ok) {
               warn(`${label(t)} — the brand could not be put on: ${done.error}`);
               process.exitCode = 1;
-              sites.push({ site: label(t), stale: true, built: false, error: `brand: ${done.error}` });
+              sites.push({ site: label(t), stale: true, built: false, error: `${label(t)}: the brand could not be put on: ${done.error}` });
               continue;
             }
             if (done.result.wrote.length) info(`${label(t)} — brand written (${done.result.wrote.join(', ')})`);

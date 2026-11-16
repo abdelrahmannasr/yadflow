@@ -780,10 +780,9 @@ function writesProduct(cmd, o) {
   if (cmd === 'dial') return o.to !== undefined;
   if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
   if (cmd === 'worktree') return o._[1] === 'add' || o._[1] === 'remove';
-  // `--wire` writes a CI workflow. `--refresh` rebuilds sites the folder already holds, and writes the
-  // Product's brand into a stale site's own source files (E186) — inside sites that are already there, so it
-  // needs no Product found beyond the one `docs` already asks for.
-  // `brand` writes the brand into a generated site of the Product (E186).
+  // `--wire` writes a CI workflow and `brand` writes the Product's brand into one site: each needs the Product
+  // found. `--refresh` does not: it works on the sites the folder holds, rebuilding each stale one, and (E186)
+  // writing the brand of the folder it runs in into a stale site's own blocks — as it wrote `dist/` before.
   if (cmd === 'docs') return (action === 'sync' && !!o.wire) || action === 'brand';
   return false;
 }

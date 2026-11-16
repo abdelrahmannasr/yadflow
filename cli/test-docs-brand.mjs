@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -338,7 +339,15 @@ test('docs brand: a file with Windows line endings keeps them, and a no-brand ru
 test('docs brand: the fingerprint names the block\'s version, and doubled markers record none', () => {
   const { ws, root } = branded();
   try {
-    assert.match(brandFingerprint(root), /^sha256:/);
+    // Worked out here from the same files: the block's version line first, then brand.json and each file.
+    const h = createHash('sha256');
+    h.update('yad-brand-block:1\n');
+    for (const rel of [BRAND_FILE, 'design/fern.woff2', 'design/mark.svg']) {
+      const buf = fs.readFileSync(path.join(root, rel));
+      h.update(`${rel}:${buf.length}\n`);
+      h.update(buf);
+    }
+    assert.equal(brandFingerprint(root), `sha256:${h.digest('hex')}`);
     assert.equal(siteBrandFingerprint(`${CSS_BEGIN}\n${CSS_END}\n${CSS_BEGIN}\n${CSS_END}\n`), undefined);
   } finally { done(ws); }
 });
@@ -356,7 +365,7 @@ test('docs brand: sync --refresh — a refused brand never becomes the answer, t
     const out = await captured(async () => { const r = await quiet(() => runDocs(root, { action: 'sync', sync: 'refresh' })); console.log(JSON.stringify(r)); });
     assert.equal(out.action, 'sync', 'the answer is the sync\'s own');
     assert.equal(out.sites.length, 2);
-    for (const row of out.sites) { assert.equal(row.built, false); assert.match(row.error, /^brand: .*yad-brand markers/); }
+    for (const row of out.sites) { assert.equal(row.built, false); assert.match(row.error, /^epic EP-[xy]: the brand could not be put on: .*yad-brand markers/); }
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
     // A site never built (no manifest) still gets the brand on a refresh. npm is kept off PATH, so the build

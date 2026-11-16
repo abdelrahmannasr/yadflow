@@ -219,7 +219,12 @@ export function applyBrand(root, site) {
   // src and src/data are checked like the site folder: a link there would carry every write out of it.
   const srcDir = siteFolder(root, path.join(site, 'src'));
   const dataDir = srcDir && siteFolder(root, path.join(site, 'src', 'data'));
-  if (!srcDir || !dataDir) return no(`${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the yad-docs skill');
+  if (!srcDir || !dataDir) {
+    const want = path.join(dir, srcDir ? path.join('src', 'data') : 'src');
+    let missing = false;
+    try { fs.lstatSync(want); } catch (e) { missing = e.code === 'ENOENT'; }
+    return no(missing ? `${shown} has no ${srcDir ? 'src/data' : 'src'} folder (a site made by an older yad-docs skill)` : `${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the yad-docs skill');
+  }
   const cssAt = path.join(srcDir, 'index.css');
   const htmlAt = path.join(dir, 'index.html');
   const tsAt = path.join(dataDir, 'brand.ts');
