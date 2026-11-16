@@ -20,6 +20,18 @@ issues and pull requests here as before. This repo also **dogfoods its own conve
 block that `yad-pr-template` installs into your code repos. If you wouldn't ship a yadflow PR without
 it, neither do we.
 
+The same yad gates you would wire into your own code repos run here too:
+
+| What | Where | What it means for a PR |
+|---|---|---|
+| The check gates (spec-link, contract-check, commit-message, pr-title, pr-template, …) | `checks/` and `.github/workflows/yad-checks.yml`, `yad-pr-text.yml`, `yad-update-guard.yml` | They run on every PR. They are **not** required checks on `main` yet, so a red one does not block a merge. |
+| Where the Product lives | `.sdlc/product-link.json` | CI checks the private Product out with a read-only `YAD_PRODUCT_TOKEN` secret. A PR from a fork gets no secrets, so the gates that read the Product only defer there. |
+| The `Task:` trailer | each commit | Needed once an epic in the Product drives the work. Housekeeping PRs (dependency bumps, releases) have no story. |
+| The AI agent rules | the yadflow block in `AGENTS.md` and `CLAUDE.md`, and the hook in `.claude/settings.json` | An AI agent working here follows yad's rules; the hook (`checks/agent-guard.mjs`) stops it from merging, approving or force-pushing. |
+
+yad owns the files above: `yad update`, run from the Product, keeps them current. Edit outside the
+`yadflow:begin`/`yadflow:end` markers only.
+
 ---
 
 ## Stable IDs (immutable once assigned)
