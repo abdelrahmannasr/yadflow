@@ -1,13 +1,13 @@
 <!-- Yadflow's own PR template: yad's code-repo template (yad-pr-template), merged by hand with this
-     repo's own fields. Keep the "Domains / repos touched:" label: risk-route.sh and `yad open-pr` read it.
+     repo's own fields. Keep the Domains field in Impact & Risk under its exact name: risk-route.sh and `yad open-pr` read it.
      One atomic task per PR (or a few small tasks of one story). -->
 
 ## Summary
 <!-- What this PR does, in one or two sentences. -->
 
 ## Story / task
-<!-- The spec-link gate fails a feat/fix/docs/refactor/perf commit with no `Task: <story>-<task>` trailer
-     (ci/chore/build/test commits are exempt). With no story yet: write "none" — that gate shows red, advisory. -->
+<!-- The spec-link gate fails any commit with no `Task: <story>-<task>` trailer, except ci/chore/build/test commits.
+     With no story yet: write "none" — spec-link then fails, but it does not block the merge. -->
 - Story / task: `EP-<slug>-S0N-T0N`
 - Spec: `specs/EP-<slug>-S0N/` (link.md points back to the Product)
 
@@ -31,7 +31,7 @@
 
 ## Checklist
 - [ ] Commits follow [Conventional Commits](CONTRIBUTING.md) (they drive semantic-release)
-- [ ] feat/fix/docs/refactor/perf commits carry a `Task: <story>-<task>` trailer (spec-link gate)
+- [ ] Every commit except ci/chore/build/test carries a `Task: <story>-<task>` trailer (spec-link gate)
 - [ ] No contract-surface change without `Contract-Change: yes` + a re-locked contract (contract-check gate)
 - [ ] `npm test` and `npm run test:e2e` pass locally
 - [ ] New behavior is covered by tests (coverage gate: ≥70% lines/branches)
