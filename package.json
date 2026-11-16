@@ -50,6 +50,7 @@
   },
   "scripts": {
     "yad": "node bin/yad.mjs",
+    "build": "node bin/yad.mjs --version",
     "lint": "eslint cli bin",
     "test": "node --test cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs cli/test-hooks.mjs cli/test-detect.mjs cli/test-members.mjs cli/test-standup.mjs cli/test-issues.mjs cli/test-issues-write.mjs cli/test-scan.mjs cli/test-issues-act.mjs cli/test-foundation-publish.mjs cli/test-lifecycle.mjs cli/test-run-checks.mjs cli/test-build.mjs cli/test-worktree.mjs cli/test-guide.mjs cli/test-agents-file.mjs cli/test-setup-agent.mjs cli/test-signing.mjs cli/test-ci-check.mjs cli/test-node.mjs cli/test-machine.mjs cli/test-story-frames.mjs cli/test-preview.mjs cli/test-brain.mjs cli/test-brain-view.mjs cli/test-reports.mjs cli/test-map.mjs cli/test-brain-activity.mjs cli/test-local-setup.mjs cli/test-brand.mjs cli/test-docs-brand.mjs cli/test-fuzz.js",
     "test:e2e": "bash test/e2e/run.sh",
