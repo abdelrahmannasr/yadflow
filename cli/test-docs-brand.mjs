@@ -385,8 +385,8 @@ test('docs brand: a folder with no src, a site with no src/data, and a dangling 
   const cases = [
     ['the parent folder', (root) => root, 'epics/EP-x', /has no src folder: is it the folder of a generated doc site\?/, /^usage: yad docs brand/],
     ['no src/data', (root) => fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }), SITE, /has no src\/data folder: the site is incomplete/, /yad-docs-overview/],
-    ['src/data a dangling link', (root) => { fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }); fs.symlinkSync(path.join(root, 'nowhere'), path.join(root, SITE, 'src/data')); }, SITE, /\/src\/data must be a folder of the site, reached through no link/, /make the site again/],
-    ['src a file', (root) => { fs.rmSync(path.join(root, SITE, 'src'), { recursive: true }); fs.writeFileSync(path.join(root, SITE, 'src'), 'x'); }, SITE, /\/src must be a folder of the site/, /make the site again/],
+    ['src/data a dangling link', (root) => { fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }); fs.symlinkSync(path.join(root, 'nowhere'), path.join(root, SITE, 'src/data')); }, SITE, /\/src\/data must be a folder of the site, reached through no link/, /replace the link \(or file\) with the folder.*yad-docs-overview/],
+    ['src a file', (root) => { fs.rmSync(path.join(root, SITE, 'src'), { recursive: true }); fs.writeFileSync(path.join(root, SITE, 'src'), 'x'); }, SITE, /\/src must be a folder of the site/, /replace the link \(or file\) with the folder.*yad-docs-overview/],
   ];
   for (const [name, setUp, site, want, hint] of cases) {
     const { ws, root } = branded();
