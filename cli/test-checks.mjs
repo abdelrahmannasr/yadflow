@@ -142,17 +142,19 @@ test('spec-link gate: an exempt commit that CLAIMS a story still resolves it (is
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('spec-link gate: an exempt commit whose Task trailer resolves to nothing FAILS (issue #157)', () => {
-  const T = scaffoldRepo();
-  // The exemption waives the REQUIREMENT for a link, never the VALIDITY of one that is claimed —
-  // otherwise a `chore:` subject makes the trailer decorative and an unlinked commit of the same
-  // shape is indistinguishable from a linked one.
-  commit(T, 'chore(ci): rewire\n\nTask: EP-ghost-S01-T01', { '.github/x.yml': 'x' });
-  const r = runGate(SPEC_LINK, T);
-  assert.equal(r.code, 1, 'a dangling story claim must fail even on an exempt commit');
-  assert.match(r.out, /specs\/EP-ghost-S01\/ but link\.md is missing/);
-  fs.rmSync(T, { recursive: true, force: true });
-});
+for (const subject of ['chore(ci): rewire', 'docs: explain the wiring']) {
+  test(`spec-link gate: an exempt commit whose Task trailer resolves to nothing FAILS (issue #157) — '${subject}'`, () => {
+    const T = scaffoldRepo();
+    // The exemption waives the REQUIREMENT for a link, never the VALIDITY of one that is claimed —
+    // otherwise an exempt subject makes the trailer decorative and an unlinked commit of the same
+    // shape is indistinguishable from a linked one. Run for docs too, so no type gets its own skip.
+    commit(T, `${subject}\n\nTask: EP-ghost-S01-T01`, { '.github/x.yml': 'x' });
+    const r = runGate(SPEC_LINK, T);
+    assert.equal(r.code, 1, 'a dangling story claim must fail even on an exempt commit');
+    assert.match(r.out, /specs\/EP-ghost-S01\/ but link\.md is missing/);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
 
 test('spec-link gate: an exempt commit with a MALFORMED Task trailer FAILS (issue #157)', () => {
   const T = scaffoldRepo();
