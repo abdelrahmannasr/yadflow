@@ -2686,8 +2686,8 @@ refuses a path outside the Product or through a link (the site folder, `src` and
 `skills/yad-docs/references/theme-map.md`. For the sites `yad docs sync` sweeps (each epic's docs site and
 the overview; not the timeline or defects sites), it compares the fingerprint the site holds with the
 Product's brand now: a changed or removed brand makes the site stale, and `--refresh` puts the brand on
-again before it builds (a site the brand cannot be put on is not built; its row says why, and the run
-exits 1). The fingerprint also covers how yadflow writes the block, so a release that writes it
+again before it builds (a site the brand cannot be put on is not built; its `sites[]` row says why in
+`error` and what to do in `hint`, and the run exits 1). The fingerprint also covers how yadflow writes the block, so a release that writes it
 differently makes each branded site stale once. `--json`: `site`, `origin`, `theme` (`brand.json` or null), `fingerprint`, `wrote`,
 `fonts`, `mark`, `problems`. An agent runs it as a local write. In this repo, `docs/sdlc-site` keeps its own
 look.

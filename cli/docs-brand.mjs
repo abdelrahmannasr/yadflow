@@ -225,7 +225,7 @@ export function applyBrand(root, site) {
     try { fs.lstatSync(want); } catch (e) { missing = e.code === 'ENOENT'; }
     if (missing && !srcDir) return no(`${shown} has no src folder: is it the folder of a generated doc site?`, DOCS_BRAND_USAGE);
     if (missing) return no(`${shown} has no src/data folder: the site is incomplete`, 'make the site again with the skill that made it (yad-docs, or yad-docs-overview for docs/sdlc-site)');
-    return no(`${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the skill that made it');
+    return no(`${shown}/${srcDir ? 'src/data' : 'src'} must be a folder of the site, reached through no link`, 'make the site again with the skill that made it');
   }
   const cssAt = path.join(srcDir, 'index.css');
   const htmlAt = path.join(dir, 'index.html');

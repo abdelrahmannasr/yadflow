@@ -329,7 +329,7 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
               warn(error);
               if (done.hint) hand(done.hint);
               process.exitCode = 1;
-              sites.push({ site: label(t), stale: true, built: false, error });
+              sites.push({ site: label(t), stale: true, built: false, error, hint: done.hint ?? null });
               continue;
             }
             if (done.result.wrote.length) info(`${label(t)} — brand written (${done.result.wrote.join(', ')})`);

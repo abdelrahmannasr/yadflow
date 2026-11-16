@@ -365,7 +365,7 @@ test('docs brand: sync --refresh — a refused brand never becomes the answer, t
     const out = await captured(async () => { const r = await quiet(() => runDocs(root, { action: 'sync', sync: 'refresh' })); console.log(JSON.stringify(r)); });
     assert.equal(out.action, 'sync', 'the answer is the sync\'s own');
     assert.equal(out.sites.length, 2);
-    for (const row of out.sites) { assert.equal(row.built, false); assert.match(row.error, /^epic EP-[xy]: the brand could not be put on: .*yad-brand markers/); }
+    for (const row of out.sites) { assert.equal(row.built, false); assert.match(row.error, /^epic EP-[xy]: the brand could not be put on: .*yad-brand markers/); assert.match(row.hint, /theme-map\.md/); }
     assert.equal(process.exitCode, 1);
     process.exitCode = 0;
     // A site never built (no manifest) still gets the brand on a refresh. npm is kept off PATH, so the build
@@ -383,17 +383,19 @@ test('docs brand: sync --refresh — a refused brand never becomes the answer, t
 
 test('docs brand: a folder with no src, a site with no src/data, and a dangling link each get their own refusal', async () => {
   const cases = [
-    ['the parent folder', (root) => root, 'epics/EP-x', /has no src folder: is it the folder of a generated doc site\?/],
-    ['no src/data', (root) => fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }), SITE, /has no src\/data folder: the site is incomplete/],
-    ['src/data a dangling link', (root) => { fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }); fs.symlinkSync(path.join(root, 'nowhere'), path.join(root, SITE, 'src/data')); }, SITE, /reached through no link/],
+    ['the parent folder', (root) => root, 'epics/EP-x', /has no src folder: is it the folder of a generated doc site\?/, /^usage: yad docs brand/],
+    ['no src/data', (root) => fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }), SITE, /has no src\/data folder: the site is incomplete/, /yad-docs-overview/],
+    ['src/data a dangling link', (root) => { fs.rmSync(path.join(root, SITE, 'src/data'), { recursive: true }); fs.symlinkSync(path.join(root, 'nowhere'), path.join(root, SITE, 'src/data')); }, SITE, /\/src\/data must be a folder of the site, reached through no link/, /make the site again/],
+    ['src a file', (root) => { fs.rmSync(path.join(root, SITE, 'src'), { recursive: true }); fs.writeFileSync(path.join(root, SITE, 'src'), 'x'); }, SITE, /\/src must be a folder of the site/, /make the site again/],
   ];
-  for (const [name, setUp, site, want] of cases) {
+  for (const [name, setUp, site, want, hint] of cases) {
     const { ws, root } = branded();
     try {
       setUp(root);
       const out = await captured(() => runDocsBrand(root, { site, json: true }));
       assert.equal(out.ok, false, name);
       assert.match(out.error, want, name);
+      assert.match(out.hint, hint, name);
       process.exitCode = 0;
     } finally { done(ws); }
   }
