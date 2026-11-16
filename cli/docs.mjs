@@ -16,7 +16,7 @@ import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
 import { contractSurfaceHash } from './epic-state.mjs';
-import { brandFingerprint, siteBrandFingerprint, runDocsBrand } from './docs-brand.mjs';
+import { brandFingerprint, siteBrandFingerprint, applyBrand } from './docs-brand.mjs';
 
 // ---- registry + site locations ------------------------------------------------------------------
 function loadDocs(root) {
@@ -317,8 +317,22 @@ export async function runDocs(root, { action = 'list', epic, overview, sync } = 
       const s = freshness(root, t, registry);
       if (s.stale) {
         warn(`${label(t)} — ${c.yellow('stale')}: ${s.reasons.join('; ')}`);
-        // A refresh puts the Product's brand on a site whose brand changed first (E186), then builds it.
-        if (sync === 'refresh' && s.reasons.some((r) => r.startsWith('the Product\'s brand'))) await runDocsBrand(root, { site: path.relative(root, siteDir(root, t)) });
+        // A refresh puts the Product's brand on a site that does not wear it as it is now (E186) — also one never
+        // built — then builds it. A site the brand cannot be put on is not built with the old one: its row says
+        // why, and the run exits 1, as a failed build does.
+        if (sync === 'refresh') {
+          const brand = siteBrand(root, t);
+          if (brand && brand.wears !== undefined && brand.wears !== brand.now) {
+            const done = applyBrand(root, path.relative(root, siteDir(root, t)));
+            if (!done.ok) {
+              warn(`${label(t)} — the brand could not be put on: ${done.error}`);
+              process.exitCode = 1;
+              sites.push({ site: label(t), stale: true, built: false, error: `brand: ${done.error}` });
+              continue;
+            }
+            if (done.result.wrote.length) info(`${label(t)} — brand written (${done.result.wrote.join(', ')})`);
+          }
+        }
         const b = sync === 'refresh' ? buildSite(root, t, { npmOptional: true }) : { built: null, error: null };
         sites.push({ site: label(t), stale: true, built: b.built, error: b.error });
       } else {

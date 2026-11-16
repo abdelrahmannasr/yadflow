@@ -95,11 +95,15 @@ function lookVars(r) {
 // `yad docs brand` writes it at the top of the site's brand block, and `yad docs sync` compares it with the
 // Product's brand now, so a changed brand makes the site stale. → 'sha256:…', or null when the Product's
 // brand cannot be worn (no file, or one with problems): the site wears yadflow's look.
+// BRAND_BLOCK_VERSION is part of it: when a later yadflow writes the block differently (another mapping),
+// every branded site reads as stale once, and a refresh writes it again.
+export const BRAND_BLOCK_VERSION = 1;
 export function brandFingerprint(root, r = readBrand(root)) {
   if (r.origin !== 'product') return null;
   const b = r.brand;
   const named = [b.logo, b.mark, ...['heading', 'body', 'mono'].flatMap((s) => b.fonts?.[s]?.files || [])].filter(Boolean);
   const h = createHash('sha256');
+  h.update(`yad-brand-block:${BRAND_BLOCK_VERSION}\n`);
   for (const rel of [BRAND_FILE, ...[...new Set(named)].sort()]) {
     const full = rel === BRAND_FILE ? path.join(root, BRAND_FILE) : brandPath(root, rel);
     let buf;
@@ -117,7 +121,8 @@ export function siteBrandFingerprint(css) {
   if (typeof css !== 'string') return undefined;
   const a = css.indexOf(CSS_BEGIN);
   const b = css.indexOf(CSS_END);
-  if (a < 0 || b < a) return undefined;
+  // Only a block `yad docs brand` could write: the markers once each, in order.
+  if (a < 0 || b < a || css.indexOf(CSS_BEGIN, a + 1) >= 0 || css.indexOf(CSS_END, b + 1) >= 0) return undefined;
   const m = FINGERPRINT_RE.exec(css.slice(a, b));
   return m ? m[1] : null;
 }
@@ -141,12 +146,12 @@ export function docsSiteCss(brand, assets, origin, fingerprint = null) {
 }
 
 // The head block's lines: the brand's mark as the favicon, and the template's font link unless the brand
-// names its own fonts. → [line]
+// names its own heading or body font (a mono font alone leaves the template's two fonts in use). → [line]
 export function docsHeadLines(brand, assets, origin) {
   if (origin !== 'product') return [...TEMPLATE_HEAD];
   const mark = assets.mark && DATA_IMAGE_RE.test(assets.mark) ? assets.mark : null;
   const lines = [mark ? `    <link rel="icon" href="${mark}" />` : TEMPLATE_HEAD[0]];
-  const ownFonts = ['heading', 'body', 'mono'].some((s) => brand.fonts?.[s]);
+  const ownFonts = !!(brand.fonts?.heading || brand.fonts?.body);
   if (!ownFonts) lines.push(TEMPLATE_HEAD[1]);
   return lines;
 }
@@ -165,6 +170,7 @@ export const brand: { name: string; mark: string | null } = { name: ${JSON.strin
 // Replace the lines between one begin marker and one end marker: everything after the begin marker's line and
 // before the end marker's line (its indentation kept). → new text, or null when the markers are not there
 // exactly once each, in that order.
+// `inner` is written with the file's own line ending (\r\n in a file that uses it).
 export function between(text, begin, end, inner) {
   const a = text.indexOf(begin);
   const b = text.indexOf(end);
@@ -172,7 +178,9 @@ export function between(text, begin, end, inner) {
   const afterBegin = text.indexOf('\n', a);
   const endLine = text.lastIndexOf('\n', b) + 1;
   if (afterBegin < 0 || afterBegin >= endLine) return null; // the two markers share a line
-  return `${text.slice(0, afterBegin + 1)}${inner ? `${inner}\n` : ''}${text.slice(endLine)}`;
+  const eol = text[afterBegin - 1] === '\r' ? '\r\n' : '\n';
+  const body = inner ? `${inner.split('\n').join(eol)}${eol}` : '';
+  return `${text.slice(0, afterBegin + 1)}${body}${text.slice(endLine)}`;
 }
 
 // The site folder, inside the Product, reached through no link: every step of the path is checked, so a link
@@ -189,34 +197,37 @@ function siteFolder(root, rel) {
   return at === root ? null : at;
 }
 
-// A file of the site, a plain file and not a link. → its text, or null.
-function siteFile(dir, rel) {
-  const full = path.join(dir, rel);
-  try { const st = fs.lstatSync(full); if (!st.isFile()) return null; } catch { return null; }
+// A file of the site: a plain file, not a link, and not a second name of another file (a hard link), so a
+// write never lands anywhere else. Its folders were checked by siteFolder. → its text; null when missing;
+// false when it is there but not a plain file of its own.
+function siteFile(full) {
+  let st;
+  try { st = fs.lstatSync(full); } catch (e) { return e.code === 'ENOENT' ? null : false; }
+  if (!st.isFile() || st.nlink > 1) return false;
   return fs.readFileSync(full, 'utf8');
 }
 
 export const DOCS_BRAND_USAGE = 'usage: yad docs brand <site folder> [--json] — the folder of a generated doc site inside the Product, e.g. epics/EP-x/docs-site';
 
-export async function runDocsBrand(root, { site, args = [], json = false } = {}) {
-  if (!site) return refuse('yad docs brand needs the site folder', DOCS_BRAND_USAGE, { json });
-  if (args.length) return refuse(`yad docs brand takes one folder (got also: ${args.map(forTerminal).join(' ')})`, DOCS_BRAND_USAGE, { json });
+// The work, with no printing: → { ok: true, result } or { ok: false, error, hint }. `yad docs brand` and
+// `yad docs sync --refresh` both use it, so a refusal inside a sync never becomes the sync's own answer.
+export function applyBrand(root, site) {
+  const no = (error, hint = null) => ({ ok: false, error, hint });
   const shown = forTerminal(site);
   const dir = siteFolder(root, site);
-  if (!dir) return refuse(`${shown} is not a folder inside the Product (a relative path with no "..", reached through no link)`, DOCS_BRAND_USAGE, { json });
-  const cssRel = path.join('src', 'index.css');
-  const tsRel = path.join('src', 'data', 'brand.ts');
-  const css = siteFile(dir, cssRel);
-  const html = siteFile(dir, 'index.html');
-  if (css === null || html === null) return refuse(`${shown} is not a generated doc site (no src/index.css and index.html as plain files)`, 'make it with the yad-docs skill first', { json });
-  const tsAt = path.join(dir, tsRel);
-  let ts = null;
-  try {
-    const st = fs.lstatSync(tsAt);
-    if (!st.isFile()) return refuse(`${shown}/src/data/brand.ts is not a plain file`, 'remove it: the next run writes it again', { json });
-    ts = fs.readFileSync(tsAt, 'utf8');
-  } catch (e) { if (e.code !== 'ENOENT') return refuse(`${shown}/src/data/brand.ts cannot be read`, null, { json }); }
-  try { const st = fs.lstatSync(path.dirname(tsAt)); if (!st.isDirectory()) return refuse(`${shown}/src/data is not a folder`, null, { json }); } catch { return refuse(`${shown} has no src/data folder`, 'make the site again with the yad-docs skill', { json }); }
+  if (!dir) return no(`${shown} is not a folder inside the Product (a relative path with no "..", reached through no link)`, DOCS_BRAND_USAGE);
+  // src and src/data are checked like the site folder: a link there would carry every write out of it.
+  const srcDir = siteFolder(root, path.join(site, 'src'));
+  const dataDir = srcDir && siteFolder(root, path.join(site, 'src', 'data'));
+  if (!srcDir || !dataDir) return no(`${shown}/src and ${shown}/src/data must be folders of the site, reached through no link`, 'make the site again with the yad-docs skill');
+  const cssAt = path.join(srcDir, 'index.css');
+  const htmlAt = path.join(dir, 'index.html');
+  const tsAt = path.join(dataDir, 'brand.ts');
+  const css = siteFile(cssAt);
+  const html = siteFile(htmlAt);
+  const ts = siteFile(tsAt);
+  if (!css || !html) return no(`${shown} is not a generated doc site (src/index.css and index.html must be plain files of their own)`, 'make it with the yad-docs skill first');
+  if (ts === false) return no(`${shown}/src/data/brand.ts is not a plain file of its own`, 'remove it: the next run writes it again');
 
   const r = readBrand(root);
   const assets = brandAssets(root, r.brand, r.origin);
@@ -224,23 +235,30 @@ export async function runDocsBrand(root, { site, args = [], json = false } = {})
   const nextCss = between(css, CSS_BEGIN, CSS_END, docsSiteCss(r.brand, assets, r.origin, fingerprint));
   const nextHtml = between(html, HEAD_BEGIN, HEAD_END, docsHeadLines(r.brand, assets, r.origin).join('\n'));
   if (nextCss === null || nextHtml === null) {
-    return refuse(`${shown} has no place for the brand: ${nextCss === null ? 'src/index.css' : 'index.html'} does not hold its yad-brand markers once each, on lines of their own (a site made from a doc template older than 0.0.7)`,
-      'make the site again with the yad-docs skill, or theme it by hand by skills/yad-docs/references/theme-map.md', { json });
+    return no(`${shown} has no place for the brand: ${nextCss === null ? 'src/index.css' : 'index.html'} does not hold its yad-brand markers once each, in order, on separate lines (a site made from a doc template older than 0.0.7)`,
+      'make the site again with the yad-docs skill, or theme it by hand by skills/yad-docs/references/theme-map.md');
   }
   const nextTs = docsBrandTs(r.brand, assets, r.origin);
   const wrote = [];
-  const put = (rel, before, after) => { if (before !== after) { fs.writeFileSync(path.join(dir, rel), after); wrote.push(rel.split(path.sep).join('/')); } };
-  put(cssRel, css, nextCss);
-  put('index.html', html, nextHtml);
-  put(tsRel, ts, nextTs);
-
+  const put = (full, rel, before, after) => { if (before !== after) { fs.writeFileSync(full, after); wrote.push(rel); } };
+  put(cssAt, 'src/index.css', css, nextCss);
+  put(htmlAt, 'index.html', html, nextHtml);
+  put(tsAt, 'src/data/brand.ts', ts, nextTs);
   const product = r.origin === 'product';
-  const result = { site, origin: r.origin, theme: product ? 'brand.json' : null, fingerprint, wrote, fonts: product ? assets.fonts.map((f) => f.family) : [], mark: product && !!assets.mark, problems: r.problems };
+  return { ok: true, result: { site, origin: r.origin, theme: product ? 'brand.json' : null, fingerprint, wrote, fonts: product ? assets.fonts.map((f) => f.family) : [], mark: product && !!assets.mark, problems: r.problems }, name: r.brand.name };
+}
+
+export async function runDocsBrand(root, { site, args = [], json = false } = {}) {
+  if (!site) return refuse('yad docs brand needs the site folder', DOCS_BRAND_USAGE, { json });
+  if (args.length) return refuse(`yad docs brand takes one folder (got also: ${args.map(forTerminal).join(' ')})`, DOCS_BRAND_USAGE, { json });
+  const done = applyBrand(root, site);
+  if (!done.ok) return refuse(done.error, done.hint, { json });
+  const { result } = done;
   if (json) return emitJSON(result);
-  log(c.bold(`\n${shown} — brand`));
-  if (product) ok(`wears ${forTerminal(r.brand.name)}'s brand from .sdlc/brand.json (theme: brand.json)`);
-  else info(r.problems.length ? 'yadflow\'s look: the brand file cannot be used, so the site keeps its own theme' : 'no .sdlc/brand.json: the site keeps its own theme');
-  for (const p of r.problems) warn(forTerminal(p));
-  info(wrote.length ? `wrote ${wrote.join(', ')}` : 'nothing changed');
+  log(c.bold(`\n${forTerminal(site)} — brand`));
+  if (result.origin === 'product') ok(`wears ${forTerminal(done.name)}'s brand from .sdlc/brand.json (theme: brand.json)`);
+  else info(result.problems.length ? 'yadflow\'s look: the brand file cannot be used, so the site keeps its own theme' : 'no .sdlc/brand.json: the site keeps its own theme');
+  for (const pr of result.problems) warn(forTerminal(pr));
+  info(result.wrote.length ? `wrote ${result.wrote.join(', ')}` : 'nothing changed');
   return result;
 }

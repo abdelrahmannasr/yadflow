@@ -21,7 +21,7 @@ const { runDocsBrand, onPrimary, between, docsSiteCss, docsHeadLines, docsBrandT
 const { readBrand, BRAND_FILE } = await import('./brand.mjs');
 const { docsStale, runDocs } = await import('./docs.mjs');
 const { classify } = await import('./agent-rules.mjs');
-const { endJSON } = await import('./lib.mjs');
+const { endJSON, beginJSON } = await import('./lib.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const YAD = path.join(HERE, '..', 'bin', 'yad.mjs');
@@ -277,3 +277,98 @@ test('docs brand: an agent runs it as a local write; the CLI routes it and refus
     assert.notEqual(no.status, 0);
   } finally { done(ws); }
 });
+
+test('docs brand: a link at src or src/data is refused, and nothing outside the Product is written (review 1)', async () => {
+  for (const linkAt of ['src', 'src/data']) {
+    const { ws, root } = branded();
+    try {
+      const real = path.join(root, SITE, linkAt);
+      const outside = path.join(ws, 'outside');
+      fs.cpSync(real, outside, { recursive: true });
+      fs.rmSync(real, { recursive: true });
+      fs.symlinkSync(outside, real);
+      const before = fs.readdirSync(outside, { recursive: true }).sort().map((f) => [f, fs.statSync(path.join(outside, f)).isFile() ? fs.readFileSync(path.join(outside, f), 'utf8') : null]);
+      const out = await captured(() => runDocsBrand(root, { site: SITE, json: true }));
+      assert.equal(out.ok, false, `a link at ${linkAt}`);
+      assert.match(out.error, /reached through no link/);
+      const after = fs.readdirSync(outside, { recursive: true }).sort().map((f) => [f, fs.statSync(path.join(outside, f)).isFile() ? fs.readFileSync(path.join(outside, f), 'utf8') : null]);
+      assert.deepEqual(after, before, 'the folder the link leads to is untouched');
+      process.exitCode = 0;
+    } finally { done(ws); }
+  }
+});
+
+test('docs brand: a site file that is a second name of another file (a hard link) is refused', async () => {
+  const { ws, root } = branded();
+  try {
+    const css = path.join(root, SITE, 'src/index.css');
+    const twin = path.join(ws, 'twin.css');
+    fs.linkSync(css, twin);
+    const before = fs.readFileSync(twin, 'utf8');
+    const out = await captured(() => runDocsBrand(root, { site: SITE, json: true }));
+    assert.equal(out.ok, false);
+    assert.equal(fs.readFileSync(twin, 'utf8'), before);
+    process.exitCode = 0;
+  } finally { done(ws); }
+});
+
+test('docs brand: a brand with only a mono font keeps the template\'s heading and body fonts and their link', async () => {
+  const { ws, root, site } = product({ brand: { ...BRAND, fonts: { heading: null, body: null, mono: { family: 'Fernmono', files: [] } } }, files: { 'design/mark.svg': SVG } });
+  try {
+    await captured(() => runDocsBrand(root, { site: SITE, json: true }));
+    assert.match(site('index.html'), /Space\+Grotesk/);
+    assert.match(site('src/index.css'), /--font-mono: "Fernmono"/);
+    assert.doesNotMatch(site('src/index.css'), /--font-(display|body): "/);
+  } finally { done(ws); }
+});
+
+test('docs brand: a file with Windows line endings keeps them, and a no-brand run gives its bytes back', async () => {
+  const { ws, root, site } = branded();
+  try {
+    for (const f of ['index.html', 'src/index.css']) fs.writeFileSync(path.join(root, SITE, f), site(f).replace(/\n/g, '\r\n'));
+    const before = ['index.html', 'src/index.css'].map(site);
+    await captured(() => runDocsBrand(root, { site: SITE, json: true }));
+    for (const f of ['index.html', 'src/index.css']) assert.doesNotMatch(site(f), /[^\r]\n/, `${f} has only \r\n`);
+    fs.rmSync(path.join(root, BRAND_FILE));
+    await captured(() => runDocsBrand(root, { site: SITE, json: true }));
+    assert.deepEqual(['index.html', 'src/index.css'].map(site), before);
+  } finally { done(ws); }
+});
+
+test('docs brand: the fingerprint names the block\'s version, and doubled markers record none', () => {
+  const { ws, root } = branded();
+  try {
+    assert.match(brandFingerprint(root), /^sha256:/);
+    assert.equal(siteBrandFingerprint(`${CSS_BEGIN}\n${CSS_END}\n${CSS_BEGIN}\n${CSS_END}\n`), undefined);
+  } finally { done(ws); }
+});
+
+test('docs brand: sync --refresh — a refused brand never becomes the answer, the site is not built, and a never-built site gets the brand', async () => {
+  const { ws, root, site } = branded();
+  const two = path.join(root, 'epics/EP-y/docs-site');
+  try {
+    for (const f of SITE_FILES) put(path.join(two, f), fs.readFileSync(path.join(TEMPLATE, f)));
+    put(path.join(root, 'epics/EP-y/.sdlc/state.json'), { repos: [] });
+    put(path.join(root, 'epics/EP-x/.sdlc/state.json'), { repos: [] });
+    // Both sites lose their head markers: the brand cannot be put on either.
+    for (const d of [path.join(root, SITE), two]) fs.writeFileSync(path.join(d, 'index.html'), fs.readFileSync(path.join(d, 'index.html'), 'utf8').replace(HEAD_BEGIN, ''));
+    beginJSON();
+    const out = await captured(async () => { const r = await quiet(() => runDocs(root, { action: 'sync', sync: 'refresh' })); console.log(JSON.stringify(r)); });
+    assert.equal(out.action, 'sync', 'the answer is the sync\'s own');
+    assert.equal(out.sites.length, 2);
+    for (const row of out.sites) { assert.equal(row.built, false); assert.match(row.error, /^brand: .*yad-brand markers/); }
+    assert.equal(process.exitCode, 1);
+    process.exitCode = 0;
+    // A site never built (no manifest) still gets the brand on a refresh. npm is kept off PATH, so the build
+    // is only a warning and only the brand is checked.
+    fs.rmSync(two, { recursive: true });
+    fs.writeFileSync(path.join(root, SITE, 'index.html'), fs.readFileSync(path.join(TEMPLATE, 'index.html')));
+    assert.equal(fs.existsSync(path.join(root, 'epics/EP-x/.sdlc/docs-build.json')), false, 'never built');
+    const PATH = process.env.PATH;
+    process.env.PATH = '';
+    try { await quiet(() => runDocs(root, { action: 'sync', sync: 'refresh' })); } finally { process.env.PATH = PATH; }
+    endJSON();
+    assert.equal(siteBrandFingerprint(site('src/index.css')), brandFingerprint(root));
+  } finally { process.exitCode = 0; done(ws); }
+});
+

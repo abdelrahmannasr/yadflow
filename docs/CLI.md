@@ -2677,15 +2677,18 @@ Product) wear the brand through `yad docs brand <site folder>` (E186). A site ma
 the block between `/* yad-brand:begin */` and `/* yad-brand:end */` at the end of `src/index.css` (the
 brand's dark and light colours, its fonts as embedded `@font-face`, and a fingerprint of the brand),
 the block between `<!-- yad-brand:head:begin -->` and `<!-- yad-brand:head:end -->` in `index.html` (the
-mark as the favicon; the Space Grotesk / Noto Sans link goes when the brand names its own fonts), and
+mark as the favicon; the Space Grotesk / Noto Sans link goes when the brand names its own heading or body font), and
 `src/data/brand.ts` (the name and mark in the top bar). Every other colour the site uses is mixed from the
 brand's seven roles; text on a primary button is white, or near-black on a light primary. With no brand
 file, or one with problems, the command puts the template's own blocks back and names the problems. It
-refuses a path outside the Product or through a link, a file that is a link, and a site with no markers
+refuses a path outside the Product or through a link (the site folder, `src` and `src/data` included), a file that is a link or a second name of another file, and a site with no markers
 (made from an older template): make it again with the `yad-docs` skill, or theme it by hand by
-`skills/yad-docs/references/theme-map.md`. `yad docs sync` compares the fingerprint the site holds with the
+`skills/yad-docs/references/theme-map.md`. For the sites `yad docs sync` sweeps (each epic's docs site and
+the overview; not the timeline or defects sites), it compares the fingerprint the site holds with the
 Product's brand now: a changed or removed brand makes the site stale, and `--refresh` puts the brand on
-again before it builds. `--json`: `site`, `origin`, `theme` (`brand.json` or null), `fingerprint`, `wrote`,
+again before it builds (a site the brand cannot be put on is not built; its row says why, and the run
+exits 1). The fingerprint also covers how yadflow writes the block, so a release that writes it
+differently makes each branded site stale once. `--json`: `site`, `origin`, `theme` (`brand.json` or null), `fingerprint`, `wrote`,
 `fonts`, `mark`, `problems`. An agent runs it as a local write. In this repo, `docs/sdlc-site` keeps its own
 look.
 
