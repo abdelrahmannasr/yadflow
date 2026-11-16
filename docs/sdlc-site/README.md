@@ -45,15 +45,18 @@ The site is built to be served under `/yadflow/app/` (the `base` in `vite.config
 
 ## How it is built and published
 
-The `yad docs` commands build and deploy it (`--overview` picks this site):
+This repository is no longer a Product (2026-11-16), so the `yad docs` commands, which work on a
+Product's sites, do not build this one: build it with `npm ci && npm run build` in this folder. In a
+Product, the `yad docs` commands build and deploy its overview site (`--overview` picks it):
 
 - `yad docs build --overview` runs `npm ci` (or `npm install` when there is no lockfile) and then
-  `npm run build` here.
+  `npm run build` in the site's folder.
 - `yad docs deploy --overview` builds it and reports the Pages deploy.
 - `yad docs list` and `yad docs sync --check` say whether the site is stale — that is, whether the
   pipeline files above changed since the last build.
 
-The Pages workflow (`.github/workflows/yad-docs.yml`, installed by `yad docs sync --wire`) runs
-`npm ci && npm run build` in this folder. It puts `public/report.html` at the root of the published
-site (`<base>/`, the main documentation), this app under `<base>/app/`, and the tutorial site
-(`docs/tutorial-site`) under `<base>/tutorial/`.
+The Pages workflow (`.github/workflows/yad-docs.yml`) was installed by `yad docs sync --wire` while this
+repository was a Product, and is now kept by hand here. It runs `npm ci && npm run build` in this
+folder. It puts `public/report.html` at the root of the published site (`<base>/`, the main
+documentation), this app under `<base>/app/`, and the tutorial site (`docs/tutorial-site`) under
+`<base>/tutorial/`.

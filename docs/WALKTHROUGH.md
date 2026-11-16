@@ -345,7 +345,15 @@ closing record.
 Invoke **`yad-status`** (read-only) to see the full 10-step chain, every step's dials/status, the
 contract lock, story repo tags, and which approvals the active gate still needs.
 
-## Worked example (already in this repo)
+## Worked example (to read here)
+
+> **Read it here; run it elsewhere.** Until 2026-11-16 this repository was itself the demo Product. It no
+> longer is: yadflow is now built with yadflow, from a separate Product, and this repository is a code
+> repo of that Product. So `epics/` here is a set of files to read. To run the example, copy
+> `cli/fixtures/golden-v3/` (the old demo Product, kept as a test fixture) to a scratch folder, make
+> the two demo repos inside that copy with the steps in `demo-repos/README.md` (which also says how to
+> stop the copy pointing at the public yadflow repo on GitHub), and run `yad migrate --apply` there
+> first: the fixture is an older project shape.
 
 `epics/EP-checkout/` shows the **whole Shape** walked end to end:
 - `epic.md` authored + approved (epic gate) — 2026-06-04.
@@ -376,7 +384,7 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 
 From a `ready-for-build` story, the **Build** turns one atomic task into shipped code through
 gates that protect production. Per-repo specs live in each code repo; the contract stays singular in
-the product repo. Code repos are **separate git repos** under `demo-repos/<repo>/` (gitignored;
+the Product. Code repos are **separate git repos** under your copy's `demo-repos/<repo>/` (gitignored;
 `demo-repos/README.md` explains regeneration). **Nothing auto-advances** — every gate is human-owned.
 
 > **Lost in Build?** `yad next <epic>` reads each story's `build-state` and tells you the

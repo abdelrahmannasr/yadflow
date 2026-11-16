@@ -14,14 +14,13 @@ _bmad-output/
 .zencoder/
 
 # Throwaway demo code repos (Phase 3). Each demo-repos/<repo>/ is its OWN git repo
-# modeling a real separate code repo — never tracked by (or a submodule of) the product repo.
+# modeling a real separate code repo — never tracked by (or a submodule of) this repository.
 # The explainer demo-repos/README.md IS tracked (negation below).
 demo-repos/*/
 !demo-repos/README.md
 
-# Connected-repo code-context cache (yad-connect-repos). The registry (.sdlc/repos.json) and the
-# lightweight code-map.md per repo ARE tracked — they're small, reviewable, and the brain reads them.
-# The full Repomix pack.md is a large, regenerable artifact (recreate via `action: refresh`) — ignored.
+# A Repomix pack (yad-connect-repos) is a large, regenerable cache. This repository is no longer a Product
+# (2026-11-16) and tracks no .sdlc/code-context/, but an old checkout may still hold packs there.
 .sdlc/code-context/*/pack.md
 
 # Learning layer (yad-learn) — personal, LOCAL-ONLY output. Never commit or push the records ledger or

@@ -1,4 +1,5 @@
-# yad-managed — built by `yad docs sync --wire`. Edit the skill, not this file.
+# First built by `yad docs sync --wire`. Kept by hand here since this repo stopped being a Product
+# (2026-11-16): nothing rewrites it from the skill now.
 name: yad-docs
 on:
   push:
