@@ -90,7 +90,8 @@ Copy the shell from `templates/app/` **verbatim**, then:
    read (which steps have artifacts, and the stories' `repos:` tags). No people or roles are read from
    `.sdlc/product.json` — yadflow keeps no list of people. Each role → its relevant doc `sectionIds` +
    `relevantPathIds` (`references/data-mapping.md`).
-3. **Theme the `:root` block of `src/index.css`** from the design tokens, by the 4-tier priority in
+3. **Theme the two `:root` blocks of `src/index.css`** (the dark look and the light look: the site
+   follows the viewer's setting) from the design tokens, by the 4-tier priority in
    `references/theme-map.md`: **DESIGN.md → design.json/design-links.json palette → code-map tokens →
    default theme** (stamp `theme: default` in the manifest when it falls through to the shell default).
    Keep fonts Space Grotesk + Noto Sans and the `.glass-panel`/`.flow-grid`/`.code-block` utilities.
@@ -146,7 +147,7 @@ the default-theme degrade), the **deploy URL** or "build-only", and the **stalen
   refresh is a human decision (`yad repo refresh`).
 - **Degrade gracefully.** No docs target → build-only (local `dist/`). No design tokens → default theme.
   Absent inputs → omitted sections. No error — the site is additive.
-- **Copy the shell verbatim.** Generate only `src/data/*.ts`, the `:root` of `index.css`, and the Vite
+- **Copy the shell verbatim.** Generate only `src/data/*.ts`, the two `:root` blocks of `index.css`, and the Vite
   base. Never hand-edit `templates/app/`.
 
 ## Reference

@@ -1,11 +1,12 @@
 # Theme map — DESIGN tokens → `index.css` `:root`
 
-`yad-docs` themes only the **`:root` block** of the copied shell's `src/index.css` (and nothing else —
-fonts, utilities, and the rest of the file stay verbatim). The shell's design system is a dark
-CSS-custom-property theme; theming = overwriting the `:root` custom properties from the epic's design
-tokens, deterministically. Fonts are always **Space Grotesk** (display / headings) + **Noto Sans**
-(body), and the `.glass-panel` / `.flow-grid` / `.code-block` utilities and Material Symbols icon names
-are untouched.
+`yad-docs` themes only the **two `:root` blocks** at the top of the copied shell's `src/index.css`: the
+dark look (the first `:root`) and the light look (the `:root` inside `@media (prefers-color-scheme:
+light)`). The site follows the viewer's setting, so both must be themed (E186). Nothing else in the file
+changes: the font variables, the Tailwind remaps in the light block, the utilities, and the empty
+`yad-brand` block at the end stay as copied. Fonts are **Space Grotesk** (display / headings) + **Noto
+Sans** (body), and the `.glass-panel` / `.flow-grid` / `.code-block` utilities and Material Symbols icon
+names are untouched.
 
 ## 4-tier priority (first hit wins, per property)
 
@@ -26,8 +27,9 @@ from a higher tier); only a wholesale absence stamps `theme: default`.
 
 ## Token → custom-property mapping
 
-Map design tokens onto these properties (the exact set the shell defines). Names match the reference
-`index.css` — do not rename or add properties.
+Map design tokens onto these properties (the exact set the shell defines), once in the dark `:root`
+and once in the light one. Names match the reference `index.css` — do not rename or add properties.
+The defaults below are the dark look's; the light look's are in the reference file's light block.
 
 | Design token (role) | CSS custom property | Default (reference) |
 |---------------------|---------------------|---------------------|
@@ -57,10 +59,11 @@ Map design tokens onto these properties (the exact set the shell defines). Names
   and the background ramp when a source supplies only a brand + accent.
 - `*-hover` = the anchor lightened one step; `*-soft` = the anchor darkened/desaturated for washes.
   Apply a **fixed** lightness delta (no randomness) so regeneration is byte-identical.
-- The background ramp (`bg-primary` → `bg-tertiary` → `surface-*`) is darkest→lighter; preserve that
-  ordering when mapping a source's neutrals.
-- Always emit the **full property set** in the **fixed order above** (matching the reference file), with
-  no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
+- The background ramp (`bg-primary` → `bg-tertiary` → `surface-*`) is darkest→lighter in the dark
+  look and lightest→darker in the light look; preserve that ordering when mapping a source's neutrals.
+  A source with only one scheme: map it onto its own look and keep the reference values in the other.
+- Always emit the **full property set** in the **fixed order above** (matching the reference file), in
+  both looks, with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
 
 ## Fonts + utilities (never themed)
 Headings/`.font-display` → **Space Grotesk**; body/`.font-body` → **Noto Sans**. The `.glass-panel`,
