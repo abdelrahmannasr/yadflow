@@ -52,7 +52,7 @@ export function StatusMachineSection() {
                   <td className="px-4 py-2.5 text-right">
                     <span
                       className="text-[10px] font-medium px-2 py-0.5 rounded border"
-                      style={{ color, background: `${color}15`, borderColor: `${color}25` }}
+                      style={{ color: readable(color), background: `${color}15`, borderColor: `${color}25` }}
                     >
                       {m.category}
                     </span>

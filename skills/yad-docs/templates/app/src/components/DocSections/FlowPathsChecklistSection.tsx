@@ -36,7 +36,7 @@ export function FlowPathsChecklistSection() {
       >
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-bold text-slate-200">Verification Progress</span>
-          <span className="text-sm font-bold" style={{ color: pct === 100 ? '#22c55e' : '#f59e0b' }}>
+          <span className="text-sm font-bold" style={{ color: readable(pct === 100 ? '#22c55e' : '#f59e0b') }}>
             {done}/{total} ({pct}%)
           </span>
         </div>
@@ -74,7 +74,7 @@ export function FlowPathsChecklistSection() {
               <div className="flex-1 min-w-0">
                 <span
                   className="text-sm font-medium"
-                  style={{ color: isChecked ? '#94a3b8' : '#e2e8f0', textDecoration: isChecked ? 'line-through' : 'none' }}
+                  style={{ color: isChecked ? 'var(--color-tint-slate-400)' : 'var(--color-tint-slate-200)', textDecoration: isChecked ? 'line-through' : 'none' }}
                 >
                   Path {path.id}: {path.label}
                 </span>

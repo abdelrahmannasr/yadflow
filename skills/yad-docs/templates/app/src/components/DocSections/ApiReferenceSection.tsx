@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 
 const ENDPOINTS = [
@@ -69,7 +70,7 @@ export function ApiReferenceSection() {
             <span
               className="ml-auto text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded"
               style={{
-                color: ep.category === 'rider' ? '#7b59e6' : '#06b6d4',
+                color: readable(ep.category === 'rider' ? '#7b59e6' : '#06b6d4'),
                 background: ep.category === 'rider' ? 'rgba(123,89,230,0.1)' : 'rgba(6,182,212,0.1)',
               }}
             >

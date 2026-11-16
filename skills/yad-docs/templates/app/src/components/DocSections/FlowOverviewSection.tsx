@@ -1,3 +1,4 @@
+import { readable } from '../../utils/readable';
 import { Icon } from '../shared/Icon';
 import { PATHS } from '../../data/paths';
 
@@ -39,7 +40,7 @@ export function FlowOverviewSection() {
                 className="h-2 w-2 rounded-full"
                 style={{ background: color }}
               />
-              <span className="text-xs font-bold uppercase tracking-wider" style={{ color }}>
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: readable(color) }}>
                 {category.replace(/-/g, ' ')} ({paths.length})
               </span>
             </div>
@@ -53,7 +54,7 @@ export function FlowOverviewSection() {
                     borderColor: 'var(--color-border-default)',
                   }}
                 >
-                  <Icon name={path.icon} size={18} className={`text-[${path.color}]`} />
+                  <span style={{ color: readable(path.color) }}><Icon name={path.icon} size={18} /></span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-slate-200 font-medium">{path.label}</span>
                     <p className="text-xs text-slate-500 truncate">{path.description}</p>

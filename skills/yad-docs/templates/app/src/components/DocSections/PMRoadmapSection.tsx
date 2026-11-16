@@ -115,7 +115,7 @@ export function PMRoadmapSection() {
               <span
                 className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5"
                 style={{
-                  color: r.level === 'high' ? '#ef4444' : r.level === 'medium' ? '#f59e0b' : '#22c55e',
+                  color: readable(r.level === 'high' ? '#ef4444' : r.level === 'medium' ? '#f59e0b' : '#22c55e'),
                   background: r.level === 'high' ? 'rgba(239,68,68,0.1)' : r.level === 'medium' ? 'rgba(245,158,11,0.1)' : 'rgba(34,197,94,0.1)',
                 }}
               >

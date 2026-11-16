@@ -9,7 +9,7 @@ description: 'Generates the per-epic interactive documentation site — a vendor
 vendored React 19 + Vite 7 + Tailwind v4 SPA with an animated **flow canvas** (system components on a
 canvas, animated messages, playback, a system-logs terminal, a right detail panel) and **role-based
 stakeholder doc pages** (each lens → a set of doc sections). The shell is generic; the **content** is
-generated entirely into `src/data/*.ts` and the theme into `src/index.css`.
+generated entirely into the five data modules in `src/data/` and the theme into `src/index.css`.
 
 This is an **output enrichment**, exactly like `design-links.json` / `test-links.json` — **NOT a gated
 Shape step.** It **never** mutates `.sdlc/state.json` `steps[]`, `approvals.json`, or
@@ -79,7 +79,7 @@ empty/omitted with a note — never invent content.
 ### Step 3 — Generate the site into `epics/EP-<slug>/docs-site/`
 Copy the shell from `templates/app/` **verbatim**, then:
 
-1. **Generate `src/data/*.ts` deterministically** — `paths.ts`, `components.ts`, `roles.ts`,
+1. **Generate the five data modules in `src/data/` deterministically** — `paths.ts`, `components.ts`, `roles.ts`,
    `docSections.ts`, `referenceData.ts` (mapping in `references/data-mapping.md`). Sort by **stable
    IDs** (story `S0N`, repo name, endpoint `method+path`), use a **fixed key order**, and write **NO
    timestamps inside the data files** — so regenerating an unchanged input yields a byte-identical file

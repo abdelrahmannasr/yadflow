@@ -27,9 +27,10 @@ from a higher tier); only a wholesale absence stamps `theme: default`.
 
 ## Token → custom-property mapping
 
-Map design tokens onto these 20 properties, once in the dark `:root` and once in the light one. **Change
-only the values of these 20 lines; leave every other line of both `:root` blocks exactly as copied**: the
-overlay, canvas, on-primary and tint variables, the `--font-*` variables, `color-scheme`, and in the light
+Map design tokens onto these 20 properties, once in the dark `:root` and once in the light one, and set
+`--color-on-primary` (the text on a primary button) to `#ffffff` or `#111111`, whichever contrasts more
+with that look's `--color-primary`. **Change only the values of these 21 lines; leave every other line of both `:root` blocks exactly as copied**: the
+overlay, canvas and tint variables, the `--font-*` variables, `color-scheme`, and in the light
 block the Tailwind remaps (`--color-white`, `--color-slate-*`, the -300/-400 tints). Each of those is used
 by the components, and one left out breaks the page (no font, a panel with no background, white headings
 on a white page). Names match the reference `index.css` — do not rename or add properties. The defaults
@@ -66,7 +67,7 @@ below are the dark look's; the light look's are in the reference file's light bl
 - The background ramp (`bg-primary` → `bg-tertiary` → `surface-*`) is darkest→lighter in the dark
   look and lightest→darker in the light look; preserve that ordering when mapping a source's neutrals.
   A source with only one scheme: map it onto its own look and keep the reference values in the other.
-- Always set **all 20 values** in the **fixed order above** (matching the reference file), in both
+- Always set **all 21 values** (the 20 above, in their **fixed order**, and `--color-on-primary`) (matching the reference file), in both
   looks, with no trailing timestamp/comment — the theme contributes to the `artifactHash`, so determinism matters.
 
 ## Fonts + utilities (never themed)

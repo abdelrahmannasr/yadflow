@@ -6,7 +6,7 @@ shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 `DocSectionConfig`). The generation is the AI step; it must be **deterministic** (rules at the bottom).
 `src/data/brand.ts` is not one of them: it is the Product's brand, written only by `yad docs brand`
 (E186). Copy it as it is. A colour a data module gives for text (a role's, a section's) is drawn as it is in
-the dark look and mixed toward the text colour in the light one (`src/utils/readable.ts`), so any tint reads.
+the dark look and mixed toward the text colour in the light one (`src/utils/readable.ts`), so a mid-tone tint reads.
 
 ## Artifact → data-structure table
 
@@ -80,6 +80,9 @@ read from `.sdlc/product.json`.
 - Colors/icons assigned to paths/components/roles come from the theme + a **fixed** lens→icon/color map
   (Material Symbols names), not randomly — so regenerating an unchanged input yields a byte-identical
   file, and the staleness hash only moves when an *artifact* actually moves.
+- **Every data colour is a 6-digit `#rrggbb`.** The components append two alpha digits to it
+  (`${color}15`), so a `var()`, `rgb()` or 3-digit hex breaks the page. Pick mid-tone colours (the
+  -500/-600 range): the light look mixes a text colour toward the text, and a very pale one still reads badly.
 - IDs are derived from the source IDs (story id → `FlowPath.id`, repo/module name → component `id`), never
   freshly minted, so links stay stable across regenerations.
 

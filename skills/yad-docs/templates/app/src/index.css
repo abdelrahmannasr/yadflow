@@ -47,6 +47,7 @@
     --color-tint-blue-400: #60a5fa;
     --color-tint-red-400: #f87171;
     --color-tint-violet-400: #a78bfa;
+    --color-tint-slate-200: #e2e8f0;
     --color-tint-slate-400: #94a3b8;
     --color-tint-slate-500: #64748b;
 
@@ -100,6 +101,7 @@
       --color-tint-blue-400: #1d4ed8;
       --color-tint-red-400: #b91c1c;
       --color-tint-violet-400: #6d28d9;
+      --color-tint-slate-200: var(--color-text-primary);
       --color-tint-slate-400: #475569;
       --color-tint-slate-500: #475569;
 

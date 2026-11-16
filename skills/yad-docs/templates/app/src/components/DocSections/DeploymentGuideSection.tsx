@@ -46,7 +46,7 @@ export function DeploymentGuideSection() {
                     key={key}
                     className="text-[11px] font-mono px-2 py-0.5 rounded border"
                     style={{
-                      color: val ? '#22c55e' : '#ef4444',
+                      color: readable(val ? '#22c55e' : '#ef4444'),
                       background: val ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
                       borderColor: val ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)',
                     }}

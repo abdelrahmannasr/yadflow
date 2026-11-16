@@ -67,7 +67,7 @@ export const StepList = () => {
               className="rounded-md px-2 py-1 text-[10px] font-semibold transition-colors"
               style={{
                 background: activeSubPathId === sub.id ? `${selectedPath.color}25` : 'var(--color-surface-highlight)',
-                color: activeSubPathId === sub.id ? selectedPath.color : 'var(--color-text-secondary)',
+                color: activeSubPathId === sub.id ? readable(selectedPath.color) : 'var(--color-text-secondary)',
                 border: `1px solid ${activeSubPathId === sub.id ? `${selectedPath.color}50` : 'var(--color-border-default)'}`,
               }}
             >

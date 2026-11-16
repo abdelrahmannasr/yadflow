@@ -65,7 +65,7 @@ export function DocTableOfContents({ items, roleLabel, roleIcon, roleColor }: Do
               className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left transition-all text-sm"
               style={{
                 background: isActive ? `${roleColor}15` : 'transparent',
-                color: isActive ? roleColor : 'var(--color-text-muted)',
+                color: isActive ? readable(roleColor) : 'var(--color-text-muted)',
                 borderLeft: isActive ? `2px solid ${roleColor}` : '2px solid transparent',
               }}
             >
