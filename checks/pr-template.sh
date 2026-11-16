@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# pr-template gate.
+# The PR/MR BODY must actually USE the committed template — i.e. carry its required sections so the
+# review (and risk-route.sh) has the inputs it needs. This catches an empty / free-form description
+# that bypassed the template.
+#   --profile code (default) — the code-repo task template (yad-pr-template templates/<platform>/):
+#     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
+#   --profile product (old name: hub) — the Shape artifact-review template (templates/product/<platform>/):
+#     requires `## Artifact under review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
+#     BUT only for review/EP-* head branches. Every other Product PR is a tooling/code change to the Product
+#     itself and uses the code task template instead; pass the head ref via --head so the gate knows
+#     which template to require. With no --head, the Product profile stays strict (artifact-review template).
+#     Branch name is not enough on its own: a non-review head that actually changes Shape
+#     artifacts (epics/**) would otherwise slip past the review workflow with only the code template.
+#     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
+#     on a non-review head the gate FAILS — artifact changes must go through a review/EP-* PR.
+#     Build the list with `git -c core.quotePath=false diff --no-renames --name-only`: without
+#     --no-renames a rename lists only its new path, and the removed artifact is never seen.
+# The body is passed as a FILE path (single positional arg); CI writes the event body to a temp file
+# (GitHub: github.event.pull_request.body; GitLab: $CI_MERGE_REQUEST_DESCRIPTION).
+set -euo pipefail
+
+PROFILE=code
+HEADREF=""
+CHANGED=""
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) PROFILE="${2:-code}"; shift 2 ;;
+    --profile=*) PROFILE="${1#*=}"; shift ;;
+    --head) HEADREF="${2:-}"; shift 2 ;;
+    --head=*) HEADREF="${1#*=}"; shift ;;
+    --changed) CHANGED="${2:-}"; shift 2 ;;
+    --changed=*) CHANGED="${1#*=}"; shift ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|product, or hub, the old name for product)."; exit 1 ;; esac
+# `product` is the Product's profile. `hub` is its old name, and BOTH are accepted.
+#
+# This script and the workflow that passes the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and
+# normally land together on one `yad update` — but not always: a copy the team edited is kept. So the
+# order is add-before-remove: the new spelling was accepted first, the workflow templates switched to
+# emit it in E123 (`yad-product-checks.yml`), and the old one is dropped after that. `hub` stays
+# accepted meanwhile, for a workflow of the team's own or one they edited. The other direction — an
+# edited copy of THIS script from before 4.0, which rejects `product`, beside the new workflow — fails
+# every Product PR; `yad update` and `yad doctor` (`profile:`) say so.
+#
+# Normalised to `product` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `hub` and the `= product`
+# branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
+# plain code title carrying an artifact change past its review.
+[ "$PROFILE" = hub ] && PROFILE=product
+
+
+# True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
+# of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
+# Three records are not artifacts: a step owner file (`yad assign`, E47), an epic's issue-links file (`yad issues
+# link`, E170) and the Foundation's roadmap-items file (`yad foundation publish`, E174) (#512). All are reviewed
+# by nobody (an assignment is advice; the other two name where a tracker item is, and sit outside any fingerprint),
+# and a review/EP-* PR would advance a step on merge. So a PR of these files alone is not an artifact change.
+# Each is matched only where yad writes it: `yad issues link` refuses the Foundation, so foundation/ has no
+# issue-links file, and roadmap-items lives in foundation/.sdlc/ only.
+# No `-q` on the second grep: under pipefail an early exit would SIGPIPE the first and read as "no artifact".
+# `"?`: git still C-quotes a path holding `"`, `\`, a tab or a newline, even with core.quotePath=false. Such a
+# line counts as an artifact, and neither exemption matches it — so it fails closed.
+# `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
+# locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$|^epics/EP-[^/]+/\.sdlc/issue-links\.json$|^foundation/\.sdlc/roadmap-items\.json$' >/dev/null; }
+
+BODY="${ARGS[0]:-}"
+if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
+  echo "FAIL [pr-template]: body file not found — pass the PR/MR description as a file path."
+  exit 1
+fi
+
+# GitLab TRUNCATES $CI_MERGE_REQUEST_DESCRIPTION at 2700 characters, so a long-but-valid description
+# can lose a required section before this gate ever reads it — the author then sees "does not use the
+# template" while looking at an MR that visibly contains it (#164). Measure the RAW body now (the
+# trailer strip below shortens it) so a failure at that boundary can say so. GitHub bodies are not
+# truncated, so the note is advisory and only ever printed alongside a real failure.
+GITLAB_DESC_LIMIT=2700
+# CHARACTERS, not bytes — GitLab counts characters, and a description full of multibyte punctuation
+# (an em-dash costs 3 bytes) would hit 2700 bytes long before it could ever be truncated. `wc -m`
+# would need a UTF-8 locale we cannot assume across CI images, so count UTF-8 code points the
+# locale-independent way: every byte that is NOT a continuation byte (0x80-0xBF) starts one.
+RAW_CHARS="$(LC_ALL=C tr -d '\200-\277' < "$BODY" | wc -c | tr -d '[:space:]')"
+
+# #343: the cut is GitLab's, not the author's, so in GitLab CI a description that reached it is read again
+# IN FULL from the MR API, and that is what the gate checks. Needs a token that can read the MR: the
+# GITLAB_TOKEN (or SDLC_API_TOKEN) CI/CD variable verified-commits already asks for, else the job's own
+# CI_JOB_TOKEN, which GitLab's job-token access list lets read a single merge request (an older GitLab, or
+# a fork's pipeline reading the target project, may not). The token goes to curl in a header file, never
+# on its command line, and only to this GitLab's own API ($CI_API_V4_URL). JSON is decoded by node,
+# which every yad job image has; without node, curl, a token or an answer, the cut body is checked as
+# before and the note below says how to get the full one read.
+FULL_READ=""
+FULL_WHY=""
+_fd=""
+# GitLab says itself when it cut the variable (CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED); the length
+# is the fallback for a GitLab that does not set it (review 1).
+# A fork's MR pipeline runs in the fork: both IDs are set and differ (review 2: a branch pipeline has no
+# MR project, and is not a fork).
+FORK=""
+if [ -n "${CI_MERGE_REQUEST_PROJECT_ID:-}" ] && [ "${CI_PROJECT_ID:-}" != "${CI_MERGE_REQUEST_PROJECT_ID}" ]; then FORK=1; fi
+ADVICE=""
+if [ "${GITLAB_CI:-}" = true ] && { [ "${CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED:-}" = true ] || [ "$RAW_CHARS" -ge "$GITLAB_DESC_LIMIT" ]; }; then
+  if [ -z "${CI_API_V4_URL:-}" ] || [ -z "${CI_MERGE_REQUEST_PROJECT_ID:-}" ] || [ -z "${CI_MERGE_REQUEST_IID:-}" ]; then
+    FULL_WHY="this is not a merge request pipeline"
+  elif ! command -v curl >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    FULL_WHY="curl or node is not on this runner"
+  else
+    # A runner with no usable temp folder still gets the cut body checked, and a reason (review 2).
+    _fd="$(mktemp -d 2>/dev/null)" || _fd=""
+  fi
+  if [ -n "$FULL_WHY" ] || [ -z "$_fd" ]; then
+    [ -n "$FULL_WHY" ] || FULL_WHY="this runner has no temp folder to write to"
+  else
+    # At once, so a cancelled job leaves neither the header file nor the MR's text behind (review 1). The
+    # trap set further down replaces this one and removes the same folder.
+    trap '[ -z "$_fd" ] || rm -rf "$_fd"' EXIT
+    _tok="${GITLAB_TOKEN:-${SDLC_API_TOKEN:-}}"
+    ( umask 077
+      if [ -n "$_tok" ]; then printf 'PRIVATE-TOKEN: %s\n' "$_tok"; else printf 'JOB-TOKEN: %s\n' "${CI_JOB_TOKEN:-}"; fi > "$_fd/h" )
+    _code="$(curl -sS --max-time 20 -o "$_fd/mr.json" -w '%{http_code}' -H @"$_fd/h" -- \
+      "${CI_API_V4_URL}/projects/${CI_MERGE_REQUEST_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}" 2>/dev/null)" || _code=""
+    rm -f "$_fd/h"
+    _decoded=""
+    if [ "$_code" = 200 ] && node -e '
+      const fs = require("fs");
+      let d;
+      try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).description; } catch { process.exit(3); }
+      if (typeof d !== "string") process.exit(3);
+      fs.writeFileSync(process.argv[2], d);
+    ' "$_fd/mr.json" "$_fd/full.md" 2>/dev/null; then
+      _decoded=1
+    fi
+    if [ -n "$_decoded" ]; then
+      BODY="$_fd/full.md"
+      FULL_READ=1
+      echo "note [pr-template]: the description reached GitLab's ${GITLAB_DESC_LIMIT}-character CI cut, so the gate read it in full from the merge request API."
+    else
+      if [ -n "${GITLAB_TOKEN:-}" ]; then _with=GITLAB_TOKEN; elif [ -n "${SDLC_API_TOKEN:-}" ]; then _with=SDLC_API_TOKEN; else _with="the job token"; fi
+      if [ "$_code" = 200 ]; then FULL_WHY="the merge request API answered ${_with} without a description yad could read"
+      else FULL_WHY="the merge request API answered ${_code:+HTTP }${_code:-nothing} to ${_with}"; fi
+      # What would help, by who asked and what GitLab answered (reviews 2, 3). Only a refusal is a token's
+      # fault; a timeout, a 5xx or an odd answer is said as it is, with no advice to change a token.
+      # A fork's own variable is the fork's to fix, so the token advice comes first; the fork note is for
+      # a refused job token only (review 4: a timeout or a 5xx in a fork is not a question of access).
+      if [ -n "$_tok" ]; then
+        case "$_code" in
+          401) ADVICE="the ${_with} variable was not accepted (expired, revoked, or not a valid token here) — renew or replace it" ;;
+          403) ADVICE="the ${_with} variable was refused: give it the read_api scope" ;;
+          404) ADVICE="the ${_with} variable's user cannot see the merge request's project — use a token of a member with Reporter access or more" ;;
+        esac
+      else
+        case "$_code" in
+          401|403|404)
+            if [ -n "$FORK" ]; then ADVICE="this pipeline runs in a fork, which cannot read the target project's merge request"
+            else ADVICE="set a GITLAB_TOKEN CI/CD variable (read_api, masked, not protected) so the gate reads the whole description"; fi ;;
+        esac
+      fi
+    fi
+  fi
+fi
+
+# The Review Companion injects a `<!-- yad:trailer --> … <!-- /yad:trailer -->` briefing block (and
+# `<!-- yad:noblock -->` notes) into the description. Strip those before the template check so the
+# AI-generated prose can never hide a required section heading or be mistaken for the `Risk level:`
+# value (the trailer is prepended, so an unstripped "risk level" mention would win `head -1`).
+STRIPPED="$(mktemp 2>/dev/null)" || { echo "FAIL [pr-template]: no temp folder to write to (TMPDIR=${TMPDIR:-/tmp}) — the description cannot be checked."; exit 1; }
+trap 'rm -f "$STRIPPED"; [ -z "$_fd" ] || rm -rf "$_fd"' EXIT
+sed '/<!-- yad:trailer -->/,/<!-- \/yad:trailer -->/d; /<!-- yad:noblock -->/d' "$BODY" > "$STRIPPED"
+BODY="$STRIPPED"
+
+rc=0
+require_heading() {
+  if ! grep -qiE "^[[:space:]]*$1[[:space:]]*$" "$BODY"; then
+    echo "FAIL [pr-template]: missing section '${2}' — the PR/MR body does not use the template."
+    rc=1
+  fi
+}
+
+# The code task template: `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:`.
+# Used by the code profile and by Product tooling PRs (any head branch that is not review/EP-*).
+check_code_body() {
+  require_heading '## Summary' '## Summary'
+  require_heading '## Impact & Risk' '## Impact & Risk'
+  require_heading '## Checklist' '## Checklist'
+  # Risk level must be present AND filled with a real value (not the <placeholder>).
+  local rl
+  rl="$(grep -iE '(\*\*)?Risk level:' "$BODY" | head -1 \
+        | sed -E 's/<!--.*$//; s/^[^:]*://; s/[*`]//g; s/^[[:space:]]*//; s/[[:space:]]*$//' || true)"
+  rl="$(printf '%s' "$rl" | tr 'A-Z' 'a-z' | grep -oE 'low|medium|high' | head -1 || true)"
+  if [ -z "$rl" ]; then
+    echo "FAIL [pr-template]: 'Risk level:' missing or not set to low|medium|high."
+    rc=1
+  fi
+}
+
+# The Shape artifact-review template.
+check_product_body() {
+  require_heading '## Artifact under review' '## Artifact under review'
+  # Add before you remove (change-safety rule 3). `front-half` is the ORIGINAL spelling and it is
+  # still what `yad gate open` emits and what the shipped Product template carries; `Shape` is the
+  # replacement, accepted here first so that this script is lenient BEFORE anything starts writing
+  # the new wording. That ordering is the whole point: this file is refreshed by `yad update`
+  # (PRODUCT_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
+  # the `yad-pr-template repo:product action: wire` skill, which nothing runs automatically. So a Product
+  # WILL sit with a refreshed checker next to an old template, and the checker has to accept both.
+  # The emitter flips to `(Shape)` in the next major; only after that may `front-half` be dropped.
+  require_heading '## Impact & Risk \((front-half|Shape)\)' '## Impact & Risk (front-half)'
+  require_heading '## Checklist' '## Checklist'
+  if ! grep -qiE '(\*\*)?Risk tags:' "$BODY"; then
+    echo "FAIL [pr-template]: missing 'Risk tags:' line (Shape Impact & Risk)."
+    rc=1
+  fi
+}
+
+KIND="$PROFILE"
+if [ "$PROFILE" = product ]; then
+  case "$HEADREF" in
+    review/EP-*|"") check_product_body ;;            # artifact-review PR (or unknown head — stay strict)
+    *)
+      # tooling/code change to the Product itself — UNLESS it changes Shape artifacts (epics/**),
+      # which must go through a review/EP-* PR. Without this guard a non-review head could carry an
+      # artifact change past the Shape review with only the code template.
+      if artifact_changed; then
+        echo "FAIL [pr-template]: head '${HEADREF}' changes Shape artifacts (epics/** or foundation/**) but is not a review/EP-* branch — move those changes to a review/<epic>/<artifact> branch, like review/EP-<slug>/architecture (review/EP-foundation/foundation for foundation/), and run yad open-pr from it, which pushes the branch and opens the review PR; or drop them from this PR."
+        rc=1
+      else
+        check_code_body; KIND="product-tooling"
+      fi
+      ;;
+  esac
+else
+  check_code_body
+fi
+
+if [ "$rc" != 0 ] && { [ "${CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED:-}" = true ] || [ "$RAW_CHARS" -ge "$GITLAB_DESC_LIMIT" ]; } && [ -z "$FULL_READ" ]; then
+  echo "NOTE [pr-template]: the description this gate read is ${RAW_CHARS} characters. On GitLab the gate reads \$CI_MERGE_REQUEST_DESCRIPTION, which is TRUNCATED at ${GITLAB_DESC_LIMIT} — a section below that cutoff is invisible here even though the MR shows it."
+  # A fork's pipeline gets neither the target project's variables nor a job token that may read its MR
+  # (review 1): only the order of the sections helps there, which the next NOTE says.
+  [ -z "$FULL_WHY" ] || echo "NOTE [pr-template]: the full description could not be read instead: ${FULL_WHY}${ADVICE:+ — ${ADVICE}}."
+  echo "NOTE [pr-template]: if the missing section IS in your description, move the required sections above the cutoff (reorder, never delete) and push the long narrative to the end."
+fi
+
+[ "$rc" = 0 ] && echo "PASS [pr-template]: body uses the ${KIND} template (required sections present)."
+exit "$rc"

@@ -59,8 +59,9 @@ updates:
       - "ci"
     commit-message:
       prefix: "chore(ci):"
-    # directory "/" reads every file in .github/workflows/, action-pins.yml included: the actions only a
-    # CI template uses are listed there, so their bumps come here too (#429).
+    # directory "/" reads every file in .github/workflows/. Every action a CI template uses must appear in
+    # one of them, so its bumps come here too (#429). The yad workflows wired here use them all today; an
+    # action only a template uses goes in a never-run .github/workflows/action-pins.yml (cli/test.mjs says so).
     #
     # Every github/codeql-action step in a workflow must run the same version, or the job fails.
     # One grouped PR bumps init, analyze and upload-sarif together.
