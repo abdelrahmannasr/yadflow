@@ -6,7 +6,9 @@ _bmad/
 _bmad-output/
 
 # IDE skill mirrors (regenerable via `yad check --fix`)
-# .claude/ is already covered by the global gitignore.
+# .claude/ holds per-machine skill mirrors; only the shared settings.json (yad's agent-guard hook) is tracked.
+.claude/*
+!.claude/settings.json
 .agents/
 .cursor/
 .gemini/
