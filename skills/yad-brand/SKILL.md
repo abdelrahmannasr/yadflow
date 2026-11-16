@@ -6,7 +6,7 @@ description: 'Makes every page yadflow generates for this Product wear the Produ
 # yadflow — the Product's brand on every page (E184)
 
 **Goal:** every page yadflow makes for this Product — the progress map, the brain view, the standup, usage
-and issues reports, and the saved-reports catalog (the doc sites follow later, E186) — wears the Product's own logo, colours
+and issues reports, the saved-reports catalog, and the generated doc sites (`yad docs brand <site>`, E186) — wears the Product's own logo, colours
 and fonts. Pages never read a design system directly. They read **one** file, `.sdlc/brand.json`. This skill
 fills it.
 

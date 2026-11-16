@@ -13,6 +13,18 @@ names are untouched.
 For each custom property, resolve its value in this order and **stamp `theme:` in `docs-build.json`** to
 the tier that supplied the palette:
 
+0. **`.sdlc/brand.json`, the Product's brand** (`theme: brand.json`, E186) — when the Product has one,
+   it wins over every tier below. Do not map it by hand: run **`yad docs brand <site folder>`** after
+   copying the shell and writing the data. It writes the brand (both looks, its fonts, mark and name) into
+   the site's `yad-brand` blocks and `src/data/brand.ts`, the same bytes every time, and answers
+   `theme: "brand.json"` under `--json`. Leave the two `:root` blocks at their tier-1-to-4 values: the
+   brand block comes after them and wins. Only when the command refuses (a site made from a template
+   older than 0.0.7) or this yad has no `yad docs brand` (older than the release that added it) map the
+   brand by hand: its `colors.dark` (or, when null, its light primary and accent made lighter, and
+   yadflow's dark neutrals) onto the dark `:root`, its `colors.light` onto the light one, with the table
+   below (`bg` → `--color-bg-primary`, `surface` → `--color-bg-secondary` and `--color-surface-dark`,
+   `text` → `--color-text-primary`, `muted` → `--color-text-muted`, `border` → `--color-border-default`,
+   `primary` → `--color-primary`, `accent` → `--color-accent`, the rest by the derivation rules).
 1. **`DESIGN.md`** (`theme: DESIGN.md`) — the epic's hand/Impeccable-authored design-system tokens. The
    richest source; use it when present.
 2. **`design.json` / `design-links.json` palette** (`theme: design.json`) — the connected design tool's

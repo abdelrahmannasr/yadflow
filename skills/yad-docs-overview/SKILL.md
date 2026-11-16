@@ -28,7 +28,9 @@ It only reads the pipeline definition and writes a project-level site. When a do
   Reference tables) and dropped the template's per-epic ones, so it is **updated in place, never
   re-copied**. Generated data satisfies `src/data/types.ts`.
 - Theme: **yadflow's own brand palette** (the `:root` of the legacy report, now `docs/sdlc-site/public/report.html`) — for visual continuity with
-  the existing overview, not an epic's design tokens.
+  the existing overview, not an epic's design tokens. In a Product with `.sdlc/brand.json`, the overview
+  wears the Product's brand instead: run `yad docs brand docs/sdlc-site` (E186) and stamp
+  `theme: brand.json`. yadflow's own repo has no brand file, so its overview keeps this look.
 - Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs

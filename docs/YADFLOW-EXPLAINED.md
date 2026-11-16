@@ -946,7 +946,8 @@ Two of them make pictures for people:
   one folder beside the Product. It never commits or pushes one. `yad reports` lists them and says which are still fresh.
 
 Every one of those pages wears the Product's own look — its logo, colours and fonts — when the Product has a
-brand file, and yadflow's purple and pink when it has none (`yad brand`).
+brand file, and yadflow's purple and pink when it has none (`yad brand`). So do the generated doc sites, once
+`yad docs brand <site>` has put the brand in them; they follow the reader's light or dark setting.
 
 ### How it works (for technical readers)
 
@@ -964,6 +965,7 @@ brand file, and yadflow's purple and pink when it has none (`yad brand`).
 | `yad map` | The progress map: how close each piece of work is to Production, and who did which part. |
 | `yad reports` | The reports saved on this machine, newest first, each marked fresh or stale. |
 | `yad brand` / `init` / `check` | The brand the pages wear; make `.sdlc/brand.json` from DESIGN.md; check it is usable, readable and current. |
+| `yad docs brand <site>` | Put the Product's brand into a generated doc site (the agent runs it when it makes the site). |
 
 A **theme** tag in `epic.md` groups related epics; a child epic copies its parent's theme.
 

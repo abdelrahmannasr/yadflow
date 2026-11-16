@@ -95,6 +95,9 @@ Copy the shell from `templates/app/` **verbatim**, then:
    `references/theme-map.md`: **DESIGN.md → design.json/design-links.json palette → code-map tokens →
    default theme** (stamp `theme: default` in the manifest when it falls through to the shell default).
    Keep fonts Space Grotesk + Noto Sans and the `.glass-panel`/`.flow-grid`/`.code-block` utilities.
+   **Then, when the Product has `.sdlc/brand.json`, run `yad docs brand epics/EP-<slug>/docs-site`**
+   (E186): it puts the Product's brand on the site and wins over the theme above; stamp
+   `theme: brand.json`. If it refuses, follow tier 0 of the theme map.
 4. **Substitute the Vite base** from `.sdlc/docs.json` `basePath` (per-epic sites nest under
    `/<repo>/epics/EP-<slug>/`). Read `docs.json` for the base path + target; if absent, default base
    `/` and treat as build-only.
@@ -106,7 +109,7 @@ Write `epics/EP-<slug>/.sdlc/docs-build.json` — the baseline `yad-docs-sync` c
 ```json
 {
   "builtAt": "<YYYY-MM-DD>",
-  "theme": "design.json | DESIGN.md | default",
+  "theme": "brand.json | design.json | DESIGN.md | default",
   "artifactHash": "<sha256 of epic.md + architecture.md + contract.md CONTRACT-SURFACE + ui-design.md + each story>",
   "repoHeads": { "<repo>": "<HEAD sha>" },
   "deployUrl": "<url or null>",

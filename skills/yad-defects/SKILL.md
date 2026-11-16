@@ -58,7 +58,8 @@ Compute, for the scope:
   normalized "how leaky is this gate").
 
 ### Step 4 — Render the report (yad-docs shell)
-Generate the site into `epics/<scope>/defects-site/` with sections:
+Generate the site into `epics/<scope>/defects-site/` (themed as `yad-docs` does, then
+`yad docs brand epics/<scope>/defects-site` when the Product has `.sdlc/brand.json`) with sections:
 1. **Summary** — total defects, severity mix, escape rate.
 2. **Escape-stage breakdown** — the bar/heat view of where defects leak (the actionable headline).
 3. **Root-cause breakdown.**

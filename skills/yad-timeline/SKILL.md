@@ -50,7 +50,8 @@ folded ship of the same key. Reading `build-log.json` alone silently drops every
 
 ### Step 3 — Render the evolution view (yad-docs shell)
 Generate the site into `epics/<thread>/timeline-site/` (copy the shell verbatim; generate `src/data/*.ts`
-deterministically; theme from the design system). The thread maps onto the shell primitives:
+deterministically; theme from the design system, then run `yad docs brand epics/<thread>/timeline-site` when the
+Product has `.sdlc/brand.json`, as `yad-docs` does). The thread maps onto the shell primitives:
 - **Flow path** = the thread; **flow steps** = the epics in order (genesis → tip), each step's messages
   = what it re-authored, its side-effects = the ships it produced + any contract re-lock.
 - **System components** = the artifacts (epic/architecture/contract/ui/stories/test-cases), each labelled
