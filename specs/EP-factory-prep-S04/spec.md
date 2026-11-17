@@ -22,6 +22,11 @@ run git in it, or write files into it, without that check.
   `check --fix` and `update` (reconcile), `docs`, `usage --repos` (an absolute path is skipped), doctor's
   file checks, `yad map` and its live view, and the repos `yad update` commits in.
 - R4. `packRepo` refuses a code-context pack path outside `.sdlc/code-context/` (`codeContextPathOk`).
+- R5. (security review) setup's connect flow (`registerRepo`, `--add-repo`, the found and interactive
+  paths) judges a path before any git call; `risk-map` judges a path the registry does not name; `yad
+  update` judges each repo folder again right before its git calls (a rebase can change the tree).
+- R6. On a disk that ignores case, only a folder named exactly `HEAD` counts as one (a file or link
+  named `head` still does, because git opens it); a folder `apps/head/` does not refuse `apps/web`.
 
 ## Clarifications
 
