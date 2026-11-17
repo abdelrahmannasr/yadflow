@@ -220,10 +220,22 @@
 
     // ────────────────────────────────────────────────────── background ──
     // A slow field of dotted lines riding a wave. Decoration only; it carries no data.
+    // The sky follows the brand (#564): the page's --bg is the brand's dark bg (the Product's, or yadflow's own
+    // when it has none), set through PAGE_MAPS.map. Only a page served with no brand CSS at all keeps the
+    // stylesheet's #040816, and then the prototype's two blues. A brand sky keeps a soft lift towards the bottom.
+    var SKY = (function () {
+      var v = '';
+      try { v = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); } catch (e) { v = ''; }
+      return v && v.toLowerCase() !== '#040816' ? [v, v, true] : ['#030613', '#050c22', false];
+    })();
     function drawBg(t) {
       var w = bg.width, h = bg.height, b = bctx;
-      var g = b.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#030613'); g.addColorStop(1, '#050c22');
+      var g = b.createLinearGradient(0, 0, 0, h); g.addColorStop(0, SKY[0]); g.addColorStop(1, SKY[1]);
       b.fillStyle = g; b.fillRect(0, 0, w, h);
+      if (SKY[2]) {
+        var lift = b.createLinearGradient(0, 0, 0, h); lift.addColorStop(0, 'rgba(255,255,255,0)'); lift.addColorStop(1, 'rgba(255,255,255,0.035)');
+        b.fillStyle = lift; b.fillRect(0, 0, w, h);
+      }
       var S = Math.max(w, h) * 0.62, cx = w / 2, cy = h * 0.54, ca = Math.cos(-0.42), sa = Math.sin(-0.42);
       var LINES = 60, DOTS = 150, bk = [[], [], [], [], []];
       for (var i = 0; i < LINES; i++) {
