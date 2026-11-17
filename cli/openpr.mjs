@@ -19,7 +19,7 @@ import { gateOpen } from './gate.mjs';
 import { unfoldedPaths, authorStepOf } from './fold.mjs';
 import { registryEntryFor } from './find-product.mjs';
 import { autoOpenCheck, recordAutoOpen, branchTasks, rangeTasks, groupWarnings } from './build.mjs';
-import { productDriftError } from './epic-state.mjs';
+import { productDriftError, epicRoot, parseFrontmatter } from './epic-state.mjs';
 import { err } from './errors.mjs';
 import { recordActor } from './skip.mjs';
 import { previewLine, previewPattern, fillPattern, needs } from './preview.mjs';
@@ -61,11 +61,13 @@ export function detectStage(root, repoRoot, head, meta) {
 // from the package (mirrors how manifest.mjs reads ../package.json). Used for a product-tooling PR, whose
 // `.github/pull_request_template.md` is the ARTIFACT-REVIEW template (wrong shape for the code-task
 // Product gate). Falls back to a minimal body that still carries every section the gate requires.
-function codeTaskTemplate(platform) {
+// `fallback` (a test seam) gives the minimal body, the one used when the bundled file cannot be read.
+export function codeTaskTemplate(platform, { fallback = false } = {}) {
   const rel = platform === 'gitlab'
     ? '../skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md'
     : '../skills/yad-pr-template/templates/github/pull_request_template.md';
   try {
+    if (fallback) throw new Error('fallback');
     return fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
   } catch {
     return [
@@ -74,12 +76,64 @@ function codeTaskTemplate(platform) {
       '- **Domains / repos touched:** <repo>',
       '- **Contract surface touched:** no',
       '- **Risk level:** low',
+      `- **Rollback plan:** ${ROLLBACK}`,
       '',
       '## Checklist',
       '- [ ] Lint, build, and tests pass (build/test/lint gate)',
       '',
     ].join('\n');
   }
+}
+
+// The rollback plan every task PR/MR gets: one task (or a few of one story) per PR, so its merge is the unit to undo.
+export const ROLLBACK = "revert this pull request's merge commit";
+
+// The Conventional-Commits types, strongest first: a branch of several commits is titled by the strongest.
+const TYPE_RANK = ['feat', 'fix', 'perf', 'refactor', 'docs', 'test', 'build', 'ci', 'chore', 'revert'];
+const TYPE_PREFIX = /^([a-z]+)(\([^)]*\))?(!)?:\s*/i;
+// A subject without its `type(scope)!:` prefix.
+export const subjectText = (s) => String(s || '').replace(TYPE_PREFIX, '');
+// One line of title text, with no trailing dot (the pr-title gate refuses one).
+const titleText = (s) => String(s || '').split(/\r?\n/)[0].trim().replace(/[.\s]+$/, '');
+
+// The Summary of a branch of several commits (#585): one bullet per subject, oldest first, no type prefix.
+export function commitsSummary(subjects) {
+  return subjects.map((s) => `- ${subjectText(s) || s}`).join('\n');
+}
+
+// The title of a branch of several commits (#585): the strongest type among them (with `!` when any commit is
+// breaking), then the story's title, else the text of the first commit of that type — the change itself, not a
+// later fix-up such as a lint fix. No scope: the commits may not share one.
+// null when no commit has a known type — the caller keeps the last subject, as for one commit.
+export function branchTitle(subjects, storyTitle) {
+  let best = -1;
+  let first = '';
+  let breaking = false;
+  for (const s of subjects) {
+    const m = TYPE_PREFIX.exec(s);
+    const at = m ? TYPE_RANK.indexOf(m[1].toLowerCase()) : -1;
+    if (at < 0) continue;
+    if (best < 0 || at < best) { best = at; first = s; }
+    if (m[3]) breaking = true;
+  }
+  const text = titleText(storyTitle) || titleText(subjectText(first));
+  return best < 0 || !text ? null : `${TYPE_RANK[best]}${breaking ? '!' : ''}: ${text}`;
+}
+
+// The story's own title, when its file in the Product has one: a `title:` in the frontmatter, else a `# ` heading.
+// A story file with neither (the usual shape: it opens with `## Story`) gives null. Never throws: the PR is
+// opened after the push, and a title is not worth stopping it for.
+export function storyTitleFor(productRoot, task) {
+  const m = /^ep-([a-z0-9-]+)-s(\d+)-t\d+$/i.exec(String(task || ''));
+  if (!productRoot || !m) return null;
+  const epic = `EP-${m[1].toLowerCase()}`;
+  try {
+    const text = fs.readFileSync(path.join(epicRoot(productRoot, epic), 'stories', `${epic}-S${m[2]}.md`), 'utf8');
+    const fm = parseFrontmatter(text);
+    if (typeof fm.title === 'string' && fm.title.trim()) return fm.title.trim();
+    const h = /^#[ \t]+(.+)$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, ''));
+    return h ? h[1].trim() : null;
+  } catch { return null; }
 }
 
 export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage, preview }) {
@@ -108,7 +162,9 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
     .replace(/specs\/EP-<slug>-S0N\//g, () => `specs/${story || 'EP-<slug>-S0N'}/`)
     .replace(/(\*\*Risk level:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${risk}`)
     .replace(/(\*\*Contract surface touched:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${contract ? 'yes' : 'no'}`)
-    .replace(/(\*\*Domains \/ repos touched:\*\*).*/i, (_m, g1) => `${g1} ${domains || '<repo>'}`);
+    .replace(/(\*\*Domains \/ repos touched:\*\*).*/i, (_m, g1) => `${g1} ${domains || '<repo>'}`)
+    // Only the `<…>` placeholder: a plan the team wrote, and a trailing `<!-- … -->` comment, stay as they are.
+    .replace(/(\*\*Rollback plan:\*\*)[ \t]*<(?!!--)[^>\r\n]*>/i, (_m, g1) => `${g1} ${ROLLBACK}`);
   if (summary) {
     // Replace the "## Summary" heading + its optional guidance comment with the real summary.
     // `\r?\n` tolerates a CRLF-checked-out template (Windows core.autocrlf) so the fill never no-ops.
@@ -419,17 +475,25 @@ export async function runOpenPr(root, opts = {}) {
   const task = auto ? `${auto.story}-${auto.task}` : opts.task || taskFromBranch(branch);
   const bodyTask = groupIds ? groupIds.join('`, `') : task;
   const subject = run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout;
-  const title = opts.title || subject || `task ${task || branch}`;
-  // Summary = commit subject (Conventional-Commits "type:" prefix stripped) + body paragraphs,
+  // The branch's own commits, oldest first (#585): read against the base, so only when the base is known.
+  const subjects = haveBase
+    ? run('git', ['log', '--reverse', '--no-merges', '--format=%s', `${baseRef}..HEAD`], { cwd: repoRoot }).stdout.split('\n').filter(Boolean)
+    : [];
+  const many = subjects.length > 1;
+  // One commit: its subject. Several: the strongest type and the story's title (else that type's first subject). --title wins.
+  const title = opts.title
+    || (many && branchTitle(subjects, storyTitleFor(auto?.productRoot || opts.product || root, task)))
+    || subject || `task ${task || branch}`;
+  // Summary of one commit = its subject (Conventional-Commits "type:" prefix stripped) + body paragraphs,
   // dropping the Task / Contract-Change / Co-Authored-By trailer lines. `run().stdout` is trimmed
-  // but keeps internal newlines, so a multi-line body survives.
-  const subjectText = subject.replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, '');
-  const bodyText = run('git', ['log', '-1', '--format=%b'], { cwd: repoRoot }).stdout
+  // but keeps internal newlines, so a multi-line body survives. Several commits: one bullet per subject,
+  // and no body — the last commit's body would read as the whole branch's.
+  const bodyText = many ? '' : run('git', ['log', '-1', '--format=%b'], { cwd: repoRoot }).stdout
     .split('\n')
     .filter((l) => !/^(Task|Contract-Change|Co-Authored-By):/i.test(l.trim()))
     .join('\n')
     .trim();
-  const summary = [subjectText, bodyText].filter(Boolean).join('\n\n') || undefined;
+  const summary = (many ? commitsSummary(subjects) : [subjectText(subject), bodyText].filter(Boolean).join('\n\n')) || undefined;
   // The Preview line (#359), on a code task only: the repo's pattern filled now, or a note. A pattern
   // that needs the PR number is filled once the PR exists (below).
   const pp = stage === 'code-repo' ? previewPattern(meta) : {};

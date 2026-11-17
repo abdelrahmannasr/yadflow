@@ -2232,6 +2232,116 @@ test('templateBody: without a task/summary the Spec + Summary placeholders degra
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #585 — the rollback plan, and the title and Summary of a branch of several commits.
+const { codeTaskTemplate, commitsSummary, branchTitle, storyTitleFor, ROLLBACK, runOpenPr: openPr585 } = await import('./openpr.mjs');
+
+test('templateBody: the rollback plan is filled on both platforms and in the fallback body; a written plan stays (#585)', () => {
+  const T = productDir();
+  try {
+    for (const platform of ['github', 'gitlab']) {
+      const b = templateBody(T, platform, { risk: 'low', stage: 'product-tooling' });
+      assert.match(b, /- \*\*Rollback plan:\*\* revert this pull request's merge commit\n/, platform);
+      assert.doesNotMatch(b, /how to revert if this misbehaves/, platform);
+    }
+    const fallback = codeTaskTemplate('github', { fallback: true });
+    assert.match(fallback, /- \*\*Rollback plan:\*\* revert this pull request's merge commit\n/, 'the fallback body carries the line, filled');
+    // A repo's own template: a trailing comment is kept, and a plan the team wrote is never replaced.
+    fs.mkdirSync(path.join(T, 'web/.github'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'web/.github/pull_request_template.md'), '- **Rollback plan:** <how to revert> <!-- keep me -->\n- **Rollback plan:** flip the flag off\n');
+    const own = templateBody(path.join(T, 'web'), 'github', { risk: 'low', stage: 'code-repo' });
+    assert.equal(own, `- **Rollback plan:** ${ROLLBACK} <!-- keep me -->\n- **Rollback plan:** flip the flag off\n`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('commitsSummary / branchTitle: one bullet per subject; the strongest type, then the story title, else the first subject of that type (#585)', () => {
+  const subjects = ['docs: say what the flag does', 'fix(cli): read the base first', 'feat: list every commit.'];
+  assert.equal(commitsSummary(subjects), '- say what the flag does\n- read the base first\n- list every commit.');
+  assert.equal(branchTitle(subjects, null), 'feat: list every commit', 'no story title: the first feat subject, its trailing dot dropped');
+  assert.equal(branchTitle(subjects, 'Describe the whole change.'), 'feat: Describe the whole change');
+  assert.equal(branchTitle(['chore: a', 'fix: b', 'docs: c'], null), 'fix: b', 'fix outranks the rest; its first commit gives the text');
+  assert.equal(branchTitle(['chore: a', 'refactor: b', 'perf: c', 'test: d'], null), 'perf: c');
+  assert.equal(branchTitle(['docs: spec it', 'fix: the real change', 'fix: drop a lint error'], null), 'fix: the real change', 'a later fix-up does not name the PR');
+  assert.equal(branchTitle(['fix!: drop the old flag', 'docs: c'], null), 'fix!: drop the old flag', 'a breaking commit keeps its `!`');
+  assert.equal(branchTitle(['Feat: a', 'wip b'], null), 'feat: a', 'the type is read in any case; a subject with none is skipped');
+  assert.equal(branchTitle(['wip a', 'oops: b'], null), null, 'no known type: the caller keeps the last subject');
+  // Every title it gives passes the real pr-title gate.
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-title.sh');
+  for (const t of [branchTitle(subjects, null), branchTitle(subjects, 'Describe the whole change.'), branchTitle(['fix!: a', 'docs: c'], null)]) {
+    execFileSync('bash', [gate, t], { stdio: 'pipe' });
+  }
+});
+
+test('storyTitleFor: a title: in the frontmatter, else a # heading, else null; never throws (#585)', () => {
+  const P = productDir();
+  try {
+    const dir = path.join(P, 'epics/EP-demo/stories');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'EP-demo-S01.md'), '---\nid: EP-demo-S01\ntitle: Show the whole change\n---\n\n# Something else\n');
+    fs.writeFileSync(path.join(dir, 'EP-demo-S02.md'), '---\nid: EP-demo-S02\n---\n\n# Ship the cart\n\n## Story\nAs a buyer…\n');
+    fs.writeFileSync(path.join(dir, 'EP-demo-S03.md'), '---\nid: EP-demo-S03\nstatus: approved\n---\n\n## Story\nAs a reviewer, I want…\n');
+    assert.equal(storyTitleFor(P, 'EP-demo-S01-T02'), 'Show the whole change');
+    assert.equal(storyTitleFor(P, 'ep-demo-s02-t01'), 'Ship the cart', 'a lower-case branch still finds the file');
+    assert.equal(storyTitleFor(P, 'EP-demo-S03-T01'), null, 'a story that opens with ## Story has no title');
+    assert.equal(storyTitleFor(P, 'EP-demo-S09-T01'), null, 'no story file');
+    assert.equal(storyTitleFor(null, 'EP-demo-S01-T01'), null);
+    assert.equal(storyTitleFor(P, null), null);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); }
+});
+
+// A Product with one registered code repo whose `main` is on a bare origin, on a task branch with `commits`.
+function productWithBranch(commits) {
+  const P = productDir();
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-'));
+  git(bare, 'init', '-q', '--bare');
+  const R = path.join(P, 'web');
+  fs.mkdirSync(R);
+  git(R, 'init', '-q'); git(R, 'config', 'user.email', 'a@b.c'); git(R, 'config', 'user.name', 'x');
+  git(R, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(R, 'seed.txt'), '0'); git(R, 'add', '-A'); git(R, 'commit', '-q', '-m', 'feat: seed');
+  git(R, 'branch', '-q', '-M', 'main'); git(R, 'remote', 'add', 'origin', bare); git(R, 'push', '-q', 'origin', 'main');
+  git(R, 'checkout', '-q', '-b', 'feat/EP-demo-S01-T01-cart');
+  commits.forEach((m, i) => { fs.writeFileSync(path.join(R, `f${i}.txt`), String(i)); git(R, 'add', '-A'); git(R, 'commit', '-q', '-m', m); });
+  fs.writeFileSync(path.join(P, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'web', path: 'web', platform: 'github', default_branch: 'main' }] }));
+  return { P, bare };
+}
+async function openSeen(P, extra = {}) {
+  let seen = null;
+  const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://github.com/o/web/pull/5' }; };
+  const prev = process.exitCode;
+  try { await captureConsole(() => openPr585(P, { repo: 'web', platform: 'github', creator, runner: () => ({ ok: false, stdout: '', stderr: '' }), ...extra })); }
+  finally { process.exitCode = prev; }
+  return seen;
+}
+
+test('runOpenPr: a branch of several commits gets a bullet Summary and a title from its strongest type and story (#585)', async () => {
+  const { P, bare } = productWithBranch(['docs: say what it does\n\nTask: EP-demo-S01-T01', 'fix: read the base first\n\nlong body\n\nTask: EP-demo-S01-T01', 'feat: list every commit\n\nTask: EP-demo-S01-T01']);
+  try {
+    let seen = await openSeen(P);
+    assert.equal(seen.title, 'feat: list every commit', 'no story file: the first subject of the strongest type');
+    assert.match(seen.body, /## Summary\n- say what it does\n- read the base first\n- list every commit\n/);
+    assert.doesNotMatch(seen.body, /long body/, 'no commit body in a several-commit Summary');
+    assert.match(seen.body, /- \*\*Rollback plan:\*\* revert this pull request's merge commit/);
+    fs.mkdirSync(path.join(P, 'epics/EP-demo/stories'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nid: EP-demo-S01\ntitle: Describe the whole change.\n---\n');
+    seen = await openSeen(P);
+    assert.equal(seen.title, 'feat: Describe the whole change', 'the story title, its trailing dot dropped');
+    seen = await openSeen(P, { title: 'chore: my own title' });
+    assert.equal(seen.title, 'chore: my own title', '--title wins');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+test('runOpenPr: a branch of one commit keeps its subject as the title and subject + body as the Summary (#585)', async () => {
+  const { P, bare } = productWithBranch(['fix: read the base first\n\nWhy it matters.\n\nTask: EP-demo-S01-T01']);
+  try {
+    fs.mkdirSync(path.join(P, 'epics/EP-demo/stories'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nid: EP-demo-S01\ntitle: Not used for one commit\n---\n');
+    const seen = await openSeen(P);
+    assert.equal(seen.title, 'fix: read the base first');
+    assert.match(seen.body, /## Summary\nread the base first\n\nWhy it matters\.\n/);
+    assert.doesNotMatch(seen.body, /Task: EP-demo/, "the trailer is dropped");
+  } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // gateOpen head override (P1) + runOpenPr product-shape delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
