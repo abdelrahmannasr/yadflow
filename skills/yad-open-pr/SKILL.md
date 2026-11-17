@@ -1,6 +1,6 @@
 ---
 name: yad-open-pr
-description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself); prints a reviewer suggestion from recent history and CODEOWNERS, a hint and never a request. High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject (a branch of several commits: its strongest type and the story's title). Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself); prints a reviewer suggestion from recent history and CODEOWNERS, a hint and never a request. High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
 # SDLC — Open Task PR/MR (Build helper)
@@ -22,9 +22,12 @@ the Product.
   10 files, from the merge base) or the tasks belong to more than one story. Each task ships from the PR:
   `yad build ship <story> --task <T> --repo <r> --pr <n>` for each.
 - **Title** — defaults to the last commit subject (one atomic task = one branch = one PR/MR), so it
-  follows the same Conventional-Commits style and passes the `pr-title` gate. Override with `--title`.
+  follows the same Conventional-Commits style and passes the `pr-title` gate. A branch of several
+  commits gets the strongest type among them (`feat` over `fix` over the rest, with `!` when any commit
+  has it) and the story's title (a `title:` or `# ` heading in its story file), else the text of the
+  first commit of that type. Override with `--title`.
 - **Body** — the committed template (`.github/pull_request_template.md` /
-  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit), the story/task id and
+  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit; one bullet per commit subject, oldest first, for a branch of several), the rollback plan (`revert this pull request's merge commit`), the story/task id and
   its `specs/` path, `Risk level:`, `Contract surface touched:`, and `Domains` (the repo name when
   `--repo` is passed) prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate. The `**Preview:**` line under `## Testing` (#359) gets the repo's preview address, filled from
@@ -166,7 +169,7 @@ the human engineer review and merge happen in `yad-engineer-review` (Step E).
 - **One task = one branch = one PR/MR.** Never open a PR from the default branch.
 - **The base is the repo's default branch** unless you deliberately chose otherwise with `--base`.
   Never hardcode `main`, and never ignore the non-default-base warning silently.
-- **Title follows the commit subject** — Conventional-Commits style, so the `pr-title` gate passes.
+- **Title follows the commit subject** (or, for several commits, the strongest type + the story title) — Conventional-Commits style, so the `pr-title` gate passes.
 - **High risk raises the approver count** — the same count as the gate; never a separate rule.
 - **Opening a PR never merges.** The human owns the merge in Step E.
 
