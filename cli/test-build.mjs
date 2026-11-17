@@ -39,7 +39,7 @@ function initRepo(dir) {
 
 // A Product (W/product) with one epic whose stories review passed, one story declaring api and web, and the
 // api repo (W/api) on its origin with the story's tasks.md merged. No platform: ships are recorded by flag.
-function workspace({ tasks = '# Tasks\n\n- [ ] T01 — create the order\n- [ ] T02 — list orders\n', spec = null } = {}) {
+function workspace({ tasks = '# Tasks\n\n- [ ] T01 — create the order\n- [ ] T02 — list orders\n', spec = null, merged = ['T01', 'T02'] } = {}) {
   const W = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-build-')));
   fs.writeFileSync(path.join(W, '.yad-workspace.json'), JSON.stringify({ version: 1, product: 'product' }));
   const P = path.join(W, 'product');
@@ -72,7 +72,7 @@ function workspace({ tasks = '# Tasks\n\n- [ ] T01 — create the order\n- [ ] T
   git(api, 'remote', 'set-head', 'origin', 'main');
   // A merged commit per task, each naming its task with a Task: trailer, on origin/main.
   const sha = {};
-  for (const t of ['T01', 'T02']) {
+  for (const t of merged) {
     write(api, { [`src/${t}.js`]: `${t}\n` });
     git(api, 'add', '-A');
     git(api, 'commit', '-q', '-m', `feat: ${t}\n\nTask: EP-l-S01-${t}`);
@@ -1134,7 +1134,8 @@ test('a task branch whose words start with "followup" is the task\'s own until i
 });
 
 // A grouped PR's branch in `api`: two commits, T01 and T02, merged into main as PR #20 with a merge commit.
-function groupedMerge(api, { merge = true } = {}) {
+// `trailer: false` squashes it to a commit that names no task, as a platform's squash button does.
+function groupedMerge(api, { merge = true, trailer = true } = {}) {
   git(api, 'checkout', '-q', '-b', 'feat/EP-l-S01-T01-small-fixes');
   for (const t of ['T01', 'T02']) {
     write(api, { [`src/g-${t}.js`]: `${t}\n` });
@@ -1145,7 +1146,7 @@ function groupedMerge(api, { merge = true } = {}) {
   if (merge) git(api, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #20 from o/feat/EP-l-S01-T01-small-fixes', 'feat/EP-l-S01-T01-small-fixes');
   else {
     git(api, 'merge', '-q', '--squash', 'feat/EP-l-S01-T01-small-fixes');
-    git(api, 'commit', '-q', '-m', 'fix: small fixes (#20)\n\nTask: EP-l-S01-T01');
+    git(api, 'commit', '-q', '-m', `fix: small fixes (#20)${trailer ? '\n\nTask: EP-l-S01-T01' : ''}`);
   }
   git(api, 'push', '-q', 'origin', 'main');
   return git(api, 'rev-parse', 'HEAD');
@@ -1336,6 +1337,86 @@ test('yad build sync: records every merged task with no ship through yad build s
     // Asked again: nothing left to record.
     r = await buildSync(P, { today: '2026-10-21', runner, prReader });
     assert.deepEqual([r.recorded.length, r.left.length], [0, 0]);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad build sync: a squash-merged grouped PR ships every task of the story it carries (#583)', async () => {
+  const { buildSync } = await import('./build.mjs');
+  const { W, P, dir, api } = workspace({ merged: [] });
+  try {
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'github', default_branch: 'main', git_url: 'https://github.com/o/api.git' }, { name: 'web', path: '../web' }] }) });
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    // On main only a squash commit that names no task: the platform's branch name says T01, the PR's commits say T02 too.
+    const m = groupedMerge(api, { merge: false, trailer: false });
+    const view = { state: 'MERGED', mergedAt: '2026-10-20T10:00:00Z', mergeCommit: { oid: m }, headRefName: 'feat/EP-l-S01-T01-small-fixes', url: 'https://github.com/o/api/pull/20', body: '', statusCheckRollup: [] };
+    // The PR also carries a task of another story: listed for a person, never recorded.
+    const commits = ['T01', 'T02'].map((t) => ({ commit: { message: `fix: small ${t}\n\nTask: EP-l-S01-${t}` } })).concat({ commit: { message: 'fix: other\n\nTask: EP-l-S02-T01' } });
+    const read20 = { ok: true, stdout: JSON.stringify(commits), stderr: '' };
+    let commitsAnswer = read20;
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || (cmd === 'gh' && args[0] === 'auth')) return { ok: true, stdout: '', stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [{ number: 20, headRefName: view.headRefName, baseRefName: 'main', mergedAt: view.mergedAt, mergeCommit: { oid: m } }] } } } }), stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/{owner}/{repo}/pulls/20/commits')) return commitsAnswer;
+      if (cmd === 'gh' && args[1] === 'view' && args[2] === '20') return { ok: true, stdout: JSON.stringify(view), stderr: '' };
+      if (cmd === 'gh' && args[1] === 'list') return { ok: true, stdout: JSON.stringify([{ number: 20, state: 'MERGED', headRefName: view.headRefName, url: view.url }]), stderr: '' };
+      return { ok: false, stdout: '', stderr: 'x' };
+    };
+    const opts = { today: '2026-10-21', runner, prReader: () => ({ ok: true, reviews: [] }) };
+    const shipFile = (t) => path.join(dir, `.sdlc/build-log/EP-l-S01-${t}-api.json`);
+    const other = (r) => r.left.filter((x) => x.story === 'EP-l-S02');
+    // A dry run lists T02 from the PR's commits, and writes nothing.
+    let r = await buildSync(P, { ...opts, dryRun: true });
+    assert.deepEqual(r.planned.filter((p) => p.task).map((p) => [p.task, p.pr]), [['T01', '20'], ['T02', '20']]);
+    assert.equal(r.planned.find((p) => p.task === 'T02').command, 'yad build ship EP-l-S01 --task T02 --repo api --pr 20');
+    assert.equal(other(r).length, 1);
+    assert.equal(fs.existsSync(path.join(dir, '.sdlc/build-log')), false);
+    // The PR's commits cannot be read, or not all of them: only the branch's task is recorded, and the rest
+    // is said to be unknown, with the command a person runs.
+    const page = { ok: true, stdout: JSON.stringify(Array.from({ length: 100 }, () => commits[0])), stderr: '' };
+    for (const [answer, why] of [[{ ok: false, stdout: '', stderr: 'denied' }, /its commits could not all be read \(denied\)/], [page, /\(more than one page of them\)/]]) {
+      commitsAnswer = answer;
+      const now = await buildSync(P, opts);
+      assert.deepEqual(now.recorded.map((x) => x.task), ['T01']);
+      const note = now.unread.find((u) => u.pr === 20);
+      assert.match(note.why, why);
+      assert.match(note.why, /yad build ship <story> --task <T> --repo api --pr 20/);
+      assert.equal(fs.existsSync(shipFile('T02')), false);
+      fs.rmSync(path.join(dir, '.sdlc/build-log'), { recursive: true });
+    }
+    commitsAnswer = read20;
+    // Read: both tasks of the story ship from PR #20, with its merge commit.
+    r = await buildSync(P, opts);
+    assert.deepEqual(r.recorded.map((x) => [x.task, x.pr, x.mergeCommit]), [['T01', view.url, m], ['T02', view.url, m]]);
+    assert.deepEqual(other(r).map((x) => [x.task, x.command]), [['T01', 'yad build ship EP-l-S02 --task T01 --repo api --pr 20']]);
+    assert.match(other(r)[0].why, /a task of another story than EP-l-S01/);
+    assert.equal(fs.existsSync(path.join(dir, '.sdlc/build-log/EP-l-S02-T01-api.json')), false);
+    assert.equal(r.notDone[0].story, 'EP-l-S01', 'build done ran for the story');
+    // Asked again: nothing new.
+    r = await buildSync(P, opts);
+    assert.equal(r.recorded.length, 0);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad build sync: a grouped PR merged with a merge commit ships each task once (#583)', async () => {
+  const { buildSync } = await import('./build.mjs');
+  const { W, P, dir, api } = workspace({ merged: [] });
+  try {
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'github', default_branch: 'main' }, { name: 'web', path: '../web' }] }) });
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const m = groupedMerge(api);
+    const view = { state: 'MERGED', mergedAt: '2026-10-20T10:00:00Z', mergeCommit: { oid: m }, headRefName: 'feat/EP-l-S01-T01-small-fixes', url: 'https://github.com/o/api/pull/20', body: '', statusCheckRollup: [] };
+    const commits = ['T01', 'T02'].map((t) => ({ commit: { message: `fix: small ${t}\n\nTask: EP-l-S01-${t}` } }));
+    const runner = (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api' && args[1].endsWith('/pulls') && args[1].startsWith('repos/{owner}/{repo}/commits/')) return { ok: true, stdout: JSON.stringify([{ number: 20, merged_at: view.mergedAt }]), stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/{owner}/{repo}/pulls/20/commits')) return { ok: true, stdout: JSON.stringify(commits), stderr: '' };
+      if (cmd === 'gh' && args[1] === 'view' && args[2] === '20') return { ok: true, stdout: JSON.stringify(view), stderr: '' };
+      if (cmd === 'gh' && args[1] === 'list') return { ok: true, stdout: JSON.stringify([{ number: 20, state: 'MERGED', headRefName: view.headRefName, url: view.url }]), stderr: '' };
+      return { ok: false, stdout: '', stderr: 'x' };
+    };
+    const r = await buildSync(P, { today: '2026-10-21', runner, prReader: () => ({ ok: true, reviews: [] }) });
+    assert.deepEqual(r.recorded.map((x) => x.task).sort(), ['T01', 'T02']);
+    assert.equal(r.left.length, 0, JSON.stringify(r.left));
+    for (const t of ['T01', 'T02']) assert.equal(read(path.join(dir, `.sdlc/build-log/EP-l-S01-${t}-api.json`)).mergeCommit, m);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

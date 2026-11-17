@@ -1301,8 +1301,50 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   const planned = [];
   const left = [];
   const touched = new Set();
+  // Each task once per run: one a grouped PR shipped is not shipped again from its own commit.
+  const handled = new Set();
+  const keyOf = (x) => `${x.story}/${x.task}/${x.repo}`;
+  const unread = [];
+  const otherStory = [];
+  // A grouped PR (#583): a squash merge leaves no Task: lines on the default branch, so `shipDrift` finds
+  // only the task its branch names. The PR's own commits name the others; each of the same story is
+  // shipped from that PR too. A task of another story is listed, never recorded: a person checks it.
+  const shipGroup = async (at, n) => {
+    const fix = `each other task it carries: yad build ship <story> --task <T> --repo ${at.repo} --pr ${n}`;
+    // A later sync does not ask this PR again (its branch's task has a ship now): the fix is by hand.
+    const notRead = (why) => unread.push({ repo: at.repo, pr: n, read: true, why: `PR/MR #${n}: ${why}, so other tasks it carries are not recorded — ${fix}` });
+    let where;
+    try { where = registeredRepo(root, at.repo); } catch (e) { notRead(e.message); return; }
+    if (!where.platform || !where.checkout) { notRead('there is no platform or checkout to read its commits from'); return; }
+    const asked = prTasks(where.platform, n, { cwd: where.checkout, runner });
+    if (!asked.ok || asked.partial) { notRead(`its commits could not all be read (${asked.ok ? 'more than one page of them' : asked.reason})`); return; }
+    for (const id of asked.tasks) {
+      const m = /^(.+)-(T\d+)$/i.exec(id);
+      if (!m) continue; // not a task id: spec-link is the gate for that
+      const [, story, task] = m;
+      const g = { story, task, repo: at.repo };
+      if (handled.has(keyOf(g)) || hasShip(g)) continue;
+      const cmd = `yad build ship ${story} --task ${task} --repo ${at.repo} --pr ${n}`;
+      if (story !== at.story) { otherStory.push({ ...g, why: `PR/MR #${n} carries it, but it is a task of another story than ${at.story}`, fix: cmd, command: cmd }); continue; }
+      handled.add(keyOf(g));
+      touched.add(story);
+      if (dryRun) { planned.push({ ...g, pr: String(n), command: cmd }); continue; }
+      try {
+        const res = await buildShip(root, { ...g, pr: String(n), byHand: false, today, fetch, runner, prReader });
+        recorded.push({ ...g, pr: res.ship.pr, mergeCommit: res.ship.mergeCommit, file: res.file });
+      } catch (e) {
+        left.push({ ...g, why: e.message, fix: e.hint || null, command: cmd });
+      }
+    }
+  };
+  // Does the task already have a ship? A ledger that cannot be read is `build ship`'s to refuse, by its cause.
+  const hasShip = (g) => {
+    try { return readShips(epicRoot(root, storyEpic(g.story))).some((s) => keyOf(s) === keyOf(g)); } catch { return false; }
+  };
   for (const f of drift.findings.filter((x) => x.kind === 'merged-no-ship')) {
     const at = { story: f.story, task: f.task, repo: f.repo };
+    if (handled.has(keyOf(at))) continue;
+    handled.add(keyOf(at));
     // Only a story yad tracks in Build there — a lane in that repo. One with no lane may predate tracking,
     // where `yad checkpoint --retro-ship` is the record, and a normal ship would close that door: a person
     // decides (the `fix` says both ways).
@@ -1312,22 +1354,33 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
     const how = pr ? { pr: String(pr) } : f.sha ? { mergeCommit: f.sha } : null;
     if (!how) { left.push({ ...at, why: 'no PR/MR and no merge commit is known for it', fix: f.fix }); continue; }
     const cmd = `yad build ship ${f.story} --task ${f.task} --repo ${f.repo} ${pr ? `--pr ${pr}` : `--merge-commit ${f.sha.slice(0, 12)}`}`;
-    if (dryRun) { planned.push({ ...at, ...how, command: cmd }); touched.add(f.story); continue; }
+    if (dryRun) {
+      planned.push({ ...at, ...how, command: cmd });
+      touched.add(f.story);
+      if (pr) await shipGroup(at, pr);
+      continue;
+    }
     const ship = (h) => buildShip(root, { ...at, ...h, byHand: false, today, fetch, runner, prReader });
+    let from = pr;
     try {
       let res;
       try { res = await ship(how); } catch (e) {
         // A merge commit the platform says a PR/MR merged: recorded from that PR/MR, with its approvers.
         const by = !pr && String(e.message).match(/was merged by PR\/MR #(\d+)$/);
         if (!by) throw e;
+        from = Number(by[1]);
         res = await ship({ pr: by[1] });
       }
       recorded.push({ ...at, pr: res.ship.pr, mergeCommit: res.ship.mergeCommit, file: res.file });
       touched.add(f.story);
     } catch (e) {
       left.push({ ...at, why: e.message, fix: e.hint || f.fix, command: cmd });
+      continue;
     }
+    if (from) await shipGroup(at, from);
   }
+  // A task of another story is listed unless this run recorded it after all (its own commit, found later).
+  left.push(...otherStory.filter((x) => !handled.has(keyOf(x))));
   // Stories every task of which now has a ship — and those `reconcile check` already sees as shipped in the
   // code but not in their status — are set shipped by `build done`, which checks it all again.
   const done = [];
@@ -1346,12 +1399,12 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   const forPerson = drift.findings.filter((x) => ['possible', 'no-story'].includes(x.kind));
   // What was not read is unknown, never an all-clear: a repo not read in full, an epic whose ledger does not
   // parse, a story that cannot be compared, a registry that cannot be read — as `yad reconcile check` says.
-  const unread = [
+  unread.push(
     ...drift.repos.filter((r) => !r.read || r.partial),
     ...drift.unreadEpics.map((e) => ({ epic: e, read: false, why: 'its build ledger could not be read (`yad doctor` says why)' })),
     ...drift.uncompared.map((st) => ({ story: st, read: false, why: 'it names no repo while the Product registers more than one, or two story files claim its ID' })),
     ...(drift.registry ? [{ registry: true, read: false, why: `.sdlc/repos.json could not be read in full — ${drift.registry}` }] : []),
-  ];
+  );
 
   if (dryRun) for (const p of planned) info(`would run: ${p.command}`);
   for (const r of recorded) ok(`recorded ${r.story} / ${r.task} in ${r.repo}`);
