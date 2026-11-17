@@ -31,6 +31,9 @@ import { sequenceDiff } from './walkthrough.mjs';
 import { syncStatuses, lowerStatuses } from './artifact-status.mjs';
 import { writeIndex, refreshIndexAfterWrite, uncommittedIndexInputs, INDEX_FILE } from './product-index.mjs';
 import { err } from './errors.mjs';
+import { readLabels, createLabel } from './issues.mjs';
+import { prTarget } from './pr-list.mjs';
+import { configuredGitUrl } from './protection.mjs';
 
 // Who WRITES a closing record (E18): the platform login, else the raw git user.name, else null
 // (`actorName`). On CI that is usually the bot's git name — a job token cannot read `/user`. Best-effort,
@@ -1896,11 +1899,34 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
   return answer({ written, committed: true });
 }
 
+// The domain labels the review PR can carry: each one the Product repo has, after making the ones it
+// lacks. When the labels cannot be read, all are sent as they are, and the retry in gateOpen drops them
+// if the platform refuses one. When one cannot be made, none are sent, and the person is told how to make
+// them: a PR without labels is better than no PR.
+function domainLabels(root, productConfig, wanted, { runner, env }) {
+  const gitUrl = configuredGitUrl(productConfig.git_url, () => runner('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
+  const t = prTarget({ platform: productConfig.platform, gitUrl }, { runner, env });
+  if (!t.ok) return wanted;
+  const have = readLabels(t, runner);
+  if (!have.ok) return wanted;
+  for (const name of wanted) {
+    if (have.names.has(name.toLowerCase())) continue;
+    if (!createLabel(t, name, '1d76db', runner).ok) { labelHint(productConfig.platform, wanted, `the label "${name}" could not be made`); return []; }
+  }
+  return wanted;
+}
+
+// Says the PR opens without its labels, and the command that makes each one.
+function labelHint(platform, labels, why) {
+  warn(`opening the review ${platform === 'gitlab' ? 'MR' : 'PR'} without its labels (${forTerminal(why)})`);
+  for (const l of labels) hand(`to add the label later, make it in the Product repo: ${platform === 'gitlab' ? `glab label create --name "${forTerminal(l)}"` : `gh label create "${forTerminal(l)}"`}`);
+}
+
 // `head` overrides the review branch the PR is opened against — `open-pr` delegates here after pushing
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
-// the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
-export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, today = new Date().toISOString().slice(0, 10) } = {}) {
+// the real pushed head so the PR targets a branch that exists. `creator` and `runner` are injected in tests.
+export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, runner = run, env = process.env, today = new Date().toISOString().slice(0, 10) } = {}) {
   const { productConfig } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -1993,9 +2019,18 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // was never sent.
   const committer = productConfig.platform === 'gitlab' ? platformLogin(root, productConfig.platform) : null;
   const assignees = committer ? [committer] : [];
-  const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
+  // Empty unless the step names its repos (touchedDomains). GitHub refuses the whole PR when one label
+  // does not exist, so the missing ones are made first; a label yad cannot make is left off (#584).
+  const wanted = domains.map((d) => `domain:${d}`);
+  const labels = wanted.length ? domainLabels(root, productConfig, wanted, { runner, env }) : [];
   info(`opening review ${productConfig.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
-  const r = creator(productConfig.platform, { title: `review: ${artifact} (${epic})`, body, base: productConfig.default_branch || 'main', head: branch, assignees, labels, cwd: root });
+  const pr = { title: `review: ${artifact} (${epic})`, body, base: productConfig.default_branch || 'main', head: branch, assignees, cwd: root };
+  let r = creator(productConfig.platform, { ...pr, labels });
+  if (!r.ok && labels.length && /label/i.test(r.reason || '')) {
+    // The platform still refused a label: open the PR without them, once.
+    labelHint(productConfig.platform, labels, 'the platform refused them');
+    r = creator(productConfig.platform, { ...pr, labels: [] });
+  }
   if (!r.ok) {
     warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`);
     return { epic, step: step.id, artifact, branch, opened: false, url: null, markedInReview: !verified, reason: r.reason || null };

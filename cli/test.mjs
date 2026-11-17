@@ -2305,14 +2305,15 @@ test('gateOpen: a new URL with no PR number still stamps the old number before t
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG-3)', async () => {
+// A stories review that touches the `backend` repo, on a GitHub Product with a git URL yad can read.
+function productWithDomainStep() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   // A roster with a reviewer and a repos.json domain owner — both left on disk from an older release.
   // Before E62 both were requested; now neither is read.
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
-    platform: 'github', default_branch: 'main',
+    platform: 'github', default_branch: 'main', git_url: 'https://github.com/acme/product.git',
     roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
   }));
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', domain_owner: 'carol' }] }));
@@ -2324,13 +2325,94 @@ test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG
   fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '---\nowner: x\nrepos: [backend]\n---\n');
   fs.mkdirSync(path.join(T, 'epics/EP-demo/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend]\n---\n');
+  return T;
+}
+
+// A fake `gh`: logged in, the repo has the labels `have`, and making a label answers `create`.
+function labelRunner(have, { create = true } = {}) {
+  const made = [];
+  const runner = (cmd, args = []) => {
+    if (cmd === 'which' || cmd === 'where') return { ok: true, stdout: `/usr/bin/${args[0]}`, stderr: '' };
+    if (cmd === 'gh' && args[0] === 'auth') return { ok: true, stdout: '', stderr: '' };
+    if (cmd === 'gh' && args[0] === 'api' && args.includes('POST')) {
+      made.push(args.find((a) => a.startsWith('name=')).slice(5));
+      return create ? { ok: true, stdout: '{}', stderr: '' } : { ok: false, stdout: '{"message":"Must have admin rights"}', stderr: 'HTTP 403' };
+    }
+    if (cmd === 'gh' && args[0] === 'api' && args.some((a) => /\/labels\?/.test(a))) return { ok: true, stdout: JSON.stringify(have.map((name) => ({ name }))), stderr: '' };
+    return { ok: false, stdout: '', stderr: `unexpected ${cmd} ${args.join(' ')}` };
+  };
+  return { runner, made };
+}
+
+test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG-3)', async () => {
+  const T = productWithDomainStep();
   let seen;
   const creator = (_p, opts) => { seen = opts; return { ok: true, url: 'https://x/pr/1' }; };
-  const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator }));
+  // The repo already has the label, spelled another way: it is not made again (#584).
+  const { runner, made } = labelRunner(['Domain:Backend']);
+  const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
   assert.equal(seen.reviewers, undefined, 'no reviewer is requested — there is no roster to choose them from');
   assert.match(out, /no reviewers were requested — ask them on the PR itself/, 'and the opener is told so');
   assert.deepEqual(seen.labels, ['domain:backend']);     // the stories review still labels the touched repos
+  assert.deepEqual(made, [], 'a label the repo has is not made again');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gateOpen: makes a missing domain label before it opens the PR (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    const calls = [];
+    const { runner, made } = labelRunner(['bug']);
+    const creator = (_p, opts) => { calls.push({ labels: opts.labels, made: [...made] }); return { ok: true, url: 'https://x/pr/1' }; };
+    const res = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(made, ['domain:backend']);
+    assert.deepEqual(calls, [{ labels: ['domain:backend'], made: ['domain:backend'] }], 'the label exists before the PR asks for it');
+    assert.equal(res.value.opened, true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: a label yad cannot make is left off, the PR still opens, and the person is told how to make it (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    const calls = [];
+    const { runner, made } = labelRunner([], { create: false });
+    const creator = (_p, opts) => { calls.push(opts.labels); return { ok: true, url: 'https://x/pr/1' }; };
+    const { value, out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(made, ['domain:backend'], 'it tried to make the label');
+    assert.deepEqual(calls, [[]], 'the PR opens once, with no labels');
+    assert.equal(value.opened, true);
+    assert.match(out, /without its labels/);
+    assert.match(out, /gh label create "domain:backend"/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: when the platform still refuses a label, the PR is opened once more without labels (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    const calls = [];
+    const { runner } = labelRunner(['domain:backend']);
+    const creator = (_p, opts) => {
+      calls.push(opts.labels);
+      return opts.labels.length ? { ok: false, reason: "could not add label: 'domain:backend' not found" } : { ok: true, url: 'https://x/pr/2' };
+    };
+    const { value, out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(calls, [['domain:backend'], []], 'two tries: with the label, then without');
+    assert.equal(value.opened, true);
+    assert.equal(value.url, 'https://x/pr/2');
+    assert.match(out, /gh label create "domain:backend"/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: a failure that is not about a label is not tried again (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    let n = 0;
+    const { runner } = labelRunner(['domain:backend']);
+    const creator = () => { n++; return { ok: false, reason: 'a pull request for branch already exists' }; };
+    const { value } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.equal(n, 1);
+    assert.equal(value.opened, false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('runOpenPr: a product-shape delegation that opens no PR sets a non-zero exit code (P2)', async () => {
