@@ -26,6 +26,7 @@ import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } fro
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
 import { parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
+import { judgedRepos } from './workspace.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
 // breaking the one-line subject or injecting a fake trailer line.
@@ -381,8 +382,9 @@ export function buildUpdatePrBody({ version = VERSION, items = [] } = {}) {
 export function updateTargets(productRoot) {
   const settings = readJSONSafe(productConfigPath(productRoot)) ?? {};
   const registry = readJSONSafe(path.join(productRoot, '.sdlc/repos.json'));
-  const repos = (Array.isArray(registry?.repos) ? registry.repos : [])
-    .filter((x) => typeof x?.path === 'string' && x.path)
+  // Judged first (E125): only a checkout yad may run git in — never one reached through a link inside a
+  // repo's tree, outside the workspace, or through a .git folder.
+  const repos = judgedRepos(productRoot, registry).ok.filter((o) => o.present).map((o) => o.repo)
     .map((x) => ({ root: path.resolve(productRoot, x.path), name: typeof x.name === 'string' ? x.name : x.path, defaultBranch: x.default_branch ?? null, platform: x.platform ?? null, file: MANAGED_LEDGER }))
     .filter((x) => x.root !== productRoot && fs.existsSync(path.join(x.root, '.git')));
   // `file`: where each records the yadflow version that last wrote it.

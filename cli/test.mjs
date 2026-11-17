@@ -29953,6 +29953,21 @@ test('E125: yad map and its live view run git only in a checkout yad may run git
   } finally { if (srv) await srv.close(); fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: the repos yad update commits in are judged: never a bare-shaped folder or a link inside a repo\'s tree', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
+  const { updateTargets } = await import('./update-commit.mjs');
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // A link the Product commits, to the real checkout: it has a `.git`, so a bare existence test passed it.
+    fs.symlinkSync('../backend', path.join(f.product, 'evil'));
+    const reg = JSON.parse(fs.readFileSync(f.regFile, 'utf8'));
+    reg.repos.push({ name: 'evil', path: 'evil' }, { name: 'away', path: '../away', git_url: 'https://git.example/u.git' });
+    fs.writeFileSync(f.regFile, JSON.stringify(reg));
+    assert.deepEqual(updateTargets(f.product).map((t) => t.name), ['product', 'backend']);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: yad doctor reads no file and runs no git in a registered folder yad runs no git in', { skip: E125_SKIP }, () => {
   const T = e79Tmp();
   try {
