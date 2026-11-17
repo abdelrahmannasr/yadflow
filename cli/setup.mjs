@@ -24,6 +24,7 @@ import { readAllowList } from './agent-rules.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
 import { repoGitUrl } from './protection.mjs';
 import { hostFromGitUrl, plainHost } from './platform.mjs';
+import { judgedRepos, codeContextPathOk, CODE_CONTEXT_DIR } from './workspace.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -377,8 +378,10 @@ export function setupQuestions(root, opts = {}) {
     // does not.
     given: has_(opts.connect) || (!found.length && (opts.addRepo || []).length > 0),
   });
-  const noCr = reposAfter(root, opts).filter((r) => !exists(path.join(path.resolve(root, r.rpath), '.coderabbit.yaml'))).map((r) => r.name);
-  if (noCr.length) add({ id: 'coderabbit', text: `Wire CodeRabbit (an advisory AI review of each PR/MR) in: ${noCr.join(', ')}?`, choices: ['all', 'none', noCr.join(',')], default: 'none', flag: '--coderabbit <all|none|name,name>', given: has_(opts.coderabbit) });
+  // Only a repo the CodeRabbit step would write into: judged first (E125), as that step judges it.
+  const noCr = reposAfter(root, opts).filter((r) => judgedRepos(root, { repos: [{ name: r.name, path: r.rpath }] }).ok.length)
+    .filter((r) => !exists(path.join(path.resolve(root, r.rpath), '.coderabbit.yaml'))).map((r) => r.name);
+  if (noCr.length) add({ id: 'coderabbit', text: `Wire CodeRabbit (an advisory AI review of each PR/MR) in: ${forTerminal(noCr.join(', '))}?`, choices: ['all', 'none', noCr.join(',')], default: 'none', flag: '--coderabbit <all|none|name,name>', given: has_(opts.coderabbit) });
   return qs;
 }
 
@@ -833,13 +836,17 @@ export async function runSetup(root, opts = {}) {
     log(`    ${c.dim(`never: ${PREAPPROVED.never}`)}`);
     allowListShown = true;
   };
-  for (const repo of registry.repos) {
-    log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
+  // Judged before anything is written into a repo (E125): an entry yad runs no git in (a folder the Product
+  // shaped as a bare repo, a link inside a repo's tree, a repo not cloned here) is skipped, with why.
+  const judged = judgedRepos(root, registry);
+  for (const x of judged.skipped) warn(`${x.j.name} (${x.j.path}): ${x.why} — skipped`);
+  for (const { repo, j } of judged.ok) {
+    log(`  ${c.bold(j.name)} ${c.dim(`(${forTerminal(String(repo.platform))})`)}`);
     // Migrate renamed wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored same-named file is
     // never touched, and an edited one is kept without its new name beside it (E123, `withoutKeptRenames`).
     const repoLegacy = legacyRepoActions(root, repo);
     const repoWiring = withoutKeptRenames([...repoActions(root, repo), ...repoLegacy]).filter((a) => !repoLegacy.includes(a));
-    showAllowList(repo.name, repoWiring);
+    showAllowList(j.name, repoWiring);
     applyActions(repoWiring, { force: true });
     wired.push(...repoWiring);
     applyActions(repoLegacy, { force: true });
@@ -925,12 +932,13 @@ export async function runSetup(root, opts = {}) {
   // Optional CodeRabbit
   S('AI review (CodeRabbit)');
   guide(['Advisory AI first-pass on PRs — never the authority. Opt in per repo; safe to skip.']);
-  for (const repo of registry.repos) {
-    const cr = path.join(path.resolve(root, repo.path), '.coderabbit.yaml');
-    if (exists(cr)) { info(`${repo.name}: .coderabbit.yaml present`); continue; }
-    if (connects(opts.coderabbit, repo.name) ?? await askYesNo(`Wire CodeRabbit (advisory) in ${repo.name}?`, false)) {
+  // Only in a repo the wiring step judged one yad may write into (E125); the others were named there.
+  for (const { repo, j, target } of judged.ok) {
+    const cr = path.join(target, '.coderabbit.yaml');
+    if (exists(cr)) { info(`${j.name}: .coderabbit.yaml present`); continue; }
+    if (connects(opts.coderabbit, repo.name) ?? await askYesNo(`Wire CodeRabbit (advisory) in ${j.name}?`, false)) {
       fs.writeFileSync(cr, 'reviews:\n  high_level_summary: true\n  poem: false\n');
-      ok(`${repo.name}: wrote .coderabbit.yaml`);
+      ok(`${j.name}: wrote .coderabbit.yaml`);
     }
   }
 
@@ -1035,11 +1043,14 @@ export function ensurePackIgnored(root) {
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off).
 export function packRepo(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
-  const out = path.join(root, repo.contextPack);
   // Printed through `forTerminal` (E81 review 12): the name and pack path come from the shared registry,
   // and repomix's error line from a run in a registered folder.
   const nm = forTerminal(repo.name);
+  // The pack path comes from the shared registry: written only under .sdlc/code-context/ in the Product, with
+  // no `..`, `.git` part or link on the way (E125) — the rule `yad repo refresh` keeps.
+  if (!codeContextPathOk(root, repo.contextPack)) { warn(`${nm}: the pack path ${forTerminal(String(repo.contextPack ?? ''))} is not under ${CODE_CONTEXT_DIR}/ in the Product — skipped repomix pack`); return false; }
   if (!has('npx')) { warn(`${nm}: npx missing — skipped repomix pack`); return false; }
+  const out = path.join(root, repo.contextPack);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${nm}: packing with repomix …`);

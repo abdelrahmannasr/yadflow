@@ -29868,6 +29868,28 @@ test('E125: yad risk-map and yad codeowners skip a registered folder yad runs no
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: packRepo writes a pack only under .sdlc/code-context/, and yad setup wires no registered folder yad runs no git in', { skip: E125_SKIP }, async () => {
+  const { packRepo } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    for (const contextPack of ['../escape/pack.md', '.sdlc/code-context/../../escape/pack.md', '.sdlc/hub.json', '', undefined]) {
+      let packed;
+      const said = await grab(() => { packed = packRepo(f.product, { name: 'backend', path: '../backend', contextPack }); });
+      assert.equal(packed, false, String(contextPack));
+      assert.match(said, /backend: the pack path .* is not under \.sdlc\/code-context\/ in the Product — skipped repomix pack/);
+    }
+    assert.ok(!fs.existsSync(path.join(f.ws, 'escape')), 'nothing written outside .sdlc/code-context/');
+    const setup = e79Yad(T, f.product, ['setup', '--solo', '--brownfield', '--separate', '--no-tools', '--no-git-init', '--ide-targets', '.claude', '--platform', 'github', '--connect', 'none', '--coderabbit', 'all'], f.env);
+    const out = setup.stdout + setup.stderr;
+    assert.match(out, /bare \(bare\): the folder exists and is not a git repo .* — skipped/);
+    assert.ok(fs.existsSync(path.join(f.backend, '.coderabbit.yaml')), `the real checkout is wired: ${out}`);
+    assert.ok(fs.existsSync(path.join(f.backend, 'checks')), 'and gets its gates');
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();
