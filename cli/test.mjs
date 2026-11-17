@@ -29847,6 +29847,27 @@ test('E125: yad open-pr and yad review refuse a registered folder yad runs no gi
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: yad risk-map and yad codeowners skip a registered folder yad runs no git in, by name, by path and in the list of every repo', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    for (const args of [['risk-map', 'check'], ['risk-map', 'draft'], ['codeowners', 'check']]) {
+      const r = e79Yad(T, f.product, args, f.env);
+      assert.match(r.stdout + r.stderr, /bare \(bare\): the folder exists and is not a git repo .* — skipped/, args.join(' '));
+    }
+    const json = JSON.parse(e79Yad(T, f.product, ['risk-map', 'check', '--json'], f.env).stdout);
+    assert.deepEqual(json.repos.map((r) => r.name), ['backend'], 'the real checkout is still checked');
+    assert.ok(json.warnings.some((w) => /bare \(bare\).* — skipped/.test(w)));
+    for (const args of [['risk-map', 'check', 'bare'], ['risk-map', 'draft', 'bare'], ['codeowners', 'check', 'bare']]) {
+      const r = e79Yad(T, f.product, args, f.env);
+      assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /bare \(bare\): the folder exists and is not a git repo .* — yad runs no git there/, args.join(' '));
+    }
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();

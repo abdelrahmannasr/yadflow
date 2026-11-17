@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
+import { judgedRepos } from './workspace.mjs';
 import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
 
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
@@ -39,6 +40,9 @@ export function readRiskMap(repoRoot) {
 // registry file at all (run inside a code repo). A registry that is empty or does not parse is a Product
 // with no repos to name, and `draft` must never fall back to writing a map into the Product itself.
 // Each entry carries the registry's `platform` when it has one (`yad codeowners check` reads it).
+// Every registered entry is judged first (E125): one yad runs no git in (a folder the Product shaped as a
+// bare repo, a link inside a repo's tree, a repo not cloned here) is skipped with its reason said, and
+// never acted on — by name, by its path, or in the list of every repo.
 export function targets(root, name) {
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   const hasRegistry = fs.existsSync(regFile);
@@ -51,14 +55,24 @@ export function targets(root, name) {
     }
   }
   const repos = Array.isArray(registry?.repos) ? registry.repos.filter((r) => r && typeof r.name === 'string' && typeof r.path === 'string' && r.path) : [];
+  const judged = judgedRepos(root, { repos });
+  const entry = ({ repo, target }) => ({ name: repo.name, root: target, platform: repo.platform || null });
+  const refusal = ({ j, why }) => ({ error: `${j.name} (${j.path}): ${why} — yad runs no git there`, hint: 'fix the entry in .sdlc/repos.json (`yad doctor` says what is wrong), or clone it (`yad repo clone`)' });
   if (name) {
-    const hit = repos.find((r) => r.name === name);
-    if (hit) return { list: [{ name: hit.name, root: path.resolve(root, hit.path), platform: hit.platform || null }] };
+    const hit = judged.ok.find((x) => x.repo.name === name);
+    if (hit) return { list: [entry(hit)] };
+    const bad = judged.skipped.find((x) => x.repo.name === name);
+    if (bad) return refusal(bad);
     const p = path.resolve(root, name);
+    const badAt = judged.skipped.find((x) => x.j.target === p);
+    if (badAt) return refusal(badAt);
     if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return { list: [{ name, root: p }] };
     return { error: `unknown repo: ${name}`, hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' };
   }
-  if (repos.length) return { list: repos.map((r) => ({ name: r.name, root: path.resolve(root, r.path), platform: r.platform || null })) };
+  if (repos.length) {
+    for (const x of judged.skipped) warn(`${x.j.name} (${x.j.path}): ${x.why} — skipped`);
+    return { list: judged.ok.map(entry), skipped: judged.skipped.map((x) => ({ name: x.j.name, why: x.why })) };
+  }
   if (hasRegistry) return { error: `no repos in ${PROJECT_FILES.reposRegistry}`, hint: 'connect one (`yad setup`), or name the path to a code repo' };
   return { list: [{ name: path.basename(path.resolve(root)), root: path.resolve(root) }] };
 }
