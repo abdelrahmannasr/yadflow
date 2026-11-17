@@ -2455,8 +2455,8 @@ test('gateOpen: when the labels cannot be read, they are sent as they are (#584)
 test('gateOpen: on GitLab the labels are sent as they are, because GitLab makes a missing one itself (#584)', async () => {
   const T = productWithDomainStep();
   try {
-    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
-    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab', git_url: 'https://gitlab.com/acme/product.git' }));
+    const cfg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...cfg, platform: 'gitlab', git_url: 'https://gitlab.com/acme/product.git' }));
     let seen;
     const calls = [];
     const runner = (cmd, args = []) => { calls.push([cmd, ...args].join(' ')); return { ok: false, stdout: '', stderr: '' }; };
