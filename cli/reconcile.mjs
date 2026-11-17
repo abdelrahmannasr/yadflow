@@ -18,6 +18,7 @@ import {
   ideTargetStateFor, recordManagedWrites, gitHookActions, orphanGitHookActions, gitHookState, gitHookAdvice, localSetupNoticeActions, orphanLocalSetupNoticeActions, localSetupNoticeAdvice, renamedNameHits, withoutKeptRenames, PRODUCT_PROFILE_GATES, productProfileGap, productProfileEffect, PRODUCT_PROFILE_FIX, workflowsPassingProduct, productGateBlockers, oldProfileAdvice,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
+import { judgedRepos, codeContextPathOk } from './workspace.mjs';
 import { groupByRoot, commitUpdates, openUpdatePrs, repoLabel, updatePrBlocker, updateTargets, HELD_KINDS, ignoreFileLines, ignoreRules } from './update-commit.mjs';
 import { createPr } from './platform.mjs';
 import { hasSiblingRepo, workspaceFileState, writeWorkspaceFile, WORKSPACE_FILE } from './find-product.mjs';
@@ -44,6 +45,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!exists(productConfigPath(root))) gaps.push('Product not configured (.sdlc/product.json absent)');
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
+  // Judged once, before anything reads, runs git in or writes into a repo (E125): an entry yad runs no git in
+  // (a folder the Product shaped as a bare repo, a link inside a repo's tree, a repo not cloned here) is
+  // skipped with its reason said. Every loop below reads `repos`, never the registry's own list.
+  const judged = judgedRepos(root, registry);
+  for (const x of judged.skipped) warn(`${x.j.name} (${x.j.path}): ${x.why} — skipped`);
+  const repos = judged.ok.map((x) => x.repo);
 
   // Resolve untrusted persisted IDE targets once, before any filesystem action is constructed.
   // The returned list contains canonical allowlisted roots only.
@@ -94,7 +101,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       apply: () => undefined,
     });
   }
-  for (const repo of registry.repos) {
+  for (const repo of repos) {
     const repoRoot = path.resolve(root, repo.path);
     // E158b: a target that left takes yad's guard and allow-list entries out of the repo's own settings too.
     // E178: and the activity record's, when the Product turned `activity` off.
@@ -110,7 +117,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
 
   // --- stale code-context (HEAD moved since last pack) ---
   const staleRepos = [];
-  for (const repo of registry.repos) {
+  for (const repo of repos) {
     const head = gitHead(path.resolve(root, repo.path));
     if (head && repo.syncedHead && head !== repo.syncedHead) {
       staleRepos.push(repo);
@@ -125,7 +132,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
         item: 'code-context',
         status: 'stale',
         root,
-        paths: repo.contextPack ? [repo.contextPack] : [],
+        // Only a pack path under .sdlc/code-context/ is staged: `packRepo` writes nowhere else (E125).
+        paths: codeContextPathOk(root, repo.contextPack) ? [repo.contextPack] : [],
         apply: () => packRepo(root, repo),
       });
     }
@@ -279,7 +287,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const productSettings = readJSON(productConfigPath(root), {});
   const defByRoot = new Map([[root, productSettings?.default_branch]]);
   const platformByRoot = new Map([[root, productSettings?.platform]]);
-  for (const repo of registry.repos) {
+  for (const repo of repos) {
     const repoRoot = path.resolve(root, repo.path);
     // A monorepo entry (`path: "."`) is the Product itself: its settings are the Product's.
     if (repoRoot === root) continue;
@@ -469,7 +477,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // A connected repo whose every managed file is the team's own (`modified`) records nothing above, so its
   // ledger would name an older yadflow for good — and read as behind on every `yad guide`. Its version is
   // brought up all the same: this release did look at it.
-  for (const repo of registry.repos) {
+  for (const repo of repos) {
     const repoRoot = path.resolve(root, repo.path);
     const ledgerFile = path.join(repoRoot, MANAGED_LEDGER);
     if (repoRoot === root || ledgerRoots.includes(repoRoot) || !reaches(repoRoot) || !exists(ledgerFile)) continue;

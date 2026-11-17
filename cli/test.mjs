@@ -29890,6 +29890,26 @@ test('E125: packRepo writes a pack only under .sdlc/code-context/, and yad setup
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: yad check and yad check --fix skip a bare-shaped folder, and still wire a checkout and a repo not cloned yet', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // A repo registered but not cloned on this machine: wired as before E125 (no folder there can carry a config).
+    const reg = JSON.parse(fs.readFileSync(f.regFile, 'utf8'));
+    reg.repos.push({ name: 'api', path: '../api', platform: 'github', default_branch: 'main' });
+    fs.writeFileSync(f.regFile, JSON.stringify(reg));
+    const check = e79Yad(T, f.product, ['check'], f.env);
+    assert.match(check.stdout + check.stderr, /bare \(bare\): the folder exists and is not a git repo .* — skipped/);
+    const fix = e79Yad(T, f.product, ['check', '--fix'], f.env);
+    assert.match(fix.stdout + fix.stderr, /bare \(bare\).* — skipped/);
+    assert.ok(fs.existsSync(path.join(f.backend, 'checks')), `the real checkout is still wired: ${fix.stdout}${fix.stderr}`);
+    assert.ok(fs.existsSync(path.join(f.ws, 'api', 'checks')), 'the repo not cloned yet is wired, as before');
+    assert.doesNotMatch(fix.stdout + fix.stderr, /api \(\.\.\/api\).* — skipped/);
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();
