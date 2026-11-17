@@ -2240,11 +2240,11 @@ test('templateBody: the rollback plan is filled on both platforms and in the fal
   try {
     for (const platform of ['github', 'gitlab']) {
       const b = templateBody(T, platform, { risk: 'low', stage: 'product-tooling' });
-      assert.match(b, /- \*\*Rollback plan:\*\* revert this pull request's merge commit\n/, platform);
+      assert.match(b, /- \*\*Rollback plan:\*\* revert the commit that merged this pull request\n/, platform);
       assert.doesNotMatch(b, /how to revert if this misbehaves/, platform);
     }
     const fallback = codeTaskTemplate('github', { fallback: true });
-    assert.match(fallback, /- \*\*Rollback plan:\*\* revert this pull request's merge commit\n/, 'the fallback body carries the line, filled');
+    assert.match(fallback, /- \*\*Rollback plan:\*\* revert the commit that merged this pull request\n/, 'the fallback body carries the line, filled');
     // A repo's own template: a trailing comment is kept, and a plan the team wrote is never replaced.
     fs.mkdirSync(path.join(T, 'web/.github'), { recursive: true });
     fs.writeFileSync(path.join(T, 'web/.github/pull_request_template.md'), '- **Rollback plan:** <how to revert> <!-- keep me -->\n- **Rollback plan:** flip the flag off\n');
@@ -2282,6 +2282,8 @@ test('storyTitleFor: a title: in the frontmatter, else a # heading, else null; n
     assert.equal(storyTitleFor(P, 'EP-demo-S01-T02'), 'Show the whole change');
     assert.equal(storyTitleFor(P, 'ep-demo-s02-t01'), 'Ship the cart', 'a lower-case branch still finds the file');
     assert.equal(storyTitleFor(P, 'EP-demo-S03-T01'), null, 'a story that opens with ## Story has no title');
+    fs.writeFileSync(path.join(dir, 'EP-demo-S04.md'), '---\nid: EP-demo-S04\n---\n\n## Story\n\n```bash\n# run this first\n```\n');
+    assert.equal(storyTitleFor(P, 'EP-demo-S04-T01'), null, 'a shell comment in fenced code is not a title');
     assert.equal(storyTitleFor(P, 'EP-demo-S09-T01'), null, 'no story file');
     assert.equal(storyTitleFor(null, 'EP-demo-S01-T01'), null);
     assert.equal(storyTitleFor(P, null), null);
@@ -2320,7 +2322,7 @@ test('runOpenPr: a branch of several commits gets a bullet Summary and a title f
     assert.equal(seen.title, 'feat: list every commit', 'no story file: the first subject of the strongest type');
     assert.match(seen.body, /## Summary\n- say what it does\n- read the base first\n- list every commit\n/);
     assert.doesNotMatch(seen.body, /long body/, 'no commit body in a several-commit Summary');
-    assert.match(seen.body, /- \*\*Rollback plan:\*\* revert this pull request's merge commit/);
+    assert.match(seen.body, /- \*\*Rollback plan:\*\* revert the commit that merged this pull request/);
     fs.mkdirSync(path.join(P, 'epics/EP-demo/stories'), { recursive: true });
     fs.writeFileSync(path.join(P, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nid: EP-demo-S01\ntitle: Describe the whole change.\n---\n');
     seen = await openSeen(P);
@@ -2339,6 +2341,34 @@ test('runOpenPr: a branch of one commit keeps its subject as the title and subje
     assert.equal(seen.title, 'fix: read the base first');
     assert.match(seen.body, /## Summary\nread the base first\n\nWhy it matters\.\n/);
     assert.doesNotMatch(seen.body, /Task: EP-demo/, "the trailer is dropped");
+  } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+test('runOpenPr: one commit under a merge of the base keeps that commit, never the merge, as its title (#585)', async () => {
+  const { P, bare } = productWithBranch(['fix: read the base first\n\nWhy it matters.\n\nTask: EP-demo-S01-T01']);
+  try {
+    const R = path.join(P, 'web');
+    git(R, 'checkout', '-q', 'main');
+    fs.writeFileSync(path.join(R, 'other.txt'), 'x'); git(R, 'add', '-A'); git(R, 'commit', '-q', '-m', 'feat: a teammate change');
+    git(R, 'push', '-q', 'origin', 'main');
+    git(R, 'checkout', '-q', 'feat/EP-demo-S01-T01-cart');
+    git(R, 'merge', '-q', '--no-ff', '-m', "Merge branch 'main' into feat/EP-demo-S01-T01-cart", 'main');
+    const seen = await openSeen(P);
+    assert.equal(seen.title, 'fix: read the base first');
+    assert.match(seen.body, /## Summary\nread the base first\n\nWhy it matters\.\n/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+test('runOpenPr: when the base cannot be fetched, a branch of several commits keeps the one-commit title and Summary (#585)', async () => {
+  const { P, bare } = productWithBranch(['docs: say what it does\n\nTask: EP-demo-S01-T01', 'fix: read the base first\n\nTask: EP-demo-S01-T01']);
+  try {
+    const R = path.join(P, 'web');
+    // Fetch from a folder that does not exist; push still reaches the bare origin.
+    git(R, 'remote', 'set-url', 'origin', path.join(bare, 'missing'));
+    git(R, 'remote', 'set-url', '--push', 'origin', bare);
+    const seen = await openSeen(P);
+    assert.equal(seen.title, 'fix: read the base first', 'a stale base is not read for the title');
+    assert.doesNotMatch(seen.body, /## Summary\n- /, 'no bullets from a stale base');
   } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
 

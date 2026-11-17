@@ -86,7 +86,7 @@ export function codeTaskTemplate(platform, { fallback = false } = {}) {
 }
 
 // The rollback plan every task PR/MR gets: one task (or a few of one story) per PR, so its merge is the unit to undo.
-export const ROLLBACK = "revert this pull request's merge commit";
+export const ROLLBACK = 'revert the commit that merged this pull request';
 
 // The Conventional-Commits types, strongest first: a branch of several commits is titled by the strongest.
 const TYPE_RANK = ['feat', 'fix', 'perf', 'refactor', 'docs', 'test', 'build', 'ci', 'chore', 'revert'];
@@ -131,7 +131,8 @@ export function storyTitleFor(productRoot, task) {
     const text = fs.readFileSync(path.join(epicRoot(productRoot, epic), 'stories', `${epic}-S${m[2]}.md`), 'utf8');
     const fm = parseFrontmatter(text);
     if (typeof fm.title === 'string' && fm.title.trim()) return fm.title.trim();
-    const h = /^#[ \t]+(.+)$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, ''));
+    // A `# ` heading outside the frontmatter and outside fenced code (a shell comment is not a title).
+    const h = /^#[ \t]+(.+)$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, '').replace(/^(```|~~~)[\s\S]*?^\1/gm, ''));
     return h ? h[1].trim() : null;
   } catch { return null; }
 }
@@ -422,7 +423,7 @@ export async function runOpenPr(root, opts = {}) {
   // Fetched first: a stale origin/<base> would count tasks merged since then as this PR's.
   const fetched = run('git', ['fetch', '--quiet', 'origin', `+refs/heads/${baseBranch}:refs/remotes/${baseRef}`], { cwd: repoRoot }).ok;
   if (!fetched && auto) throw err('YAD-STATE-009', `could not fetch ${baseBranch} from origin, so the tasks ${branch} carries are not known`, 'check the network and your login, then run this again');
-  if (!fetched) warn(`could not fetch ${baseBranch} from origin — the tasks this PR carries are read against the last fetched ${baseRef}`);
+  if (!fetched) warn(`could not fetch ${baseBranch} from origin — the tasks this PR carries are read against the last fetched ${baseRef}, and the title and Summary come from the last commit only`);
   const haveBase = run('git', ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`], { cwd: repoRoot }).ok;
   // A base nobody chose (the platform's default, origin/HEAD, or 'main') may not be where this branch was
   // cut from (#450): then the range below holds another branch's commits. Stop before anything is pushed.
@@ -474,12 +475,15 @@ export async function runOpenPr(root, opts = {}) {
   // every task it carries.
   const task = auto ? `${auto.story}-${auto.task}` : opts.task || taskFromBranch(branch);
   const bodyTask = groupIds ? groupIds.join('`, `') : task;
-  const subject = run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout;
-  // The branch's own commits, oldest first (#585): read against the base, so only when the base is known.
-  const subjects = haveBase
+  // The branch's own commits, oldest first (#585): read against the base, so only when the base is known
+  // and fresh — a stale base would hold commits merged since, and a teammate's could name this PR.
+  const subjects = haveBase && fetched
     ? run('git', ['log', '--reverse', '--no-merges', '--format=%s', `${baseRef}..HEAD`], { cwd: repoRoot }).stdout.split('\n').filter(Boolean)
     : [];
   const many = subjects.length > 1;
+  // One commit of its own: that commit, even under a merge of the base (never "Merge branch …"). Else the tip.
+  const tip = subjects.length === 1 ? ['--no-merges', `${baseRef}..HEAD`] : [];
+  const subject = run('git', ['log', '-1', '--format=%s', ...tip], { cwd: repoRoot }).stdout;
   // One commit: its subject. Several: the strongest type and the story's title (else that type's first subject). --title wins.
   const title = opts.title
     || (many && branchTitle(subjects, storyTitleFor(auto?.productRoot || opts.product || root, task)))
@@ -488,7 +492,7 @@ export async function runOpenPr(root, opts = {}) {
   // dropping the Task / Contract-Change / Co-Authored-By trailer lines. `run().stdout` is trimmed
   // but keeps internal newlines, so a multi-line body survives. Several commits: one bullet per subject,
   // and no body — the last commit's body would read as the whole branch's.
-  const bodyText = many ? '' : run('git', ['log', '-1', '--format=%b'], { cwd: repoRoot }).stdout
+  const bodyText = many ? '' : run('git', ['log', '-1', '--format=%b', ...tip], { cwd: repoRoot }).stdout
     .split('\n')
     .filter((l) => !/^(Task|Contract-Change|Co-Authored-By):/i.test(l.trim()))
     .join('\n')
