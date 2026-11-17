@@ -29935,6 +29935,29 @@ test('E125: the docs staleness and yad usage --repos run git only in a judged ch
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: yad doctor reads no file and runs no git in a registered folder yad runs no git in', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // What an older release left, in the refused folder: every file check below would name it.
+    fs.writeFileSync(path.join(f.product, '.sdlc', 'hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', git_url: 'https://github.com/o/product.git' }));
+    const reg = JSON.parse(fs.readFileSync(f.regFile, 'utf8'));
+    reg.repos.find((r) => r.name === 'bare').platform = 'gitlab';
+    fs.writeFileSync(f.regFile, JSON.stringify(reg));
+    for (const [rel, body] of [['.sdlc/verified-authors', 'a\n'], ['checks/verified-commits.sh', 'ALLOWLIST=x\n'], ['checks/contract-check.sh', '#!/bin/sh\n'], ['.gitlab/ci/yad-checks.yml', 'x: 1\n'], ['.sdlc/product-link.json', '{}']]) {
+      fs.mkdirSync(path.dirname(path.join(f.bare, rel)), { recursive: true });
+      fs.writeFileSync(path.join(f.bare, rel), body);
+    }
+    const doc = JSON.parse(e79Yad(T, f.product, ['doctor', '--json'], f.env).stdout);
+    assert.match(doc.checks.find((c) => c.id === 'repo:bare').message, /exists and is not a git repo/, 'named once, with its reason');
+    // The protection and token checks ask the platform by the recorded address, never the folder.
+    const byFolder = doc.checks.filter((c) => c.id !== 'repo:bare' && !/^(protection|product-token):/.test(c.id) && /\bbare\b/.test(`${c.message} ${c.hint}`));
+    assert.deepEqual(byFolder.map((c) => c.id), [], 'no other check read a file in it');
+    assert.deepEqual(f.gitInBare(), []);
+    assert.ok(!fs.existsSync(path.join(T, 'fsmonitor-ran')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();

@@ -612,6 +612,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
     previewChecks(checks, repoEntries);
+    // The checks below read files in each repo and run git there: only in a checkout the judgement accepts
+    // (E125). Each other entry is already named, with its reason, by its `repo:<name>` check above.
+    const checkouts = repoEntries.filter((r) => typeof r.path === 'string' && r.path && isCheckout(root, r));
     // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
     // repo an older setup connected carries an EMPTY `domain_owner`, which says nothing.
     const owned = repoEntries.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
@@ -625,7 +628,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
     const allowFiles = [
       { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
-      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+      ...checkouts.map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
     ].filter((x) => exists(x.file)).map((x) => x.where);
     const listedAuthors = productConfig && typeof productConfig === 'object' && Array.isArray(productConfig.verified_authors) && productConfig.verified_authors.length > 0;
     if (allowFiles.length || listedAuthors) {
@@ -639,7 +642,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
     const oldGates = [
       { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
-      ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+      ...checkouts.map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
     ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
     if (oldGates.length) {
       check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
@@ -650,7 +653,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // slice out of specs/<story>/contracts/ (or a file out of src/<feature>/) passes the gate. `yad check
     // --fix` refreshes a wired contract-check nobody changed; one changed by hand is kept, and
     // backfill-check is never wired at all — every copy is placed by hand. Named, not fixed.
-    const gateRoots = [{ where: 'the Product', root }, ...repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ where: forTerminal(r.name), root: path.resolve(root, r.path) }))];
+    const gateRoots = [{ where: 'the Product', root }, ...checkouts.map((r) => ({ where: forTerminal(r.name), root: path.resolve(root, r.path) }))];
     const renameBlind = gateRoots
       .flatMap((x) => RENAME_BLIND_GATES.map((rel) => ({ ...x, rel })))
       .filter((x) => renameBlindGate(path.join(x.root, x.rel)))
@@ -731,8 +734,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // hint would install its whole wiring.
     const top = (d) => { const x = run('git', ['rev-parse', '--show-toplevel'], { cwd: d }); return x.ok ? path.resolve(x.stdout.trim()) : ''; };
     const rootTop = top(root);
-    const unlinked = repoEntries.filter((r) => typeof r.path === 'string' && r.path).map((r) => ({ r, dir: path.resolve(root, r.path) }))
-      .filter(({ r, dir }) => isCheckout(root, r) && (exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh'))))
+    const unlinked = checkouts.map((r) => ({ r, dir: path.resolve(root, r.path) }))
+      .filter(({ dir }) => exists(path.join(dir, '.sdlc/managed.json')) || exists(path.join(dir, 'checks/contract-check.sh')))
       .filter(({ dir }) => { const t = top(dir); return t && t !== rootTop; })
       .map(({ r, dir }) => {
         const branch = r.default_branch || 'main';
@@ -898,7 +901,7 @@ export function ciTagsChecks(checks, root, productConfig, registry) {
       fix: 'run `yad docs sync --wire` and commit the file (it rewrites the whole file, so re-apply any change your team made to it)' });
   }
   for (const repo of Array.isArray(registry?.repos) ? registry.repos : []) {
-    if (!isPlainObject(repo) || repo.platform !== 'gitlab' || !repo.path) continue;
+    if (!isPlainObject(repo) || repo.platform !== 'gitlab' || !repo.path || !isCheckout(root, repo)) continue;
     for (const file of ['.gitlab/ci/yad-checks.yml', '.gitlab/ci/yad-update-guard.yml']) {
       fragments.push({ scope: forTerminal(repo.name), repo: true, file, path: path.join(path.resolve(root, repo.path), file) });
     }
@@ -2783,7 +2786,8 @@ export function productTokenChecks(checks, root, { runner, env, today } = {}) {
     // The Product's own repo (a monorepo) needs no token: on disk, the record writer's own test — the same
     // git top as the Product (review 1); else the same host and path.
     const repoRoot = typeof repo.path === 'string' && repo.path ? path.resolve(root, repo.path) : null;
-    const onDisk = repoRoot && exists(repoRoot) ? topOf(repoRoot) : null;
+    // git runs only in a checkout the judgement accepts (E125); any other entry is compared by its address.
+    const onDisk = repoRoot && isCheckout(root, repo) ? topOf(repoRoot) : null;
     if (onDisk && rootTop && onDisk === rootTop) continue;
     if (!onDisk && at && product && at.host === product.host && at.repo === product.repo) continue;
     // A repo on disk with no product-link record has no checkout that reads the token (review 1): CI only
