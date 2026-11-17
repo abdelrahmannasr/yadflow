@@ -224,8 +224,8 @@
     // when it has none), set through PAGE_MAPS.map. Only a page served with no brand CSS at all keeps the
     // stylesheet's #040816, and then the prototype's two blues. A brand sky keeps a soft lift towards the bottom.
     var SKY = (function () {
-      var v = '';
-      try { v = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); } catch (e) { v = ''; }
+      var v;
+      try { v = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); } catch { v = ''; }
       return v && v.toLowerCase() !== '#040816' ? [v, v, true] : ['#030613', '#050c22', false];
     })();
     function drawBg(t) {
