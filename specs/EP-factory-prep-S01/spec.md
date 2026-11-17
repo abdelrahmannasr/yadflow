@@ -12,14 +12,16 @@ would stop here at the first review in a repo that has never had the label.
 
 ## Requirements
 
-- R1. Before opening the review PR, yad reads the Product repo's labels and makes each missing
-  `domain:<repo>` label (GitHub and GitLab), then opens the PR with the labels.
+- R1. On GitHub, before opening the review PR, yad reads the Product repo's labels and makes each missing
+  `domain:<repo>` label, then opens the PR with the labels.
 - R2. A label that already exists (names compared without case) is not made again; no other label is made.
-- R3. When a label cannot be made, the PR opens without labels, and a warning names the command that
-  makes each one (`gh label create "domain:x"`, `glab label create --name "domain:x"`).
-- R4. When the labels cannot be read, the labels are sent as they are. If the platform still refuses the
-  PR because of a label, yad opens it once more without labels, with the same warning.
-- R5. Nothing changes when the review carries no labels. A failure that is not about a label is not retried.
+  A label someone else made at the same moment ("already exists") counts as made.
+- R3. A label that cannot be made is left off; the others stay. A warning names each label left off and
+  the command that makes it (`gh label create "domain:x"`).
+- R4. When the labels cannot be read, they are sent as they are. If the platform still refuses the PR
+  because of a label, yad opens it once more without labels, with the same warning.
+- R5. On GitLab the labels are sent as they are: GitLab makes a missing label itself.
+- R6. Nothing changes when the review carries no labels. A failure that is not about a label is not retried.
 
 ## Clarifications
 
@@ -30,7 +32,7 @@ would stop here at the first review in a repo that has never had the label.
 
 In `cli/gate.mjs`, add `domainLabels` (target from `prTarget` and the Product's git URL; `readLabels` and
 `createLabel` from `cli/issues.mjs`) and `labelHint`, and call them in `gateOpen` before the creator; add
-the one retry without labels. `gateOpen` takes `runner` and `env` for tests, like `creator`. Tests in
+the one retry without labels; skip the label step on GitLab. `gateOpen` takes `runner` and `env` for tests, like `creator`. Tests in
 `cli/test.mjs` beside the gateOpen tests, with a fake `gh`.
 
 ## Tasks
