@@ -82,6 +82,15 @@ const runGate = (script, cwd, args = ['main'], env = {}) => {
 // ---------- spec-link.sh ----------
 const SPEC_LINK = path.join(CHECKS, 'spec-link.sh');
 
+// Product #186: `yad commit` skips its missing-Task warning for the types the gate exempts. One list in the
+// CLI, one in the gate — this holds them equal so they cannot drift apart.
+test('spec-link gate: EXEMPT= matches the CLI list SPEC_LINK_EXEMPT_TYPES', async () => {
+  const { SPEC_LINK_EXEMPT_TYPES } = await import('./manifest.mjs');
+  const m = fs.readFileSync(SPEC_LINK, 'utf8').match(/^EXEMPT='([^']*)'$/m);
+  assert.ok(m, 'spec-link.sh declares EXEMPT=');
+  assert.equal(m[1], SPEC_LINK_EXEMPT_TYPES.join('|'));
+});
+
 test('spec-link gate: Task trailer resolving to specs/<story>/link.md passes', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: add thing\n\nTask: EP-demo-S01-T01', {
