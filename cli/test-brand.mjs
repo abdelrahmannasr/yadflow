@@ -248,6 +248,38 @@ test('the CSS: fonts embedded under the cap, both schemes named, status only whe
   } finally { done(ws); }
 });
 
+// #564: the brand's link colour and accent reach the standup and the map, and the map keeps no fixed colour
+// of its own for the header, the table head, the overlays, the tints or the focus ring.
+test('#564: links, accent and the map\'s own colours follow the brand', () => {
+  for (const scheme of ['', 'dark-']) {
+    assert.match(PAGE_MAPS.standup, new RegExp(`--link:var\\(--brand-${scheme}primary\\)`));
+    assert.match(PAGE_MAPS.standup, new RegExp(`--accent:var\\(--brand-${scheme}accent\\)`));
+  }
+  assert.match(PAGE_MAPS.map, /--link:var\(--brand-dark-primary\)/);
+  assert.match(PAGE_MAPS.map, /--tint:var\(--brand-dark-primary\)/);
+  assert.match(PAGE_MAPS.map, /--focus:var\(--brand-dark-accent\)/);
+  const css = fs.readFileSync(new URL('./map/view/style.css', import.meta.url), 'utf8');
+  const rules = css.replace(/^:root \{[\s\S]*?\n\}/m, '');   // the defaults live in :root; the rules use variables
+  for (const fixed of ['#040816', '#050a1a', '#8fb6ff', '#9cc3ff', 'rgba(140, 170, 255', 'rgba(3, 6, 18', 'rgba(4, 8, 22']) {
+    assert.ok(!rules.includes(fixed), `style.css rules still paint ${fixed} directly`);
+  }
+  // A Product with no brand file: the map wears yadflow's own dark look, tint and focus included.
+  const plain = brandForPage(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-nobrand-')), 'map').css;
+  assert.match(plain, new RegExp(`--brand-dark-primary:${YADFLOW_BRAND.colors.dark.primary}`, 'i'));
+  assert.match(plain, /--tint:var\(--brand-dark-primary\)/);
+  assert.match(plain, /--focus:var\(--brand-dark-accent\)/);
+  const app = fs.readFileSync(new URL('./map/view/app.js', import.meta.url), 'utf8');
+  assert.match(app, /getPropertyValue\('--bg'\)/, 'the canvas sky reads the brand bg');
+});
+
+test('#564: brand check warns when the link colour is hard to read on the card surface', () => {
+  const base = { bg: '#ffffff', surface: '#ffffff', text: '#111111', muted: '#555555', border: '#dddddd', primary: '#0b57d0', accent: '#0b57d0' };
+  const brand = { colors: { light: base, dark: { ...base, bg: '#0b0b0b', surface: '#1a3a8a', text: '#f5f5f5', muted: '#aaaaaa', primary: '#3355cc' } } };
+  const lines = contrastProblems(brand, { links: true });
+  assert.ok(lines.some((l) => /^dark: primary \(links\) on surface is .* under 4\.5:1/.test(l)), lines.join('\n'));
+  assert.ok(!contrastProblems(brand).some((l) => /links/.test(l)), 'doctor (no links option) never warns about links');
+});
+
 test('every page takes the brand: reports and the catalog carry it after their own CSS, with fonts and images allowed', async () => {
   const { ws, root } = product({ design: YAML_DESIGN, files: { 'design/assets/fernleaf-mark.svg': SVG } });
   try {
