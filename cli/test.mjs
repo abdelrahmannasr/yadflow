@@ -29888,6 +29888,29 @@ test('E125: yad risk-map and yad codeowners skip a registered folder yad runs no
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 review: yad risk-map judges a path the registry does not name, whatever its letters\' case', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // A second bare-shaped folder the registry never names, and the registered one written in other case.
+    const other = path.join(f.product, 'other');
+    fs.cpSync(f.bare, other, { recursive: true });
+    const args = [['risk-map', 'check', 'other'], ['risk-map', 'draft', 'other'], ['codeowners', 'check', 'other']];
+    if (fs.existsSync(path.join(f.product, 'BARE'))) args.push(['risk-map', 'draft', 'BARE']);
+    for (const a of args) {
+      const r = e79Yad(T, f.product, a, f.env);
+      assert.equal(r.status, 1, `${a.join(' ')}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /exists and is not a git repo .* — yad runs no git there/, a.join(' '));
+    }
+    const log = fs.existsSync(f.env.YAD_GIT_LOG) ? fs.readFileSync(f.env.YAD_GIT_LOG, 'utf8').toLowerCase() : '';
+    for (const dir of [other, f.bare]) assert.ok(!log.includes(dir.toLowerCase()), `git never ran in ${dir}`);
+    assert.deepEqual(fs.readdirSync(other).sort(), fs.readdirSync(f.bare).sort(), 'nothing was written in the unregistered folder');
+    f.untouched();
+    // A real checkout named by its path is still checked.
+    assert.equal(e79Yad(T, f.product, ['risk-map', 'check', '../backend'], f.env).status, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: packRepo writes a pack only under .sdlc/code-context/, and yad setup wires no registered folder yad runs no git in', { skip: E125_SKIP }, async () => {
   const { packRepo } = await import('./setup.mjs');
   const T = e79Tmp();

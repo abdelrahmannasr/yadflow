@@ -63,10 +63,14 @@ export function targets(root, name) {
     if (hit) return { list: [entry(hit)] };
     const bad = judged.skipped.find((x) => x.repo.name === name);
     if (bad) return refusal(bad);
+    // A path the registry does not name is judged too, as an entry would be: git runs there only when it is
+    // a checkout yad may run git in, whatever the case of the path's letters.
     const p = path.resolve(root, name);
-    const badAt = judged.skipped.find((x) => x.j.target === p);
-    if (badAt) return refusal(badAt);
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return { list: [{ name, root: p }] };
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+      const adhoc = judgedRepos(root, { repos: [{ name, path: name }] });
+      if (adhoc.ok[0]?.present) return { list: [{ name, root: p }] };
+      return refusal(adhoc.skipped[0] ?? { j: adhoc.ok[0].j, why: 'not a git repository' });
+    }
     return { error: `unknown repo: ${name}`, hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' };
   }
   if (repos.length) {
