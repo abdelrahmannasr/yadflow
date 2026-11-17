@@ -1900,25 +1900,33 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
 }
 
 // The domain labels the review PR can carry: each one the Product repo has, after making the ones it
-// lacks. When the labels cannot be read, all are sent as they are, and the retry in gateOpen drops them
-// if the platform refuses one. When one cannot be made, none are sent, and the person is told how to make
-// them: a PR without labels is better than no PR.
+// lacks (GitHub refuses the whole PR for one missing label). GitLab makes a missing label itself, so there
+// they are sent as they are. When the labels cannot be read, all are sent, and the retry in gateOpen drops
+// them if the platform refuses one. A label that cannot be made is left off, and the person is told how to
+// make it: a PR without that label is better than no PR.
 function domainLabels(root, productConfig, wanted, { runner, env }) {
+  if (productConfig.platform !== 'github') return wanted;
   const gitUrl = configuredGitUrl(productConfig.git_url, () => runner('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
   const t = prTarget({ platform: productConfig.platform, gitUrl }, { runner, env });
   if (!t.ok) return wanted;
   const have = readLabels(t, runner);
   if (!have.ok) return wanted;
+  const kept = [];
+  const failed = [];
   for (const name of wanted) {
-    if (have.names.has(name.toLowerCase())) continue;
-    if (!createLabel(t, name, '1d76db', runner).ok) { labelHint(productConfig.platform, wanted, `the label "${name}" could not be made`); return []; }
+    if (have.names.has(name.toLowerCase())) { kept.push(name); continue; }
+    const r = createLabel(t, name, '1d76db', runner);
+    // Made by someone else at the same moment counts as made.
+    if (r.ok || /already_exists|already exists/i.test(`${r.stdout || ''} ${r.stderr || ''}`)) kept.push(name);
+    else failed.push(name);
   }
-  return wanted;
+  if (failed.length) labelHint(productConfig.platform, failed, `${failed.length === 1 ? 'a label' : 'labels'} could not be made`);
+  return kept;
 }
 
 // Says the PR opens without its labels, and the command that makes each one.
 function labelHint(platform, labels, why) {
-  warn(`opening the review ${platform === 'gitlab' ? 'MR' : 'PR'} without its labels (${forTerminal(why)})`);
+  warn(`opening the review ${platform === 'gitlab' ? 'MR' : 'PR'} without ${labels.length === 1 ? 'the label' : 'these labels'}: ${labels.map(forTerminal).join(', ')} (${forTerminal(why)})`);
   for (const l of labels) hand(`to add the label later, make it in the Product repo: ${platform === 'gitlab' ? `glab label create --name "${forTerminal(l)}"` : `gh label create "${forTerminal(l)}"`}`);
 }
 

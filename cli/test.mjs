@@ -2330,13 +2330,18 @@ function productWithDomainStep() {
 
 // A fake `gh`: logged in, the repo has the labels `have`, and making a label answers `create`.
 function labelRunner(have, { create = true } = {}) {
+  const answer = typeof create === 'function' ? create : () => (create ? 'ok' : 'denied');
   const made = [];
   const runner = (cmd, args = []) => {
     if (cmd === 'which' || cmd === 'where') return { ok: true, stdout: `/usr/bin/${args[0]}`, stderr: '' };
     if (cmd === 'gh' && args[0] === 'auth') return { ok: true, stdout: '', stderr: '' };
     if (cmd === 'gh' && args[0] === 'api' && args.includes('POST')) {
-      made.push(args.find((a) => a.startsWith('name=')).slice(5));
-      return create ? { ok: true, stdout: '{}', stderr: '' } : { ok: false, stdout: '{"message":"Must have admin rights"}', stderr: 'HTTP 403' };
+      const name = args.find((a) => a.startsWith('name=')).slice(5);
+      made.push(name);
+      const a = answer(name);
+      if (a === 'ok') return { ok: true, stdout: '{}', stderr: '' };
+      if (a === 'exists') return { ok: false, stdout: '{"errors":[{"code":"already_exists"}]}', stderr: 'HTTP 422' };
+      return { ok: false, stdout: '{"message":"Must have admin rights"}', stderr: 'HTTP 403' };
     }
     if (cmd === 'gh' && args[0] === 'api' && args.some((a) => /\/labels\?/.test(a))) return { ok: true, stdout: JSON.stringify(have.map((name) => ({ name }))), stderr: '' };
     return { ok: false, stdout: '', stderr: `unexpected ${cmd} ${args.join(' ')}` };
@@ -2381,7 +2386,7 @@ test('gateOpen: a label yad cannot make is left off, the PR still opens, and the
     assert.deepEqual(made, ['domain:backend'], 'it tried to make the label');
     assert.deepEqual(calls, [[]], 'the PR opens once, with no labels');
     assert.equal(value.opened, true);
-    assert.match(out, /without its labels/);
+    assert.match(out, /without the label: domain:backend/);
     assert.match(out, /gh label create "domain:backend"/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -2400,6 +2405,65 @@ test('gateOpen: when the platform still refuses a label, the PR is opened once m
     assert.equal(value.opened, true);
     assert.equal(value.url, 'https://x/pr/2');
     assert.match(out, /gh label create "domain:backend"/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// The domain step, with a stories review that names two repos.
+function productWithTwoDomains() {
+  const T = productWithDomainStep();
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend, web]\n---\n');
+  return T;
+}
+
+test('gateOpen: only the label that cannot be made is left off; the others stay, and the hint names only it (#584)', async () => {
+  const T = productWithTwoDomains();
+  try {
+    let seen;
+    const { runner, made } = labelRunner(['domain:backend'], { create: () => 'denied' });
+    const creator = (_p, opts) => { seen = opts.labels; return { ok: true, url: 'https://x/pr/1' }; };
+    const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(made, ['domain:web']);
+    assert.deepEqual(seen, ['domain:backend'], 'the label the repo has is kept');
+    assert.match(out, /gh label create "domain:web"/);
+    assert.doesNotMatch(out, /gh label create "domain:backend"/, 'no hint for a label that exists');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: a label someone made at the same moment counts as made (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    let seen;
+    const { runner } = labelRunner([], { create: () => 'exists' });
+    const creator = (_p, opts) => { seen = opts.labels; return { ok: true, url: 'https://x/pr/1' }; };
+    const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(seen, ['domain:backend']);
+    assert.doesNotMatch(out, /label create/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: when the labels cannot be read, they are sent as they are (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    let seen;
+    const runner = () => ({ ok: false, stdout: '', stderr: 'not logged in' });
+    const creator = (_p, opts) => { seen = opts.labels; return { ok: true, url: 'https://x/pr/1' }; };
+    await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(seen, ['domain:backend']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: on GitLab the labels are sent as they are, because GitLab makes a missing one itself (#584)', async () => {
+  const T = productWithDomainStep();
+  try {
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab', git_url: 'https://gitlab.com/acme/product.git' }));
+    let seen;
+    const calls = [];
+    const runner = (cmd, args = []) => { calls.push([cmd, ...args].join(' ')); return { ok: false, stdout: '', stderr: '' }; };
+    const creator = (_p, opts) => { seen = opts.labels; return { ok: true, url: 'https://x/mr/1' }; };
+    await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator, runner, env: {} }));
+    assert.deepEqual(seen, ['domain:backend']);
+    assert.ok(!calls.some((c) => /labels/.test(c)), `no label call on GitLab: ${calls.join(' | ')}`);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
