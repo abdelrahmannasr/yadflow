@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
 import {
-  COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT,
+  COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT, SPEC_LINK_EXEMPT_TYPES,
   TASK_TRAILER, CONTRACT_CHANGE_TRAILER, LEDGER_OVERRIDE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
   productConfigPath,
 } from './manifest.mjs';
@@ -108,7 +108,9 @@ export async function runCommit(root, opts = {}) {
 
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root }).stdout;
   const task = opts.task || taskFromBranch(branch);
-  if (!task) {
+  // A maintenance commit (ci/chore/build/test/docs) needs no trailer: the gate exempts it, so a warning
+  // would name a failure that cannot happen (Product #186).
+  if (!task && !SPEC_LINK_EXEMPT_TYPES.includes(opts.type)) {
     // spec-link is a code-repo gate (REPO_WIRING.common), not a Product gate — so a missing Task trailer
     // is expected on a Product PR (Shape artifact review or Product tooling) and only matters on a repo.
     const onProduct = exists(productConfigPath(root));
