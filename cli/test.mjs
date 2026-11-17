@@ -29910,6 +29910,31 @@ test('E125: yad check and yad check --fix skip a bare-shaped folder, and still w
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: the docs staleness and yad usage --repos run git only in a judged checkout; usage skips an absolute path', { skip: E125_SKIP }, async () => {
+  const { repoHeadsFor } = await import('./docs.mjs');
+  const { deriveEvents } = await import('./usage.mjs');
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    const reg = JSON.parse(fs.readFileSync(f.regFile, 'utf8'));
+    const head = e79Git(T, f.backend, 'rev-parse', 'HEAD');
+    await f.withShim(async () => {
+      assert.deepEqual(repoHeadsFor(f.product, ['backend', 'bare', 'ghost'], reg), { backend: head, bare: null });
+      let events;
+      await grab(() => { events = deriveEvents(f.product, { repos: true }); });
+      const committed = events.filter((e) => e.action === 'committed');
+      assert.deepEqual(committed.map((e) => e.repo), ['backend']);
+      // The same checkout recorded by its absolute path (inside the workspace, so judgeRepo alone accepts it).
+      fs.writeFileSync(f.regFile, JSON.stringify({ repos: [{ name: 'backend', path: f.backend }] }));
+      const said = await grab(() => { events = deriveEvents(f.product, { repos: true }); });
+      assert.deepEqual(events.filter((e) => e.action === 'committed'), [], 'an absolute path is never read');
+      assert.match(said, /an absolute path — its commits are not counted/);
+    });
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();

@@ -15,6 +15,7 @@ import { c, log, ok, info, warn, hand, fail, readJSON, runLauncher, has, exists 
 import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
+import { judgedRepos } from './workspace.mjs';
 import { contractSurfaceHash } from './epic-state.mjs';
 import { brandFingerprint, siteBrandFingerprint, applyBrand } from './docs-brand.mjs';
 
@@ -85,13 +86,16 @@ export function docsArtifactHash(files = [], extra = '') {
   return 'sha256:' + h.digest('hex');
 }
 
-// Current HEAD sha per repo the epic touches (mirrors repo.mjs head-sha staleness).
+// Current HEAD sha per repo the epic touches (mirrors repo.mjs head-sha staleness). Judged first (E125): a
+// registered entry yad runs no git in (a folder the Product shaped as a bare repo, a link inside a repo's
+// tree, a repo not cloned here) reads as null, and git never runs there.
 export function repoHeadsFor(root, repos = [], registry = { repos: [] }) {
   const out = {};
+  const judged = judgedRepos(root, registry);
   for (const name of repos) {
-    const entry = (registry.repos || []).find((r) => r.name === name);
-    if (!entry) continue;
-    out[name] = gitHead(path.resolve(root, entry.path)) || null;
+    const hit = judged.ok.find((x) => x.repo.name === name);
+    if (hit) out[name] = gitHead(hit.target) || null;
+    else if (judged.skipped.some((x) => x.repo?.name === name)) out[name] = null;
   }
   return out;
 }

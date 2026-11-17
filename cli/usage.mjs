@@ -70,6 +70,7 @@ const ARTIFACT_FILES = new Set([
 // add the new name beside the old) and is the one every older reader here still calls.
 import { loginFromEmail } from './riskmap.mjs';
 import { gateMemberMap, hashEmail } from './members.mjs';
+import { judgedRepos } from './workspace.mjs';
 export { loginFromEmail };
 
 // ---- epic enumeration --------------------------------------------------------------------------
@@ -165,14 +166,16 @@ function gitAuthoredEvents(root, pairs = new Map()) {
 }
 
 // Optional (`--repos`): code commits in each connected code repo, attributed to the git author (or the
-// login a noreply address carries).
+// login a noreply address carries). Judged first (E125): git runs only in a checkout yad may run git in,
+// and only at a path relative to the Product, as the registry records it — an absolute path is skipped.
 function repoCommitEvents(root, pairs = new Map()) {
   const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const judged = judgedRepos(root, reg);
+  for (const x of judged.skipped) warn(`${x.j.name} (${x.j.path}): ${x.why} — its commits are not counted`);
   const events = [];
-  for (const repo of reg?.repos || []) {
-    if (!repo.path) continue;
-    const abs = path.isAbsolute(repo.path) ? repo.path : path.join(root, repo.path);
-    const r = run('git', ['-C', abs, 'log', '--no-merges', '--date=short', GIT_PRETTY]);
+  for (const { repo, j, target } of judged.ok) {
+    if (path.isAbsolute(repo.path)) { warn(`${j.name} (${j.path}): an absolute path — its commits are not counted (record a path relative to the Product)`); continue; }
+    const r = run('git', ['-C', target, 'log', '--no-merges', '--date=short', GIT_PRETTY]);
     if (!r.ok || !r.stdout) continue;
     for (const cm of parseGitLog(r.stdout)) {
       const login = loginFromEmail(cm.ae) || pairs.get(hashEmail(cm.ae)) || null;
