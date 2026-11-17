@@ -582,17 +582,32 @@ export function openUpdatePr(group, { productRoot, defaultBranch, platform, crea
     if (r?.ok) { opened = true; pr = r.url || null; ok(`${label}: opened ${pr ?? 'the PR/MR (no URL came back)'}`); }
     else {
       warn(`${label}: pushed ${head}, but the PR/MR did not open — ${oneLine(r?.reason || 'no reason given').slice(0, 200)}`);
-      left = { reason: 'pr-not-opened', hint: `the branch '${head}' is pushed, but its PR/MR did not open (${oneLine(r?.reason || 'no reason given').slice(0, 160)}): open one from '${head}' into '${base}' by hand, or log the platform CLI in and run this again` };
+      left = { reason: 'pr-not-opened', hint: `the branch '${head}' is pushed, but its PR/MR did not open (${oneLine(r?.reason || 'no reason given').slice(0, 160)}): open one by hand from inside that repo's folder — ${byHand(platform, { root, productRoot, head, base })} — or log the platform CLI in and run this again` };
       hand(left.hint);
     }
   } else {
-    left = { reason: 'no-platform', hint: `the branch '${head}' is pushed, but no platform is recorded for this repo: open a PR/MR from '${head}' into '${base}' by hand` };
+    left = { reason: 'no-platform', hint: `the branch '${head}' is pushed, but no platform is recorded for this repo: open a PR/MR from '${head}' into '${base}' by hand, from inside ${shellPath(folderOf(root, productRoot))}` };
     hand(`${label}: ${left.hint}`);
   }
   const home = back();
   // Said together with what is left of the PR/MR, never in place of it.
   if (!home) left = left ? { reason: left.reason, hint: `${left.hint}. Also: ${where} is still on '${head}': run \`git switch ${base}\` there` } : { reason: 'switch-back-failed', hint: `${where} is still on '${head}': run \`git switch ${base}\` there` };
   return out({ branch: head, committed: true, pushed: true, opened, pr, error: !home, ...(left ?? {}) });
+}
+
+// The repo's folder as the person would `cd` to it from the Product (`.` for the Product itself). The hand
+// command must run THERE: glab and gh take the project from the folder's git remote, so run from the Product
+// they open the MR against the Product and GitLab answers 422 "Source project is not a fork" (#562).
+const folderOf = (root, productRoot) => path.relative(productRoot ?? root, root).split(path.sep).join('/') || '.';
+// Quoted for a POSIX shell only when it needs it.
+const shellPath = (p) => (/^[\w./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`);
+// The exact command to open the PR/MR by hand, run from the Product folder.
+function byHand(platform, { root, productRoot, head, base }) {
+  const open = platform === 'gitlab'
+    ? `glab mr create --source-branch ${head} --target-branch ${base} --fill --yes`
+    : `gh pr create --head ${head} --base ${base} --fill`;
+  const dir = folderOf(root, productRoot);
+  return dir === '.' ? `\`${open}\`` : `\`cd ${shellPath(dir)} && ${open}\``;
 }
 
 // Every repo the update changed, one PR/MR each.

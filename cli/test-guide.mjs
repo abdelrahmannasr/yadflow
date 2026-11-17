@@ -1295,6 +1295,34 @@ test('a skill folder keeps the person\'s files; an older template\'s file where 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #562: when the MR does not open, the by-hand hint names the code repo's folder and the exact command to run
+// THERE. Run from the Product folder, glab takes the Product as the source project and GitLab answers 422.
+test('yad update --open-pr: a PR/MR that did not open hands over the command to run inside that repo (#562)', async () => {
+  const { openUpdatePr } = await import('./update-commit.mjs');
+  const P = tmp();
+  const T = path.join(P, 'repos', 'api');
+  const R = tmp();
+  try {
+    fs.mkdirSync(T, { recursive: true });
+    git(R, ['init', '-q', '--bare', '-b', 'main']);
+    git(T, ['init', '-q', '-b', 'main']);
+    git(T, ['config', 'user.name', 'Alice Smith']);
+    git(T, ['config', 'user.email', 'alice@work.com']);
+    git(T, ['config', 'commit.gpgsign', 'false']); git(T, ['config', 'core.excludesFile', NO_GLOBAL_IGNORE]);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.0.0' });
+    git(T, ['add', '.sdlc/cli-version.json']);
+    git(T, ['commit', '-q', '-m', 'chore: start']);
+    git(T, ['remote', 'add', 'origin', R]);
+    git(T, ['push', '-q', '-u', 'origin', 'main']);
+    put(path.join(T, '.sdlc/cli-version.json'), { version: '4.7.0' });
+    const creator = () => ({ ok: false, reason: '422 Source project is not a fork of the target project' });
+    const r = openUpdatePr({ root: T, paths: ['.sdlc/cli-version.json'], items: [] }, { productRoot: P, defaultBranch: 'main', platform: 'gitlab', creator, version: '4.7.0', checked: true });
+    assert.deepEqual([r.pushed, r.opened, r.reason], [true, false, 'pr-not-opened']);
+    assert.match(r.hint, /`cd repos\/api && glab mr create --source-branch chore\/yad-update-v4\.7\.0 --target-branch main --fill --yes`/);
+    assert.match(r.hint, /from inside that repo's folder/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
+});
+
 test('yad update --open-pr: the update on its own branch, pushed, a PR/MR opened, and the repo back on its default branch', async () => {
   const { openUpdatePr, updateBranchName, buildUpdatePrBody } = await import('./update-commit.mjs');
   const T = tmp();
