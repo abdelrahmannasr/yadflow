@@ -29831,6 +29831,26 @@ test('E125: judgedRepos keeps the entries git may run in and names the others; c
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 review: a folder named `head` beside a monorepo folder is an ordinary folder; a file named HEAD, in any case git reads, is not', { skip: E125_SKIP }, async () => {
+  const { judgeRepo } = await import('./workspace.mjs');
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(product, 'apps', 'web'), { recursive: true });
+    fs.mkdirSync(path.join(product, 'apps', 'head'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'apps', 'head', 'x.js'), 'x');
+    assert.equal(judgeRepo(product, { name: 'web', path: 'apps/web' }).state, 'present', 'a folder named head is not HEAD');
+    // A folder named exactly HEAD still counts, and so does a file or link that git's own open of HEAD reads.
+    fs.mkdirSync(path.join(product, 'libs', 'a', 'HEAD'), { recursive: true });
+    assert.equal(judgeRepo(product, { name: 'a', path: 'libs/a' }).state, 'refused');
+    fs.mkdirSync(path.join(product, 'libs', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(product, 'libs', 'b', 'head'), 'ref: refs/heads/main\n');
+    const ignoresCase = fs.existsSync(path.join(product, 'libs', 'b', 'HEAD'));
+    assert.equal(judgeRepo(product, { name: 'b', path: 'libs/b' }).state, ignoresCase ? 'refused' : 'present', 'a file named head counts where the disk ignores case');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: yad open-pr and yad review refuse a registered folder yad runs no git in, and never fall back to the folder they run in', { skip: E125_SKIP }, () => {
   const T = e79Tmp();
   try {

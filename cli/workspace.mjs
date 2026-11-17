@@ -306,10 +306,16 @@ function enclosingCheckout(productRoot, target) {
 // Git takes a folder for a bare repo only when it holds `HEAD` — then `objects/` and `refs/` may come
 // from anywhere (a `commondir` file points elsewhere), and `HEAD` may be a link that points nowhere
 // (E81 review 2 made git run a command both ways). So the one sound test is the part git always needs:
-// ANY entry named `HEAD`, of any kind, read with `lstat` so a dangling link counts. The file system
-// matches the name as git's own lookup does (without case on macOS and Windows). From `target` up to,
-// not including, the checkout `top`.
-const hasHead = (dir) => { try { fs.lstatSync(path.join(dir, 'HEAD')); return true; } catch { return false; } };
+// ANY entry named exactly `HEAD`, of any kind, read with `lstat` so a dangling link counts. On a disk that
+// ignores case (macOS, Windows) git's own open of `HEAD` also reads a FILE or link named `head`, so that
+// counts too; a FOLDER named `head` never does (git cannot read a folder as HEAD, and `apps/head/` beside
+// `apps/web` is an ordinary folder). From `target` up to, not including, the checkout `top`.
+const hasHead = (dir) => {
+  let st;
+  try { st = fs.lstatSync(path.join(dir, 'HEAD')); } catch { return false; }
+  if (!st.isDirectory()) return true;
+  try { return fs.readdirSync(dir).includes('HEAD'); } catch { return true; }
+};
 function headOnWay(target, top) {
   for (let cur = target; cur !== top && cur.startsWith(top + path.sep); cur = path.dirname(cur)) {
     if (hasHead(cur)) return true;
