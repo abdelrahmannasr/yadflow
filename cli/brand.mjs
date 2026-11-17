@@ -214,16 +214,18 @@ export function lighter(value) {
 }
 
 // Text that is hard to read. → [text]; a colour yadflow cannot read is skipped, never guessed. `links`: also
-// `primary`, which the pages use as link text, so it needs 4.5:1 like text (review 2). `yad brand check` asks
-// for it; `yad doctor` does not, so a brand colour chosen for buttons never warns on every run.
+// `primary`, which the pages use as link text, so it needs 4.5:1 like text (review 2) — on bg, and on surface,
+// where the standup's and the issues page's cards put their links (#564). `yad brand check` asks for it; `yad
+// doctor` does not, so a brand colour chosen for buttons never warns on every run. Warnings only, never a failure.
 export function contrastProblems(brand, { links = false } = {}) {
   const out = [];
-  const pairs = [['text', 4.5, 'text'], ['muted', 3, 'muted'], ...(links ? [['primary', 4.5, 'primary (links)']] : [])];
+  const pairs = [['text', 4.5, 'text', 'bg'], ['muted', 3, 'muted', 'bg'],
+    ...(links ? [['primary', 4.5, 'primary (links)', 'bg'], ['primary', 4.5, 'primary (links)', 'surface']] : [])];
   for (const scheme of ['light', 'dark']) {
     const c = brand.colors[scheme];
-    for (const [role, min, label] of pairs) {
-      const r = contrast(c[role], c.bg);
-      if (r !== null && r < min) out.push(`${scheme}: ${label} on bg is ${r.toFixed(1)}:1 — under ${min}:1, hard to read`);
+    for (const [role, min, label, on] of pairs) {
+      const r = contrast(c[role], c[on]);
+      if (r !== null && r < min) out.push(`${scheme}: ${label} on ${on} is ${r.toFixed(1)}:1 — under ${min}:1, hard to read`);
     }
   }
   return out;
@@ -293,7 +295,8 @@ export const PAGE_MAPS = Object.freeze({
   // The progress map is always dark: the dark roles, a glass of the surface, the status colours only if set.
   map: `:root{${map([['--bg', 'bg'], ['--ink', 'text'], ['--muted', 'muted']], 'dark')};--ink-2:color-mix(in srgb, var(--brand-dark-text) 60%, var(--brand-dark-muted));--hair:color-mix(in srgb, var(--brand-dark-border) 70%, transparent);--glass:color-mix(in srgb, var(--brand-dark-surface) 80%, transparent)}
 :root{--live:var(--brand-status-live, #3987e5);--merged:var(--brand-status-merged, #d55181);--active:var(--brand-status-active, #c98500);--planned:var(--brand-status-planned, #93a0bf);--idle:var(--brand-status-idle, #5b6680)}
-html,body{font-family:var(--brand-font-body)}.brand h1{font-family:var(--brand-font-heading)}.linkish,#panel a{color:var(--brand-dark-primary)}`,
+:root{--link:var(--brand-dark-primary);--tint:var(--brand-dark-primary);--focus:var(--brand-dark-accent)}
+html,body{font-family:var(--brand-font-body)}.brand h1{font-family:var(--brand-font-heading)}`,
   brain: both(map([['--bg', 'bg'], ['--panel', 'surface'], ['--text', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--accent', 'primary']], 'light'),
     map([['--bg', 'bg'], ['--panel', 'surface'], ['--text', 'text'], ['--muted', 'muted'], ['--line', 'border'], ['--accent', 'primary']], 'dark'))
     + '\nbody{font-family:var(--brand-font-body)}h1,h2,h3{font-family:var(--brand-font-heading)}',
@@ -305,8 +308,8 @@ html,body{font-family:var(--brand-font-body)}.brand h1{font-family:var(--brand-f
   usage: both(map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--accent', 'primary']], 'light'),
     map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--accent', 'primary']], 'dark'))
     + '\nbody{font-family:var(--brand-font-body)}h1,h2{font-family:var(--brand-font-heading)}',
-  standup: both(map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border']], 'light'),
-    map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border']], 'dark'))
+  standup: both(map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--link', 'primary'], ['--accent', 'accent']], 'light'),
+    map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--link', 'primary'], ['--accent', 'accent']], 'dark'))
     + '\nbody{font-family:var(--brand-font-body)}h1,h2{font-family:var(--brand-font-heading)}',
   issues: both(map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--link', 'primary']], 'light'),
     map([['--bg', 'bg'], ['--fg', 'text'], ['--dim', 'muted'], ['--card', 'surface'], ['--line', 'border'], ['--link', 'primary']], 'dark'))

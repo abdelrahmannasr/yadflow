@@ -691,8 +691,9 @@ function renderHtmlPage(model) {
   const missing = gapLines(model);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>yadflow — standup</title><style>
-:root{--bg:#fff;--fg:#1d2026;--dim:#5d6470;--card:#f6f7f9;--line:#e1e4ea}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8ee;--dim:#9aa0ad;--card:#181b22;--line:#262a33}}
+:root{--bg:#fff;--fg:#1d2026;--dim:#5d6470;--card:#f6f7f9;--line:#e1e4ea;--link:#0b57d0;--accent:#0b57d0}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--fg:#e6e8ee;--dim:#9aa0ad;--card:#181b22;--line:#262a33;--link:#8ab4f8;--accent:#8ab4f8}}
+a{color:var(--link)}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 .wrap{max-width:860px;margin:0 auto;padding:28px 16px}h1{font-size:22px;margin:0 0 6px}.sub{color:var(--dim);margin:0 0 20px;padding-left:18px}
 .member{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 12px}

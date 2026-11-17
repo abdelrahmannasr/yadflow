@@ -573,6 +573,9 @@ test('E132 review 2: every format ends with the same gaps; a partial page counts
     assert.equal(m.prPartial, true);
     const md = S.renderMarkdown(m);
     const html = S.renderHtml(m);
+    // #564: links take the page's link colour (the brand's primary when there is a brand), never the browser's blue.
+    assert.match(html, /a\{color:var\(--link\)\}/);
+    assert.match(html, /:focus-visible\{outline:2px solid var\(--accent\)/);
     for (const out of [md, html]) {
       assert.match(out, /could not fetch the capture branches/);
       assert.match(out, /github-zz\.json/);
