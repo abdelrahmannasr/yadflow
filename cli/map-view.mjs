@@ -22,6 +22,7 @@ import { TYPES, startPageServer, inlineSnapshot, writeOwnFile, trackedRisk } fro
 import { saveReport, listReports, SIDE_SUFFIX } from './reports-dir.mjs';
 import { openUrl } from './report.mjs';
 import { brandForPage } from './brand.mjs';
+import { judgedRepos } from './workspace.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VIEW_DIR = path.join(HERE, 'map', 'view');
@@ -66,9 +67,10 @@ function mapStream(root, { heartbeat = 15000, debounce = 500, runner = spawnSync
     const out = [path.join(root, 'epics'), path.join(root, '.sdlc')];
     let reg = null;
     try { reg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'repos.json'), 'utf8')); } catch { /* none */ }
-    for (const r of Array.isArray(reg?.repos) ? reg.repos : []) {
-      if (!r || typeof r.path !== 'string') continue;
-      const g = runner('git', ['-C', path.resolve(root, r.path), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+    // Judged first (E125): git runs only in a checkout yad may run git in, never a folder the Product shaped as
+    // a bare repo or a link inside a repo's tree.
+    for (const { target } of judgedRepos(root, reg).ok.filter((o) => o.present)) {
+      const g = runner('git', ['-C', target, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
       if (g.status !== 0) continue;
       const common = String(g.stdout).trim();
       out.push(path.join(common, 'refs'), path.join(common, 'packed-refs'), path.join(common, 'FETCH_HEAD'));

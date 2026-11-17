@@ -22,7 +22,7 @@ import { readJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { epicIds, epicRoot, loadLedger, readFrontmatter, FOUNDATION_EPIC } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
-import { readRegistry } from './workspace.mjs';
+import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { readOwners } from './owners.mjs';
 import { readMembers, productIdentity } from './members.mjs';
 import { gateWaits, whose } from './standup.mjs';
@@ -565,7 +565,9 @@ export function gatherMap(root, { fetch = false, runner = spawnSync, now = Date.
   for (const r of registry.repos) {
     if (!r || typeof r.name !== 'string') continue;
     const p = path.resolve(root, typeof r.path === 'string' ? r.path : '');
-    const info = { name: r.name, available: typeof r.path === 'string' && isRepo(g, p), integrationBranch: r.default_branch || null, productionBranch: null, productionGuessed: false };
+    // Judged first (E125): git runs only in a checkout yad may run git in, never a folder the Product shaped as
+    // a bare repo or a link inside a repo's tree.
+    const info = { name: r.name, available: typeof r.path === 'string' && runnable(judgeRepo(root, r)) && isRepo(g, p), integrationBranch: r.default_branch || null, productionBranch: null, productionGuessed: false };
     repos.push(info);
     const mine = tasks.filter((t) => t.repo === r.name);
     if (!info.available) continue;

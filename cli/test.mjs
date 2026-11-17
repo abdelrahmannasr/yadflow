@@ -29935,6 +29935,24 @@ test('E125: the docs staleness and yad usage --repos run git only in a judged ch
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: yad map and its live view run git only in a checkout yad may run git in', { skip: E125_SKIP }, async () => {
+  const { buildMap, startMapServer } = await import('./map-view.mjs');
+  const T = e79Tmp();
+  let srv;
+  try {
+    const f = e125Workspace(T);
+    const calls = [];
+    const runner = (cmd, args, o) => { calls.push([cmd, ...args, o?.cwd ?? ''].join(' ')); return spawnSync(cmd, args, o); };
+    const { model } = buildMap(f.product, { runner, env: { ...process.env, YAD_REPORTS_DIR: path.join(T, 'r') } });
+    assert.ok(JSON.stringify(model).includes('backend'), 'the real checkout is still on the map');
+    srv = await startMapServer(f.product, { live: true, runner, env: { ...process.env, YAD_REPORTS_DIR: path.join(T, 'r') } });
+    assert.ok(srv.watchable > 0, 'the Product and the real checkout are still watched');
+    assert.ok(calls.some((l) => l.includes(f.backend)), 'git ran in the real checkout');
+    assert.deepEqual(calls.filter((l) => l.includes(f.bare)), [], 'never in the bare-shaped folder');
+    f.untouched();
+  } finally { if (srv) await srv.close(); fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: yad doctor reads no file and runs no git in a registered folder yad runs no git in', { skip: E125_SKIP }, () => {
   const T = e79Tmp();
   try {
