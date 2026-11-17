@@ -1306,6 +1306,9 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   const keyOf = (x) => `${x.story}/${x.task}/${x.repo}`;
   const unread = [];
   const otherStory = [];
+  // The PRs to read for grouped tasks, after every task's own finding is handled: a task's own merge is
+  // the better evidence (a stacked PR can still list the commits of a task that merged on its own).
+  const groups = [];
   // A grouped PR (#583): a squash merge leaves no Task: lines on the default branch, so `shipDrift` finds
   // only the task its branch names. The PR's own commits name the others; each of the same story is
   // shipped from that PR too. A task of another story is listed, never recorded: a person checks it.
@@ -1357,7 +1360,7 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
     if (dryRun) {
       planned.push({ ...at, ...how, command: cmd });
       touched.add(f.story);
-      if (pr) await shipGroup(at, pr);
+      if (pr) groups.push([at, pr]);
       continue;
     }
     const ship = (h) => buildShip(root, { ...at, ...h, byHand: false, today, fetch, runner, prReader });
@@ -1377,8 +1380,9 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
       left.push({ ...at, why: e.message, fix: e.hint || f.fix, command: cmd });
       continue;
     }
-    if (from) await shipGroup(at, from);
+    if (from) groups.push([at, from]);
   }
+  for (const [at, n] of groups) await shipGroup(at, n);
   // A task of another story is listed unless this run recorded it after all (its own commit, found later).
   left.push(...otherStory.filter((x) => !handled.has(keyOf(x))));
   // Stories every task of which now has a ship — and those `reconcile check` already sees as shipped in the
