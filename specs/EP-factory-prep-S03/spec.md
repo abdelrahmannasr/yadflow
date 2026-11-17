@@ -18,9 +18,10 @@ The template's rollback plan is left as its placeholder, and the fallback body h
   (`feat`, then `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`; `!` when any
   commit has it), then the story's title (a `title:` or `# ` heading in its story file in the Product),
   else the text of the first commit of that type. No scope; no trailing dot. It passes `checks/pr-title.sh`.
-- R3. The rollback plan's placeholder is filled with `revert this pull request's merge commit` on GitHub
+- R3. The rollback plan's placeholder is filled with `revert the commit that merged this pull request` (a merge or a squash) on GitHub
   and GitLab; a plan the team already wrote, and a trailing comment, stay. The fallback body gets the line.
-- R4. A branch of one commit keeps today's title and Summary. `--title` still wins.
+- R4. A branch of one commit keeps today's title and Summary, even under a merge of the base (the commit's subject, never the merge's). `--title` still wins.
+- R5. The commit list is read only when the base was just fetched; otherwise the one-commit title and Summary are used, and the warning says so.
 
 ## Clarifications
 
