@@ -29933,6 +29933,31 @@ test('E125: packRepo writes a pack only under .sdlc/code-context/, and yad setup
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 review: connecting a repo by flag or by answer runs no git in a bare-shaped folder', { skip: E125_SKIP }, async () => {
+  const { registerRepo } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // The default answer's folder (`demo-repos/<name>`), committed by the Product shaped as a bare repo.
+    const api = path.join(f.product, 'demo-repos', 'api');
+    fs.mkdirSync(path.dirname(api), { recursive: true });
+    fs.cpSync(f.bare, api, { recursive: true });
+    const r = e79Yad(T, f.product, ['setup', '--solo', '--brownfield', '--separate', '--no-tools', '--no-git-init', '--ide-targets', '.claude', '--platform', 'github', '--connect', 'none', '--add-repo', 'api=demo-repos/api'], f.env);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout + r.stderr, /demo-repos\/api is not a git repository yad may run git in \(the folder exists and is not a git repo/);
+    const registry = { repos: [] };
+    let repo;
+    const said = await f.withShim(() => grab(() => { repo = registerRepo(f.product, registry, { name: 'api', rpath: 'demo-repos/api' }); }));
+    assert.equal(repo, null);
+    assert.deepEqual(registry.repos, [], 'nothing registered');
+    assert.match(said, /demo-repos\/api is not a git repository yad may run git in/);
+    assert.deepEqual(f.gitInBare(), []);
+    const log = fs.existsSync(f.env.YAD_GIT_LOG) ? fs.readFileSync(f.env.YAD_GIT_LOG, 'utf8') : '';
+    assert.ok(!log.includes(api), 'git never ran in the answer\'s folder');
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: yad check and yad check --fix skip a bare-shaped folder, and still wire a checkout and a repo not cloned yet', { skip: E125_SKIP }, () => {
   const T = e79Tmp();
   try {

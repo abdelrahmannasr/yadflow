@@ -124,6 +124,16 @@ export function buildReconfiguredProductConfig(cur, fields) {
   return { ...(cur || {}), ...fields };
 }
 
+// Why yad may not run git at `rpath` (E125): null for a checkout the judgement accepts, else the reason.
+// Asked before ANY git call on a path the connect flow is given — a flag, an answer, or a folder found beside
+// the Product — so a folder the Product commits shaped as a bare repo (`demo-repos/api/{HEAD,config,…}`)
+// never has its config read.
+function notCheckoutWhy(root, rpath) {
+  const x = judgedRepos(root, { repos: [{ name: String(rpath), path: rpath }] });
+  if (x.ok[0]?.present) return null;
+  return x.ok[0] ? 'nothing is there yet' : x.skipped[0].why;
+}
+
 // Validate + record one code repo into the registry (the testable half of the connect loop).
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
@@ -133,6 +143,8 @@ export function registerRepo(root, registry, { name, rpath, platform, default_br
     warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
   }
+  const why = notCheckoutWhy(root, rpath);
+  if (why) { warn(`${forTerminal(rpath)} is not a git repository yad may run git in (${why}) — skipped`); return null; }
   const repoRoot = path.resolve(root, rpath);
   const head = gitHead(repoRoot);
   if (head === null) { warn(`${rpath} is not a git repository (or has no commits) — skipped`); return null; }
@@ -416,6 +428,8 @@ export function checkSetupFlags(root, opts = {}) {
     if (r.platform && !['github', 'gitlab'].includes(r.platform)) throw setupFlagError(`--add-repo ${spec}: platform ${r.platform} — expected github or gitlab`);
     if (r.default_branch && !branchOk(r.default_branch)) throw setupFlagError(`--add-repo ${spec}: ${r.default_branch} is not a plain branch name`);
     // What `registerRepo` refuses, refused here first: a skipped repo would change which one a monorepo connects.
+    const why = notCheckoutWhy(root, r.rpath);
+    if (why) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} is not a git repository yad may run git in (${why})`);
     if (gitHead(path.resolve(root, r.rpath)) === null) throw setupFlagError(`--add-repo ${spec}: ${r.rpath} is not a git repository`);
   }
   if (has_(opts.coderabbit) && !['all', 'none'].includes(opts.coderabbit)) {
@@ -763,6 +777,8 @@ export async function runSetup(root, opts = {}) {
   // `yad init` (E79) found these beside the Product: one yes/no each, with what git already knows about
   // them — the platform from `origin`, the default branch from origin/HEAD or the branch it is on.
   for (const d of (opts.discovered || []).filter((x) => !known.has(x.name))) {
+    const notHere = notCheckoutWhy(root, d.rpath);
+    if (notHere) { warn(`${forTerminal(d.name)} (${forTerminal(d.rpath)}): ${notHere} — skipped`); continue; }
     const repoRoot = path.resolve(root, d.rpath);
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
     const platform = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
@@ -782,6 +798,8 @@ export async function runSetup(root, opts = {}) {
   // repos were answered by flag (`--connect` or `--add-repo`).
   for (const r of (opts.addRepo || []).map(parseAddRepo)) {
     if (known.has(r.name)) { warn(`${r.name} already registered — skipping`); continue; }
+    const notHere = notCheckoutWhy(root, r.rpath);
+    if (notHere) { warn(`${forTerminal(r.rpath)} is not a git repository yad may run git in (${notHere}) — skipped`); continue; }
     const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, r.rpath) });
     const platform = r.platform || detectPlatform(detected.ok ? detected.stdout : '') || 'github';
     const repo = registerRepo(root, registry, { name: r.name, rpath: r.rpath, platform, default_branch: r.default_branch || 'main', today: opts.today ?? null, pack: !greenfield });
@@ -802,6 +820,8 @@ export async function runSetup(root, opts = {}) {
       const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
       if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); continue; }
       if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
+      const notHere = notCheckoutWhy(root, rpath);
+      if (notHere) { warn(`${forTerminal(rpath)} is not a git repository yad may run git in (${notHere}) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
       const default_branch = await ask('    default branch', 'main');
