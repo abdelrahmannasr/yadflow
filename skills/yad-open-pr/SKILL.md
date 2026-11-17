@@ -27,7 +27,7 @@ the Product.
   has it) and the story's title (a `title:` or `# ` heading in its story file), else the text of the
   first commit of that type. Override with `--title`.
 - **Body** — the committed template (`.github/pull_request_template.md` /
-  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit; one bullet per commit subject, oldest first, for a branch of several), the rollback plan (`revert this pull request's merge commit`), the story/task id and
+  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit; one bullet per commit subject, oldest first, for a branch of several), the rollback plan (`revert the commit that merged this pull request`), the story/task id and
   its `specs/` path, `Risk level:`, `Contract surface touched:`, and `Domains` (the repo name when
   `--repo` is passed) prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate. The `**Preview:**` line under `## Testing` (#359) gets the repo's preview address, filled from
