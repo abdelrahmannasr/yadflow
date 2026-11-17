@@ -7,10 +7,10 @@
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
 import { log, ok, info, warn, fail, note, run, readJSON, emitJSON, refuse, inJSON, collectWarning } from './lib.mjs';
-import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
-import { registryEntryFor } from './find-product.mjs';
+import { codeRepoFor } from './workspace.mjs';
 import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
   resolveBaseBranch,
@@ -21,24 +21,10 @@ import { resolvePreview } from './preview.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
-// Resolve the target code repo: --repo <name> from the registry (platform + path), else cwd.
-// An explicit --repo that is NOT in the registry is an error — never silently fall through to cwd (that
-// would operate on the wrong repo). Returns { error } in that case for the caller to surface.
-//
-// `product` (E80) is the Product found from a code repo beside it: the registry, the code map and the
-// epics are read there, and a repo run without --repo is looked up in the registry by its path.
-function resolveRepo(root, { repo, dir, product }) {
-  const productRoot = product || root;
-  if (repo) {
-    const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), { repos: [] });
-    const found = (reg.repos || []).find((r) => r.name === repo);
-    if (!found) return { error: `repo '${repo}' is not in .sdlc/repos.json — connect it first (yad-connect-repos)` };
-    return { repoRoot: path.resolve(productRoot, found.path), meta: found, productRoot };
-  }
-  const here = path.resolve(root, dir || '.');
-  const hit = registryEntryFor(product, here);
-  return { repoRoot: hit ? hit.top : here, meta: hit ? hit.meta : null, productRoot };
-}
+// The target code repo (E125): --repo <name> from the registry, judged first, else the folder it runs in.
+// An explicit --repo that is NOT in the registry, or one yad runs no git in, is an error — never a silent
+// fall through to cwd (that would operate on the wrong repo). `codeRepoFor` in workspace.mjs.
+const resolveRepo = (root, opts) => codeRepoFor(root, opts, { strict: true });
 
 function platformOf(root, repoRoot, meta) {
   if (meta?.platform) return meta.platform;

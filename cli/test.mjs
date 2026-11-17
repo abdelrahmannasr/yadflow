@@ -29831,6 +29831,22 @@ test('E125: judgedRepos keeps the entries git may run in and names the others; c
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125: yad open-pr and yad review refuse a registered folder yad runs no git in, and never fall back to the folder they run in', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    for (const args of [['open-pr', '--repo', 'bare', '--title', 'feat: x'], ['review', 'context', '--repo', 'bare'], ['review', 'trailer', '--repo', 'bare', '--pr', '1', '--body', 'x']]) {
+      const r = e79Yad(T, f.product, args, f.env);
+      assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout + r.stderr, /repo bare \(bare\): the folder exists and is not a git repo .* yad runs no git there/, args.join(' '));
+    }
+    // An unknown name: `review` refuses it; `open-pr` works in the folder it runs in, as before.
+    assert.match(e79Yad(T, f.product, ['review', 'context', '--repo', 'ghost'], f.env).stdout, /'ghost' is not in \.sdlc\/repos\.json/);
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 16: refresh never writes through a .gitignore the Product commits as a link', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, async () => {
   const { ensurePackIgnored } = await import('./setup.mjs');
   const T = e79Tmp();

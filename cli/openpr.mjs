@@ -5,7 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
-import { PROJECT_FILES , productConfigPath, settingsEditHint } from './manifest.mjs';
+import { productConfigPath, settingsEditHint } from './manifest.mjs';
 import {
   detectPlatform, createPr, platformLogin, resolveBaseBranch, prNumberFromUrl, editPrBody, forkBranch, forkBranchWords, branchTaskId,
 } from './platform.mjs';
@@ -17,29 +17,12 @@ import { baseChangeLevel, changedSince, recentAuthorsFor, suggestedAuthorsFor } 
 import { personLabel } from './riskmap.mjs';
 import { gateOpen } from './gate.mjs';
 import { unfoldedPaths, authorStepOf } from './fold.mjs';
-import { registryEntryFor } from './find-product.mjs';
+import { codeRepoFor } from './workspace.mjs';
 import { autoOpenCheck, recordAutoOpen, branchTasks, rangeTasks, groupWarnings } from './build.mjs';
 import { productDriftError } from './epic-state.mjs';
 import { err } from './errors.mjs';
 import { recordActor } from './skip.mjs';
 import { previewLine, previewPattern, fillPattern, needs } from './preview.mjs';
-
-// Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd. `product` (E80) is
-// the Product found from a code repo beside it: the registry is read there, and a repo run without
-// --repo is looked up in it by its path — so its platform and default branch are the recorded ones.
-function resolveRepo(root, { repo, dir, product }) {
-  const productRoot = product || root;
-  if (repo) {
-    const reg = readJSON(path.join(productRoot, PROJECT_FILES.reposRegistry), { repos: [] });
-    const found = (reg.repos || []).find((r) => r.name === repo);
-    if (found) return { repoRoot: path.resolve(productRoot, found.path), meta: found };
-  }
-  const here = path.resolve(root, dir || '.');
-  // The checkout it runs in, when that checkout is a registered repo or a git worktree of one (#515): worked
-  // at its own top, from any folder inside it. A nested repo stays exactly where it is, with no entry.
-  const hit = registryEntryFor(product, here);
-  return { repoRoot: hit ? hit.top : here, meta: hit ? hit.meta : null };
-}
 
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
 // `--head` split the Product pattern gates (pr-title.sh/pr-template.sh) already apply:
@@ -267,7 +250,11 @@ export async function runOpenPr(root, opts = {}) {
   log(c.bold('\nyad open-pr'));
   const via = opts.via == null ? 'human' : opts.via;
   if (!['auto', 'human'].includes(via)) throw err('YAD-STATE-009', `--via must be auto or human (got '${via}')`, '--via auto opens it on the standing approval (`yad dial open-pr`)');
-  const { repoRoot, meta } = resolveRepo(root, opts);
+  // The code repo, judged first (E125): a registered entry yad runs no git in is refused, never swapped for
+  // the folder this runs in.
+  const rr = codeRepoFor(root, opts);
+  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  const { repoRoot, meta } = rr;
   if (!exists(path.join(repoRoot, '.git'))) { fail(`not a git repo: ${repoRoot}`); process.exitCode = 1; return; }
 
   const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
