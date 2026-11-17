@@ -15,7 +15,8 @@ recorded and the story never shows as shipped. `yad build ship --pr` already rea
 
 - R1. After sync records a task from a merged PR, it reads that PR's commits and records every other task
   of the same story whose `Task:` line appears there and that has no ship yet, from the same PR.
-- R2. Each task is handled once per run (a `--no-ff` merge can report it again); a second sync records nothing.
+- R2. Each task is handled once per run (a `--no-ff` merge can report it again), and from its own merge first: the
+  grouped PRs are read only after every task's own finding. A second sync records nothing.
 - R3. A task of another story in the PR is not recorded; sync lists it with `yad build ship … --pr <n>`.
 - R4. When the PR's commits cannot be read, or are cut off (100 or more), nothing extra is recorded, and
   sync says so with the command to run for each other task.
@@ -44,4 +45,8 @@ Tests in `cli/test-build.mjs` with the `groupedMerge` helper (a squash with no t
 **Files:**
 - cli/build.mjs
 - cli/test-build.mjs
+
+## T02 — Say in the CLI docs how build sync records a grouped PR
+**Files:**
+- docs/CLI.md
 <!-- /yad:tasks -->
