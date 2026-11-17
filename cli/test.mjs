@@ -30036,6 +30036,25 @@ test('E125: the repos yad update commits in are judged: never a bare-shaped fold
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 review: a connected repo\'s folder is judged again right before yad update commits or opens a PR/MR in it', { skip: E125_SKIP }, async () => {
+  const { commitAndPush, openUpdatePr } = await import('./update-commit.mjs');
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    // As if a pull made by an earlier group's push had turned the folder into a bare-shaped one.
+    const group = { root: f.bare, paths: ['config'], items: [] };
+    let a, b;
+    await f.withShim(() => grab(() => {
+      a = commitAndPush(group, { productRoot: f.product, push: true });
+      b = openUpdatePr(group, { productRoot: f.product, defaultBranch: 'main', platform: 'github', creator: () => { throw new Error('never opened'); } });
+    }));
+    assert.equal(a.skipped, true);
+    assert.equal(b.skipped, true);
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125: yad doctor reads no file and runs no git in a registered folder yad runs no git in', { skip: E125_SKIP }, () => {
   const T = e79Tmp();
   try {
