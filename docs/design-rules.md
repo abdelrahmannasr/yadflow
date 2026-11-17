@@ -13,6 +13,12 @@
 > every row there. The kept parts are copied word for word, so a few sentences still say a row is
 > "below" (E75 in Part 1, E135–E144 in Part 5): those rows are in that old file.
 >
+> **Where the product strategy went (2026-11-17):** who pays, for what, at what price, and the licence
+> plan are product decisions, not engine design. They now live in the maintainer's private Foundation.
+> This file keeps the engineering rules. Part 9 marks the rows that moved as **Superseded**, and keeps
+> their numbers, because code cites them. The earlier text stays in git history:
+> `git show 6e91f5fa:docs/design-rules.md`.
+>
 > This is the outcome of a product brainstorming session. Everything here is a decision we made
 > together, or a rule that follows from one.
 
@@ -23,7 +29,8 @@
 When this plan was written, yadflow was a fixed pipeline built on top of BMAD (E3 has
 since removed BMAD from the engine). This plan turns it into a
 real engine: one that any team can shape to their own lifecycle, that drives AI
-agents from the command line, and that a paid desktop app can later sit on top of.
+agents from the command line, and that other tools and hosts can sit on top of, through `--json`
+and MCP.
 
 It also sets the rule we follow for **every** change from now on: we never break a
 project that already exists.
@@ -32,18 +39,17 @@ project that already exists.
 
 ## The vision
 
-> **Yad is the control room for engineers who build software with AI agents.**
+> **yadflow is the open engine for building software with AI agents, with people at the gates.**
 >
-> Every project gets a clear, visible lifecycle. New projects are guided from idea
-> to product. Existing projects get order without being disturbed. One person or
-> one team can run many projects at the same time, switch between them in one
-> click, and never lose the thread.
+> Every project gets a clear, visible lifecycle, recorded in git. New projects are guided from idea
+> to product. Existing projects get order without being disturbed. AI agents from any vendor do the
+> work; people answer the questions, make the decisions and approve at the gates. One person or one
+> team can run many projects at the same time and never lose the thread.
 >
-> The engine is free and open. The control room is what you pay for.
+> The engine is free and open, and every engine feature stays free.
 
-**Business shape:** the engine (yadflow) stays free and MIT. The desktop app is
-paid. The buyer is both solo engineers and teams, and a solo engineer must be able
-to become a team without redoing anything.
+A solo engineer must be able to become a team without redoing anything. Who pays, and for what, is a
+product decision kept outside this file (see the note at the top).
 
 ---
 
@@ -380,7 +386,7 @@ it. This is not a new design; the plan just never said it.
 |---|---|
 | **CI on WIP branches** | `yad/wip/*` is excluded from CI triggers, and `yad setup` writes the exclusion. Otherwise every save burns CI minutes — the exact thing this plan promises to save |
 | **Solo with no remote** | A local-only repo commits locally, says so, and never fails |
-| **Windows** | First-class from Wave 3 onward. Background capture, file claims and spawning agent CLIs all behave differently there, and a paid desktop app must run on it. Until then, WSL only, stated plainly in the README. **E113 (2026-09-27):** the agent hooks run natively, and the CLI code they reach is fixed for Windows, proved by a Windows CI job; the rest of the CLI, the full suite and the e2e harness are not tested there yet |
+| **Windows** | First-class from Wave 3 onward. Background capture, file claims and spawning agent CLIs all behave differently there, and the tools built on the engine must run on it. Until then, WSL only, stated plainly in the README. **E113 (2026-09-27):** the agent hooks run natively, and the CLI code they reach is fixed for Windows, proved by a Windows CI job; the rest of the CLI, the full suite and the e2e harness are not tested there yet |
 
 ---
 
@@ -635,6 +641,10 @@ sizes and what each one needs, the estimate, the v4.0 cut line, and where the ri
 
 # Part 7 — The skill orchestrator (companion package)
 
+> **Parked (2026-11-17).** The orchestrator is not on the current roadmap. Its design is kept here
+> because code cites it (closed decision 7 below) and because it may come back. Nothing in this part is
+> being built now.
+
 A **separate package**, built after Wave 2. Yadflow uses it; it does not need
 yadflow.
 
@@ -788,38 +798,14 @@ There are no open questions left.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Which engine features stay free? | **All of them.** The app is the only paid thing | MIT cannot hide features. A crippled free tier makes people distrust a governance tool. The multi-project view is not withheld — it simply does not belong in a per-project CLI |
-| 2 | Does MIT stay on the engine? | **Yes, permanently.** Say so in the README | The engine is not the moat; the control room, the benchmark data and the cross-harness orchestrator are — and all three are work, not secrets. Companies that tightened an open licence lost trust and got forked within weeks |
-| 3 | How does a serverless app check who paid? | **A signed offline licence file.** See below | Matches the privacy promise: not even a licence check leaves the machine |
-| 4 | Price and plan shape | **Per person, per month, one plan.** No per-project pricing. The number is set after the first ten real conversations with users | Charging per project punishes the exact behaviour we sell. There is no willingness-to-pay data yet, and a guessed number is worse than a delayed one. Price it as a professional tool, not a consumer app |
-| 5 | How do we get the first users? | **Orchestrator-first funnel.** Ship E29, then the free orchestrator, which mentions yadflow once and quietly. Talk to every early user personally | A tiny tool useful in 30 seconds reaches a hundred times more people than a governed lifecycle does. The one engaged contributor is worth more than a thousand stars |
+| 1 | Which engine features stay free? | **All of them.** Anything paid is a separate product on top of the engine, using only the doors in row 8 *(revised 2026-11-17: this used to name a paid desktop app)* | An open licence cannot hide features. A crippled free tier makes people distrust a governance tool |
+| 2 | Which licence does the engine use? | **Superseded (2026-11-17).** MIT today. A move to Apache-2.0 is planned for a future major release; this row used to say "MIT, permanently" | Apache-2.0 keeps the engine just as open, and adds a patent grant and a clear statement that the licence gives no rights to the yadflow name. Past contributors' MIT notices are kept |
+| 3 | How does a paid product check who paid? | **Superseded (2026-11-17).** A product decision, now kept outside this file. Whatever it is, the free engine never sends anything off the machine (rule 8) | — |
+| 4 | Price and plan shape | **Superseded (2026-11-17).** A product decision, now kept outside this file | — |
+| 5 | How do we get the first users? | **Superseded (2026-11-17).** A product decision, now kept outside this file. The orchestrator it relied on is parked (Part 7) | — |
 | 6 | Do we ever measure adoption? | **Never.** Public signals only — npm, GitHub issues, stars | Closed by rule 8. A floor is enough to know whether we are growing |
 | 7 | Chain or panel for multi-skill steps? | **Chain only.** One skill per step by default; extras opt-in with a cost warning. Panel deferred, maybe forever | Chain has a clear winner (the last output). Panel needs a picking step — a human reading three architectures, or an AI judge nobody should trust in a governance tool |
-| 8 | The engine/app boundary | **`--json` (E1) and MCP (E2). Nothing else.** No private API | If the app uses the same door as everyone else, the door stays honest and we feel every gap ourselves. Anyone may build a competing app on the engine — that is what MIT means |
-
-## The licence check, in detail
-
-**Signed offline file. No hardware lock. Read-only on expiry, never locked.**
-
-| Layer | How | Why it works |
-|---|---|---|
-| **The name on the file** | The file carries the buyer's name and email, signed with our key. The app shows it always: *"Licensed to Alice Chen · 5 seats · until 2027-09"* | Sharing the file means sharing your name. This is the Sublime Text model, and it deters better than any hardware lock with zero false positives and zero support tickets |
-| **Seats, shown not enforced** | The file says `seats: 5`. The ledger already records every approver. `yad doctor` warns *on their own machine* when the ledger shows more distinct people than the licence covers | Companies fix this themselves because their own compliance team sees it. A warning inside their own audit trail beats a lock, and nothing leaves the machine |
-| **Short renewals** | A 12-month file. A copied file expires like any other | The natural limit |
-| **Read-only on expiry** | The app keeps working for reading; editing asks you to renew | A pirate with an expired copy sees a helpful tool that asks nicely — some convert. A locked app converts nobody. Locking anyone out of their own audit trail would end our reputation in one post |
-
-**What we deliberately do not do, and why:**
-
-| Not this | Because |
-|---|---|
-| MAC address or any hardware fingerprint | A MAC belongs to a network card, not a machine — laptops have several, macOS and Windows randomise it, VMs fake it, and it is changed with one command. It fails only the honest, and it would require a device identifier to leave the machine at purchase, breaking rule 8 at the exact moment the customer decides whether to trust us |
-| Online activation or phone-home | Needs a server. Breaks the offline promise and rule 8 |
-| Locking the app | See above |
-
-Piracy of professional B2B tools is small and is not stopped by DRM. Companies pay
-for the invoice, the compliance record and the support contact — none of which come
-with a copied file. The goal is not to make copying impossible; it is to make paying
-the obvious, respectable choice and copying slightly embarrassing.
+| 8 | The boundary between the engine and anything built on it | **`--json` (E1) and MCP (E2). Nothing else.** No private API | If every host, plugin and paid product uses the same door as everyone else, the door stays honest and we feel every gap ourselves. Anyone may build a competing product on the engine — that is what an open licence means |
 
 ---
 
