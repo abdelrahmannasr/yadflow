@@ -6692,7 +6692,7 @@ test('runCommit: the missing-Task warning is stage-aware (Product vs code repo)'
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
   fs.writeFileSync(path.join(T, 'a.txt'), '1'); git(T, 'add', '-A');
-  const onProduct = await grab(() => runCommit(T, { type: 'ci', message: 'wire the gates', dryRun: true }));
+  const onProduct = await grab(() => runCommit(T, { type: 'feat', message: 'add a step', dryRun: true }));
   assert.match(onProduct, /fine for a Product PR/);
   assert.doesNotMatch(onProduct, /spec-link gate will fail on a code repo/);
   fs.rmSync(T, { recursive: true, force: true });
@@ -6705,6 +6705,13 @@ test('runCommit: the missing-Task warning is stage-aware (Product vs code repo)'
   fs.writeFileSync(path.join(R, 'a.txt'), '1'); git(R, 'add', '-A');
   const onRepo = await grab(() => runCommit(R, { type: 'feat', message: 'do a thing', dryRun: true }));
   assert.match(onRepo, /spec-link gate will fail on a code repo/);
+  // Product #186: the gate exempts maintenance commits, so they get no warning at all — on a repo or a Product.
+  for (const type of ['docs', 'chore', 'ci', 'build', 'test']) {
+    const exempt = await grab(() => runCommit(R, { type, message: 'tidy up', dryRun: true }));
+    assert.doesNotMatch(exempt, /no Task trailer/, `${type} is exempt from spec-link`);
+  }
+  const fix = await grab(() => runCommit(R, { type: 'fix', message: 'mend a thing', dryRun: true }));
+  assert.match(fix, /spec-link gate will fail on a code repo/, 'fix is not exempt');
   fs.rmSync(R, { recursive: true, force: true });
 });
 

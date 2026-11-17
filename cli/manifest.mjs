@@ -425,6 +425,9 @@ export const stepAdvance = (step) => {
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----
 // Conventional-commit types (config.yaml commit_subject_style).
 export const COMMIT_TYPES = ['feat', 'fix', 'docs', 'refactor', 'test', 'perf', 'build', 'ci', 'chore', 'revert'];
+// The commit types the spec-link gate lets through with no `Task:` trailer: maintenance commits link no
+// story. The gate's own list is `EXEMPT=` in checks/spec-link.sh; a test holds the two equal.
+export const SPEC_LINK_EXEMPT_TYPES = ['ci', 'chore', 'build', 'test', 'docs'];
 // Per-commit AI co-author choices (config.yaml build.ai_coauthor.allowed). The human git author OWNS
 // the commit; the AI is only a Co-Authored-By trailer. `none` => human-only (trailer omitted).
 export const AI_COAUTHORS = {
