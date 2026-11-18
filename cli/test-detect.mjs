@@ -1923,7 +1923,9 @@ test('E85 review 1: `yad check` from a code repo finds that repo\'s tools, as `y
 
 test('`yad update --dry-run` previews the update and writes nothing; with --push or --open-pr it refuses', () => {
   const { T, p, home } = product();
-  const files = () => fs.readdirSync(p, { recursive: true }).filter((f) => fs.statSync(path.join(p, f)).isFile()).sort();
+  // Each file's path with a hash of its content: a dry run must neither add a file nor change one.
+  const files = () => Object.fromEntries(fs.readdirSync(p, { recursive: true }).sort()
+    .filter((f) => fs.statSync(path.join(p, f)).isFile()).map((f) => [f, sha(path.join(p, f))]));
   try {
     const before = files();
     const dry = yad(['update', '--dry-run'], { cwd: p, home });
@@ -1938,7 +1940,7 @@ test('`yad update --dry-run` previews the update and writes nothing; with --push
     assert.deepEqual(files(), before);
     const real = yad(['update'], { cwd: p, home });
     assert.equal(real.status, 0, real.stdout + real.stderr);
-    assert.ok(files().length > before.length, 'without --dry-run the update still writes');
+    assert.ok(Object.keys(files()).length > Object.keys(before).length, 'without --dry-run the update still writes');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

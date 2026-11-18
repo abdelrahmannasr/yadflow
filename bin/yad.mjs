@@ -49,7 +49,7 @@ ${c.bold('Setup & maintenance')}
                        it. Anything else it cannot account for is replaced only after
                        a <file>.yad-orig backup
   yad update --dry-run Preview the update (as yad check --scope=changed): writes nothing
-  yad update --push   Also commit each repo's applied changes and push them straight to the
+  yad update --push    Also commit each repo's applied changes and push them straight to the
                        default branch of the Product + every connected repo (a chore(yad-update)
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
                        + commit-message). Announce the team & pause merges first. Also works as
