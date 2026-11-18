@@ -222,7 +222,7 @@ build:
   story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md (or a light spec's tasks block) shipped
   # Backfill (yad-backfill) — specs for already-built features in an existing repo.
   backfill:
-    tool: repomix                  # the one true CLI subprocess: `npx repomix@1.18.1` (Phase 0 / RESEARCH-NOTES §3)
+    tool: repomix                  # run by `yad repo pack <repo> --include <globs> --logs -o <file>`: `npx repomix@1.18.1` from an empty temp folder, the npm registry named (#213)
     pack_flags: "--compress --include <globs> --include-logs --style markdown"   # one feature at a time; Secretlint by default
     spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
     gate_scope: touched-features   # block a change only until the features it touches have approved specs

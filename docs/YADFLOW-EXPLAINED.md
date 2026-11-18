@@ -1219,7 +1219,8 @@ yad detect                  # skills, agents, MCP servers and plugins installed 
 
 - **Every tool is vetted:** each entry records its licence, its source, and the date its facts were
   checked. Install commands were checked against each tool's own docs, never guessed. Versions are
-  pinned (for example, Repomix runs as `npx repomix@1.18.1`, never `@latest`).
+  pinned (for example, Repomix runs as `npx repomix@1.18.1`, never `@latest`, and the skills start it
+  through `yad repo pack`).
 - Finding a tool starts no program, installs nothing and uses no network.
 - A skill that cannot use its tool writes one exact line saying so (for example
   `speckit: not-installed`), so the record shows what was not used.
