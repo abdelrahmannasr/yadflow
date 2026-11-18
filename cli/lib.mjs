@@ -347,22 +347,26 @@ const writeShape = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVers
 // never waits for a writer. (Windows has neither flag; there the `lstat` check stands alone.)
 export const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
 const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
-const notPlain = (p) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE });
+// `kind` says what was there instead: 'dir', 'link' or 'other' (a device, a pipe, a socket).
+const notPlain = (p, kind) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE, kind });
+const kindOf = (st) => (st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : 'other');
 // The read itself. Every failure is thrown, the `lstat` one too, so a caller can tell a missing file
 // (ENOENT) from one it may not read. `encoding: null` gives the raw bytes.
 function readPlainOrThrow(p, encoding = 'utf8') {
   const st = fs.lstatSync(p);
-  if (!st.isFile()) throw notPlain(p);
+  if (!st.isFile()) throw notPlain(p, kindOf(st));
   let fd;
-  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p); throw e; }
+  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p, 'link'); throw e; }
   try {
-    if (!fs.fstatSync(fd).isFile()) throw notPlain(p);
+    const now = fs.fstatSync(fd);
+    if (!now.isFile()) throw notPlain(p, kindOf(now));
     return fs.readFileSync(fd, encoding === null ? undefined : encoding);
   } finally { fs.closeSync(fd); }
 }
 export function readPlainFile(p) {
   try { fs.lstatSync(p); } catch { return null; }
-  return readPlainOrThrow(p);
+  // A file removed between the two looks is no file, as it would have been a moment earlier.
+  try { return readPlainOrThrow(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 // The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
 export const readPlainBytes = (p) => readPlainOrThrow(p, null);
