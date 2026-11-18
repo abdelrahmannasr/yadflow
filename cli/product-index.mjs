@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { isPlainObject, writeJSON, info, warn } from './lib.mjs';
+import { isPlainObject, writeJSON, info, warn, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import {
@@ -43,14 +43,21 @@ export const INDEX_FORMAT = 'e111-1';
 // Line endings are made `\n` before anything else: a checkout with `core.autocrlf` (the Windows default)
 // holds CRLF where git stores LF, and the same Product must hash the same on every machine — and parse
 // the same, since the frontmatter reader expects `\n`. Nothing else in the bytes is touched.
+//
+// Only a plain file is read (E125 b): a link is never followed, so a link to a device cannot hang the
+// read and a link out of the Product is not read. A folder keeps its old answer, EISDIR.
 export function readInput(file) {
+  let raw;
   try {
-    const raw = fs.readFileSync(file);
-    return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
+    raw = readPlainBytes(file);
   } catch (e) {
-    return e.code === 'ENOENT' ? { absent: true } : { error: e.code || e.message };
+    if (e.code === 'ENOENT') return { absent: true };
+    if (e.code === NOT_PLAIN_FILE) return { error: isFolder(file) ? 'EISDIR' : 'it is a link or not a plain file' };
+    return { error: e.code || e.message };
   }
+  return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
 }
+const isFolder = (f) => { try { return fs.lstatSync(f).isDirectory(); } catch { return false; } };
 
 // The hash of everything the index reads, length-prefixed so two inputs can never run together
 // (`a` + `bc` never collides with `ab` + `c`), and naming each input's place so a file moved from one
@@ -192,9 +199,9 @@ export function indexFreshness(root, prebuilt = null) {
   }
   let onDisk;
   try {
-    onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return { state: 'unreadable', why: '.sdlc/index.json does not parse' };
+    onDisk = readPlainJSON(file);
+  } catch (e) {
+    return { state: 'unreadable', why: e.code === NOT_PLAIN_FILE ? '.sdlc/index.json is a link or not a plain file, so it was not read' : '.sdlc/index.json does not parse' };
   }
   if (!isPlainObject(onDisk) || typeof onDisk.inputs !== 'string') {
     return { state: 'unreadable', why: '.sdlc/index.json records no input hash' };

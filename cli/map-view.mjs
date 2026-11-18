@@ -16,7 +16,7 @@ import { setInterval, clearInterval, setTimeout, clearTimeout } from 'node:timer
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { c, emitJSON, forTerminal, info, log, ok, refuse, warn } from './lib.mjs';
+import { c, emitJSON, forTerminal, info, log, ok, readPlainJSON, refuse, warn } from './lib.mjs';
 import { gatherMap, mapModel, digestOf } from './map.mjs';
 import { TYPES, startPageServer, inlineSnapshot, writeOwnFile, trackedRisk } from './local-page.mjs';
 import { saveReport, listReports, SIDE_SUFFIX } from './reports-dir.mjs';
@@ -66,7 +66,8 @@ function mapStream(root, { heartbeat = 15000, debounce = 500, runner = spawnSync
   const watchPaths = () => {
     const out = [path.join(root, 'epics'), path.join(root, '.sdlc')];
     let reg = null;
-    try { reg = JSON.parse(fs.readFileSync(path.join(root, '.sdlc', 'repos.json'), 'utf8')); } catch { /* none */ }
+    // Read only as a plain file (E125 b): a link to a device would hang the server, a link out reads a stranger's file.
+    try { reg = readPlainJSON(path.join(root, '.sdlc', 'repos.json')); } catch { /* none, broken, or not a plain file */ }
     // Judged first (E125): git runs only in a checkout yad may run git in, never a folder the Product shaped as
     // a bare repo or a link inside a repo's tree.
     for (const { target } of judgedRepos(root, reg).ok.filter((o) => o.present)) {

@@ -25567,6 +25567,48 @@ test('E19 indexFreshness: none, missing, current, behind, unreadable', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b readInput and indexFreshness: a link is never read, a folder keeps EISDIR', { skip: E125B_SKIP }, async () => {
+  const { readInput } = await import('./product-index.mjs');
+  const T = indexFixture({ 'outside.md': 'secret', 'crlf.md': 'a\r\nb' });
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.symlinkSync(path.join(T, 'outside.md'), path.join(T, '.sdlc', 'repos.json'));
+    assert.deepEqual(readInput(path.join(T, '.sdlc', 'repos.json')), { error: 'it is a link or not a plain file' });
+    assert.deepEqual(readInput(path.join(T, '.sdlc')), { error: 'EISDIR' });
+    assert.deepEqual(readInput(path.join(T, 'absent.md')), { absent: true });
+    assert.equal(readInput(path.join(T, 'crlf.md')).bytes.toString(), 'a\nb');
+    // A current index, moved out and linked back: it is not read, so it cannot be called current.
+    fs.mkdirSync(path.join(T, 'epics', 'EP-a', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE()));
+    writeIndex(T);
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
+    fs.renameSync(indexPath(T), path.join(T, 'index-outside.json'));
+    fs.symlinkSync(path.join(T, 'index-outside.json'), indexPath(T));
+    assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json is a link or not a plain file, so it was not read' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b: a .sdlc/repos.json that links to /dev/zero stops neither the brain inputs, the index check nor the live map', { skip: DEV_ZERO_SKIP }, () => {
+  const T = indexFixture({ 'epics/EP-a/.sdlc/state.json': E19_STATE(), '.sdlc/hub.json': { platform: 'github' } });
+  try {
+    fs.symlinkSync('/dev/zero', path.join(T, '.sdlc', 'repos.json'));
+    fs.symlinkSync('/dev/zero', path.join(T, '.sdlc', 'index.json'));
+    const got = inChildWithLimit(`const { readInput, indexFreshness } = await import(${cliUrl('./product-index.mjs')});
+const { startMapServer } = await import(${cliUrl('./map-view.mjs')});
+const root = process.argv[1];
+const input = readInput(root + '/.sdlc/repos.json');
+const fresh = indexFreshness(root);
+const srv = await startMapServer(root, { live: true });
+process.stdout.write(JSON.stringify({ input, fresh, watchable: srv.watchable }) + '\\n');
+process.exit(0);`, [T]);
+    assert.deepEqual(got, {
+      input: { error: 'it is a link or not a plain file' },
+      fresh: { state: 'unreadable', why: '.sdlc/index.json is a link or not a plain file, so it was not read' },
+      watchable: 2,
+    });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // `yad index`: the default branch only on a local Product; nothing written on a verified one; --json is a
 // read on any branch. Every arm is pinned, because each is a twin of another (local/verified, the default
 // branch/another, write/read).
@@ -25909,7 +25951,7 @@ test('E19 review: the summary format is in the hash, and a hand-edited index rea
   const { indexHash } = await import('./product-index.mjs');
   const parts = [{ name: 'x', input: { bytes: Buffer.from('y') } }];
   assert.notEqual(indexHash(parts, 'e19-2'), indexHash(parts), 'a new summary format must read the old file as behind');
-  const T = indexFixture({ 'epics/EP-a/.sdlc/state.json': E19_STATE() });
+  const T = indexFixture({ 'epics/EP-a/.sdlc/state.json': E19_STATE(), '.sdlc/hub.json': { platform: 'github' } });
   try {
     writeIndex(T);
     const onDisk = JSON.parse(fs.readFileSync(indexPath(T), 'utf8'));
