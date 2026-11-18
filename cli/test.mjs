@@ -27852,6 +27852,30 @@ test('E43 doctor: names a team workflow that runs on a push to any branch, and s
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #599: the update guard checks direct pushes to the trunk the YAD_TRUNK variable names, as well as to the
+// platform's default branch. Unset, it adds nothing: GitHub reads an unset variable as '', and GitLab's
+// rule asks for the variable before comparing to it. The files are copied as they are, so no branch is
+// filled in per repo.
+test('#599: the update guard also runs on a push to the YAD_TRUNK branch, and only there when it is set', () => {
+  const read = (f) => fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates', f), 'utf8');
+  const code = (t) => t.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const github = code(read('github/yad-update-guard.yml'));
+  const ifs = [...github.matchAll(/^ {4}if: (.+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(ifs, ["github.ref_name == github.event.repository.default_branch || (vars.YAD_TRUNK != '' && github.ref_name == vars.YAD_TRUNK)"]);
+  // Every branch push starts the workflow, so the job's `if:` is what picks the trunk.
+  assert.match(github, /on:\n {2}push:\n\s+branches-ignore: \["yad\/wip\/\*\*"\]\n/);
+  assert.doesNotMatch(github, /^\s+branches: /m);
+  const gitlab = code(read('gitlab/yad-update-guard.gitlab-ci.yml'));
+  const rules = gitlab.slice(gitlab.indexOf('.yad_update_guard_rules:'), gitlab.indexOf('.yad_update_guard_base:'));
+  assert.deepEqual([...rules.matchAll(/^ {4}- if: (.+)$/gm)].map((m) => m[1]), [
+    '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH',
+    '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK',
+  ]);
+  // Both jobs take those rules, and neither sets YAD_TRUNK itself: the value is the team's, set in the settings.
+  assert.equal((gitlab.match(/^ {2}extends: \.yad_update_guard_rules$/gm) || []).length, 2);
+  assert.doesNotMatch(gitlab, /^\s+YAD_TRUNK:/m);
+});
+
 test('E43: yadflow\'s update-guard workflow ignores the capture branches; the CLI runs capture and its hook path', () => {
   const guard = fs.readFileSync(new URL('../skills/yad-checks/templates/github/yad-update-guard.yml', import.meta.url), 'utf8');
   assert.match(guard, /on:\n {2}push:\n(?:\s*#.*\n)*\s+branches-ignore: \["yad\/wip\/\*\*"\]/);
