@@ -18,7 +18,8 @@ export const sameDir = (a, b) => { const [x, y] = [a && real(a), b && real(b)]; 
 
 // A linked worktree's own git folder, from the `gitdir:` line of its `.git` FILE. Null for a main checkout
 // (`.git` is a folder), for no checkout, or for a file that does not point at a `worktrees/<name>` folder
-// (a submodule's `.git` file points into `modules/`).
+// holding git's `commondir` file (a submodule's `.git` file points into `modules/` — also one kept at a
+// path `worktrees/<x>`, whose folder `modules/worktrees/<x>` has no `commondir`; #597 review).
 export function linkedGitDir(top) {
   let text;
   try {
@@ -28,7 +29,8 @@ export function linkedGitDir(top) {
   const m = text.match(/^gitdir:\s*(.+?)\s*$/m);
   if (!m) return null;
   const dir = path.resolve(top, m[1]);
-  return path.basename(path.dirname(dir)) === 'worktrees' ? dir : null;
+  if (path.basename(path.dirname(dir)) !== 'worktrees') return null;
+  try { return fs.statSync(path.join(dir, 'commondir')).isFile() ? dir : null; } catch { return null; }
 }
 
 // The common git folder a linked worktree shares with its main checkout (`<main>/.git`).

@@ -59,7 +59,7 @@ export async function runIndex(root, { json = false } = {}) {
   }
   const git = productGit(root);
   const defaultBranch = resolveDefaultBranch(git, productConfig);
-  const branch = branchToCommitOn(root, git, defaultBranch); // an epic worktree's detached trunk counts (#115)
+  const branch = branchToCommitOn(root, git, defaultBranch); // a Product worktree's detached trunk counts (#115, #597)
   if (branch !== defaultBranch) {
     fail(`on '${branch}', not the default branch '${defaultBranch}' — ${INDEX_FILE} is written on the default branch only, so a branch never carries it`);
     hand(`switch to '${defaultBranch}' and re-run (if '${defaultBranch}' is wrong, set default_branch in ${settingsEditHint(root)}); \`yad index --json\` prints it here without writing`);

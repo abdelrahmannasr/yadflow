@@ -20,8 +20,7 @@ import {
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead } from './productcommit.mjs';
-import { worktreeAt } from './worktree-record.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, isProductWorktree } from './productcommit.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
@@ -1144,13 +1143,14 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
     const originHead = git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
     const trunk = productConfig.default_branch || (originHead.ok && originHead.stdout ? originHead.stdout.replace(/^origin\//, '') : null);
-    // An epic's Product worktree sits detached: there, the same rule as the other default-branch commands.
+    // A Product worktree (an epic's, or a plain linked one, #597) sits detached: there, the same rule as the
+    // other default-branch commands.
     // In a worktree the default branch is never left unknown: a missing setting must not skip this check.
     const wtTrunk = trunk || resolveDefaultBranch(git, productConfig);
-    const detachedWorktree = head === 'HEAD' && worktreeAt(root)?.repo === null && !onlyYadCommitsAhead(git, wtTrunk);
+    const detachedWorktree = head === 'HEAD' && isProductWorktree(root) && !onlyYadCommitsAhead(git, wtTrunk);
     if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
       fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk || wtTrunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
-      hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in an epic worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
+      hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in a worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
       process.exitCode = 1;
       return { synced: 0, committed: false, pushed: false };
     }
@@ -1470,7 +1470,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // (E19 review). `stageIndexIfClean` keeps it out of a commit that does not hold what it read.
   const onDefault = (() => {
     const trunk = resolveDefaultBranch(git, productConfig);
-    return branchToCommitOn(root, git, trunk) === trunk; // an epic Product worktree's detached HEAD too (#115)
+    return branchToCommitOn(root, git, trunk) === trunk; // a Product worktree's detached HEAD too (#115, #597)
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
