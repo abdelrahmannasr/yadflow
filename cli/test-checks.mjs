@@ -3763,6 +3763,96 @@ test('epic-open gate: a link.md with no product-repo and no record says which to
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #597: a local `yad run checks` that could not put the Product where CI puts it writes the Product's
+// default branch to a folder of its own and names it in YAD_LOCAL_PRODUCT. The gates read it over what
+// product-repo reaches (here: a Product folder on another branch, without the epic) — but never in CI.
+const NO_CI = { CI: '', GITHUB_ACTIONS: '', GITLAB_CI: '' };
+const CI_FLAGS = [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { GITLAB_CI: 'true' }];
+test('epic-open, lineage-check and reconcile-debt read YAD_LOCAL_PRODUCT over product-repo, never in CI (#597)', () => {
+  for (const [script, tag] of [[EPIC_OPEN, 'epic-open'], [LINEAGE, 'lineage-check'], [DEBT, 'reconcile-debt']]) {
+    const T = scaffoldRepo();
+    const local = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-local-product-'));
+    try {
+      seedProductEpic(path.join(T, 'product'), 'EP-other');
+      seedProductEpic(local, 'EP-demo', { fm: { type: 'feature' }, stories: { 'EP-demo-S01': 'in-progress' } });
+      linkedCommit(T, '../../product');
+      let r = runGate(script, T, ['main'], { ...NO_CI, YAD_LOCAL_PRODUCT: local });
+      assert.equal(r.code, 0, `${tag}: ${r.out}`);
+      assert.ok(r.out.includes(`PASS [${tag}]`), `${tag}: ${r.out}`);
+      assert.doesNotMatch(r.out, /orphan story link|not reachable/, `${tag}: ${r.out}`);
+      assert.match(r.out, new RegExp(`note \\[${tag}\\]: \\w+ the Product is read from its default branch, which yad run checks wrote out for this run`), `${tag}: ${r.out}`);
+      // In CI the value is never read: product-repo is followed as before.
+      for (const ci of CI_FLAGS) {
+        r = runGate(script, T, ['main'], { ...NO_CI, ...ci, YAD_LOCAL_PRODUCT: local });
+        assert.equal(r.code, 1, `${tag} ${JSON.stringify(ci)}: ${r.out}`);
+        assert.match(r.out, /orphan story link/, `${tag} ${JSON.stringify(ci)}: ${r.out}`);
+      }
+      // Nor a value that is not a folder.
+      r = runGate(script, T, ['main'], { ...NO_CI, YAD_LOCAL_PRODUCT: path.join(local, 'nope') });
+      assert.equal(r.code, 1, `${tag}: ${r.out}`);
+      assert.match(r.out, /orphan story link/, `${tag}: ${r.out}`);
+    } finally {
+      fs.rmSync(T, { recursive: true, force: true });
+      fs.rmSync(local, { recursive: true, force: true });
+    }
+  }
+});
+
+test('contract-check reads the lock in YAD_LOCAL_PRODUCT over product-repo, never in CI (#597)', () => {
+  const T = scaffoldRepo();
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-local-product-'));
+  try {
+    // The folder product-repo reaches holds an older lock; the default branch holds the one pinned.
+    seedProductLock(T, 'EP-demo', 'b'.repeat(64));
+    seedProductLock(local, 'EP-demo', 'a'.repeat(64), '.');
+    commit(T, 'feat: widen API\n\nContract-Change: yes', {
+      'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': `sha256:${'a'.repeat(64)}` }),
+    });
+    let r = runGate(CONTRACT, T, ['main'], { ...NO_CI, YAD_LOCAL_PRODUCT: local });
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /still pins/, r.out);
+    assert.match(r.out, /note \[contract-check\]: the Product is read from its default branch, which yad run checks wrote out for this run — not from '\.\.\/\.\.\/product'/);
+    for (const ci of CI_FLAGS) {
+      r = runGate(CONTRACT, T, ['main'], { ...NO_CI, ...ci, YAD_LOCAL_PRODUCT: local });
+      assert.equal(r.code, 1, `${JSON.stringify(ci)}: ${r.out}`);
+      assert.match(r.out, /still pins/, `${JSON.stringify(ci)}: ${r.out}`);
+    }
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(local, { recursive: true, force: true });
+  }
+});
+
+test('YAD_LOCAL_PRODUCT swaps only a folder product-repo reaches: a FAIL CI gives still FAILs (#597)', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-local-product-'));
+  const env = { ...NO_CI, YAD_LOCAL_PRODUCT: local };
+  try {
+    seedProductEpic(local, 'EP-demo', { fm: { type: 'feature' }, stories: { 'EP-demo-S01': 'in-progress' } });
+    seedProductLock(local, 'EP-demo', 'd'.repeat(64), '.');
+    // A link.md with no product-repo and no record.
+    let T = scaffoldRepo();
+    commit(T, 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+      'src/thing.js': 'x',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo' }),
+    });
+    let r = runGate(EPIC_OPEN, T, ['main'], env);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /names no product-repo, and no \.sdlc\/product-link\.json on main names the Product/);
+    fs.rmSync(T, { recursive: true, force: true });
+    // A first spec whose product-repo reaches nothing.
+    T = scaffoldRepo();
+    commit(T, 'feat: widen API\n\nContract-Change: yes', {
+      'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}` }),
+    });
+    r = runGate(CONTRACT, T, ['main'], env);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL \[contract-check\]: specs\/EP-demo-S01\/link\.md is this repo's first spec/);
+    fs.rmSync(T, { recursive: true, force: true });
+  } finally { fs.rmSync(local, { recursive: true, force: true }); }
+});
+
 // #351: the same words in three gates, so all three are run.
 test('epic-open, lineage-check and reconcile-debt: an orphan story link says what to check (#351)', () => {
   for (const [script, tag] of [[EPIC_OPEN, 'epic-open'], [LINEAGE, 'lineage-check'], [DEBT, 'reconcile-debt']]) {
