@@ -1277,6 +1277,33 @@ test('#215 settings: a settings file over 64 MiB is named as too big, never read
   } finally { cleanup(T); }
 });
 
+test('#215 doctor and apply: a settings file over 64 MiB is named as too big, never "does not parse" or "restore it from git"', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { hookActions } = await import('./plan.mjs');
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  const T = await oldProduct();
+  try {
+    const dest = path.join(T, '.claude/settings.json');
+    fs.writeFileSync(dest, '{"permissions":{}}');
+    // Planned on a plain file, then made too big before apply: left untouched, with its own words.
+    const outdated = hookActions(T, ['.claude']).find((a) => a.shared === '.claude/settings.json');
+    assert.equal(outdated.status, 'outdated');
+    fs.truncateSync(dest, MAX_PLAIN_BYTES + 1);
+    const { said } = await quietly(() => outdated.apply());
+    assert.match(said, /\.claude\/settings\.json is larger than 64 MiB, the most yad reads, so yad did not read it — left untouched; replace it with a file of the right size/);
+    assert.doesNotMatch(said, /does not parse/);
+    assert.equal(fs.statSync(dest).size, MAX_PLAIN_BYTES + 1);
+    // doctor: the ledger guard and capture rows name it as too big.
+    const check = (id) => collectDoctor(T).checks.find((c) => c.id === id);
+    const hooks = check('hooks');
+    assert.equal(hooks.status, 'warn');
+    assert.match(hooks.message, /agent ledger guard cannot be wired — \.claude\/settings\.json is larger than 64 MiB, the most yad reads, so yad did not read it \[YAD-STATE-001\]/);
+    assert.match(hooks.hint, /^replace it with a file of the right size/);
+    assert.doesNotMatch(`${hooks.message} ${hooks.hint}`, /does not parse|from git/);
+    assert.match(check('capture').message, /wip capture not wired: .*\.claude\/settings\.json \(larger than 64 MiB, the most yad reads, so yad did not read it\)/);
+  } finally { cleanup(T); }
+});
+
 test('E125 b doctor: a linked settings file is named as one, for the ledger guard and for capture', { skip: LINK_SKIP }, async () => {
   const { collectDoctor } = await import('./doctor.mjs');
   const T = await oldProduct();

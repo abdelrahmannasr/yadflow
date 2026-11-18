@@ -6,7 +6,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -384,6 +384,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // Settings files that are a link or not a plain file (E125 b): never read, so neither "does not parse"
     // nor "not wired" — `yad check --fix` refuses them too, and only replacing the file clears it.
     const notPlain = [];
+    // Settings files larger than any real one (#215): never read, and named as such — not "does not parse",
+    // and not "restore it from git", which has no smaller copy when the big file is what is committed.
+    const tooBig = [];
     // Targets with no pre-edit hook protocol at all. Collected rather than skipped: a project whose
     // only target is `.agents` had this whole section report `ok` — "agent ledger guard wired" — while
     // nothing local guarded anything, because the loop found no adapter and said nothing. Silence
@@ -425,6 +428,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       let text;
       try { text = readPlainFile(settingsPath); } catch (e) {
         if (e?.code === NOT_PLAIN_FILE) { notPlain.push(relDest); continue; }
+        if (e?.code === FILE_TOO_BIG) { tooBig.push(relDest); continue; }
         text = ''; // cannot be read: reported below as a file that does not parse, as before
       }
       if (text !== null) {
@@ -463,6 +467,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     } else if (notPlain.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${notPlain.join(', ')} ${SETTINGS_NOT_PLAIN} [YAD-STATE-001]${alsoUnguarded}`,
         'replace it with the real file (not a link), then run `yad check --fix` — yad never reads or rewrites a settings file through a link, and restoring it from git brings back a link that is committed');
+    } else if (tooBig.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${tooBig.join(', ')} ${TOO_BIG_SAID} [YAD-STATE-001]${alsoUnguarded}`,
+        'replace it with a file of the right size, then run `yad check --fix` — yad never reads or rewrites a settings file that big');
     } else if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
@@ -3020,11 +3027,13 @@ export function lineEndingChecks(root, checks, { platform = process.platform, ru
 // those run on every `yad/wip/*` push. yadflow's own templates exclude the branches; a team's file is theirs,
 // so it is named, never edited.
 // One IDE settings file, parsed, or null when it is missing or does not parse. Read only as a plain file
-// (E125 b): a link or a folder is null too, and `named` says why beside the file's name.
+// (E125 b): a link or a folder is null too, and `named` says why beside the file's name; so is a file too big
+// to read (#215).
 const SETTINGS_NOT_PLAIN = 'is a link or not a plain file, so it was not read';
 function settingsOf(root, rel) {
   try { return { settings: readPlainJSON(path.join(root, rel)), named: rel }; } catch (e) {
-    return { settings: null, named: e?.code === NOT_PLAIN_FILE ? `${rel} (${SETTINGS_NOT_PLAIN.replace(/^is /, '')})` : rel };
+    const why = e?.code === NOT_PLAIN_FILE ? SETTINGS_NOT_PLAIN : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null;
+    return { settings: null, named: why ? `${rel} (${why.replace(/^is /, '')})` : rel };
   }
 }
 export function captureChecks(root, checks, cfg) {

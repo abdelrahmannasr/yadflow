@@ -1292,6 +1292,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       let text;
       try { text = readPlainFile(dest); } catch (e) {
         if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
+        if (e?.code === FILE_TOO_BIG) { warn(`${named} ${TOO_BIG_SAID} — left untouched; replace it with a file of the right size, then re-run \`yad check --fix\``); return; }
         text = '';  // unreadable — refused below, as a file that does not parse
       }
       if (text !== null) {
