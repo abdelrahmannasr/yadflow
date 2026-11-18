@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { isPlainObject, writeJSON, info, warn, readPlainFile, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
+import { isPlainObject, writeJSON, info, warn, readPlainFile, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, tooBigSaid } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import {
@@ -45,15 +45,16 @@ export const INDEX_FORMAT = 'e111-1';
 // the same, since the frontmatter reader expects `\n`. Nothing else in the bytes is touched.
 //
 // Only a plain file is read (E125 b): a link is never followed, so a link to a device cannot hang the
-// read and a link out of the Product is not read. A folder keeps its old answer, EISDIR.
-export function readInput(file) {
+// read and a link out of the Product is not read. A folder keeps its old answer, EISDIR. `opts.max` is the
+// most bytes read (the plain reads' limit unless named; #215).
+export function readInput(file, opts) {
   let raw;
   try {
-    raw = readPlainBytes(file);
+    raw = readPlainBytes(file, opts);
   } catch (e) {
     if (e.code === 'ENOENT') return { absent: true };
     if (e.code === NOT_PLAIN_FILE) return { error: e.kind === 'dir' ? 'EISDIR' : 'it is a link or not a plain file' };
-    if (e.code === FILE_TOO_BIG) return { error: `it ${TOO_BIG_SAID}` };
+    if (e.code === FILE_TOO_BIG) return { error: `it ${tooBigSaid(e.limit)}` };
     return { error: e.code || e.message };
   }
   return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };

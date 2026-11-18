@@ -17,7 +17,7 @@ if (process.env.NODE_TEST_CONTEXT) {
 process.env.YAD_NO_UPDATE_NOTIFIER = '1';
 
 const {
-  readGraphify, surfacesOf, tasksOf, composeBrain, buildRepoGraph, ensureBrainDir, excludeGraphifyOut,
+  readGraphify, surfacesOf, tasksOf, composeBrain, buildRepoGraph, ensureBrainDir, excludeGraphifyOut, BRAIN_GRAPH_MAX_BYTES,
   writeBrain, readBrain, brainFreshness, queryBrain, graphifyEnv, safeName, BRAIN_FILE, GRAPHIFY_ENV, GRAPHIFY_VERSION,
 } = await import('./brain.mjs');
 const { TOOLBOX } = await import('./toolbox.mjs');
@@ -393,6 +393,29 @@ test('review 1: a link or a committed graphify-out/ is refused; a link under .sd
     assert.throws(() => buildRepoGraph(root, { name: 'backend', target: be }, { runner: fakeGraphify().runner }), /not a plain folder/);
     assert.deepEqual(fs.readdirSync(away), [], 'nothing written through the link');
     done(away);
+  } finally { done(ws); }
+});
+
+// #215: the code graph is generated and grows with the code, so it is read up to its own, larger limit; a graph
+// past that is named as too big, never as one Graphify did not write.
+test('#215: a code graph over 64 MiB is still read, and one over 256 MiB is named as too big', () => {
+  const { ws, root, be } = product();
+  try {
+    const sized = (size) => {
+      const { runner } = fakeGraphify();
+      return (cmd, args = [], opts = {}) => {
+        const r = runner(cmd, args, opts);
+        // Sparse: no room on disk. The trailing zero bytes make it not parse, which shows it was read.
+        if (cmd === 'graphify' && args[0] === 'update') fs.truncateSync(path.join(opts.cwd, 'graphify-out', 'graph.json'), size);
+        return r;
+      };
+    };
+    assert.equal(BRAIN_GRAPH_MAX_BYTES, 256 * 1024 * 1024);
+    const read = buildRepoGraph(root, { name: 'backend', target: be }, { runner: sized(70 * 1024 * 1024) });
+    assert.equal(read.ok, false);
+    assert.match(read.why, /does not parse/, 'read past the 64 MiB limit of other files');
+    const big = buildRepoGraph(root, { name: 'backend', target: be }, { runner: sized(BRAIN_GRAPH_MAX_BYTES + 1) });
+    assert.equal(big.why, 'graphify-out/graph.json could not be read: it is larger than 256 MiB, the most yad reads, so yad did not read it');
   } finally { done(ws); }
 });
 

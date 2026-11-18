@@ -52,6 +52,10 @@ export const GRAPHIFY_ENV = Object.freeze({ GRAPHIFY_BACKEND: 'none', GRAPHIFY_Q
 export const LLM_ENV = /^(?:.*_API_KEY|.*_BASE_URL|ANTHROPIC_.*|OPENAI_.*|AZURE_OPENAI_.*|GEMINI_.*|GOOGLE_API_KEY|GOOGLE_APPLICATION_CREDENTIALS|MOONSHOT_.*|DEEPSEEK_.*|OLLAMA_.*|AWS_.*|GRAPHIFY_.*)$/i;
 // Graphify on a large repo is slow, but never this slow; a hang must not hold `yad` for ever.
 const GRAPHIFY_TIMEOUT_MS = 20 * 60 * 1000;
+// The most bytes of one repo's code graph (and its file list) read back. Graphify writes them, and they grow
+// with the code: the engine's own graph is about 9 MB, so a repo some eight times bigger passes the 64 MiB
+// every other Product file is held to (#215). Still a limit, so a committed file of gigabytes is refused.
+export const BRAIN_GRAPH_MAX_BYTES = 256 * 1024 * 1024;
 // A repo name becomes a folder name under .sdlc/brain/repos/: one plain word, never a path or a key that
 // means something to JavaScript.
 const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
@@ -86,13 +90,14 @@ export function ensureBrainDir(root) {
 }
 
 // A file inside `base`, read only when nothing on its way is a link (a committed link could point anywhere).
-function readPlain(base, rel) {
+// `opts.max`: the most bytes read (see readInput).
+function readPlain(base, rel, opts) {
   let cur = base;
   for (const part of rel.split('/')) {
     cur = path.join(cur, part);
     try { if (fs.lstatSync(cur).isSymbolicLink()) return { error: 'a link' }; } catch { return { absent: true }; }
   }
-  return readInput(cur);
+  return readInput(cur, opts);
 }
 
 // Write a file by a temp file and a rename: a rename replaces a link where `writeFileSync` would follow it,
@@ -215,8 +220,9 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   try {
     const st = fs.lstatSync(path.join(repo.target, 'graphify-out'));
     if (!st.isDirectory()) return { ok: false, why: 'graphify-out in the repo is not a plain folder (a link?)' };
-    const input = readPlain(repo.target, 'graphify-out/graph.json');
-    if (!input.bytes) return { ok: false, why: 'graphify wrote no graphify-out/graph.json' };
+    const input = readPlain(repo.target, 'graphify-out/graph.json', { max: BRAIN_GRAPH_MAX_BYTES });
+    // A file that is there but was refused (too big, a link) is named as such, never as one never written.
+    if (!input.bytes) return { ok: false, why: input.absent ? 'graphify wrote no graphify-out/graph.json' : `graphify-out/graph.json could not be read: ${input.error}` };
     text = input.bytes.toString('utf8');
   } catch { return { ok: false, why: 'graphify wrote no graphify-out/graph.json' }; }
   let g;
@@ -240,8 +246,8 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
 
 // The code graph kept for one repo, or why there is none: { graph?, meta?, files?, inputs, why? }.
 function storedRepoGraph(root, name) {
-  const input = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'graph.json')));
-  const filesIn = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'files.txt')));
+  const input = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'graph.json')), { max: BRAIN_GRAPH_MAX_BYTES });
+  const filesIn = readPlain(root, posix(path.join(BRAIN_DIR, 'repos', name, 'files.txt')), { max: BRAIN_GRAPH_MAX_BYTES });
   const inputs = { input, filesIn };
   if (!input.bytes) return { inputs, why: input.absent ? 'not built yet' : `unreadable (${input.error})` };
   let meta = {};
