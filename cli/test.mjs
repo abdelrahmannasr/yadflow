@@ -27180,7 +27180,7 @@ test('E1 every command answers --json with one envelope, ok matching its exit co
     ['review', 'context', '--repo', 'nope', '--pr', '1'], ['review', 'trailer', '--repo', 'nope', '--pr', '1', '--body', 'x'],
     ['review', 'nudge', '--repo', 'nope', '--pr', '1'],
     ['commit', '-m', 'x'], ['open-pr'], ['ship', '-m', 'x', '--dry-run'], ['checkpoint'], ['tidy', 'up'], ['tidy'], ['index'],
-    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'sync'], ['repo', 'clone'],
+    ['history'], ['history', 'show', 'EP-demo'], ['history', 'search', 'demo'], ['repo', 'list'], ['repo', 'refresh'], ['repo', 'pack'], ['repo', 'sync'], ['repo', 'clone'],
     ['risk-map', 'check'], ['codeowners', 'check'], ['roster'], ['docs', 'list'], ['docs', 'sync'], ['thread'], ['thread', 'EP-demo'],
     ['reconcile'], ['hook', 'ledger-guard'], ['standup'], ['setup', '--solo', '--greenfield', '--monorepo'],
   ];
@@ -30407,6 +30407,104 @@ test('E125 b: packRepo runs npx from an empty folder of its own, names the npm r
     const out = path.join(product, '.sdlc', 'code-context', 'backend', 'pack.md');
     assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${(await import('./toolbox.mjs')).REPOMIX_VERSION}`, backend, '--compress', '--include-logs', '--style', 'markdown', '-o', out]);
     assert.ok(path.isAbsolute(args[2]) && path.isAbsolute(args.at(-1)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #213: `yad repo pack` is what the skills now run, in place of Repomix started with npx inside the repo. An npx on PATH
+// that logs where it ran, what was in that folder, and each argument on its own line, then prints `PACK`.
+function packNpx(T) {
+  const bin = path.join(T, 'npx-bin');
+  const log = path.join(T, 'npx-calls.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | tr '\\n' ','; echo; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\necho PACK\n`, { mode: 0o755 });
+  return {
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+    ran: () => fs.existsSync(log),
+    call: () => { const [cwd, entries, ...args] = fs.readFileSync(log, 'utf8').trim().split('\n'); return { cwd, entries, args }; },
+  };
+}
+
+test('#213: yad repo pack runs npx from an empty folder of its own, names the registry, and passes --include, --logs and absolute paths', { skip: E125_SKIP }, async () => {
+  const { REPOMIX_VERSION } = await import('./toolbox.mjs');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A `.npmrc` planted in the code repo and in the Product: npm would read either one from where it runs.
+    for (const dir of [backend, product]) fs.writeFileSync(path.join(dir, '.npmrc'), 'registry=https://evil.example/\n');
+    const npx = packNpx(T);
+    // Run from inside the code repo, as an agent would: `-o` is named from there.
+    const r = e79Yad(T, backend, ['repo', 'pack', 'backend', '--include', 'src/**,lib/*.ts', '--logs', '-o', 'out/pack.md', '--json'], npx.env);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const { cwd, entries, args } = npx.call();
+    assert.ok(cwd.startsWith(path.join(fs.realpathSync(os.tmpdir()), 'yad-repomix-')), `npx ran in a temp folder of its own: ${cwd}`);
+    assert.ok(!cwd.startsWith(T), 'not in the workspace, the Product or the repo');
+    assert.equal(entries, 'package.json,', 'only its own package.json: the planted .npmrc is never read');
+    assert.ok(!fs.existsSync(cwd), 'and it is removed afterwards');
+    const out = path.join(backend, 'out', 'pack.md');
+    assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${REPOMIX_VERSION}`, backend, '--compress', '--include', 'src/**,lib/*.ts', '--include-logs', '--style', 'markdown', '-o', out]);
+    assert.ok(fs.existsSync(path.dirname(out)), 'the folder for the file is made');
+    const json = JSON.parse(r.stdout);
+    assert.equal(json.command, 'repo pack');
+    assert.deepEqual([json.packed, json.out], [true, out]);
+    // Without --logs, no git log; with no -o, the repo's usual pack in the Product, as `refresh` writes it.
+    assert.equal(e79Yad(T, backend, ['repo', 'pack', 'backend', '-o', 'x.md'], npx.env).status, 0);
+    assert.ok(!npx.call().args.includes('--include-logs'));
+    const before = fs.readFileSync(path.join(product, '.sdlc', 'repos.json'), 'utf8');
+    assert.equal(e79Yad(T, product, ['repo', 'pack', 'backend'], npx.env).status, 0);
+    assert.deepEqual(npx.call().args.slice(2), [backend, '--compress', '--include-logs', '--style', 'markdown', '-o', path.join(product, '.sdlc', 'code-context', 'backend', 'pack.md')]);
+    assert.equal(fs.readFileSync(path.join(product, '.sdlc', 'repos.json'), 'utf8'), before, 'the registry is not stamped: that is refresh\'s');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213: yad repo pack -o - puts the pack alone on stdout, and refuses --json there', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // An entry that is not an object: a warning every repo command says, here on stderr.
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'));
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [...reg.repos, null] }));
+    const npx = packNpx(T);
+    const r = e79Yad(T, backend, ['repo', 'pack', 'backend', '--include', 'src/**', '-o', '-'], npx.env);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.stdout, 'PACK\n', 'nothing but the pack on stdout');
+    assert.match(r.stderr, /1 entry in \.sdlc\/repos\.json is not an object/);
+    assert.match(r.stderr, /backend: packed to stdout/);
+    assert.deepEqual(npx.call().args.slice(3), ['--compress', '--include', 'src/**', '--style', 'markdown', '--stdout']);
+    fs.rmSync(path.join(T, 'npx-calls.log'));
+    const j = e79Yad(T, backend, ['repo', 'pack', 'backend', '-o', '-', '--json'], npx.env);
+    assert.equal(j.status, 1);
+    assert.match(JSON.parse(j.stdout).error, /-o - takes no --json/);
+    // A part of the repo never replaces the usual whole-repo pack.
+    const part = e79Yad(T, backend, ['repo', 'pack', 'backend', '--include', 'src/**'], npx.env);
+    assert.equal(part.status, 1);
+    assert.match(part.stdout, /--include packs part of the repo/);
+    assert.ok(!npx.ran(), 'npx never ran for either refusal');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213: yad repo pack never packs a refused folder — a bare-shaped one or one behind a link — and runs neither git nor npx there', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const f = e125Workspace(T);
+    fs.symlinkSync('../backend', path.join(f.product, 'evil'));
+    const reg = JSON.parse(fs.readFileSync(f.regFile, 'utf8'));
+    reg.repos.push({ name: 'evil', path: 'evil' });
+    fs.writeFileSync(f.regFile, JSON.stringify(reg));
+    const npx = packNpx(T);
+    const env = { ...f.env, PATH: `${npx.env.PATH.split(path.delimiter)[0]}${path.delimiter}${f.env.PATH}` };
+    for (const [name, why] of [['bare', /bare: the folder exists and is not a git repo .* — not packed/], ['evil', /evil: a folder on its path, inside a repo, is a link.* — not packed/]]) {
+      for (const tail of [[], ['-o', 'x.md'], ['-o', '-']]) {
+        const r = e79Yad(T, f.product, ['repo', 'pack', name, ...tail], env);
+        assert.equal(r.status, 1, `${name} ${tail.join(' ')}: ${r.stdout}${r.stderr}`);
+        assert.match(r.stdout + r.stderr, why);
+        assert.equal(tail[1] === '-' ? r.stdout : '', '', 'to stdout: not even the refusal is on stdout');
+      }
+    }
+    assert.ok(!npx.ran(), 'npx never ran');
+    assert.deepEqual(f.gitInBare(), []);
+    f.untouched();
+    assert.ok(!fs.existsSync(path.join(f.product, 'x.md')));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
