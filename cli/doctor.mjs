@@ -2960,10 +2960,14 @@ export async function runDoctor(root, { json = false, headCount = null } = {}) {
     const guide = () => { if (section === 'protection' && protectionWarns) hand(`how to set branch protection up for yad: ${PROTECTION_GUIDE_URL}`); };
     for (const x of checks) {
       if (x.section !== section) { guide(); section = x.section; log(`\n  ${c.bold(section)}`); }
-      ({ ok, warn, fail })[x.status](x.message);
+      // Cleaned here, once, for every check (E125): a message or hint can carry text from a Product file
+      // (a step id, a reason, a file name), and a committed file must not move the cursor or set the
+      // window title. `forTerminal` leaves clean text as it is, so text a check already cleaned is fine.
+      // The colour codes are added after, by ok/warn/fail/hand. `--json` above keeps the raw values.
+      ({ ok, warn, fail })[x.status](forTerminal(x.message));
       // A check may ask for its hint whatever its level (`alwaysHint`): an E70 `protection` line is `ok` in
       // solo mode even when the platform could not be read, and its hint is the fix ("run `gh auth login` …").
-      if (x.hint && (x.status !== 'ok' || x.alwaysHint)) hand(x.hint);
+      if (x.hint && (x.status !== 'ok' || x.alwaysHint)) hand(forTerminal(x.hint));
     }
     guide();
     log('');

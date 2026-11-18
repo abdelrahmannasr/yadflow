@@ -30005,6 +30005,42 @@ test('E81 review 14: doctor builds no login command from a Product host that is 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// E125 part (c): doctor cleans every finding at its printer, so text a Product file holds — a step id in
+// state.json, a reconcile-debt reason, a workflow file name — cannot set the window title or clear the
+// screen. `--json` still carries the raw value, and a plain message prints as it is.
+test('E125 (c): yad doctor prints a step id, a reconcile-debt reason and a workflow file name cleaned; --json keeps them raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const title = '\u001b]0;pwned\u0007';
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const epic = (id, front, files = {}) => {
+      fs.mkdirSync(path.join(product, 'epics', id, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(product, 'epics', id, 'epic.md'), `---\nid: ${id}\n${front}\n---\n\n## Goal\nx\n`);
+      for (const [f, v] of Object.entries(files)) fs.writeFileSync(path.join(product, 'epics', id, '.sdlc', f), JSON.stringify(v));
+    };
+    epic('EP-gen', 'kind: feature\nthread: EP-gen', { 'state.json': { schemaVersion: 7, epicId: 'EP-gen', currentStep: 'epic',
+      steps: [{ id: `ep${title}ic`, type: 'author', artifact: 'epic.md', status: 'quantum' }] } });
+    epic('EP-chg', 'kind: defect\nparent: EP-gen\nthread: EP-gen', { 'reconcile-debt.json': [{ status: 'open', reason: `late${title}fix\u001b[2J` }] });
+    fs.mkdirSync(path.join(product, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(product, '.github', 'workflows', `ci${title}.yml`), 'on: push\njobs: {}\n');
+
+    const doc = e79Yad(T, product, ['doctor']);
+    const out = doc.stdout + doc.stderr;
+    assert.ok(!hasRaw(out), `doctor prints no raw control character:\n${out}`);
+    assert.match(out, /EP-gen\/ep ]0;pwned ic: `quantum`/, 'the step id, cleaned');
+    assert.match(out, /EP-chg: open reconcile debt \(late ]0;pwned fix \[2J\)/, 'the debt reason, cleaned');
+    assert.match(out, /\.github\/workflows\/ci ]0;pwned \.yml runs on a push to ANY branch/, 'the workflow file name, cleaned');
+    assert.match(out, /EP-chg: defect threaded to EP-gen/, 'a plain message prints as it is');
+
+    const json = JSON.parse(e79Yad(T, product, ['doctor', '--json']).stdout);
+    const msg = (id) => json.checks.find((x) => x.id === id)?.message || '';
+    assert.ok(msg('step:unknown-status').includes(`EP-gen/ep${title}ic`), '--json keeps the raw step id');
+    assert.ok(msg('thread:EP-chg:debt').includes(`late${title}fix\u001b[2J`), '--json keeps the raw reason');
+    assert.ok(json.checks.some((x) => x.id === 'capture' && x.message.includes(`ci${title}.yml`)), '--json keeps the raw file name');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 15: the solo people count runs no git in a folder the Product shaped as a repo, and says it could not count it', { skip: process.platform === 'win32' && 'a shell script as gpg.program' }, () => {
   const T = e79Tmp();
   const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-r15-${process.pid}`);
