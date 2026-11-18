@@ -84,4 +84,8 @@ folder and a link to `/dev/zero` in place of each file, the last in a child proc
 - cli/brand-cmd.mjs
 - cli/guide.mjs
 - cli/doctor.mjs
+
+## T09 — Cover the guide, brand and doctor reads
+**Files:**
+- cli/test.mjs
 <!-- /yad:tasks -->
