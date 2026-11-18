@@ -142,6 +142,17 @@ test('E125 b readMemberFile: a link or a folder in place of the file is not read
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#215 readMemberFile: a member file over 64 MiB is named as too big, not read', async () => {
+  const { MAX_PLAIN_BYTES, TOO_BIG_SAID } = await import('./lib.mjs');
+  const T = product();
+  try {
+    const f = path.join(T, M.MEMBERS_DIR, 'github-alice.json');
+    put(f, alice());
+    fs.truncateSync(f, MAX_PLAIN_BYTES + 1);
+    assert.deepEqual(M.readMemberFile(f, GH), { error: TOO_BIG_SAID });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125 b readMemberFile: a link to /dev/zero is refused at once', { skip: process.platform === 'win32' && 'no /dev/zero on Windows' }, () => {
   const T = tmp();
   try {

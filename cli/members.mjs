@@ -44,7 +44,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readBlobsAt } from './git-read.mjs';
 
-import { c, log, ok, info, warn, fail, hand, run, readJSON, readPlainJSON, NOT_PLAIN_FILE, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, readJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, configuredGitUrl, httpStatus } from './protection.mjs';
@@ -105,6 +105,7 @@ export function readMemberFile(file, { platform, host } = {}) {
   let r;
   try { r = readPlainJSON(file); } catch (e) {
     if (e.code === NOT_PLAIN_FILE) return { error: 'is a link or not a plain file, so it was not read' };
+    if (e.code === FILE_TOO_BIG) return { error: TOO_BIG_SAID };
     return { error: e instanceof SyntaxError ? 'is not valid JSON' : `cannot be read (${e.code || e.message})` };
   }
   if (!isPlainObject(r)) return { error: 'is not a JSON object' };
