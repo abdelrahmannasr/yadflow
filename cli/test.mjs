@@ -21895,6 +21895,25 @@ test('risk map: draft never writes a line the map cannot read — a parent line 
   assert.match(left.find((f) => f.target === 'my docs/').message, /rename it/);
 });
 
+// S04 (Product #216): a directory name holding a control character (C0, DEL, C1) or an invisible one
+// `forTerminal` replaces (a bidi control, a line separator) is never written into the committed map.
+test('risk map: draft never writes a directory whose name holds a control or invisible character', async () => {
+  const { draftRiskMap, parseRiskMap } = await import('./riskmap.mjs');
+  const { changedForTerminal, forTerminal } = await import('./lib.mjs');
+  // `src/in…ner/` sits under `src/x/`, which has a line, so draft asks for that folder itself — and must not write it.
+  const odd = ['ev\u001b]0;x/', 'bel\u0007/', 'del\u007f/', 'c1\u009b/', 'rtl\u202e/', 'ls\u2028/', 'src/in\u001bner/'];
+  const files = ['plain/a.js', 'src/x/a.js', ...odd.map((d) => `${d}f.js`), '.sdlc/risk-map'];
+  const d = draftRiskMap('# yad-risk-map v1\nsrc/x/ low confirmed\n', files);
+  assert.deepEqual(d.added, ['.sdlc/', 'plain/']);
+  assert.deepEqual([...d.unwritable].sort(), [...odd].sort(), 'each such directory is listed as one draft could not write');
+  assert.ok(d.text.split('\n').every((l) => !changedForTerminal(l)), `no line of the map holds such a character:\n${JSON.stringify(d.text)}`);
+  assert.deepEqual(parseRiskMap(d.text).problems, []);
+  assert.equal(draftRiskMap(d.text, files).text, d.text, 'a second draft adds nothing');
+  // The shared predicate says exactly what `forTerminal` changes.
+  for (const t of ['plain', 'é ü 字', '@types', 'a-b_c.d']) assert.equal(changedForTerminal(t), false, t);
+  for (const t of odd) assert.ok(changedForTerminal(t) && forTerminal(t) !== t, JSON.stringify(t));
+});
+
 test('risk map: `@types/` is a directory, `@org/team` is a name; only spaces and tabs are whitespace', async () => {
   const { parseRiskMap } = await import('./riskmap.mjs');
   const p = parseRiskMap('# yad-risk-map v1\n@types/ low confirmed\nsrc/ high confirmed # @org/payments-team\nlib/ low confirmed \n');

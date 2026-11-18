@@ -31,6 +31,8 @@
 //   - Everything here has a twin in `checks/risk-map-check.sh`. Change one and change the other: a test
 //     runs both over the same repos and compares what they report.
 
+import { changedForTerminal } from './lib.mjs';
+
 export const RISK_MAP_FILE = '.sdlc/risk-map';
 export const RISK_MAP_VERSION = 1;
 export const RISK_LEVELS = ['high', 'medium', 'low'];
@@ -348,9 +350,11 @@ const NEW_MAP_HEAD = [
 
 // Add an `unset` line for every directory nothing covers, and never change a line already there. Returns
 // { text, added, unwritable, refused }: `refused` is a reason when the file is written for a newer version
-// (adding to it by older rules is guessing); `unwritable` lists top-level directories whose names a line
-// cannot hold — writing one would be an unreadable line that the next draft adds again. A missing header
-// is added at the top — it is not an entry.
+// (adding to it by older rules is guessing); `unwritable` lists the top-level directories whose names a
+// line cannot hold — writing one would be an unreadable line that the next draft adds again — and any
+// directory, at any depth, whose name holds a control or invisible character (`changedForTerminal`): the
+// map is committed, so such a name is named, never written. A missing header is added at the top — it is
+// not an entry.
 export function draftRiskMap(existing, files) {
   const text = existing ?? null;
   const parsed = parseRiskMap(text ?? '');
@@ -358,8 +362,11 @@ export function draftRiskMap(existing, files) {
   const all = files.includes(RISK_MAP_FILE) ? files : [...files, RISK_MAP_FILE];
   // Sorted, `./` first, so the same repo drafts the same bytes however git happens to list its files.
   const asked = riskMapFindings(parsed, { files: all }).filter((x) => x.code === 'uncovered').map((x) => x.target);
-  const unwritable = asked.filter((d) => !validDir(d));
-  const added = asked.filter((d) => validDir(d))
+  // A name `validDir` reads but that holds a control or invisible character (an escape, a bidi control)
+  // is not written either: the map is committed, and every tool that shows it would meet the name raw.
+  const writable = (d) => validDir(d) && !changedForTerminal(d);
+  const unwritable = asked.filter((d) => !writable(d));
+  const added = asked.filter(writable)
     .sort((a, b) => (a === './' ? -1 : b === './' ? 1 : a < b ? -1 : a > b ? 1 : 0));
   const width = Math.max(0, ...added.map((d) => d.length)) + 2;
   const newLines = added.map((d) => `${d.padEnd(width)}unset`);

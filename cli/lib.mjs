@@ -29,7 +29,11 @@ export const PKG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 // So do the line and paragraph separators and the bidi controls, which can make a line read in another
 // order than it holds (E81 review 9).
 const INVISIBLE = new Set([0x2028, 0x2029, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x061c]);
-export const forTerminal = (s) => [...String(s ?? '')].map((ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n) ? ' ' : ch; }).join('');
+const unsafeChar = (ch) => { const n = ch.charCodeAt(0); return n < 32 || (n >= 127 && n <= 159) || INVISIBLE.has(n); };
+export const forTerminal = (s) => [...String(s ?? '')].map((ch) => (unsafeChar(ch) ? ' ' : ch)).join('');
+// True when `forTerminal` would change `s`: a name holding one of those characters is never written into
+// a committed file yad drafts (the risk map), where every later reader would meet it raw.
+export const changedForTerminal = (s) => [...String(s ?? '')].some(unsafeChar);
 
 // A registry name inside a command the person is invited to copy: as it is only when it is one plain
 // word that starts with a letter or digit (never an option like `--push`), else `<name>` — the shared
