@@ -30697,6 +30697,27 @@ test('E125: the repos yad update commits in are judged: never a bare-shaped fold
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b: a .sdlc/repos.json that is a link is not read by yad update or the live map', { skip: E125B_SKIP }, async () => {
+  const { updateTargets } = await import('./update-commit.mjs');
+  const { startMapServer } = await import('./map-view.mjs');
+  const T = e79Tmp();
+  let srv;
+  try {
+    const f = e125Workspace(T);
+    const env = { ...process.env, YAD_REPORTS_DIR: path.join(T, 'r') };
+    srv = await startMapServer(f.product, { live: true, env });
+    const watchedWithFile = srv.watchable;
+    await srv.close();
+    // The same registry, moved out of the Product and linked back: a read that followed the link would
+    // still find the backend.
+    fs.renameSync(f.regFile, path.join(T, 'registry-outside.json'));
+    fs.symlinkSync(path.join(T, 'registry-outside.json'), f.regFile);
+    assert.deepEqual(updateTargets(f.product).map((t) => t.name), ['product']);
+    srv = await startMapServer(f.product, { live: true, env });
+    assert.ok(srv.watchable < watchedWithFile, `the backend is no longer watched (${srv.watchable} < ${watchedWithFile})`);
+  } finally { if (srv) await srv.close(); fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125 review: a connected repo\'s folder is judged again right before yad update commits or opens a PR/MR in it', { skip: E125_SKIP }, async () => {
   const { commitAndPush, openUpdatePr } = await import('./update-commit.mjs');
   const T = e79Tmp();

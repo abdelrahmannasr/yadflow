@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath, readPlainJSON } from './lib.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
 import { parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
@@ -401,7 +401,8 @@ export function updateTargets(productRoot) {
   return [{ root: productRoot, name: 'product', defaultBranch: settings.default_branch ?? null, platform: settings.platform ?? null, product: true, file: PROJECT_FILES.version }, ...repos];
 }
 const isRoot = (a, b) => path.resolve(a) === path.resolve(b);
-const readJSONSafe = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+// Null when the file is missing, broken, or not a plain file (a link is never followed, E125 b).
+const readJSONSafe = (f) => { try { return readPlainJSON(f); } catch { return null; } };
 
 // Where one repo stands against its default branch, from git alone (origin as last fetched, no network):
 // the branch checked out (null when detached or unborn), whether it has an origin, and how far HEAD is
