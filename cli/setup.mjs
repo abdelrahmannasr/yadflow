@@ -5,7 +5,7 @@ import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
   exists, readJSON, readJSONStrict, writeJSON,
-  writeProductConfig, forTerminal, inJSON,
+  writeProductConfig, forTerminal, asArg, inJSON,
 } from './lib.mjs';
 import { err } from './errors.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
@@ -139,21 +139,21 @@ function notCheckoutWhy(root, rpath) {
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
 export function registerRepo(root, registry, { name, rpath, platform, default_branch = 'main', today = null, pack = true }) {
-  if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); return null; }
+  if (throughGitDir(root, rpath)) { warn(`${forTerminal(rpath)} runs through a .git folder — not a code repo, skipped`); return null; }
   if (!insideWorkspace(root, rpath)) {
-    warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
+    warn(`${forTerminal(rpath)} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
   }
   const why = notCheckoutWhy(root, rpath);
   if (why) { warn(`${forTerminal(rpath)} is not a git repository yad may run git in (${why}) — skipped`); return null; }
   const repoRoot = path.resolve(root, rpath);
   const head = gitHead(repoRoot);
-  if (head === null) { warn(`${rpath} is not a git repository (or has no commits) — skipped`); return null; }
+  if (head === null) { warn(`${forTerminal(rpath)} is not a git repository (or has no commits) — skipped`); return null; }
   const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
   let plat = (platform || '').toLowerCase();
   if (!['github', 'gitlab'].includes(plat)) {
     const detected = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
-    if (plat) warn(`unknown platform '${platform}' — using ${detected}`);
+    if (plat) warn(`unknown platform '${forTerminal(platform)}' — using ${detected}`);
     plat = detected;
   }
   // No `domain_owner` / `domain_owners` (E62): people are not stored. A registry entry an older release
@@ -281,13 +281,13 @@ function applyActions(actions, { force = false } = {}) {
     // A managed file the team edited is left alone here too — setup re-runs with force:true, so
     // without this the wizard would be a second silent-clobber path for the same edits (#164).
     if (a.status === 'modified') {
-      warn(`kept locally modified ${a.scope}/${a.item} — replace it with \`yad update --overwrite-local\``);
+      warn(`kept locally modified ${forTerminal(`${a.scope}/${a.item}`)} — replace it with \`yad update --overwrite-local\``);
       continue;
     }
     if (a.status === 'ok' && !force) continue;
     a.apply();
     changed++;
-    info(`${a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
+    info(`${a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${forTerminal(`${a.scope}/${a.item}`)}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
   }
   if (!changed) info('already up to date');
   return changed;
@@ -416,7 +416,7 @@ export function checkSetupFlags(root, opts = {}) {
   const found = (opts.discovered || []).map((d) => d.name);
   if (has_(opts.connect) && !['all', 'none'].includes(opts.connect)) {
     const unknown = parseList(opts.connect).filter((n) => !found.includes(n));
-    if (unknown.length) throw setupFlagError(`--connect: no repo named ${unknown.join(', ')} was found beside the Product${found.length ? ` (found: ${found.join(', ')})` : ''}`);
+    if (unknown.length) throw setupFlagError(`--connect: no repo named ${forTerminal(unknown.join(', '))} was found beside the Product${found.length ? ` (found: ${forTerminal(found.join(', '))})` : ''}`);
   }
   const names = new Set();
   for (const spec of opts.addRepo || []) {
@@ -786,19 +786,19 @@ export async function runSetup(root, opts = {}) {
     const default_branch = detectDefaultBranch(repoRoot);
     // "Connect" means what it means in the loop below: register it, and the wiring step then writes the
     // CI gates and the PR template into it. Said here, because init asks for every repo at once.
-    if (!(connects(opts.connect, d.name) ?? await askYesNo(`Connect and wire ${d.name} (${d.rpath}, ${platform}, default branch ${default_branch}) — writes its CI gates + PR template?`, true))) continue;
+    if (!(connects(opts.connect, d.name) ?? await askYesNo(`Connect and wire ${forTerminal(d.name)} (${forTerminal(d.rpath)}, ${platform}, default branch ${forTerminal(default_branch)}) — writes its CI gates + PR template?`, true))) continue;
     const repo = registerRepo(root, registry, { name: d.name, rpath: d.rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
     if (!repo) continue;
     known.add(d.name);
-    ok(`registered ${d.name}`);
-    if (greenfield) info(`${d.name}: greenfield — skipped repomix pack (run \`yad repo refresh ${d.name}\` once it has code)`);
+    ok(`registered ${forTerminal(d.name)}`);
+    if (greenfield) info(`${forTerminal(d.name)}: greenfield — skipped repomix pack (run \`yad repo refresh ${asArg(d.name)}\` once it has code)`);
     else packRepo(root, repo);
     if (mono) { info('monorepo — one repo connected'); break; }
   }
   // E159: repos named by flag (`--add-repo`, checked before anything was written), and no question when the
   // repos were answered by flag (`--connect` or `--add-repo`).
   for (const r of (opts.addRepo || []).map(parseAddRepo)) {
-    if (known.has(r.name)) { warn(`${r.name} already registered — skipping`); continue; }
+    if (known.has(r.name)) { warn(`${forTerminal(r.name)} already registered — skipping`); continue; }
     const notHere = notCheckoutWhy(root, r.rpath);
     if (notHere) { warn(`${forTerminal(r.rpath)} is not a git repository yad may run git in (${notHere}) — skipped`); continue; }
     const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, r.rpath) });
@@ -806,8 +806,8 @@ export async function runSetup(root, opts = {}) {
     const repo = registerRepo(root, registry, { name: r.name, rpath: r.rpath, platform, default_branch: r.default_branch || 'main', today: opts.today ?? null, pack: !greenfield });
     if (!repo) continue;
     known.add(r.name);
-    ok(`registered ${r.name}`);
-    if (greenfield) info(`${r.name}: greenfield — skipped repomix pack (run \`yad repo refresh ${r.name}\` once it has code)`);
+    ok(`registered ${forTerminal(r.name)}`);
+    if (greenfield) info(`${forTerminal(r.name)}: greenfield — skipped repomix pack (run \`yad repo refresh ${asArg(r.name)}\` once it has code)`);
     else packRepo(root, repo);
     if (mono) { info('monorepo — one repo connected'); break; }
   }
@@ -816,11 +816,11 @@ export async function runSetup(root, opts = {}) {
     for (;;) {
       const name = await ask('  repo name (blank to finish)', '');
       if (!name) break;
-      if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
+      if (known.has(name)) { warn(`${forTerminal(name)} already registered — skipping`); continue; }
       // Siblings of the Product are the common layout (project/{product,backend}) — `../backend` is valid.
       const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
-      if (throughGitDir(root, rpath)) { warn(`${rpath} runs through a .git folder — not a code repo, skipped`); continue; }
-      if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
+      if (throughGitDir(root, rpath)) { warn(`${forTerminal(rpath)} runs through a .git folder — not a code repo, skipped`); continue; }
+      if (!insideWorkspace(root, rpath)) { warn(`${forTerminal(rpath)} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const notHere = notCheckoutWhy(root, rpath);
       if (notHere) { warn(`${forTerminal(rpath)} is not a git repository yad may run git in (${notHere}) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
@@ -829,8 +829,8 @@ export async function runSetup(root, opts = {}) {
       const repo = registerRepo(root, registry, { name, rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
       if (!repo) continue;
       known.add(name);
-      ok(`registered ${name}`);
-      if (greenfield) info(`${name}: greenfield — skipped repomix pack (run \`yad repo refresh ${name}\` once it has code)`);
+      ok(`registered ${forTerminal(name)}`);
+      if (greenfield) info(`${forTerminal(name)}: greenfield — skipped repomix pack (run \`yad repo refresh ${asArg(name)}\` once it has code)`);
       else packRepo(root, repo);
       if (mono) { info('monorepo — one repo connected; stop here'); break; }
     }

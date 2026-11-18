@@ -30712,6 +30712,45 @@ test('E125 (c): yad doctor prints a step id, a reconcile-debt reason and a workf
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// S04 (Product #216): the repo names and paths `yad setup` / `yad init` print — a found folder, its
+// prompt, a registered repo, a path refused — go through `forTerminal`; the registry keeps the raw name.
+test('S04: yad setup prints a found folder name, a registered repo and a refused path cleaned; the registry keeps them raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, async () => {
+  const { registerRepo } = await import('./setup.mjs');
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const odd = 'ap\u001b]0;pwned\u0007i';
+  const { T } = scaffold();
+  const prior = process.env.SDLC_NONINTERACTIVE;
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const repo = path.join(T, 'demo', odd);
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q');
+    git(repo, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
+    const { out } = await captureConsole(() => runSetup(T, {
+      solo: true, greenfield: true, separate: true, ideTargets: ['.claude'], connect: 'all',
+      discovered: [{ name: odd, rpath: `demo/${odd}` }],
+    }));
+    assert.ok(!hasRaw(out), `setup prints no raw control character:\n${out}`);
+    assert.match(out, /registered ap ]0;pwned i/, 'the found folder, cleaned');
+    assert.match(out, /ap ]0;pwned i: greenfield — skipped repomix pack \(run `yad repo refresh <name>`/, 'and a name that is not one plain word is never put in a command');
+    const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    assert.ok(reg.repos.some((r) => r.name === odd && r.path === `demo/${odd}`), 'the registry keeps the raw name and path');
+
+    // A path refused before any git runs is printed cleaned too.
+    const refused = await captureConsole(() => {
+      registerRepo(T, { repos: [] }, { name: 'x', rpath: `../../out\u001b[2Jside` });
+      registerRepo(T, { repos: [] }, { name: 'y', rpath: `.git/in\u001b[2Jside` });
+    });
+    assert.ok(!hasRaw(refused.out), `no raw control character:\n${refused.out}`);
+    assert.match(refused.out, /\.\.\/\.\.\/out \[2Jside resolves outside the workspace/);
+    assert.match(refused.out, /\.git\/in \[2Jside runs through a \.git folder/);
+  } finally {
+    if (prior === undefined) delete process.env.SDLC_NONINTERACTIVE;
+    else process.env.SDLC_NONINTERACTIVE = prior;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 // E125 part (c): `yad risk-map check` prints a finding's folder name cleaned, before its colour; `--json`
 // keeps the raw name.
 test('E125 (c): yad risk-map check prints a folder name holding an escape cleaned; --json keeps it raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
