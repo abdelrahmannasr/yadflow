@@ -30041,6 +30041,34 @@ test('E125 (c): yad doctor prints a step id, a reconcile-debt reason and a workf
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// E125 part (c): `yad risk-map check` prints a finding's folder name cleaned, before its colour; `--json`
+// keeps the raw name.
+test('E125 (c): yad risk-map check prints a folder name holding an escape cleaned; --json keeps it raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const odd = 'ev\u001b]0;pwned\u0007il\u001b[2J';
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    fs.mkdirSync(path.join(backend, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(backend, '.sdlc', 'risk-map'), '# yad-risk-map v1\n');
+    for (const d of [odd, 'plain']) {
+      fs.mkdirSync(path.join(backend, d));
+      fs.writeFileSync(path.join(backend, d, 'f.js'), 'x');
+    }
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+
+    const r = e79Yad(T, product, ['risk-map', 'check']);
+    const out = r.stdout + r.stderr;
+    assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
+    assert.match(out, /uncovered ev ]0;pwned il \[2J\/: no line gives this directory a level/, 'the folder name, cleaned');
+    assert.match(out, /uncovered plain\/: no line gives this directory a level$/m, 'a plain name prints as it is');
+
+    const json = JSON.parse(e79Yad(T, product, ['risk-map', 'check', '--json']).stdout);
+    assert.ok(json.repos[0].findings.some((f) => f.target === `${odd}/`), '--json keeps the raw folder name');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 15: the solo people count runs no git in a folder the Product shaped as a repo, and says it could not count it', { skip: process.platform === 'win32' && 'a shell script as gpg.program' }, () => {
   const T = e79Tmp();
   const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-r15-${process.pid}`);

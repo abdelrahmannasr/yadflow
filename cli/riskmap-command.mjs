@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
+import { c, fail, forTerminal, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { judgedRepos } from './workspace.mjs';
 import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
@@ -238,7 +238,10 @@ export function checkRepo(repoRoot) {
   return { git: true, map: true, entries: parsed.entries, findings: riskMapFindings(parsed, { files }) };
 }
 
-const findingLine = (f) => `${c.bold(f.code)}${f.target ? ` ${f.target}` : ''}: ${f.message}`;
+// A finding names a folder from the repo's own tree, and its message can quote it: both are cleaned here,
+// before the colour, so a folder name cannot move the cursor or set the window title (E125). `--json`
+// keeps the raw values.
+const findingLine = (f) => `${c.bold(forTerminal(f.code))}${f.target ? ` ${forTerminal(f.target)}` : ''}: ${forTerminal(f.message)}`;
 
 export async function runRiskMap(root, { action = 'check', name, json = false, dryRun = false } = {}) {
   const t = targets(root, name);
@@ -257,12 +260,12 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
       return { ok: true, repos };
     }
     for (const r of repos) {
-      log(c.bold(`\nrisk map — ${r.name}`));
-      if (!r.git) { warn(`${r.root} is not a git repo — skipped`); continue; }
-      if (!r.map) { info(`no ${RISK_MAP_FILE} yet — no directory has a risk level`); hand(`draft one with \`yad risk-map draft ${r.name}\``); continue; }
+      log(c.bold(`\nrisk map — ${forTerminal(r.name)}`));
+      if (!r.git) { warn(`${forTerminal(r.root)} is not a git repo — skipped`); continue; }
+      if (!r.map) { info(`no ${RISK_MAP_FILE} yet — no directory has a risk level`); hand(`draft one with \`yad risk-map draft ${forTerminal(r.name)}\``); continue; }
       if (!r.findings.length) { ok('every directory has a confirmed level'); continue; }
       for (const f of r.findings) warn(findingLine(f));
-      hand(`fix ${RISK_MAP_FILE} in ${r.name} and commit it through a PR — the warnings are advisory and block nothing`);
+      hand(`fix ${RISK_MAP_FILE} in ${forTerminal(r.name)} and commit it through a PR — the warnings are advisory and block nothing`);
     }
     return { ok: true, repos };
   }
@@ -285,12 +288,12 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
       emitJSON({ ok: !results.some((r) => r.refused), dryRun, repos: results });
     } else {
       for (const r of results) {
-        log(c.bold(`\nrisk map — ${r.name}`));
+        log(c.bold(`\nrisk map — ${forTerminal(r.name)}`));
         if (!r.git) { warn('not a git repo — skipped'); continue; }
         if (r.refused) { fail(`${RISK_MAP_FILE} is ${r.refused} — nothing was written over it`); continue; }
-        if (r.unwritable.length) warn(`not added — a map line cannot hold these names (a space, \`#\`, \`*\`, \`?\`, \`[\` or \`\\\`): ${r.unwritable.join(' ')}; rename them to give them a level`);
+        if (r.unwritable.length) warn(`not added — a map line cannot hold these names (a space, \`#\`, \`*\`, \`?\`, \`[\` or \`\\\`): ${r.unwritable.map(forTerminal).join(' ')}; rename them to give them a level`);
         if (!r.added.length) { ok('every directory already has a line — nothing to add'); continue; }
-        (r.written ? ok : info)(`${r.written ? 'added' : 'would add'} ${r.added.length} unset line(s): ${r.added.join(' ')}`);
+        (r.written ? ok : info)(`${r.written ? 'added' : 'would add'} ${r.added.length} unset line(s): ${r.added.map(forTerminal).join(' ')}`);
       }
       if (results.some((r) => r.added.length)) {
         hand('classify the `unset` lines: ask your AI agent to run the risk-map step of yad-connect-repos (it reads the code), or set them by hand');
