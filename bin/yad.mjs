@@ -995,7 +995,7 @@ async function main() {
       if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
       // --dry-run previews the update as `yad check` does: nothing is written, committed or pushed.
       if (o.dryRun && (o.push || o.openPr)) { refuse('--dry-run writes nothing, so it cannot also --push or --open-pr', 'preview with `yad update --dry-run`, then run it again without --dry-run'); break; }
-      if (o.dryRun) { result = await commands.reconcile(o.dir, { fix: false, scope: 'changed', force: o.force, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt }); break; }
+      if (o.dryRun) { result = await commands.reconcile(o.dir, { fix: false, scope: 'changed', force: o.force, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt, previewOf: 'update' }); break; }
       result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt, invite: true });
       break;
     case 'doctor':

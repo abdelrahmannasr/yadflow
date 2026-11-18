@@ -1931,6 +1931,8 @@ test('`yad update --dry-run` previews the update and writes nothing; with --push
     const dry = yad(['update', '--dry-run'], { cwd: p, home });
     assert.equal(dry.status, 0, dry.stdout + dry.stderr);
     assert.match(dry.stdout, /new\s+yad-epic/, 'the preview lists what the update would add');
+    assert.match(dry.stdout, /run `yad update` to apply it/, 'the hint names the command that applies the preview');
+    assert.doesNotMatch(dry.stdout, /yad check --fix` to reconcile/);
     assert.deepEqual(files(), before, 'a dry run writes no file');
     for (const flag of ['--push', '--open-pr']) {
       const r = yad(['update', '--dry-run', flag], { cwd: p, home });

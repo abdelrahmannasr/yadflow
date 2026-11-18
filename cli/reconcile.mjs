@@ -35,7 +35,7 @@ const repoShown = (repo) => `product (the code repo at ${forTerminal(repo.path)}
 const shown = (a) => a.shownScope ?? a.scope;
 const itemsOf = (actions) => actions.map((a) => ({ scope: a.scope, item: a.item, status: a.status, product: !a.fromRepo }));
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr, invite = false } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, openPr = false, allowBranch = false, overwriteLocal = false, toolbox: toolboxAt = null, creator = createPr, invite = false, previewOf = null } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -276,7 +276,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (!fix) {
     if (workspaceFile === 'missing') info(`no ${WORKSPACE_FILE} beside the Product — \`yad check --fix\` writes it, so yad finds the Product from its code repos`);
     if (push || openPr) warn(`${push ? '--push' : '--open-pr'} has no effect without --fix (there is nothing applied to commit).`);
-    if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
+    // `previewOf: 'update'` is `yad update --dry-run`: name the command that applies what it previewed.
+    if (fixable.length || gaps.length) hand(previewOf === 'update'
+      ? 'run `yad update` to apply it (or `yad setup` for missing one-time setup).'
+      : 'run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     // After the --fix hint, never above it: --fix installs no tool, and must not read as if it did.
     const toolbox = toolboxSection(root, toolboxAt);
     const localSetup = localSetupSection(root);
