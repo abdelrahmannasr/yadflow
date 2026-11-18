@@ -30328,7 +30328,7 @@ test('E125 b: packRepo runs npx from an empty folder of its own, names the npm r
     const bin = path.join(T, 'npx-bin');
     const log = path.join(T, 'npx-calls.log');
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | wc -l | tr -d ' '; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | tr '\\n' ','; echo; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\n`, { mode: 0o755 });
     const saved = process.env.PATH;
     process.env.PATH = `${bin}${path.delimiter}${saved}`;
     let packed;
@@ -30338,7 +30338,7 @@ test('E125 b: packRepo runs npx from an empty folder of its own, names the npm r
     const real = (p) => fs.realpathSync(p);
     assert.ok(cwd.startsWith(path.join(real(os.tmpdir()), 'yad-repomix-')), `npx ran in a temp folder of its own: ${cwd}`);
     assert.ok(!cwd.startsWith(real(T)), 'not in the workspace, the Product or the repo');
-    assert.equal(entries, '0', 'the folder was empty: no .npmrc and no repomix config there');
+    assert.equal(entries, 'package.json,', 'only its own package.json (npm stops there): no .npmrc and no repomix config');
     assert.ok(!fs.existsSync(cwd), 'and it is removed afterwards');
     const out = path.join(product, '.sdlc', 'code-context', 'backend', 'pack.md');
     assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${(await import('./toolbox.mjs')).REPOMIX_VERSION}`, backend, '--compress', '--include-logs', '--style', 'markdown', '-o', out]);

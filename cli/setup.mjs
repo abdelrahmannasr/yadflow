@@ -1080,7 +1080,17 @@ export function packRepo(root, repo) {
   // send npm to another registry, whose "repomix" would then run here. Repomix also loads its config
   // (`repomix.config.*`, which may be code) from the folder it runs from. So the registry is named, and the
   // repo and the pack are passed as absolute paths.
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-repomix-'));
+  // Its own `package.json` makes it the project folder npm stops at, so npm never walks up into a shared
+  // temp folder (`/tmp` on Linux) where another user could leave a `.npmrc`.
+  let work;
+  try {
+    work = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-repomix-'));
+    fs.writeFileSync(path.join(work, 'package.json'), '{ "private": true }\n');
+  } catch (e) {
+    if (work) fs.rmSync(work, { recursive: true, force: true });
+    warn(`${nm}: could not make a temporary folder for repomix (${forTerminal(e.message)}) — skipped repomix pack`);
+    return false;
+  }
   let r;
   try {
     // The vetted version, never `@latest` (E88): a new Repomix release reaches users only once it is vetted.
