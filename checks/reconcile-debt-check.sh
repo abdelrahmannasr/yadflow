@@ -249,7 +249,18 @@ CANDS
         done
       done
       ! tracked_verdict "$(product_tracked "$_phys")" || return 0
-      # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it.
+      # An untracked folder that is there is the Product CI checked out: a PR cannot make one. Read it —
+      # unless a local `yad run checks` names a folder of its own in YAD_LOCAL_PRODUCT (#597): it could not
+      # put the Product where CI puts it (no record on the base, no git_url in it, or no copy written
+      # there), so it wrote the Product's default branch there. That is read instead of this folder, which
+      # may be the Product's main folder on another branch, or hold unmerged edits. Only this one folder is
+      # swapped: what reaches nothing, or a Product kept on the base, is answered as before. Never in CI:
+      # no CI job sets it, and a job that had it could not have made that folder.
+      if [ -n "${YAD_LOCAL_PRODUCT:-}" ] && [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && [ -z "${GITLAB_CI:-}" ] && [ -d "$YAD_LOCAL_PRODUCT" ]; then
+        prod="$YAD_LOCAL_PRODUCT"
+        prod_note="${prod_note:+$prod_note
+}the Product is read from its default branch, which yad run checks wrote out for this run — not from '${product_rel}', which product-repo reaches on this machine."
+      fi
       return 0
     fi
   fi

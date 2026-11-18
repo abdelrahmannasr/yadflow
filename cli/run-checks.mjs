@@ -15,6 +15,10 @@
 //     a private index: the Product clone's own index, branch and files are never touched. The path gets
 //     the checks product-checkout.sh applies (no symlink on the way, nothing tracked there). A run removes
 //     only what it wrote itself; a folder already there is read as it is and kept.
+//     When nothing can go there — no record on the base, no git_url in it, or no copy written there (#597)
+//     — the found Product clone's default branch is written to this run's own temp folder instead, and the
+//     four gates are pointed at it with YAD_LOCAL_PRODUCT (read only outside CI), so they never follow
+//     product-repo in a link.md to the Product's main folder, whatever branch it is on.
 //   - every gate runs, even after one fails (CI jobs run side by side), then one summary.
 //
 // What cannot be the same here, and says so:
@@ -99,8 +103,8 @@ function readRecord(repoRoot, base) {
   const dest = field('path');
   // No git_url it can read: CI's product-checkout clones nothing and says so before it looks at the path,
   // so nothing is written here either, and nothing else in the record fails.
-  if (!url && isSet('git_url')) return { nothing: `.sdlc/product-link.json on ${base} names a git_url CI's product-checkout cannot read (it is written with a JSON escape, a quote or a backslash), so CI checks no Product out — write it in the record without escapes and merge that change first. Nothing is written here` };
-  if (!url) return { nothing: `.sdlc/product-link.json on ${base} names no git_url, so CI checks no Product out — nothing is written here either` };
+  if (!url && isSet('git_url')) return { nothing: `.sdlc/product-link.json on ${base} names a git_url CI's product-checkout cannot read (it is written with a JSON escape, a quote or a backslash), so CI checks no Product out — write it in the record without escapes and merge that change first. Nothing is written at the record's path` };
+  if (!url) return { nothing: `.sdlc/product-link.json on ${base} names no git_url, so CI checks no Product out — nothing is written at the record's path either` };
   const rel = safeRecordPath(dest);
   // `yad check --fix` writes a missing path and keeps one that is set (even one of only spaces, or one
   // written with an escape), so the fix named differs by case. It reaches only the repos cloned on that
@@ -152,8 +156,72 @@ export function removeParents(dest, created) {
   }
 }
 
-// Write the Product's default branch to `rel`. Returns { placed, created?, note } or { fail }.
-function placeProduct(repoRoot, productRoot, { rel, branch: recorded, record }, { fetch }) {
+// The Product clone's default branch, as its origin/HEAD says (main when it says none).
+function cloneDefault(productRoot) {
+  const h = git(productRoot, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  return safeBranch(h.ok && h.stdout.startsWith('origin/') ? h.stdout.slice('origin/'.length) : '') || 'main';
+}
+const remoteSha = (productRoot, branch) => git(productRoot, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`]);
+
+// Write commit `sha` of the Product clone to the folder `dest`, through a private index: the clone's own
+// index, branch and files are never touched. Throws when git cannot.
+function writeCommit(productRoot, sha, dest) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-run-checks-'));
+  try {
+    const env = { ...process.env, GIT_INDEX_FILE: path.join(tmp, 'index') };
+    delete env.GIT_DIR; delete env.GIT_WORK_TREE;
+    const read = spawnSync('git', ['read-tree', sha], { cwd: productRoot, env, encoding: 'utf8' });
+    const out = read.status === 0
+      ? spawnSync('git', ['checkout-index', '-a', '-f'], { cwd: productRoot, env: { ...env, GIT_WORK_TREE: dest }, encoding: 'utf8' })
+      : read;
+    if (out.status !== 0) throw new Error((out.stderr || '').trim().split('\n')[0] || 'git could not write it');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// #597: nothing could go where CI puts the Product (no record on the base, no git_url in it, or no copy
+// written there). Write the found Product clone's default branch to `dest`, a folder of this run's own
+// outside the repo, for the gates to read through YAD_LOCAL_PRODUCT — never the clone's main folder,
+// which may be on another branch or hold unmerged edits. `recorded` is the record's default_branch when
+// it names one. Null when there is no clone or it has no such branch; { kept: true } when the clone is
+// this repo itself (a Product kept here is read from the base by the gates, as in CI). Otherwise
+// { dest, written, note }, with no dest when the copy could not be written.
+export function placeLocal(repoRoot, productRoot, dest, { recorded = null, fetch }) {
+  if (!productRoot) return null;
+  const top = git(productRoot, ['rev-parse', '--show-toplevel']);
+  let same = !top.ok;
+  try { same = same || fs.realpathSync(top.stdout) === fs.realpathSync(repoRoot); } catch { same = true; }
+  if (same) return { kept: true, note: 'the Product is kept in this same repo, so the Product-reading gates read it as it stands on the base, as in CI — nothing is written for it' };
+  const notes = [];
+  let branch = recorded;
+  let sha = branch ? remoteSha(productRoot, branch) : null;
+  if (branch && !(sha.ok && sha.stdout)) {
+    const other = cloneDefault(productRoot);
+    if (other === branch) return null;
+    notes.push(`the Product clone has no origin/${branch}, so its origin/HEAD's ${other} is read`);
+    branch = other;
+    sha = null;
+  }
+  if (!branch) branch = cloneDefault(productRoot);
+  if (!sha) {
+    if (fetch && !fetchBranch(productRoot, branch).ok) notes.push(`could not fetch ${branch} in the Product clone — its last fetched copy is read`);
+    sha = remoteSha(productRoot, branch);
+  }
+  if (!sha.ok || !sha.stdout) return null;
+  try {
+    fs.mkdirSync(dest);
+    writeCommit(productRoot, sha.stdout, dest);
+  } catch (e) {
+    fs.rmSync(dest, { recursive: true, force: true });
+    return { dest: null, written: false, note: [...notes, `could not write the Product's ${branch} to a temp folder either (${e.message}) — the Product-reading gates may read what product-repo in a link.md reaches on this machine`].join('; ') };
+  }
+  return { dest, written: true, note: [...notes, `the Product's ${branch} (${sha.stdout.slice(0, 12)}) is written to a temp folder of this run, and the Product-reading gates read it — not what product-repo in a link.md reaches on this machine; it is removed after these gates`].join('; ') };
+}
+
+// Write the Product's default branch to `rel`. Returns { placed, created?, note, why? } or { fail }. `why`
+// is a note without its last words on what the gates read instead, for when a temp copy is read (#597).
+function placeProduct(repoRoot, productRoot, { rel, branch: recorded, record }, { fetch, base }) {
   const dest = path.join(repoRoot, rel);
   // A run removes only what it wrote itself. A folder already there — the user's own, another run's in use,
   // or one a killed run left behind — is read as it is and never removed (CI's product-checkout leaves an
@@ -166,17 +234,25 @@ function placeProduct(repoRoot, productRoot, { rel, branch: recorded, record }, 
   const notes = [];
   let branch = recorded;
   if (!branch) {
-    const h = git(productRoot, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
-    branch = safeBranch(h.ok && h.stdout.startsWith('origin/') ? h.stdout.slice('origin/'.length) : '') || 'main';
+    branch = cloneDefault(productRoot);
     notes.push(`the record names no default_branch, so the Product clone's origin/HEAD says it: ${branch}`);
   }
   const want = repoPathFromGitUrl(record?.git_url || '');
   const have = repoPathFromGitUrl(git(productRoot, ['remote', 'get-url', 'origin']).stdout);
   if (want && have && want.toLowerCase() !== have.toLowerCase()) notes.push(`the Product clone's origin is ${have}, but the record names ${want} — it is read anyway`);
-  if (fetch && !fetchBranch(productRoot, branch).ok) notes.push(`could not fetch ${branch} in the Product clone — its last fetched copy is read`);
-  const sha = git(productRoot, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`]);
+  if (fetch && !fetchBranch(productRoot, branch).ok) {
+    // The remote answered, and has no such branch: CI's product-checkout fails its `git clone --branch`
+    // too (when YAD_PRODUCT_TOKEN is set), so that is the answer here. Exit 2 is ls-remote's "no such
+    // ref"; anything else (no network, no login) is not an answer, and the last fetched copy is read.
+    if (recorded && git(productRoot, ['ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`]).code === 2) {
+      return { fail: `.sdlc/product-link.json on ${base} names default_branch ${branch}, which the Product's origin does not have — CI's product-checkout fails its clone too, when YAD_PRODUCT_TOKEN is set. Run \`yad check --fix --push\` from the Product to write the right one, or set default_branch in the record yourself and merge that change first` };
+    }
+    notes.push(`could not fetch ${branch} in the Product clone — its last fetched copy is read`);
+  }
+  const sha = remoteSha(productRoot, branch);
   if (!sha.ok || !sha.stdout) {
-    return { placed: false, note: [...notes, `the Product clone has no origin/${branch}, so ${rel} is not written — the Product-reading gates may read what product-repo in a link.md reaches on this machine, where CI would read the default branch`].join('; ') };
+    const why = [...notes, `the Product clone has no origin/${branch}, so ${rel} is not written`].join('; ');
+    return { placed: false, why, note: `${why} — the Product-reading gates may read what product-repo in a link.md reaches on this machine, where CI would read the default branch` };
   }
   // Making the folder itself is the claim: one mkdir, which fails when another run made it first, between
   // the check above and here (the fetch takes seconds). `created` is the top folder this run made (`.yad`
@@ -192,25 +268,19 @@ function placeProduct(repoRoot, productRoot, { rel, branch: recorded, record }, 
     if (e.code === 'EEXIST') {
       let isDir = false;
       try { isDir = fs.lstatSync(dest).isDirectory(); } catch { /* gone again */ }
-      return isDir ? { ...alreadyThere, note: [...notes, alreadyThere.note].join('; ') } : { placed: false, note: [...notes, `a file is where the Product's folder goes (${rel}) — move it, or point path in .sdlc/product-link.json elsewhere`].join('; ') };
+      if (isDir) return { ...alreadyThere, note: [...notes, alreadyThere.note].join('; ') };
+      const why = [...notes, `a file is where the Product's folder goes (${rel}) — move it, or point path in .sdlc/product-link.json elsewhere`].join('; ');
+      return { placed: false, why, note: why };
     }
-    return { placed: false, note: [...notes, `could not make ${rel} (${e.message}) — the Product-reading gates may read what product-repo in a link.md reaches on this machine`].join('; ') };
+    const why = [...notes, `could not make ${rel} (${e.message})`].join('; ');
+    return { placed: false, why, note: `${why} — the Product-reading gates may read what product-repo in a link.md reaches on this machine` };
   }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-run-checks-'));
-  const idx = path.join(tmp, 'index');
   try {
-    const env = { ...process.env, GIT_INDEX_FILE: idx };
-    delete env.GIT_DIR; delete env.GIT_WORK_TREE;
-    const read = spawnSync('git', ['read-tree', sha.stdout], { cwd: productRoot, env, encoding: 'utf8' });
-    const out = read.status === 0
-      ? spawnSync('git', ['checkout-index', '-a', '-f'], { cwd: productRoot, env: { ...env, GIT_WORK_TREE: dest }, encoding: 'utf8' })
-      : read;
-    if (out.status !== 0) throw new Error((out.stderr || '').trim().split('\n')[0] || 'git could not write it');
+    writeCommit(productRoot, sha.stdout, dest);
   } catch (e) {
     removeCopy(dest, created);
-    return { placed: false, note: [...notes, `could not write the Product's ${branch} to ${rel} (${e.message}) — the Product-reading gates may read what product-repo in a link.md reaches on this machine`].join('; ') };
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    const why = [...notes, `could not write the Product's ${branch} to ${rel} (${e.message})`].join('; ');
+    return { placed: false, why, note: `${why} — the Product-reading gates may read what product-repo in a link.md reaches on this machine` };
   }
   return { placed: true, created, dest, note: [...notes, `the Product's ${branch} (${sha.stdout.slice(0, 12)}) is written to ${rel}, as CI checks it out, and removed after these gates`].join('; ') };
 }
@@ -382,6 +452,12 @@ export async function runChecks(dir, opts = {}) {
 
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-run-checks-'));
   let placed = null;
+  // The Product's default branch in this run's own temp folder (#597), when nothing could go where CI puts it.
+  let local = null;
+  // The one note on where the Product is read from, as printed and in --json.
+  let productNote = null;
+  // Why CI reaches no Product while this run reads its default branch (#597): its FAILs are this run's alone.
+  let ciDefers = null;
   const live = { child: null, stopped: false };
   // A folder this run read as it was (another run's copy, say) may be removed by that run meanwhile.
   const checkVanished = () => {
@@ -390,6 +466,7 @@ export async function runChecks(dir, opts = {}) {
     if (placed.vanished) warn(`${record?.rel || 'the Product copy'} was removed while the Product gates read it (another run ended) — their answers may be wrong; run again`);
   };
   const removeProduct = () => {
+    if (local?.dest) { fs.rmSync(local.dest, { recursive: true, force: true }); local.dest = null; }
     if (!placed?.placed) return;
     removeCopy(placed.dest, placed.created);
     placed.placed = false;
@@ -466,7 +543,7 @@ export async function runChecks(dir, opts = {}) {
     const env = { ...process.env };
     for (const k of Object.keys(env)) {
       if (k === 'CI' || k === 'GITLAB_CI' || k.startsWith('CI_') || (k.startsWith('GITHUB_') && k !== 'GITHUB_TOKEN')
-        || k.startsWith('SDLC_') || k === 'GIT_DIR' || k === 'GIT_WORK_TREE' || k === 'GIT_INDEX_FILE') delete env[k];
+        || k.startsWith('SDLC_') || k === 'YAD_LOCAL_PRODUCT' || k === 'GIT_DIR' || k === 'GIT_WORK_TREE' || k === 'GIT_INDEX_FILE') delete env[k];
     }
     // The build gates get what the CI job sets for them.
     const headSha = git(repoRoot, ['rev-parse', 'HEAD']).stdout;
@@ -478,7 +555,7 @@ export async function runChecks(dir, opts = {}) {
       const scriptPath = g.script ? path.join(checksDir, g.script) : null;
       if (g.optional && !exists(scriptPath)) continue;
       // The copy exists only while the Product-reading gates run, whichever of them is installed.
-      if (placed?.placed && !PRODUCT_GATES.has(g.name)) removeProduct();
+      if ((placed?.placed || local?.dest) && !PRODUCT_GATES.has(g.name)) removeProduct();
       if (placed?.existing && !PRODUCT_GATES.has(g.name)) checkVanished();
       log(`\n${c.bold(g.name)}`);
       const r = { name: g.name, status: 'pass', reason: null, output: '' };
@@ -487,16 +564,27 @@ export async function runChecks(dir, opts = {}) {
       // The Product goes in place just before the first Product-reading gate.
       if (!isProduct && PRODUCT_GATES.has(g.name) && !record) {
         record = readRecord(repoRoot, base);
+        if (!record.fail && !record.nothing && !record.none) {
+          placed = placeProduct(repoRoot, opts.product || null, record, { fetch: opts.fetch !== false, base });
+          if (placed.fail) { record.fail = placed.fail; placed = null; }
+        }
         if (record.fail) {
           results.splice(results.length - 1, 0, { name: 'product-checkout', status: 'fail', reason: 'the Product could not be put where CI puts it', output: `FAIL [product-checkout]: ${record.fail}` });
           log(`  FAIL [product-checkout]: ${record.fail}`);
-        } else if (record.nothing) {
-          info(record.nothing);
-        } else if (record.none) {
-          info(`no .sdlc/product-link.json on ${base}, so nothing is checked out for the Product — the Product-reading gates read what product-repo in a link.md reaches on this machine (CI reaches nothing, and they skip their Product check there)`);
         } else {
-          placed = placeProduct(repoRoot, opts.product || null, record, { fetch: opts.fetch !== false });
-          info(placed.note);
+          // Nothing went where CI puts it (and no folder was already there): the found Product clone's
+          // default branch goes to a temp folder of this run's own instead (#597).
+          if (!placed?.placed && !placed?.existing) {
+            local = placeLocal(repoRoot, opts.product || null, path.join(scratch, 'product'), { recorded: record.branch || null, fetch: opts.fetch !== false });
+          }
+          const first = record.nothing
+            || (record.none ? `no .sdlc/product-link.json on ${base}, so CI checks no Product out (the Product-reading gates skip their Product check there)` : null)
+            || (local && !local.kept && placed?.why) || placed?.note;
+          const then = local?.note
+            || (record.none && !local ? 'no Product clone with its default branch was found from this repo, so the Product-reading gates read what product-repo in a link.md reaches on this machine' : null);
+          productNote = [first, then].filter(Boolean).join('; ');
+          info(productNote);
+          if (local?.written && (record.none || record.nothing)) ciDefers = record.none ? 'no record on the base' : 'no git_url CI can read in the record';
         }
       }
 
@@ -528,7 +616,8 @@ export async function runChecks(dir, opts = {}) {
         warn(`checks/${g.script} is not the gate this yadflow ships — CI runs the committed copy; if it is an older one, \`yad update\` replaces it`);
       }
       if (live.stopped) { results.pop(); break; }
-      const p = await runGate(g.node ? process.execPath : 'bash', [scriptPath, ...g.args], { cwd: repoRoot, env: g.build ? buildEnv : env }, live);
+      const gateEnv = g.build ? buildEnv : (local?.dest && PRODUCT_GATES.has(g.name) ? { ...env, YAD_LOCAL_PRODUCT: local.dest } : env);
+      const p = await runGate(g.node ? process.execPath : 'bash', [scriptPath, ...g.args], { cwd: repoRoot, env: gateEnv }, live);
       r.output = p.out || '';
       if (p.error) {
         r.status = 'fail';
@@ -540,6 +629,7 @@ export async function runChecks(dir, opts = {}) {
       } else {
         r.exit = p.status;
         r.status = p.status === 0 ? 'pass' : 'fail';
+        if (r.status === 'fail' && ciDefers && PRODUCT_GATES.has(g.name)) r.ciDefers = true;
         // A gate that passed by skipping says so (#496): a skipped gate is not a pass.
         if (r.status === 'pass' && (g.name === 'install-deps' || g.name === 'build/test/lint') && /^SKIP \[(install-deps|build\/test\/lint)\]: a Unity project/m.test(r.output)) { r.status = 'skip'; r.reason = 'a Unity project: build and test it with Unity\'s own CI'; }
       }
@@ -564,9 +654,15 @@ export async function runChecks(dir, opts = {}) {
   const passed = results.filter((r) => r.status === 'pass');
   const json = () => ({
     repo: path.basename(repoRoot), kind: isProduct ? 'product' : 'code', base, platform,
-    product: placed ? { placed: !!placed.dest, path: record?.rel || null, note: placed.note || null, ...(placed.vanished ? { vanished: true } : {}) } : null,
-    gates: results.map(({ name, status, reason, exit, differs, output }) => ({
+    product: placed || (local && !local.kept) ? {
+      placed: !!placed?.dest, path: record?.rel || null, note: productNote || placed?.note || null,
+      ...(placed?.vanished ? { vanished: true } : {}), ...(local && !local.kept ? { local: !!local.written } : {}),
+      ...(ciDefers ? { ciDefers: true } : {}),
+    } : null,
+    gates: results.map(({ name, status, reason, exit, differs, output, ciDefers: deferred }) => ({
       name, status, ...(reason ? { reason } : {}), ...(exit !== undefined ? { exit } : {}), ...(differs ? { differs: true } : {}),
+      // A Product gate's FAIL that CI never reports: it reaches no Product and defers (#597).
+      ...(deferred ? { ciDefers: true } : {}),
       // The FAIL lines, so an agent reading --json sees what to change without the whole log.
       fails: (output || '').split('\n').map((l) => l.trim()).filter((l) => /^FAIL /.test(l)),
     })),
@@ -580,7 +676,7 @@ export async function runChecks(dir, opts = {}) {
   }
   log(`\n${c.bold('Summary')}`);
   for (const r of results) {
-    const line = `${r.name}${r.reason ? ` — ${r.reason}` : ''}`;
+    const line = `${r.name}${r.reason ? ` — ${r.reason}` : ''}${r.ciDefers ? ` (CI defers this: ${ciDefers})` : ''}`;
     if (r.status === 'pass') ok(line);
     else if (r.status === 'skip') info(`skipped: ${line}`);
     else log(`  ${c.red('✗')} ${line}`);
