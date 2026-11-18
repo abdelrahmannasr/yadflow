@@ -993,7 +993,7 @@ function yadArgs(words) {
 }
 
 // The command words and flag names of yad's argv, read as bin/yad.mjs reads it: flags may come anywhere, a
-// flag that takes a value (`--dir <path>`, `-m <text>`) takes the word after it, and `--` is a word like any
+// flag that takes a value (`--dir <path>`, `-m <text>`, `-o <file>`) takes the word after it, and `--` is a word like any
 // other (yad has no end-of-flags marker). `help` is set for `--help`/`-h`: that run only prints the help.
 function yadWords(args) {
   const words = [];
@@ -1006,7 +1006,7 @@ function yadWords(args) {
       const name = a.split('=')[0];
       flags.push(name.slice(2));
       if (!a.includes('=') && (VALUE_FLAGS.has(name) || LIST_FLAGS.has(name))) i++;
-    } else if (a === '-m') i++;
+    } else if (a === '-m' || a === '-o') i++;
     else if (a.startsWith('-') && a !== '--') continue;
     else if (words.length < 2) words.push(a);
   }

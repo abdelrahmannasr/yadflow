@@ -264,6 +264,8 @@ test('the agent guard refuses every human-only yad command and every force push,
     'yad --dir ../product gate approve EP-x epic',
     'yad --json gate advance EP-x epic',
     'yad -m s commit --manual --reason r',
+    // #213: `-o` takes the word after it, as yad reads it (`yad repo pack <name> -o <file>`).
+    'yad -o x gate approve EP-x epic',
     'yad gate approve \\\nEP-x epic',
     'yad \\\n  gate reopen EP-x epic',
     './bin/yad.mjs gate approve EP-x epic',
