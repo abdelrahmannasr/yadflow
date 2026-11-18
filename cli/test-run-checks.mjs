@@ -84,8 +84,8 @@ function workspace({ storyStatus = 'in-progress' } = {}) {
   return { W, product, backend };
 }
 
-const yad = (cwd, args) => {
-  const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' }, encoding: 'utf8' });
+const yad = (cwd, args, env = {}) => {
+  const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', ...env }, encoding: 'utf8' });
   return { code: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout };
 };
 
@@ -133,7 +133,7 @@ test('yad run checks: with no record on the base, the Product is still read from
   for (const shape of ['none', 'no git_url', 'no such branch']) {
     const { W, product, backend } = workspace({ storyStatus: 'shipped' });
     try {
-      const record = { none: null, 'no git_url': JSON.stringify({ path: '.yad/product' }), 'no such branch': JSON.stringify({ git_url: path.join(W, 'remotes/product.git'), path: '.yad/product', default_branch: 'gone' }) }[shape];
+      const record = { none: null, 'no git_url': JSON.stringify({ path: '.yad/product' }), 'no such branch': gone(W) }[shape];
       git(backend, 'checkout', '-q', 'main');
       if (record === null) git(backend, 'rm', '-q', '.sdlc/product-link.json');
       else write(backend, { '.sdlc/product-link.json': record });
@@ -147,9 +147,15 @@ test('yad run checks: with no record on the base, the Product is still read from
       git(product, 'rm', '-r', '-q', 'epics/EP-demo');
       git(product, 'commit', '-q', '-m', 'chore: drop the epic');
       write(product, { 'epics/NOTES.md': 'not merged\n' });
-      const r = yad(backend, ['run', 'checks', '--no-build', '--json']);
+      // A temp folder of its own, so what the run leaves there is seen. With no fetch, a recorded branch
+      // the clone lacks is not CI's answer (the remote was not asked), so origin/HEAD's branch is read.
+      const tmp = fs.mkdtempSync(path.join(W, 'tmp-'));
+      const r = yad(backend, ['run', 'checks', '--no-build', '--json', ...(shape === 'no such branch' ? ['--no-fetch'] : [])], { TMPDIR: tmp });
       const what = `${shape}: ${r.out}`;
-      if (shape === 'no such branch') assert.match(r.out, /the Product clone has no origin\/gone, so its origin\/HEAD's main is read/, what);
+      assert.deepEqual(fs.readdirSync(tmp), [], `the temp copy is removed after the run — ${what}`);
+      if (shape === 'no such branch') assert.match(r.out, /the Product clone has no origin\/gone, so \.yad\/product is not written; the Product clone has no origin\/gone, so its origin\/HEAD's main is read/, what);
+      // One note, not one saying product-repo is followed and then one saying it is not.
+      assert.doesNotMatch(r.out, /may read what product-repo/, what);
       assert.doesNotMatch(r.out, /orphan story link/, what);
       assert.match(r.out, /the Product's main \([0-9a-f]{12}\) is written to a temp folder of this run, and the Product-reading gates read it/, what);
       // main has the story shipped, as CI would read it; the main folder has no epic at all.
@@ -158,11 +164,47 @@ test('yad run checks: with no record on the base, the Product is still read from
       const json = JSON.parse(r.stdout);
       assert.equal(json.product.local, true, what);
       assert.equal(json.product.placed, false, what);
+      assert.doesNotMatch(json.product.note, /may read what product-repo/, what);
+      // With no record CI reaches no Product and defers, so a Product gate's FAIL is this run's alone.
+      const epicOpen = json.gates.find((g) => g.name === 'epic-open');
+      if (shape === 'no such branch') {
+        assert.equal(epicOpen.ciDefers, undefined, what);
+        assert.equal(json.product.ciDefers, undefined, what);
+      } else {
+        assert.equal(epicOpen.ciDefers, true, what);
+        assert.equal(json.product.ciDefers, true, what);
+        const why = shape === 'none' ? 'no record on the base' : 'no git_url CI can read in the record';
+        assert.ok(r.out.includes(`✗ epic-open (CI defers this: ${why})`), what);
+        assert.ok(!r.out.includes('✗ verified-commits (CI defers'), what);
+      }
       assert.equal(git(product, 'rev-parse', '--abbrev-ref', 'HEAD'), 'other', 'the Product clone stays on its branch');
       assert.ok(fs.existsSync(path.join(product, 'epics/NOTES.md')), 'and keeps its unmerged edit');
       assert.ok(!fs.existsSync(path.join(backend, '.yad')), 'nothing is written into the repo');
     } finally { fs.rmSync(W, { recursive: true, force: true }); }
   }
+});
+
+// A record naming a default_branch the Product's origin does not have.
+const gone = (W) => JSON.stringify({ git_url: path.join(W, 'remotes/product.git'), path: '.yad/product', default_branch: 'gone' });
+
+test('yad run checks: a recorded default_branch the Product\'s origin does not have fails product-checkout, as in CI (#597)', () => {
+  const { W, backend } = workspace();
+  try {
+    git(backend, 'checkout', '-q', 'main');
+    commitAll(backend, 'chore: a branch that is gone', { '.sdlc/product-link.json': gone(W) });
+    git(backend, 'push', '-q', 'origin', 'main');
+    git(backend, 'checkout', '-q', 'feature');
+    git(backend, 'rebase', '-q', 'main');
+    const r = yad(backend, ['run', 'checks', '--no-build', '--json']);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL \[product-checkout\]: \.sdlc\/product-link\.json on origin\/main names default_branch gone, which the Product's origin does not have — CI's product-checkout fails its clone too/);
+    const json = JSON.parse(r.stdout);
+    for (const name of ['contract-check', 'lineage-check', 'epic-open', 'reconcile-debt']) {
+      assert.equal(json.gates.find((g) => g.name === name).status, 'skip', `${name}: ${r.out}`);
+    }
+    assert.equal(json.product, null, r.out);
+    assert.doesNotMatch(r.out, /temp folder/, r.out);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
 test('yad run checks: a YAD_LOCAL_PRODUCT from the shell never reaches a gate (#597)', () => {
@@ -377,7 +419,7 @@ test('yad run checks: a record CI refuses says what to change, as product-checko
     // A git_url written with an escape: the gate reads none and checks nothing out, so nothing fails here.
     r = onBase('{"git_url": "https:\\/\\/host\\/org\\/p.git", "path": "../elsewhere"}');
     assert.doesNotMatch(r.out, /FAIL \[product-checkout\]/, r.out);
-    assert.match(r.out, /names a git_url CI's product-checkout cannot read \(it is written with a JSON escape, a quote or a backslash\), so CI checks no Product out — write it in the record without escapes and merge that change first\. Nothing is written here/);
+    assert.match(r.out, /names a git_url CI's product-checkout cannot read \(it is written with a JSON escape, a quote or a backslash\), so CI checks no Product out — write it in the record without escapes and merge that change first\. Nothing is written at the record's path/);
     assert.ok(!fs.existsSync(path.join(W, 'elsewhere')), r.out);
     // An empty file, or one that does not parse with no git_url the gate can read: as in CI, a note.
     for (const text of ['', '{"path": "../elsewhere"']) {
@@ -645,6 +687,34 @@ test('removeParents and removeCopy: only the folders a run made, and only while 
     removeParents(path.join(T, 'e', 'f', 'g'), path.join(T, 'other'));
     assert.ok(fs.existsSync(path.join(T, 'e', 'f')));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('placeLocal: a Product kept in this same repo is never copied; a copy that cannot be written says so (#597)', async () => {
+  const { placeLocal } = await import('../cli/run-checks.mjs');
+  const { W, product, backend } = workspace();
+  try {
+    const dest = path.join(W, 'copy');
+    // The Product clone is this repo itself (a Product kept here): the gates read it from the base.
+    const kept = placeLocal(product, product, dest, { fetch: false });
+    assert.equal(kept.kept, true);
+    assert.match(kept.note, /the Product is kept in this same repo, so the Product-reading gates read it as it stands on the base, as in CI/);
+    assert.ok(!fs.existsSync(dest), 'nothing is written');
+    // From a subfolder of it too: the same git repo.
+    fs.mkdirSync(path.join(product, 'app'));
+    assert.equal(placeLocal(product, path.join(product, 'app'), dest, { fetch: false }).kept, true);
+    // A folder that cannot be made (its parent is missing): no copy, and the note says what is read.
+    const bad = placeLocal(backend, product, path.join(W, 'missing', 'copy'), { fetch: false });
+    assert.equal(bad.written, false);
+    assert.equal(bad.dest, null);
+    assert.match(bad.note, /could not write the Product's main to a temp folder either .* — the Product-reading gates may read what product-repo in a link\.md reaches on this machine/);
+    // No clone: nothing to copy.
+    assert.equal(placeLocal(backend, null, dest, { fetch: false }), null);
+    // The copy: the clone's default branch, not its work tree.
+    write(product, { 'epics/EP-demo/epic.md': 'unmerged\n' });
+    const good = placeLocal(backend, product, dest, { fetch: false });
+    assert.equal(good.written, true);
+    assert.notEqual(fs.readFileSync(path.join(dest, 'epics/EP-demo/epic.md'), 'utf8'), 'unmerged\n');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
 test('yad run checks: a folder read as it was, removed while the Product gates read it, is said to be gone', () => {

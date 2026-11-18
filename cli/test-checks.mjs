@@ -3013,6 +3013,22 @@ for (const g of GATES) {
     fs.rmSync(T, { recursive: true, force: true });
   });
 
+  test(`${g.name} gate: a monorepo Product is never swapped for YAD_LOCAL_PRODUCT (#597)`, () => {
+    // A Product kept on the base is read from the base, as in CI, even when a local run names a copy.
+    const T = scaffoldRepo();
+    const local = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-local-product-'));
+    productFiles(T, 'our-product', g.seed, { settings: true });
+    productFiles(local, 'p', clean);
+    onBase(T, { 'specs/EP-demo-S01/link.md': linkFor(g, '../../our-product') });
+    commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', { 'src/thing.js': 'x', ...(g.files || {}) });
+    const r = runGate(g.script, T, ['main'], { CI: '', GITHUB_ACTIONS: '', GITLAB_CI: '', YAD_LOCAL_PRODUCT: path.join(local, 'p') });
+    assert.equal(r.code, 1, `the base's Product must be read, not the local copy:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    assert.doesNotMatch(r.out, /wrote out for this run/);
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(local, { recursive: true, force: true });
+  });
+
   test(`${g.name} gate: a monorepo Product marked export-ignore is still read from the base (E117 review 1)`, () => {
     // `git archive` drops what .gitattributes marks export-ignore; the Product came out empty.
     const T = scaffoldRepo();
