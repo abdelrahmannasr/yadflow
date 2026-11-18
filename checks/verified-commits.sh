@@ -11,11 +11,18 @@
 # the signature proves which platform account made the commit. A `.sdlc/verified-authors` file an older
 # release generated is no longer read, and the gate says so when it finds one.
 #
-# Merge-commit signature exemption: a merge that introduces NO content of its own (its combined diff
-# is empty — no conflict-resolution / evil-merge hunks) is signature-waived, because every change it
-# carries already lives in its individually signature-checked parents. This unblocks self-hosted
-# GitLab, which does not sign UI-created merge commits (the signature API returns 404). A merge that
-# DOES introduce content of its own still requires a verified signature (fail-closed).
+# Merge-commit signature exemption: a merge that introduces NO content of its own is signature-waived,
+# because every change it carries already lives in its individually signature-checked parents. This
+# unblocks platform merge buttons that do not sign the merge commit (self-hosted GitLab: the signature
+# API returns 404). "No content of its own" is decided by redoing the merge: with git 2.36 or newer and
+# a merge of exactly two parents, the merge is waived when `git show --remerge-diff` prints nothing —
+# the commit is exactly what git's own automatic merge of the two parents gives, so a clean merge of
+# nearby lines in one file passes (#600). A merge whose result differs from that redone merge — an
+# extra change, or a conflict resolved by hand, even one that keeps one side — still requires a verified
+# signature (fail-closed). On older git, when the parents share no merge base (a shallow clone, or
+# unrelated histories), on any git error, and for a merge of three or more parents, the gate uses the
+# older test instead: the combined diff (`git diff-tree --cc`) must be empty. An error never waives a
+# merge.
 #
 # Degradation is explicit, never silent:
 #   - no GitHub/GitLab remote  -> signature check SKIPPED with a warning (no platform, no badge)
@@ -146,15 +153,49 @@ signature_verified() {
   esac
 }
 
-# 0 when a merge commit introduced NO content of its own. The combined diff (--cc) lists only hunks
-# that differ from ALL parents, so empty output means every change lives in an individually-checked
-# parent — there is no conflict-resolution or evil-merge content unique to the merge commit, hence
-# nothing an unsigned change could smuggle in past the per-parent signature checks.
+# 0 when this git has `git show --remerge-diff` (git 2.36+). Parses `git --version` — "git version
+# 2.39.5 (Apple Git-154)" and "git version 2.45.1.windows.1" alike. Anything it cannot read as digits is
+# "no": the caller then keeps the older combined-diff check.
+git_has_remerge_diff() {
+  local v major minor
+  v="$(git --version 2>/dev/null)" || return 1
+  v="${v#git version }"
+  major="${v%%.*}"
+  minor="${v#*.}"
+  minor="${minor%%[!0-9]*}"
+  case "$major" in ''|*[!0-9]*) return 1 ;; esac
+  case "$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 36 ]; }
+}
+remerge_ok=0
+git_has_remerge_diff && remerge_ok=1
+
+# 0 when a merge commit introduced NO content of its own.
+# With git 2.36+ and exactly two parents that share a merge base, git redoes the merge
+# (`--remerge-diff`) and prints how the commit differs from that redone merge. Empty output means the
+# commit is exactly git's own automatic merge of its parents — every change lives in an
+# individually-checked parent. A non-empty answer is final: an extra change or a conflict resolved by
+# hand (even to one side, which the combined diff below misses) is content of the merge's own.
+# Otherwise — older git, no merge base (a shallow clone cut it off, or unrelated histories: the redone
+# merge would be a two-way merge full of spurious conflicts), a failed command, 3+ parents — fall back
+# to the combined diff (--cc): it lists only hunks that differ from ALL parents, so it is empty for a
+# merge of disjoint files but not for one where both sides edited nearby lines of one file.
+# The flags stop local config from hiding a change: no external diff or textconv driver, submodule
+# changes shown even under diff.ignoreSubmodules, and no diff.relative narrowing.
 merge_introduces_no_content() {
   # `local` on its own line: `local out=$(...)` would mask the substitution's exit status (local
   # always returns 0). A git error (e.g. a parent tree missing in a shallow clone) must fail closed —
   # an empty stdout from a *failed* command is not evidence the merge is content-free.
-  local out
+  local out parents
+  parents="$(git log -1 --format=%P "$1")" || return 1
+  # shellcheck disable=SC2086 # word-split on purpose: count the parent shas
+  set -- "$1" $parents
+  if [ "$remerge_ok" = 1 ] && [ "$#" -eq 3 ] && git merge-base "$2" "$3" >/dev/null 2>&1; then
+    if out="$(git show --remerge-diff --no-ext-diff --no-textconv --ignore-submodules=none --no-relative --format= "$1" 2>/dev/null)"; then
+      [ -z "$out" ]
+      return
+    fi
+  fi
   out="$(git diff-tree --cc --no-commit-id -r "$1")" || return 1
   [ -z "$out" ]
 }
