@@ -323,12 +323,24 @@ The old allowlist waivers for the `yad-gate-sync` bot and for merge commits are 
 is no allowlist left to waive. A bot commit inside the checked range needs a Verified signature like any
 other commit.
 
-**Content-free merge exemption** (unchanged). A merge commit (2+ parents) is **signature-waived when it
-introduces no content of its own** (its combined diff — `git diff-tree --cc` — is empty, i.e. no
-conflict-resolution or evil-merge hunks): every change it carries already lives in an individually
+**Content-free merge exemption.** A merge commit (2+ parents) is **signature-waived when it
+introduces no content of its own**: every change it carries already lives in an individually
 signature-checked parent, so there is nothing to protect. This unblocks **self-hosted GitLab**, which
 does not sign UI-created merge commits (the signature API returns 404) — without it every routine merge
-would red the branch. A merge that *does* introduce content of its own still requires a verified
+would red the branch. How "no content of its own" is decided (#600):
+
+- **git 2.36 or newer, exactly two parents that share a merge base:** git redoes the merge
+  (`git show --remerge-diff`, with `--no-ext-diff --no-textconv --ignore-submodules=none --no-relative`
+  so local config cannot hide a change). Empty output means the commit is exactly git's own automatic
+  merge of its parents — so a clean merge where both sides edited nearby lines of one file passes. Any
+  output is final, and the merge then needs a verified signature: an extra change, or a conflict
+  resolved by hand (even one that keeps one side, which the combined diff misses).
+- **Otherwise** — older git, a version string it cannot read, parents with no merge base (a shallow
+  clone cut it off, or unrelated histories), a git error, or a merge of three or more parents: the
+  older test — the combined diff (`git diff-tree --cc`) must be empty. It passes a merge of disjoint
+  files but not a merge of nearby lines in one file. An error never waives a merge.
+
+A merge that *does* introduce content of its own still requires a verified
 signature (fail-closed), so an evil merge pushed direct-to-default cannot smuggle in unverified changes.
 This matters for the push-on-default `yad-update-guard` (§9), and for this PR-triggered gate too: a
 GitHub `pull_request` run and a GitLab merged-results pipeline check a merge the platform made, which is
