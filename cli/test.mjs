@@ -30733,6 +30733,28 @@ test('E125 b: a .sdlc/repos.json that is a link is not read by yad update or the
   } finally { if (srv) await srv.close(); fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b: the guide, yad brand and yad doctor never read a Product file that is a link', { skip: E125B_SKIP }, async () => {
+  const { installState } = await import('./guide.mjs');
+  const { brandFromDesign } = await import('./brand-cmd.mjs');
+  const { mirrorChecks } = await import('./doctor.mjs');
+  // Not a git repo, so the guide reads the version stamp from the working tree, not from HEAD.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plain-misc-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    // Each link points at a valid file: a read that followed it would show in the answer.
+    fs.writeFileSync(path.join(T, 'version-outside.json'), '{"version":"4.0.0"}');
+    fs.symlinkSync(path.join(T, 'version-outside.json'), path.join(T, '.sdlc', 'cli-version.json'));
+    assert.equal(installState(T, '4.7.0').project, null, 'no version is read through the link');
+    fs.writeFileSync(path.join(T, 'product-outside.json'), '{"name":"Secret Product","schemaVersion":3}');
+    fs.symlinkSync(path.join(T, 'product-outside.json'), path.join(T, '.sdlc', 'product.json'));
+    assert.equal(brandFromDesign(T, '').brand.name, path.basename(T), 'the name is not read through the link');
+    // product.json alone, on shape 3, would be a half-made pair; through a link it is skipped like a broken file.
+    const checks = [];
+    mirrorChecks(checks, T);
+    assert.deepEqual(checks.filter((x) => x.status === 'warn'), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125 review: a connected repo\'s folder is judged again right before yad update commits or opens a PR/MR in it', { skip: E125_SKIP }, async () => {
   const { commitAndPush, openUpdatePr } = await import('./update-commit.mjs');
   const T = e79Tmp();
