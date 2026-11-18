@@ -13081,9 +13081,17 @@ test('doctor: a pointer-lock is followed over every hop, with the walk `yad epic
   pointer(chg, 'EP-mid');
   const status = async (epic) => (await doctorOn(T)).checks.find((x) => x.id === `epic:${epic}:contract-lock`);
   try {
+    // Sound over two hops, but CI's contract-check follows one: a warning that says how to flatten it.
     const clean = await status('EP-chg');
-    assert.equal(clean?.status, 'ok');
-    assert.match(clean.message, /pointer-lock matches EP-gen via EP-mid/);
+    assert.equal(clean?.status, 'warn');
+    assert.match(clean.message, /pointer-lock matches EP-gen via EP-mid .*, but CI's contract-check follows one hop/);
+    assert.match(clean.hint, /set "inheritedFrom": "EP-gen" and "ref": "\.\.\/\.\.\/EP-gen\/\.sdlc\/contract-lock\.json", and leave "hash" as it is/);
+    // One hop (the mid epic) is plainly ok.
+    assert.equal((await status('EP-mid'))?.status, 'ok');
+    // Flattened as the hint says, the child is ok.
+    pointer(chg, 'EP-gen');
+    assert.equal((await status('EP-chg'))?.status, 'ok');
+    pointer(chg, 'EP-mid');
 
     // The second hop breaks; one hop alone would have read EP-mid's hash and said ok.
     pointer(mid, 'EP-gone');
