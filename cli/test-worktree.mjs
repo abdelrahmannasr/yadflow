@@ -10,9 +10,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
-import { worktreeAt } from './worktree-record.mjs';
+import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
-import { branchToCommitOn, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
+import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
 import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
 
@@ -342,6 +342,70 @@ test('a detached HEAD in the main Product checkout is refused, and --allow-branc
     r = yad(P, 'checkpoint', '--push');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /pass --allow-branch to override/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('--allow-branch never applies to a detached HEAD: refused before any commit, in the main checkout and in a worktree with a commit not yad\'s own (#597 review)', () => {
+  const { W, P } = workspace();
+  try {
+    const shard = (dir, task) => write(dir, { [`epics/EP-x/.sdlc/build-log/EP-x-S01-${task}-api.json`]: JSON.stringify({ story: 'EP-x-S01', task, repo: 'api', mergeCommit: 'abc', date: '2026-10-25' }) });
+    const refused = (dir) => {
+      const before = git(dir, 'rev-parse', 'HEAD');
+      const r = yad(dir, 'checkpoint', '--push', '--allow-branch');
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /--allow-branch cannot apply to a detached HEAD/);
+      assert.doesNotMatch(r.out, /pushed to origin/);
+      assert.equal(git(dir, 'rev-parse', 'HEAD'), before, 'no commit made, HEAD unmoved');
+      assert.equal(git(path.join(W, 'product.git'), 'for-each-ref', '--format=%(refname)', 'refs/heads/'), 'refs/heads/main', 'no branch named HEAD');
+    };
+    git(P, 'switch', '-q', '--detach');
+    shard(P, 'T01');
+    refused(P);
+    git(P, 'switch', '-q', 'main');
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    write(wt, { 'notes.md': 'x\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-qm', 'unreviewed');
+    shard(wt, 'T02');
+    refused(wt);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('only a real linked worktree with no record, or the Product\'s record, counts: not a submodule kept at worktrees/<x>, not a damaged record (#597 review)', () => {
+  const { W, P } = workspace();
+  try {
+    const g = (root) => (...a) => run('git', a, { cwd: root });
+    // A Product kept as a submodule at `worktrees/prod`: its `.git` file points at
+    // `.git/modules/worktrees/prod`, a folder named under `worktrees` with no `commondir`.
+    const sup = path.join(W, 'super');
+    fs.mkdirSync(sup);
+    git(sup, 'init', '-q', '-b', 'main');
+    git(sup, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', path.join(W, 'product.git'), 'worktrees/prod');
+    const sub = path.join(sup, 'worktrees', 'prod');
+    assert.match(fs.readFileSync(path.join(sub, '.git'), 'utf8'), /modules\/worktrees\/prod/);
+    git(sub, 'switch', '-q', '--detach', 'origin/main');
+    assert.equal(isProductWorktree(sub), false);
+    assert.equal(linkedGitDir(sub), null);
+    assert.equal(branchToCommitOn(sub, g(sub), 'main'), 'HEAD', 'a submodule is not a worktree');
+    // A plain linked worktree counts; with a record that cannot be read, or is not valid, it does not.
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    assert.equal(isProductWorktree(wt), true);
+    const rec = path.join(linkedGitDir(wt), 'yad-worktree.json');
+    for (const bad of ['{not json', JSON.stringify({ epic: 'not-an-epic', repo: 'api' }), JSON.stringify({ epic: 'EP-x', repo: 7 })]) {
+      fs.writeFileSync(rec, bad);
+      assert.equal(isProductWorktree(wt), false, bad);
+      assert.equal(branchToCommitOn(wt, g(wt), 'main'), 'HEAD', bad);
+    }
+    // A valid record naming a code repo does not count; the Product's own record does.
+    fs.writeFileSync(rec, JSON.stringify({ epic: 'EP-x', repo: 'api' }));
+    assert.equal(isProductWorktree(wt), false);
+    fs.writeFileSync(rec, JSON.stringify({ epic: 'EP-x', repo: null }));
+    assert.equal(isProductWorktree(wt), true);
+    assert.equal(branchToCommitOn(wt, g(wt), 'main'), 'main');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
