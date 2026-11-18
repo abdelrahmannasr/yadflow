@@ -613,3 +613,50 @@ test('yad worktree add, list and remove run no git in a registered folder shaped
     assert.equal(fs.existsSync(marker), false, 'its config never ran');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('yad worktree add, list and remove run no git in a registered clone outside the workspace, or one reached through a .git folder, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git' }, () => {
+  const { W, P } = workspace();
+  // A real clone with an origin, beside the workspace folder, not in it: a bare existence test passed it.
+  const outer = `${W}-elsewhere`;
+  try {
+    const { env, gitIn } = gitLogger(W);
+    fs.mkdirSync(outer);
+    const away = repoWithOrigin(outer, 'away', { f: 'x\n' });
+    const hidden = repoWithOrigin(path.join(P, '.git'), 'hidden', { f: 'x\n' });
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'away', path: `../../${path.basename(outer)}/away` }, { name: 'hidden', path: '.git/hidden' }] }) });
+    for (const [name, why] of [['away', /away \(\.\.\/\.\.\/[^)]+\/away\): outside the workspace .* — yad runs no git there/], ['hidden', /hidden \(\.git\/hidden\): it runs through a \.git folder .* — yad runs no git there/]]) {
+      let r = yadWith(env, P, 'worktree', 'add', 'EP-x', '--repo', name);
+      assert.deepEqual([...gitIn(away), ...gitIn(hidden)], [], `no git ran in ${name}`);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, why);
+      r = yadWith(env, P, 'worktree', 'remove', 'EP-x', '--repo', name);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, why);
+    }
+    const r = yadWith(env, P, 'worktree', 'list', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).skipped.map((s) => s.repo), ['away', 'hidden']);
+    assert.equal(fs.existsSync(path.join(outer, 'away--EP-x')), false, 'no worktree was made');
+    assert.deepEqual(gitIn(away), [], 'no git ran in the clone outside the workspace');
+    assert.deepEqual(gitIn(hidden), [], 'no git ran in the clone inside .git');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); fs.rmSync(outer, { recursive: true, force: true }); }
+});
+
+test('yad worktree: the Product\'s own entry and a folder inside a checkout are not acted on, as before (#217)', () => {
+  const { W, P } = workspace();
+  try {
+    fs.mkdirSync(path.join(P, 'apps', 'web'), { recursive: true });
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'self', path: '.' }, { name: 'web', path: 'apps/web' }] }) });
+    let r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'self');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /self is not a registered repo/, 'the Product\'s own entry: its worktree is the Product\'s');
+    r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'web');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /web is not cloned here \(.*apps\/web\)/, 'a folder inside a checkout holds no worktrees of its own');
+    r = yad(P, 'worktree', 'list', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees, [], 'nothing listed');
+    assert.equal('skipped' in json(r), false, 'nothing skipped');
+    assert.deepEqual(json(r).warnings, []);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});

@@ -215,7 +215,7 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
   for (const t of targets) {
     const name = t.repo ?? 'the Product';
     if (t.refused) throw err(CODE, refusedLine(t), REFUSED_HINT);
-    if (t.missing) throw err(CODE, `${t.repo} is not cloned here (${t.main})`, `\`yad repo clone ${t.repo}\` fetches it`);
+    if (t.missing) throw err(CODE, `${forTerminal(t.repo)} is not cloned here (${forTerminal(t.main)})`, `\`yad repo clone ${forTerminal(t.repo)}\` fetches it`);
     const mine = yadWorktrees(t.main).find((w) => w.epic === epic && (w.repo ?? null) === t.repo);
     const where = worktreePath(t.main, epic);
     const plan = planAdd({
