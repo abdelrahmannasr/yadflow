@@ -20,9 +20,14 @@ only the branch's task — stays missed, and a person must record each other tas
 - R2. A PR/MR is asked at most once per sync, however many ships or findings name it; one that cannot be
   read is listed in `unread` once per run, and the note says the next sync asks again.
 - R3. A task that already has a ship is never recorded twice.
-- R4. A shipped story's PRs/MRs are not asked, so the platform calls grow only with stories still open.
+- R4. A shipped story's PRs/MRs are not asked, nor those of a story whose every task in its task list
+  (`tasks.md`, or the light spec's tasks block, read locally with `git show`) has a ship in that repo. A
+  task list that cannot be read counts as owing, and is said in `notes`. Each epic's ships are read once.
 - R5. `docs/CLI.md` says what a later sync reads again, in place of "a later sync does not read that
   PR/MR again".
+- R6. A task of another story that a re-read PR carries is listed with `again: true` ("(again)" in the
+  text). A ship whose `pr` links a PR of another repo than its registered `git_url` goes to `unread`. A
+  story whose status cannot be read is said in `notes`, not skipped silently.
 
 ## Out of scope
 
