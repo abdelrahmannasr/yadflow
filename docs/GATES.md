@@ -153,6 +153,17 @@ yad run checks --body pr-description.md
   another run's, or one a killed run left) is read as it is and kept — remove it to read the default
   branch. Two runs at once in one repo can disturb each other (the Product copy, `node_modules`); a Product copy
   that disappears while the gates read it is reported.
+- When nothing can be written where CI checks the Product out — no `.sdlc/product-link.json` on the
+  base, a record with no `git_url`, or a Product clone without that `default_branch` — the run still
+  writes your Product clone's default branch, to a temporary folder of its own outside the repo. It
+  passes that folder to those four gates in the variable `YAD_LOCAL_PRODUCT`, so they read it instead
+  of the folder `product-repo` in a `link.md` reaches on this machine. A `product-repo` that reaches
+  nothing, or none at all, is answered as before. With no record, CI reaches no Product and defers, so
+  this run can give a real answer (a FAIL included) where CI passes with a deferral. That keeps them off your Product's main folder, which
+  may be on another branch (where a story's epic does not exist yet, so the gates said "orphan story
+  link" while CI passed) or hold unmerged edits. The gates read `YAD_LOCAL_PRODUCT` only outside CI
+  (when none of `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` is set), and the run never passes on a value
+  from your shell. With no Product clone, or when the Product is kept in this same repo, nothing changes.
 - Every gate runs, including the package install and build/test/lint (`--no-build` skips those two),
   then a summary. The exit code is 1 when a gate fails or the run is refused, and 130 when it is
   stopped with Ctrl-C.
