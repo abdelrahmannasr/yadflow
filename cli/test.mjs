@@ -15111,6 +15111,35 @@ test('usage: a corrupt ledger warns and is skipped, never throws or under-counts
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('E125 b usage: an approvals.json that is a link is skipped with a warning, not read', { skip: E125B_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-link-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    // A valid ledger outside the Product: a read that followed the link would count ann's approval.
+    fs.writeFileSync(path.join(T, 'outside.json'), JSON.stringify([{ artifact: 'epic.md', step: 'epic-review', approver: 'ann', role: 'owner', status: 'approved', date: '2026-06-01' }]));
+    fs.symlinkSync(path.join(T, 'outside.json'), path.join(T, 'epics/EP-x/.sdlc/approvals.json'));
+    let model;
+    const said = grabErr(() => { model = buildModel(T, {}); });
+    assert.deepEqual(model.members.map((m) => m.name), []);
+    assert.match(said, /skipped unreadable ledger EP-x\/approvals\.json: .*approvals\.json is not a plain file/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b usage: an approvals.json that links to /dev/zero is skipped at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-zero-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.symlinkSync('/dev/zero', path.join(T, 'epics/EP-x/.sdlc/approvals.json'));
+    const got = inChildWithLimit(`const { buildModel } = await import(${cliUrl('./usage.mjs')});
+process.stdout.write('\\n' + JSON.stringify(buildModel(process.argv[1], {}).members.length));`, [T]);
+    assert.equal(got, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('usage: runUsage --out creates missing parent directories', () => {
   const T = usageFixture();
   const dest = path.join(T, 'nested/deep/report.html');
@@ -26686,6 +26715,31 @@ test('E20 review: readSteps and itemHistory say why the steps cannot be read', (
     }
     fs.mkdirSync(file);
     assert.deepEqual(readState(T, 'EP-old'), { why: 'it is a folder' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b: history never reads a state.json that is a link', { skip: E125B_SKIP }, () => {
+  const T = historyProduct();
+  const file = path.join(T, 'epics/EP-old/.sdlc/state.json');
+  try {
+    // The link points at the epic's own valid state: a read that followed it would give its steps.
+    fs.renameSync(file, path.join(T, 'outside-state.json'));
+    fs.symlinkSync(path.join(T, 'outside-state.json'), file);
+    const why = 'it is a link or not a plain file, so it was not read';
+    assert.deepEqual(readState(T, 'EP-old'), { why });
+    assert.deepEqual(itemHistory(T, { id: 'EP-old' }).stepsWhy, why);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b: history answers at once for a state.json that links to /dev/zero', { skip: DEV_ZERO_SKIP }, () => {
+  const T = historyProduct();
+  try {
+    const file = path.join(T, 'epics/EP-old/.sdlc/state.json');
+    fs.rmSync(file);
+    fs.symlinkSync('/dev/zero', file);
+    const got = inChildWithLimit(`const { readState } = await import(${cliUrl('./history.mjs')});
+process.stdout.write(JSON.stringify(readState(process.argv[1], 'EP-old')));`, [T]);
+    assert.deepEqual(got, { why: 'it is a link or not a plain file, so it was not read' });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

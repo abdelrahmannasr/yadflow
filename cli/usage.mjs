@@ -29,7 +29,7 @@
 // a login.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, note, warn, fail, readJSON, run, emitJSON, collectWarning } from './lib.mjs';
+import { c, log, ok, note, warn, fail, readJSON, readPlainJSON, run, emitJSON, collectWarning } from './lib.mjs';
 import { brandForPage } from './brand.mjs';
 import { writeOrSave } from './reports-dir.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
@@ -44,11 +44,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // since one corrupt ledger must not abort the whole derived view, but a silent under-count must never
 // masquerade as "no activity" (an active reviewer wrongly left off the report). Mirrors the `readJSONStrict`
 // hazard note in lib.mjs, softened to warn-and-continue for this read-only aggregation.
+// A link or a folder in its place is never read (E125 b); it is warned about like a broken file.
 function readLedger(p, def) {
-  if (!fs.existsSync(p)) return def;
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    return readPlainJSON(p);
   } catch (e) {
+    if (e.code === 'ENOENT') return def;
     { const w = `skipped unreadable ledger ${path.basename(path.dirname(path.dirname(p)))}/${path.basename(p)}: ${e.message}`; collectWarning(w); note(c.yellow(w)); }
     return def;
   }

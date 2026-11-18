@@ -38,7 +38,7 @@
 // status or date only when it is text, a PR only when it is a whole number) — never a value re-typed.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON } from './lib.mjs';
+import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { buildIndex } from './product-index.mjs';
 import {
@@ -185,21 +185,18 @@ function readItems(root) {
 // One JSON file: { value }, { missing: true } or { why }. Read here rather than through
 // `readJSONStrict`, which names every failure `YAD-STATE-001`: a view that says why a file could not be
 // read must tell "does not parse" from "is a folder" or "permission denied". Nothing is written, so no
-// shape stamp is needed.
+// shape stamp is needed. Only a plain file is read (E125 b): a link is never followed.
 function readJsonFile(file) {
-  let text;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    return { value: readPlainJSON(file) };
   } catch (e) {
     if (e.code === 'ENOENT') return { missing: true };
-    return { why: e.code === 'EISDIR' ? 'it is a folder' : (e.code || e.message) };
-  }
-  try {
-    return { value: JSON.parse(text) };
-  } catch {
-    return { why: 'it does not parse' };
+    if (e.code === NOT_PLAIN_FILE) return { why: isFolder(file) ? 'it is a folder' : 'it is a link or not a plain file, so it was not read' };
+    if (e instanceof SyntaxError) return { why: 'it does not parse' };
+    return { why: e.code || e.message };
   }
 }
+const isFolder = (f) => { try { return fs.lstatSync(f).isDirectory(); } catch { return false; } };
 
 // One item's `state.json`: { state, steps } or { why }. The summary was built a moment earlier from the
 // same file; if it changed in between (a checkout, a pull), this says so rather than guessing. `state`
