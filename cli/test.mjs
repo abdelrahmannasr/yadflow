@@ -25617,6 +25617,12 @@ test('E125 b readInput and indexFreshness: a link is never read, a folder keeps 
     fs.renameSync(indexPath(T), path.join(T, 'index-outside.json'));
     fs.symlinkSync(path.join(T, 'index-outside.json'), indexPath(T));
     assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: '.sdlc/index.json is a link or not a plain file, so it was not read' });
+    // Writing it again puts a plain file in place of the link, and leaves the linked file as it was.
+    fs.writeFileSync(path.join(T, 'index-outside.json'), '{"outside":true}');
+    assert.equal(writeIndex(T), true);
+    assert.ok(fs.lstatSync(indexPath(T)).isFile());
+    assert.equal(fs.readFileSync(path.join(T, 'index-outside.json'), 'utf8'), '{"outside":true}');
+    assert.deepEqual(indexFreshness(T), { state: 'current' });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -25625,18 +25631,23 @@ test('E125 b: a .sdlc/repos.json that links to /dev/zero stops neither the brain
   try {
     fs.symlinkSync('/dev/zero', path.join(T, '.sdlc', 'repos.json'));
     fs.symlinkSync('/dev/zero', path.join(T, '.sdlc', 'index.json'));
-    const got = inChildWithLimit(`const { readInput, indexFreshness } = await import(${cliUrl('./product-index.mjs')});
+    const got = inChildWithLimit(`const { readInput, indexFreshness, writeIndex } = await import(${cliUrl('./product-index.mjs')});
 const { startMapServer } = await import(${cliUrl('./map-view.mjs')});
+const fs = await import('node:fs');
 const root = process.argv[1];
 const input = readInput(root + '/.sdlc/repos.json');
 const fresh = indexFreshness(root);
 const srv = await startMapServer(root, { live: true });
-process.stdout.write(JSON.stringify({ input, fresh, watchable: srv.watchable }) + '\\n');
+const wrote = writeIndex(root);
+const plain = fs.lstatSync(root + '/.sdlc/index.json').isFile();
+process.stdout.write(JSON.stringify({ input, fresh, watchable: srv.watchable, wrote, plain }) + '\\n');
 process.exit(0);`, [T]);
     assert.deepEqual(got, {
       input: { error: 'it is a link or not a plain file' },
       fresh: { state: 'unreadable', why: '.sdlc/index.json is a link or not a plain file, so it was not read' },
       watchable: 2,
+      wrote: true,
+      plain: true,
     });
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

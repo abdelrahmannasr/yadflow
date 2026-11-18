@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { isPlainObject, writeJSON, info, warn, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
+import { isPlainObject, writeJSON, info, warn, readPlainFile, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import {
@@ -52,12 +52,11 @@ export function readInput(file) {
     raw = readPlainBytes(file);
   } catch (e) {
     if (e.code === 'ENOENT') return { absent: true };
-    if (e.code === NOT_PLAIN_FILE) return { error: isFolder(file) ? 'EISDIR' : 'it is a link or not a plain file' };
+    if (e.code === NOT_PLAIN_FILE) return { error: e.kind === 'dir' ? 'EISDIR' : 'it is a link or not a plain file' };
     return { error: e.code || e.message };
   }
   return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
 }
-const isFolder = (f) => { try { return fs.lstatSync(f).isDirectory(); } catch { return false; } };
 
 // The hash of everything the index reads, length-prefixed so two inputs can never run together
 // (`a` + `bc` never collides with `ab` + `c`), and naming each input's place so a file moved from one
@@ -175,9 +174,12 @@ export function buildIndex(root, { format = INDEX_FORMAT } = {}) {
 // and ledger rules live with the commands, not here).
 export function writeIndex(root, built = buildIndex(root)) {
   const file = indexPath(root);
-  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  // Only a plain file is read (E125 b). A link or a folder there counts as different, and writeJSON
+  // puts a plain file in place of a link.
+  let before = null;
+  try { before = readPlainFile(file); } catch { /* not a plain file */ }
   writeJSON(file, built.index);
-  return fs.readFileSync(file, 'utf8') !== before;
+  return readPlainFile(file) !== before;
 }
 
 // How the committed index compares with the Product on disk:
