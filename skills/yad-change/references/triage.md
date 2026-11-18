@@ -80,7 +80,7 @@ counts — it just documents where the sign-off lives):
 
 The engine copies the `hash` field of the owning epic's `.sdlc/contract-lock.json` (it never recomputes
 it), and refuses when that lock is missing, malformed, or no longer matches the owner's `contract.md`
-surface — a pointer to a stale lock would pass the drift down the thread. `contract-check.sh` reads only `hash`, so a Build story in the change-epic pins this identical
+surface — a pointer to a stale lock would pass the drift down the thread. **When the owner's lock is itself a pointer** (it approved its architecture but has no `contract.md`), the engine follows the pointers to the epic that holds `contract.md` and writes `inheritedFrom` / `ref` naming **that** epic, with the hash unchanged (#598). Each `ref` must be another epic's `.sdlc/contract-lock.json` inside `epics/`; a loop, more than 8 hops, a missing lock, a hash that differs from the next lock's, or a last `contract.md` that no longer matches its lock is refused, naming the break. `yad doctor` runs the same walk. `contract-check.sh` reads only `hash`, so a Build story in the change-epic pins this identical
 hash via its `link.md` and the gate passes unchanged. There is no `contract.md` in the change-epic, so
 the surface physically cannot drift.
 

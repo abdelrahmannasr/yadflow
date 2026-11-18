@@ -1095,6 +1095,7 @@ refused before anything is written:
 | the step or its review is unfinished | nothing approved exists yet | finish it on the owner first |
 | architecture approved, but no usable lock | rule 5 — you may skip authoring a contract, never having one | lock the owner's surface first |
 | the owner's surface no longer matches its lock | a pointer would pass the drift down the thread | re-lock the owner first |
+| the owner's lock is a pointer that breaks — a ref outside `epics/` or to no epic's lock, a loop, more than 8 hops, a missing lock, a hash that differs from the next lock's, or a last `contract.md` that no longer matches (#598) | the walk cannot reach a `contract.md` the lock really copies | fix the lock the message names (`yad doctor` runs the same walk) |
 | the route has no such step (a short lane) | nothing to inherit | leave the base out |
 
 A brownfield anchor (`kind: stub`, or a light-promoted `backfill-done`) is the one exception: its chain
@@ -1104,7 +1105,7 @@ was never started, so its bases carry `boundHash: null` and no pointer-lock is w
 
 When `architecture` is inherited, `yad epic new` writes a **derived** `contract-lock.json` carrying the
 parent's hash **verbatim** so `contract-check.sh` (which reads only `hash`) passes unchanged. There is
-no `contract.md` in the child to edit, so the surface physically cannot drift.
+no `contract.md` in the child to edit, so the surface physically cannot drift. When the owner's lock is itself a pointer, the engine follows it to the epic that holds `contract.md`, and `inheritedFrom` / `ref` name that epic (flattened — one hop for every reader; #598).
 
 ```json
 { "artifact": "contract.md", "hash": "sha256:<parent hash, verbatim>", "lockedAt": "<date>",
