@@ -270,16 +270,51 @@ function packAction(root, entries, { name, include, logs, out, push }) {
   if (!has('npx')) return no(`${j.name}: npx missing — not packed`);
   const repoRoot = j.target || path.resolve(root, repo.path);
   if (out !== '-') {
+    const bad = outProblem(out);
+    if (bad) return no(`${j.name}: ${shown(out)} ${bad} — not packed`);
     try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch (e) { return no(`${j.name}: cannot make the folder for ${shown(out)} (${shown(e.message)}) — not packed`); }
+    // The folder made is the one judged: no link put on the way since.
+    if (realOf(path.dirname(out)) !== path.dirname(realOf(out) ?? '')) return no(`${j.name}: the folder for ${shown(out)} changed while it was made — not packed`);
   }
   info(`${j.name}: packing with repomix …`);
   // Repomix's own report (files packed, its secret check) on stderr: a file it flags is left out of the pack,
   // and the person needs to hear which one.
-  const r = runRepomix(repoRoot, { include: include ?? null, logs: !!logs, out, report: true });
+  const r = runRepomix(repoRoot, { include: include ?? null, logs: !!logs, out, report: true, place: out !== '-' });
   if (r.noWork) return no(`${j.name}: could not make a temporary folder for repomix (${shown(r.noWork)}) — not packed`);
   if (!r.ok) return no(`${j.name}: repomix failed — ${shown(String(r.stderr || '').split('\n')[0]) || 'unknown error'}`);
   ok(`${j.name}: packed ${out === '-' ? 'to stdout' : shown(out)}`);
   return done({ packed: true });
+}
+
+// A path's real place, for a file that may not exist yet: the nearest folder on its way that exists, by its
+// real path, then the parts still to be made. Null when a link on the way leads nowhere.
+function realOf(p) {
+  const there = (q) => { try { fs.lstatSync(q); return true; } catch { return false; } };
+  const rest = [];
+  let dir = p;
+  while (!there(dir)) {
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    rest.unshift(path.basename(dir));
+    dir = up;
+  }
+  try { return path.join(fs.realpathSync(dir), ...rest); } catch { return null; }
+}
+
+// Why `yad repo pack -o <file>` will not write `out` (absolute), or null. The command is one an agent runs
+// without asking, so it never writes into yad's own records (a `.sdlc` folder — the Product's ledgers, a repo's
+// risk map) or into git's storage (a `.git` folder, whose hooks and config run code), by any path that leads
+// there; and never over a link or anything but a plain file.
+function outProblem(out) {
+  let st = null;
+  try { st = fs.lstatSync(out); } catch { /* a new file */ }
+  if (st && (st.isSymbolicLink() || !st.isFile())) return 'is a link or not a plain file';
+  const real = realOf(out);
+  if (!real) return 'is reached through a link that leads nowhere';
+  const parts = real.split(/[\\/]/).map((x) => x.toLowerCase());
+  if (parts.includes('.git')) return 'is inside a .git folder';
+  if (parts.includes('.sdlc')) return 'is inside a .sdlc folder (yad\'s own records; with no -o, the pack goes to the Product\'s code-context)';
+  return null;
 }
 
 // `yad repo preview <name> [<pattern>] [--clear]` (#359): show, set or clear the repo's preview address

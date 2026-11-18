@@ -835,6 +835,8 @@ async function main() {
   // --json run: one object on stdout, a refusal included, and every other line on stderr.
   if (o.json || ALWAYS_JSON.has(commandName(o._))) beginJSON(commandName(o._));
   if (o.version) return inJSON() ? emitJSON({}) : log(VERSION);
+  // Only `repo pack` reads `-o -` as stdout; to any other command it would be a file named `-`.
+  if (o.out === '-' && !(cmd === 'repo' && o._[1] === 'pack')) return refuse('-o - (stdout) is only for `yad repo pack`', 'name a file with -o <file> (or --out <file>)');
 
   // THE HOT PATH, handled before anything heavy is loaded. `yad hook ledger-guard` runs inside the
   // agent's tool loop on every file-editing call, and it needs `cli/hook.mjs` alone. Everything else
