@@ -329,16 +329,25 @@ signature-checked parent, so there is nothing to protect. This unblocks **self-h
 does not sign UI-created merge commits (the signature API returns 404) — without it every routine merge
 would red the branch. How "no content of its own" is decided (#600):
 
-- **git 2.36 or newer, exactly two parents that share a merge base:** git redoes the merge
-  (`git show --remerge-diff`, with `--no-ext-diff --no-textconv --ignore-submodules=none --no-relative`
-  so local config cannot hide a change). Empty output means the commit is exactly git's own automatic
-  merge of its parents — so a clean merge where both sides edited nearby lines of one file passes. Any
-  output is final, and the merge then needs a verified signature: an extra change, or a conflict
-  resolved by hand (even one that keeps one side, which the combined diff misses).
-- **Otherwise** — older git, a version string it cannot read, parents with no merge base (a shallow
-  clone cut it off, or unrelated histories), a git error, or a merge of three or more parents: the
-  older test — the combined diff (`git diff-tree --cc`) must be empty. It passes a merge of disjoint
-  files but not a merge of nearby lines in one file. An error never waives a merge.
+- **Only a merge of exactly two parents can be waived.** A merge of three or more parents (an octopus
+  merge) always needs a verified signature; a platform merge button never makes one.
+- **git 2.36 or newer, in a clone that is not shallow:** git redoes the merge
+  (`git -c merge.renames=true -c merge.directoryRenames=conflict show --remerge-diff`, with
+  `--no-ext-diff --no-textconv --ignore-submodules=none --no-relative`, so config on the runner cannot
+  change the answer). Empty output means the commit is exactly git's own automatic merge of its
+  parents — so a clean merge where both sides edited nearby lines of one file passes. Any output is
+  final, and the merge then needs a verified signature: an extra change, or a conflict resolved by hand
+  (even one that keeps one side, which the combined diff misses). Parents with no merge base (unrelated
+  histories) are redone against an empty tree, so a result that mixes the two sides shows as conflicts
+  and fails. When git fails to redo the merge, the merge needs a verified signature too, and the gate
+  prints git's reason.
+- **git older than 2.36, a version string it cannot read, or a shallow clone** (where the merge base may
+  be cut off): the older test — the combined diff (`git diff-tree --cc`) must be empty. It passes a
+  merge of disjoint files but not a merge of nearby lines in one file. An error never waives a merge.
+
+The gate reads commits with plumbing (`git rev-list --parents`, `git rev-parse --short`), which no
+`log.*` setting changes, and with `GIT_NO_REPLACE_OBJECTS=1`, so a `refs/replace/` object cannot stand in
+for a commit it judges.
 
 A merge that *does* introduce content of its own still requires a verified
 signature (fail-closed), so an evil merge pushed direct-to-default cannot smuggle in unverified changes.

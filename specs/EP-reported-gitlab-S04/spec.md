@@ -14,15 +14,16 @@ by hand to one side, because the result equals a parent.
 
 ## Requirements
 
-- R1. With git 2.36 or newer and a merge of exactly two parents that share a merge base, the gate waives
-  an unsigned merge when `git show --remerge-diff` (with `--no-ext-diff --no-textconv
-  --ignore-submodules=none --no-relative`) prints nothing. Any output is final: the merge needs a
-  verified signature.
+- R1. With git 2.36 or newer, in a clone that is not shallow, a merge of exactly two parents is waived
+  when `git -c merge.renames=true -c merge.directoryRenames=conflict show --remerge-diff` (with
+  `--no-ext-diff --no-textconv --ignore-submodules=none --no-relative`) prints nothing. Any output is
+  final: the merge needs a verified signature. Parents with no merge base are redone against an empty
+  tree. When the command fails, the merge needs a signature, and the gate prints git's reason.
 - R2. The git version is read from `git --version` in portable bash ("git version 2.39.5 (Apple
-  Git-154)" works); a version it cannot read counts as older.
-- R3. On older git, when the parents share no merge base (a shallow clone, unrelated histories), when a
-  command fails, and for a merge of three or more parents, the gate keeps today's combined-diff check.
-  An error never waives a merge.
+  Git-154)" and ".windows.1" work); a version it cannot read counts as older.
+- R3. On older git and in a shallow clone, the gate keeps today's combined-diff check. A merge of three
+  or more parents is never waived. An error never waives a merge. Parents and short ids are read with
+  plumbing (`rev-list --parents`, `rev-parse --short`), and `GIT_NO_REPLACE_OBJECTS=1` is set.
 - R4. A merge that adds its own change (in the merged file, or a submodule pointer even under
   `diff.ignoreSubmodules=all`), or a conflict resolved by hand, fails.
 - R5. `checks/verified-commits.sh` stays a byte-for-byte copy of the template.
@@ -43,9 +44,12 @@ Signing merge commits on the platform; the signature check itself; how CI fetche
 Add `git_has_remerge_diff` (version parse, once per run) and try `--remerge-diff` first inside
 `merge_introduces_no_content`, falling back to `--cc`. Copy the template over `checks/verified-commits.sh`.
 Tests build real merges in a temp repo with a failing `glab` shim: nearby lines waived; Apple version
-string waived; a `git` shim reporting 2.30.0 (and an unreadable version) falls back and fails; an
-amended extra change fails; a submodule pointer fails under `diff.ignoreSubmodules=all`; a conflict
-resolved to one side fails; a depth-2 clone with no merge base falls back and waives a disjoint merge.
+string waived; a `git` shim reporting 2.30.0, 2.35.9 (or an unreadable version) falls back and fails,
+2.36.0 and `.windows.1` are waived; an amended extra change fails; a submodule pointer fails under
+`diff.ignoreSubmodules=all`; a conflict resolved to one side fails, also when a `git` wrapper makes
+`--remerge-diff` fail; a mixed merge of unrelated histories fails; an octopus merge fails; a signed empty
+commit under `log.showSignature=true` is not read as a merge; a depth-2 shallow clone falls back and
+waives a disjoint merge.
 
 ## Tasks
 
