@@ -12017,6 +12017,202 @@ test('verified-commits gate: an unsigned content-free merge is signature-waived;
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('verified-commits gate: a clean merge of nearby lines is waived by redoing the merge; an extra change, a hand-resolved conflict, a failed redo, unrelated histories, an octopus merge, old git and a shallow clone are handled (issue #600)', () => {
+  // A platform merge button (GitLab) never signs its merge commit. When both sides edited nearby lines
+  // of one file, git merges them on its own, yet the combined diff (--cc) shows those hunks — so the
+  // old check failed a merge that added nothing. git 2.36+ redoes the merge (`--remerge-diff`): an
+  // empty answer means the commit is exactly git's own merge of its parents.
+  const T = scaffoldGateRepo(); // on `feature`
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bin-'));
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-vc-shallow-'));
+  fs.writeFileSync(path.join(bin, 'glab'), '#!/usr/bin/env bash\nexit 1\n'); // no signature, no network
+  fs.chmodSync(path.join(bin, 'glab'), 0o755);
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { stdio: 'pipe' }).toString().trim();
+  const runIn = (cwd, base, extraPath = bin) => {
+    const env = { ...process.env, SDLC_PLATFORM: 'gitlab', CI_API_V4_URL: '', CI_PROJECT_ID: '', PATH: `${extraPath}:${bin}:${process.env.PATH}` };
+    try { return { code: 0, out: execFileSync('bash', [GATE, base], { cwd, env, stdio: 'pipe' }).toString() }; }
+    catch (e) { return { code: e.status, out: (e.stdout || '').toString() + (e.stderr || '').toString() }; }
+  };
+  // A `git` on PATH that reports the given version and hands every other call to the real git.
+  const gitShim = (version) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gitshim-'));
+    fs.writeFileSync(path.join(dir, 'git'), `#!/usr/bin/env bash\nif [ "$1" = --version ]; then echo '${version}'; exit 0; fi\nexec '${realGit}' "$@"\n`);
+    fs.chmodSync(path.join(dir, 'git'), 0o755);
+    return dir;
+  };
+  const waived = (out, sha) => new RegExp(`${sha} unsigned merge commit .* signature waived`).test(out);
+  const failed = (out, sha) => new RegExp(`FAIL \\[verified-commits\\]: ${sha} signature missing/unverified`).test(out);
+  const merger = ['-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub'];
+  const short = (cwd = T) => git(cwd, 'rev-parse', '--short', 'HEAD').toString().trim();
+  const shims = [];
+  try {
+    git(T, 'checkout', '-q', 'main');
+    fs.writeFileSync(path.join(T, 'n.txt'), '1\n2\n3\n4\n5\n6\n');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'seed lines');
+    git(T, 'checkout', '-q', '-b', 'topic');
+    fs.writeFileSync(path.join(T, 'n.txt'), '1\n2 topic\n3\n4\n5\n6\n');
+    git(T, 'commit', '-q', '-am', 'feat: topic edits line 2');
+    git(T, 'checkout', '-q', '-b', 'other', 'main');
+    fs.writeFileSync(path.join(T, 'n.txt'), '1\n2 other\n3\n4\n5\n6\n');
+    git(T, 'commit', '-q', '-am', 'feat: other edits line 2 too');
+    git(T, 'checkout', '-q', 'main');
+    fs.writeFileSync(path.join(T, 'n.txt'), '1\n2\n3\n4 main\n5\n6\n');
+    git(T, 'commit', '-q', '-am', 'feat: main edits line 4');
+    const base = git(T, 'rev-parse', 'HEAD').toString().trim();
+
+    // Both sides edited nearby lines of one file: git merges them on its own -> waived.
+    git(T, ...merger, 'merge', '-q', '--no-ff', '-m', 'Merge topic', 'topic');
+    const clean = short();
+    assert.notEqual(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff is not empty for this merge');
+    let r = runIn(T, base);
+    assert.ok(waived(r.out, clean), r.out);
+    assert.ok(!failed(r.out, clean), r.out);
+
+    // An Apple-style version string is read too.
+    const apple = gitShim('git version 2.39.5 (Apple Git-154)');
+    shims.push(apple);
+    assert.ok(waived(runIn(T, base, apple).out, clean), 'git 2.39.5 (Apple Git-154) uses the redone merge');
+
+    // Older git (no --remerge-diff): the gate keeps the stricter combined-diff check, so this merge fails.
+    const old = gitShim('git version 2.30.0');
+    shims.push(old);
+    r = runIn(T, base, old);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, clean), `git 2.30 falls back to --cc: ${r.out}`);
+    // A version it cannot read is "older" too.
+    const weird = gitShim('git version weird');
+    shims.push(weird);
+    assert.ok(failed(runIn(T, base, weird).out, clean), 'an unreadable version falls back');
+    // The 2.35 / 2.36 boundary, and a Windows version string.
+    for (const [version, redone] of [['git version 2.35.9', false], ['git version 2.36.0', true], ['git version 2.45.1.windows.1', true]]) {
+      const dir = gitShim(version);
+      shims.push(dir);
+      const out = runIn(T, base, dir).out;
+      assert.equal(waived(out, clean), redone, `${version}: ${out}`);
+      assert.equal(failed(out, clean), !redone, `${version}: ${out}`);
+    }
+
+    // The same merge amended with an extra change in the merged file: content of its own -> FAIL.
+    fs.writeFileSync(path.join(T, 'n.txt'), '1\n2 topic\n3\n4 main\n5\n6 smuggled\n');
+    git(T, ...merger, 'commit', '-q', '-a', '--amend', '--no-edit');
+    const evil = short();
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, evil), r.out);
+
+    // A submodule pointer added by the merge is content too, even when local config hides submodules.
+    git(T, 'reset', '-q', '--hard', clean);
+    git(T, 'update-index', '--add', '--cacheinfo', `160000,${base},sub`);
+    git(T, ...merger, 'commit', '-q', '--amend', '--no-edit');
+    const gitlink = short();
+    git(T, 'config', 'diff.ignoreSubmodules', 'all');
+    r = runIn(T, base);
+    git(T, 'config', '--unset', 'diff.ignoreSubmodules');
+    assert.ok(failed(r.out, gitlink), r.out);
+
+    // A conflict resolved by hand to one side. The combined diff is empty for it (the result equals a
+    // parent), so the old check waived it; the redone merge shows the conflict it settled -> FAIL.
+    git(T, 'reset', '-q', '--hard', clean); // back to the clean merge
+    try { git(T, ...merger, 'merge', '-q', '--no-ff', '-m', 'Merge other', 'other'); assert.fail('expected a conflict'); }
+    catch (e) { if (e.code === 'ERR_ASSERTION') throw e; }
+    git(T, 'checkout', '-q', '--ours', 'n.txt');
+    git(T, 'add', 'n.txt');
+    git(T, ...merger, 'commit', '-q', '--no-edit');
+    const resolved = short();
+    assert.equal(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff misses it');
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, resolved), r.out);
+    assert.ok(waived(r.out, clean), 'the clean merge below it is still waived');
+
+    // git fails to redo the merge: no waiver (the combined diff would have waived this one), and why.
+    const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gitshim-'));
+    shims.push(broken);
+    fs.writeFileSync(path.join(broken, 'git'), `#!/usr/bin/env bash\nfor a in "$@"; do [ "$a" = --remerge-diff ] && { echo 'fatal: remerge broke' >&2; exit 128; }; done\nexec '${realGit}' "$@"\n`);
+    fs.chmodSync(path.join(broken, 'git'), 0o755);
+    r = runIn(T, base, broken);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, resolved), r.out);
+    assert.ok(!waived(r.out, resolved), r.out);
+    assert.match(r.out, new RegExp(`WARN \\[verified-commits\\]: ${resolved} — git could not redo the merge to check it \\(git show --remerge-diff failed: fatal: remerge broke \\), so it needs a verified signature\\.`), r.out);
+
+    // Unrelated histories (no merge base): git redoes the merge against an empty tree. A merge that
+    // takes a.txt from one side and n.txt from the other passes the combined diff, but not this.
+    git(T, 'checkout', '-q', '--orphan', 'unrelated');
+    git(T, 'rm', '-rfq', '.');
+    fs.writeFileSync(path.join(T, 'a.txt'), 'other a\n');
+    fs.writeFileSync(path.join(T, 'n.txt'), 'other n\n');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'feat: an unrelated root');
+    git(T, 'checkout', '-q', '-b', 'mixed', base);
+    try { git(T, ...merger, 'merge', '-q', '--allow-unrelated-histories', '-m', 'Merge unrelated', 'unrelated'); assert.fail('expected a conflict'); }
+    catch (e) { if (e.code === 'ERR_ASSERTION') throw e; }
+    git(T, 'checkout', '-q', '--ours', 'a.txt');
+    git(T, 'checkout', '-q', '--theirs', 'n.txt');
+    git(T, 'add', 'a.txt', 'n.txt');
+    git(T, ...merger, 'commit', '-q', '--no-edit');
+    const mixed = short();
+    assert.equal(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff misses it');
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, mixed), r.out);
+
+    // An octopus merge (3 parents) is never waived, even of disjoint files.
+    for (const b of ['o1', 'o2']) {
+      git(T, 'checkout', '-q', '-b', b, base);
+      fs.writeFileSync(path.join(T, `${b}.txt`), `${b}\n`);
+      git(T, 'add', '-A');
+      git(T, 'commit', '-q', '-m', `feat: ${b}`);
+    }
+    git(T, 'checkout', '-q', '-b', 'octopus', base);
+    git(T, ...merger, 'merge', '-q', '--no-ff', '-m', 'Merge o1 and o2', 'o1', 'o2');
+    const octopus = short();
+    assert.equal(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff is empty');
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, octopus), r.out);
+    assert.match(r.out, new RegExp(`WARN \\[verified-commits\\]: ${octopus} merges 3 parents — only a merge of two parents can go unsigned`), r.out);
+
+    // log.showSignature=true must not change how commits are read: a signed (but not platform-Verified)
+    // commit with no change is not taken for a merge, and its short id stays clean.
+    if (spawnSync('ssh-keygen', ['-?'], { stdio: 'ignore' }).error === undefined) {
+      const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-key-'));
+      shims.push(keyDir);
+      execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', path.join(keyDir, 'key')], { stdio: 'pipe' });
+      git(T, 'checkout', '-q', '-b', 'signed', base);
+      git(T, '-c', 'gpg.format=ssh', '-c', `user.signingkey=${path.join(keyDir, 'key')}`, 'commit', '-q', '--allow-empty', '-S', '-m', 'chore: signed, empty');
+      const signed = short();
+      git(T, 'config', 'log.showSignature', 'true');
+      r = runIn(T, base);
+      git(T, 'config', '--unset', 'log.showSignature');
+      assert.equal(r.code, 1, r.out);
+      assert.ok(failed(r.out, signed), r.out);
+      assert.doesNotMatch(r.out, /unsigned merge commit/, r.out);
+    }
+
+    // A shallow clone (here it cut off the merge base): redoing the merge would be a two-way merge full
+    // of spurious conflicts, so the gate uses the combined diff, as before. A disjoint merge passes.
+    git(T, 'checkout', '-q', '-b', 'disjoint', base);
+    git(T, 'checkout', '-q', '-b', 'side');
+    fs.writeFileSync(path.join(T, 'side.txt'), 'side\n');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'feat: side file');
+    git(T, 'checkout', '-q', 'disjoint');
+    fs.writeFileSync(path.join(T, 'a.txt'), 'changed after the fork');
+    git(T, 'commit', '-q', '-am', 'feat: change a.txt');
+    git(T, ...merger, 'merge', '-q', '--no-ff', '-m', 'Merge side', 'side');
+    fs.rmSync(clone, { recursive: true, force: true });
+    git(os.tmpdir(), 'clone', '-q', '--depth', '2', '--branch', 'disjoint', `file://${T}`, clone);
+    assert.notEqual(spawnSync('git', ['merge-base', 'HEAD^1', 'HEAD^2'], { cwd: clone }).status, 0, 'the clone has no merge base');
+    const shallowMerge = short(clone);
+    r = runIn(clone, git(clone, 'rev-parse', 'HEAD^1').toString().trim());
+    assert.ok(waived(r.out, shallowMerge), r.out);
+  } finally {
+    for (const d of [bin, clone, T, ...shims]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('verified-commits gate: the signature is now the whole gate — a Verified commit passes, an unverified one fails (E62 review)', () => {
   const T = scaffoldGateRepo();
   fs.writeFileSync(path.join(T, 'b.txt'), '2');

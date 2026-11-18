@@ -650,7 +650,13 @@ author commits is decided by write access to the repo, not by a list.
 
 - No GitHub or GitLab remote, or `SDLC_PLATFORM=none`: a warning, and signatures are not checked.
 - A merge commit with no content of its own: a warning, and its signature is not required (self-hosted
-  GitLab does not sign merge commits made in its web page).
+  GitLab does not sign merge commits made in its web page). Only a merge of two parents can be waived:
+  a merge of three or more parents always needs a signature. With git 2.36 or newer in a clone that is
+  not shallow, "no content of its own" means the commit is exactly what git gets when it redoes the
+  merge (`git show --remerge-diff` prints nothing), so a clean merge of nearby lines in one file passes.
+  A change added to the merge, a conflict resolved by hand, a mix of two unrelated histories, or a merge
+  git fails to redo, needs a signature. On older git or in a shallow clone, the gate uses the older
+  check instead: the combined diff (`git diff-tree --cc`) must be empty.
 
 **Reads:** each commit's verification status, from the platform's API. On GitHub it uses `gh` with
 `GH_TOKEN`; on GitLab, the `GITLAB_TOKEN` (or `SDLC_API_TOKEN`) CI/CD variable with the `read_api` scope.
