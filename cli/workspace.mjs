@@ -509,8 +509,9 @@ export async function runInit(cwd, opts = {}) {
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
   noteWorkspaceFile(product);
-  // Setup's own "yad next" is said from the Product; the person is still in the workspace folder.
-  hand(`start with: cd ${fromShell(product)} && yad next`);
+  // Setup's own "yad next" is said from the Product; the person is still in the workspace folder. A
+  // folder name that is not a plain one is never put in a command to copy (S04): a placeholder instead.
+  hand(`start with: cd ${validFolderName(path.basename(product)) ? fromShell(product) : '<the Product folder>'} && yad next`);
   return { workspace: cwd, product, found, setup };
 }
 

@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { exists, readJSON, writeJSON } from './lib.mjs';
+import { exists, forTerminal, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
 
@@ -218,12 +218,12 @@ export function workspaceFileState(productRoot) {
   const workspace = path.dirname(root);
   const name = path.basename(root);
   if (path.dirname(root) === root || sharedFolder(workspace)) return 'other: the folder above the Product is your home folder, the temp folder or the top of the disk — move the Product into a folder of its own';
-  if (!PRODUCT_NAME_RE.test(name)) return `other: the Product folder's name (${name}) is not one a workspace file can hold`;
+  if (!PRODUCT_NAME_RE.test(name)) return `other: the Product folder's name (${forTerminal(name)}) is not one a workspace file can hold`;
   if (insideGitTree(workspace)) return 'other: the folder above the Product is inside a git repo';
   const cur = readJSON(path.join(workspace, WORKSPACE_FILE), null);
   if (cur && cur.product === name && cur.version === WORKSPACE_VERSION) return 'ok';
   if (cur && cur.product === name) return `other: ${WORKSPACE_FILE} there is version ${JSON.stringify(cur.version ?? null)}, not ${WORKSPACE_VERSION}`;
-  if (cur) return `other: ${WORKSPACE_FILE} there names ${typeof cur.product === 'string' ? `${cur.product}/` : 'no Product'}`;
+  if (cur) return `other: ${WORKSPACE_FILE} there names ${typeof cur.product === 'string' ? `${forTerminal(cur.product)}/` : 'no Product'}`;
   return 'missing';
 }
 

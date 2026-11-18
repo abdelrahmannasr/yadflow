@@ -30828,7 +30828,7 @@ test('S04: yad risk-map draft never writes a folder name holding an escape, and 
 });
 
 // S04 (Product #216): `yad init` names a Product folder it found beside the repos cleaned.
-test('S04: yad init prints a found Product folder name holding an escape cleaned', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+test('S04: yad init prints a found Product folder name holding an escape cleaned, and never puts it in a cd to copy', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
   const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
   const T = e79Tmp();
   try {
@@ -30842,6 +30842,17 @@ test('S04: yad init prints a found Product folder name holding an escape cleaned
     assert.equal(two.status, 1);
     assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
     assert.match(out, /more than one Product here \(pr ]0;pwned od, second\)/);
+
+    // One Product, so init sets it up: every line it prints — the target, the workspace-file note, the
+    // `cd` to copy — holds no raw control character, and the `cd` never names a folder that is not plain.
+    fs.rmSync(path.join(ws, 'second'), { recursive: true, force: true });
+    const one = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    const all = one.stdout + one.stderr;
+    assert.equal(one.status, 0, all);
+    assert.ok(!hasRaw(all), `no raw control character:\n${all}`);
+    assert.match(all, /Product folder: pr ]0;pwned od\//);
+    assert.match(all, /not written \(the Product folder's name \(pr ]0;pwned od\)/);
+    assert.match(all, /start with: cd <the Product folder> && yad next/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
