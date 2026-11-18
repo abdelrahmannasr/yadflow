@@ -71,7 +71,7 @@ export function targets(root, name) {
       if (adhoc.ok[0]?.present) return { list: [{ name, root: p }] };
       return refusal(adhoc.skipped[0] ?? { j: adhoc.ok[0].j, why: 'not a git repository' });
     }
-    return { error: `unknown repo: ${name}`, hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' };
+    return { error: `unknown repo: ${forTerminal(name)}`, hint: 'name a repo from .sdlc/repos.json (`yad repo list`) or give the path to a code repo' };
   }
   if (repos.length) {
     for (const x of judged.skipped) warn(`${x.j.name} (${x.j.path}): ${x.why} — skipped`);
@@ -291,7 +291,7 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
         log(c.bold(`\nrisk map — ${forTerminal(r.name)}`));
         if (!r.git) { warn('not a git repo — skipped'); continue; }
         if (r.refused) { fail(`${RISK_MAP_FILE} is ${r.refused} — nothing was written over it`); continue; }
-        if (r.unwritable.length) warn(`not added — a map line cannot hold these names (a space, \`#\`, \`*\`, \`?\`, \`[\` or \`\\\`): ${r.unwritable.map(forTerminal).join(' ')}; rename them to give them a level`);
+        if (r.unwritable.length) warn(`not added — a map line cannot hold these names (a space, \`#\`, \`*\`, \`?\`, \`[\`, \`\\\`, or a control or invisible character): ${r.unwritable.map(forTerminal).join(' ')}; rename them to give them a level`);
         if (!r.added.length) { ok('every directory already has a line — nothing to add'); continue; }
         (r.written ? ok : info)(`${r.written ? 'added' : 'would add'} ${r.added.length} unset line(s): ${r.added.map(forTerminal).join(' ')}`);
       }

@@ -30740,6 +30740,59 @@ test('E125 (c): yad risk-map check prints a folder name holding an escape cleane
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// S04 (Product #216): `yad risk-map draft` lists a folder whose name holds an escape as one it could not
+// write, cleaned; the map stays free of it; `--json` keeps the raw name. A repo name the person typed is
+// echoed cleaned too.
+test('S04: yad risk-map draft never writes a folder name holding an escape, and prints it cleaned; --json keeps it raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const odd = 'ev\u001b]0;pwned\u0007il';
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    for (const d of [odd, 'plain']) {
+      fs.mkdirSync(path.join(backend, d));
+      fs.writeFileSync(path.join(backend, d, 'f.js'), 'x');
+    }
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+
+    const json = JSON.parse(e79Yad(T, product, ['risk-map', 'draft', '--dry-run', '--json']).stdout);
+    assert.deepEqual(json.repos[0].unwritable, [`${odd}/`], '--json keeps the raw folder name');
+    const r = e79Yad(T, product, ['risk-map', 'draft']);
+    const out = r.stdout + r.stderr;
+    assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
+    assert.match(out, /not added — .*control or invisible character\): ev ]0;pwned il\//, 'the folder, cleaned, as one it could not write');
+    const map = fs.readFileSync(path.join(backend, '.sdlc', 'risk-map'), 'utf8');
+    assert.ok(!hasRaw(map) && !map.includes('pwned'), `the map never holds it:\n${map}`);
+    assert.match(map, /^plain\/ +unset$/m);
+
+    const u = e79Yad(T, product, ['risk-map', 'check', `no\u001b[2Jpe`]);
+    const uo = u.stdout + u.stderr;
+    assert.ok(!hasRaw(uo), `the unknown repo is echoed cleaned:\n${uo}`);
+    assert.match(uo, /unknown repo: no \[2Jpe/);
+    // The message is cleaned in --json too, as the refusal beside it and `yad sync --repo` already are.
+    assert.equal(JSON.parse(e79Yad(T, product, ['risk-map', 'check', `no\u001b[2Jpe`, '--json']).stdout).error, 'unknown repo: no [2Jpe');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// S04 (Product #216): `yad init` names a Product folder it found beside the repos cleaned.
+test('S04: yad init prints a found Product folder name holding an escape cleaned', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    for (const p of ['pr\u001b]0;pwned\u0007od', 'second']) {
+      fs.mkdirSync(path.join(ws, p, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(ws, p, '.sdlc', 'hub.json'), '{}');
+    }
+    const two = e79Yad(T, ws, ['init']);
+    const out = two.stdout + two.stderr;
+    assert.equal(two.status, 1);
+    assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
+    assert.match(out, /more than one Product here \(pr ]0;pwned od, second\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E81 review 15: the solo people count runs no git in a folder the Product shaped as a repo, and says it could not count it', { skip: process.platform === 'win32' && 'a shell script as gpg.program' }, () => {
   const T = e79Tmp();
   const marker = path.join(fs.realpathSync(os.tmpdir()), `yad-e81-r15-${process.pid}`);
