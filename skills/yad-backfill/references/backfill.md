@@ -4,18 +4,20 @@ Backfill (build plan §G) brings an existing repo under the gated SDLC **one fea
 recording what is already built as a spec a human approves. It never invents behaviour and never blocks
 the whole repo.
 
-## Repomix (the one true CLI subprocess)
+## Repomix (run through `yad repo pack`)
 
-`npx repomix@1.18.1 [flags]` (Phase 0 / RESEARCH-NOTES §3). For a single feature:
+`yad repo pack <repo> [flags]` runs `npx repomix@1.18.1` from an empty folder of its own, with the npm
+registry named (#213). Never start Repomix with npx inside the repo: npm reads a `.npmrc` committed there,
+which could send it to another registry. For a single feature:
 
 ```
-npx repomix@1.18.1 --compress --include "src/<feature>/**" --include-logs --style markdown -o <out>.md
+yad repo pack <repo> --include "src/<feature>/**" --logs -o <out>.md
 ```
 
-- `--compress` — Tree-sitter structural compression (keeps the pack small and signal-dense).
+- `--compress` — always on: Tree-sitter structural compression (keeps the pack small and signal-dense).
 - `--include "<glob,glob>"` — restrict to this feature's files (one feature at a time).
-- `--include-logs` — add the relevant git commit history (default 50; `--include-logs-count N`).
-- `--style markdown` — human/AI-readable; default output is `repomix-output.xml`.
+- `--logs` — add the relevant git commit history (Repomix's `--include-logs`: the last 50 commits).
+- `--style markdown` — always on: human/AI-readable.
 - **Secretlint runs by default** — if a secret is reported, STOP and redact before any AI sees the code.
 
 If Repomix is not used (the skill's "When a tool is missing" section says how to tell), degrade:
