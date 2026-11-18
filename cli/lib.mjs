@@ -92,8 +92,12 @@ export function refuse(message, hint = null, { code = null, json = false, ...ext
 }
 
 // ---- output -------------------------------------------------------------
+// A run whose stdout carries something else (`yad repo pack <name> -o -`: the pack itself) sends every
+// line it says to stderr, as a --json run does, so the pack is the only thing on stdout.
+let proseOnStderr = false;
+export function proseToStderr() { proseOnStderr = true; }
 // Colour follows the stream the prose goes to: stderr during a --json run, stdout otherwise.
-const useColor = () => (jsonRun ? process.stderr.isTTY : output.isTTY) && !process.env.NO_COLOR;
+const useColor = () => (jsonRun || proseOnStderr ? process.stderr.isTTY : output.isTTY) && !process.env.NO_COLOR;
 const paint = (code, s) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const c = {
   bold: (s) => paint('1', s),
@@ -112,7 +116,7 @@ export async function quietly(fn) {
 }
 export const log = (s = '') => {
   if (muted) return;
-  if (!jsonRun) return console.log(s);
+  if (!jsonRun) return proseOnStderr ? console.error(s) : console.log(s);
   jsonRun.afterFail = false;
   console.error(s);
 };
