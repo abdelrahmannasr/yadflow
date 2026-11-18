@@ -4,7 +4,7 @@
 // strand required checks and fail verified-commits). This module is the single home of that guard.
 import { warn, fail, hand, run, forTerminal } from './lib.mjs';
 import { SETTINGS_EDIT_HINT, settingsEditHint } from './manifest.mjs';
-import { worktreeAt } from './worktree-record.mjs';
+import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -31,19 +31,28 @@ export function resolveDefaultBranch(git, productConfig) {
     || 'main';
 }
 
-// The branch a default-branch command commits on: the current one — or, in an epic's Product worktree
-// (#115), which sits DETACHED because the default branch is checked out in the main tree, the default
+// A linked worktree of the Product (#597): one `yad worktree add` made for an epic (#115), or a plain
+// `git worktree add --detach <dir> origin/<default>` with no record. Never the main checkout, and never a
+// folder whose record names a code repo.
+export function isProductWorktree(root) {
+  if (!root || !linkedGitDir(root)) return false;
+  const rec = worktreeAt(root);
+  return rec === null || rec.repo === null;
+}
+
+// The branch a default-branch command commits on: the current one — or, in a linked Product worktree
+// (#115, #597), which sits DETACHED because the default branch is checked out in the main tree, the default
 // branch itself, so the commit is pushed as HEAD:<default>. Only when every commit HEAD holds that the
 // default branch lacks (fetched first) is one of yad's own default-branch commits — each subject is
 // `chore(product|gate): … [skip ci]`, so a `Revert "…"` of one, or a step's commit, is not. One a run made
 // without --push, or whose push failed, is pushed by the next run, as in the main checkout. Anything else (a step's unreviewed work) must never reach the default branch. A detached
-// HEAD anywhere else stays 'HEAD', and the guard below refuses it as before.
+// HEAD in the main checkout stays 'HEAD', and the guard below refuses it as before.
 // `fetch: false` judges by the local origin/<default> — for a caller that writes a derived file and pushes
 // nothing (the index refresh): a stale or missing ref can only make it skip — unless the default branch
 // was rewound — and it asks no network.
 export function branchToCommitOn(root, git, defaultBranch, { fetch = true } = {}) {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  return branch === 'HEAD' && worktreeAt(root)?.repo === null && onlyYadCommitsAhead(git, defaultBranch, { fetch }) ? defaultBranch : branch;
+  return branch === 'HEAD' && isProductWorktree(root) && onlyYadCommitsAhead(git, defaultBranch, { fetch }) ? defaultBranch : branch;
 }
 
 // The subject every yad default-branch commit has (checkpoint, tidy, repo refresh, gate ci/repair/reopen).
@@ -70,9 +79,16 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  // An epic worktree (#115) refused here holds commits origin/<default> lacks, or could not fetch it.
-  if (branch === 'HEAD' && root && worktreeAt(root)?.repo === null) {
-    hand(`this epic worktree's HEAD has commits origin/${d} does not that are not yad's own (or the fetch failed) — a step's work goes on its branch and through review: \`git switch -c <step>/<epic>\` keeps it, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
+  // A Product worktree (#115, #597) refused here holds commits origin/<default> lacks, or could not fetch it.
+  if (branch === 'HEAD' && isProductWorktree(root)) {
+    const which = worktreeAt(root) ? 'epic worktree' : 'worktree';
+    hand(`this ${which}'s HEAD has commits origin/${d} does not that are not yad's own (or the fetch failed) — a step's work goes on its branch and through review: \`git switch -c <step>/<epic>\` keeps it, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
+    process.exitCode = 1;
+    return false;
+  }
+  // A detached HEAD in the main checkout: --allow-branch would push to a branch named 'HEAD' (#597).
+  if (branch === 'HEAD') {
+    hand(`check out the default branch and re-run (\`git switch ${d}\`), or, when another folder holds '${d}', run it from a worktree at its tip: \`git worktree add --detach <dir> origin/${d}\``);
     process.exitCode = 1;
     return false;
   }

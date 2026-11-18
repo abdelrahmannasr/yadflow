@@ -279,6 +279,72 @@ test('default-branch commands: an epic Product worktree commits on the default b
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('default-branch commands: a plain detached Product worktree (no yad record) commits on the default branch; one with a commit not yad\'s own is refused (#597)', () => {
+  const { W, P } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product', default_branch: 'main' } });
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    assert.equal(worktreeAt(wt), null, 'git made it, not yad: no record');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (root) => (...a) => run('git', a, { cwd: root });
+    assert.equal(branchToCommitOn(wt, g(wt), 'main'), 'main', 'HEAD at the tip of origin/main');
+    // End to end: a Build record checkpointed from it lands on origin/main.
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T01', repo: 'api', mergeCommit: 'abc', date: '2026-10-25' }) });
+    let r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /pushed to origin\/main/);
+    assert.match(git(path.join(W, 'product.git'), 'log', '-1', '--format=%s', 'main'), /sync Build state/);
+    assert.equal(git(path.join(W, 'product.git'), 'for-each-ref', '--format=%(refname)', 'refs/heads/'), 'refs/heads/main', 'no branch named HEAD');
+    // yad's own commit made without --push still counts, and the next run pushes it.
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T02-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T02', repo: 'api', mergeCommit: 'def', date: '2026-10-25' }) });
+    assert.equal(yad(wt, 'checkpoint').code, 0);
+    assert.equal(branchToCommitOn(wt, g(wt), 'main'), 'main');
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T05-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T05', repo: 'api', mergeCommit: 'bad', date: '2026-10-25' }) });
+    r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), git(wt, 'rev-parse', 'HEAD'), 'both commits went up');
+    // A commit that is not yad's own: refused, nothing pushed, and the hint is the worktree one.
+    write(wt, { 'notes.md': 'x\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-qm', 'unreviewed');
+    assert.equal(branchToCommitOn(wt, g(wt), 'main'), 'HEAD');
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T03-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T03', repo: 'api', mergeCommit: 'fed', date: '2026-10-25' }) });
+    const head = git(path.join(W, 'product.git'), 'rev-parse', 'main');
+    r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /on 'HEAD', not the default branch 'main'/);
+    assert.match(r.out, /this worktree's HEAD has commits origin\/main does not/);
+    assert.doesNotMatch(r.out, /--allow-branch/);
+    // gate ci there refuses it too.
+    r = yad(wt, 'gate', 'ci');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
+    assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head, 'nothing reached origin/main');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('a detached HEAD in the main Product checkout is refused, and --allow-branch (a push to a branch named HEAD) is not suggested (#597)', () => {
+  const { W, P } = workspace();
+  try {
+    const g = (root) => (...a) => run('git', a, { cwd: root });
+    // Even at the tip of origin/main.
+    git(P, 'switch', '-q', '--detach');
+    assert.equal(branchToCommitOn(P, g(P), 'main'), 'HEAD');
+    write(P, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T04-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T04', repo: 'api', mergeCommit: 'cab', date: '2026-10-25' }) });
+    let r = yad(P, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /on 'HEAD', not the default branch 'main'/);
+    assert.match(r.out, /git switch main/);
+    assert.doesNotMatch(r.out, /--allow-branch/);
+    // A named branch still gets the --allow-branch hint, as before.
+    git(P, 'switch', '-q', '-c', 'wip');
+    r = yad(P, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /pass --allow-branch to override/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad gate ci refuses to push from a named branch other than the default; a detached HEAD may (#115)', () => {
   const { W, P } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product', default_branch: 'main' } });
   try {
