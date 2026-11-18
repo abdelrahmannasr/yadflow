@@ -43,6 +43,19 @@ Protect the branch yad's files name as `default_branch`:
 That is the branch every review merges into and every check runs against. If yad's files name none,
 yad reads the platform's own default branch, and `yad doctor` says so.
 
+**A trunk that is not the platform's default branch (#599).** The update guard checks direct pushes
+to the platform's default branch. If the branch yad's files name (for example `testing`) is another
+branch, set a CI variable named `YAD_TRUNK` to that branch, so direct pushes to it are checked too:
+
+- GitHub: a repository variable (Settings → Secrets and variables → Actions → Variables).
+- GitLab: a project or group CI/CD variable (Settings → CI/CD → Variables). Leave "Protect variable"
+  off unless that branch is protected: a protected variable reaches only pipelines on protected branches.
+
+Set it in the settings, not in yad's files: `yad update` rewrites them. With the variable unset, the
+guard checks the default branch only, as before. `yad ci check` shows a `trunk` warning for each repo
+whose branch is not the platform's default. It cannot read the variable's value, so the warning says
+"if it is not set already".
+
 ## GitHub
 
 GitHub has two ways to set rules: **rulesets** (Settings → Rules → Rulesets) and the older **classic
@@ -171,6 +184,10 @@ default-branch pipelines your list stopped until now, your own jobs included). T
 older self-managed GitLab treats an unknown key as an error that stops every pipeline: check the file in
 the pipeline editor before you commit it (Build → Pipeline editor, or CI/CD → Editor on older versions; it
 validates the file).
+
+If your trunk is not the default branch and you set `YAD_TRUNK` ([Which branch](#which-branch)), give the
+trunk the same rule: add `- if: $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK` with the same two
+`auto_cancel` lines, before `- when: always`.
 
 **Duplicate pipelines.** A push to a branch with an open merge request can start two pipelines: a branch
 pipeline and a merge request pipeline. yad's jobs run only in the merge request one. To stop the branch

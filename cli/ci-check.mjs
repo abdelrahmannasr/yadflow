@@ -277,6 +277,36 @@ function platformRows(add, root, t, s, { solo }) {
 
   if (gh) githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps });
   else gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo });
+  trunkRow(add, t, p, { branch, web, gh });
+}
+
+// #599: the update guard checks a direct push to the platform's default branch, and to the branch the YAD_TRUNK
+// CI variable names. A repo whose trunk (as the Product declares it) is another branch needs that variable. yad
+// cannot read a variable's value (GitLab shows it to a Maintainer only), so this is a warning, said as "if not
+// set already", never a gap that could not clear. A repo that runs no yad CI has no guard, and no row: a
+// Product that keeps its ledger locally, or a code repo whose entry names no platform (yad wired none of its
+// workflows; the files row says so). On the Product, gate sync still follows only the platform's default
+// branch, so the variable alone does not finish the setup there.
+function trunkRow(add, t, p, { branch, web, gh }) {
+  if (!t.ciRuns || (t.kind === 'code' && !t.target.platform)) return;
+  if (typeof p.platformDefault !== 'string' || !p.platformDefault || p.branch === p.platformDefault) return;
+  const other = forTerminal(p.platformDefault);
+  const where = gh ? 'a repository variable' : 'a project or group CI/CD variable';
+  const url = gh ? `${web}/settings/variables/actions` : `${web}/-/settings/ci_cd`;
+  // A protected GitLab variable reaches only the pipelines of protected branches: on any other branch the
+  // rule never sees it, and the guard never runs there, with nothing to say so.
+  const protect = p.protected === true
+    ? `${branch} is protected, so "Protect variable" may stay on.`
+    : `Untick "Protect variable": ${branch} is ${p.protected === false ? 'not protected' : 'not known to be protected'}, and a protected variable is invisible to the pipelines of an unprotected branch, so the guard would never run there and nothing would say so.`;
+  const steps = gh
+    ? [`If it is not set already: open ${url} → New repository variable: name YAD_TRUNK, value ${branch}.`]
+    : [`If it is not set already: open ${url} → Variables → Add variable: key YAD_TRUNK, value ${branch} (or set it once on the group, for all its projects). ${protect} Set it there, not in yad's fragment: yad rewrites its files on every update.`];
+  if (t.kind === 'product') {
+    steps.push(`On the Product the variable is not enough: yad-gate-sync, the job that moves a gate on after its review merges, still follows only the platform's default branch (${other}), so merges into ${branch} do not move the gates. The simplest fix is to make ${branch} the platform's default branch (${gh ? `${web}/settings → Default branch` : `${web}/-/settings/repository → Branch defaults`}).`);
+  }
+  add('trunk', 'suggest', `the trunk ${branch} is not ${gh ? 'GitHub' : 'GitLab'}'s default branch (${other}): the update guard checks a direct push to ${branch} only when ${where} YAD_TRUNK is set to ${branch}${t.kind === 'product' ? ', and the gate sync follows only ' + other : ''}`, {
+    actor: 'person', where: 'settings', url, steps,
+  });
 }
 
 function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps }) {

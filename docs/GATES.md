@@ -127,6 +127,10 @@ each repo, and names the settings page when it does not ([branch-protection.md](
 or the `yad-update-guard-verified-commits` and `yad-update-guard-commit-message` jobs (GitLab) run only
 two gates over the pushed commits: [verified-commits](#verified-commits) and
 [commit-message](#commit-message). This covers `yad update --push`, which pushes without a pull request.
+When the repo's trunk (its `default_branch` in yad's files) is not the platform's default branch, set the CI
+variable `YAD_TRUNK` to the trunk, and pushes to it are checked too (a repository variable on GitHub, a
+project or group CI/CD variable on GitLab). Unset, only the default branch is checked. `yad ci check`
+names the value in its `trunk` row ([branch-protection.md](branch-protection.md#which-branch)).
 
 **When the PR text is edited** (title or description only), GitHub runs only `pr-title` and
 `pr-template` again. They have their own workflow file for this: `yad-pr-text.yml` on a code repo,

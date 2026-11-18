@@ -225,6 +225,12 @@ Copy from this skill's `templates/`:
     equal to the whole variable, not a comma-split. Leave **Protect variable** unticked on both
     variables below: a protected variable reaches only pipelines on protected branches, so the MR
     gates would run without it — untagged and on the default Node line.
+  - **A trunk that is not the default branch** (#599): the update guard checks direct pushes to the
+    platform's default branch, and to the branch a `YAD_TRUNK` CI variable names. When the repo's
+    `default_branch` in yad's files (for example `testing`) is not the platform's default, the person
+    sets `YAD_TRUNK` to it — a project or group CI/CD variable on GitLab (`rules:` read it), a
+    repository variable on GitHub. Unset, only the default branch is checked. `yad ci check` shows a
+    `trunk` warning with the value; it cannot read the variable, so ask the person whether it is set.
   - **The Node line** (#364): every GitLab job runs `image: node:${YAD_NODE_VERSION}`, `22` by default.
     Set a `YAD_NODE_VERSION` CI/CD variable (a current `20`, `22` or `24` line) to change it — a
     project variable wins over the fragment's value, so the fragment itself is never edited.

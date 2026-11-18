@@ -307,6 +307,93 @@ test('E160b case 8: one repo by name, an unknown name, and the default from the 
   } finally { done(w); }
 });
 
+// #599: the update guard checks a direct push to the platform's default branch, and to the branch YAD_TRUNK
+// names. A trunk the Product declares that is not the platform's default needs that variable: a warning row
+// that names it and the value. yad cannot read the variable, so it says "if not set already".
+// The platform answers for the declared branch; its own default stays `main`. A list with no branch path in
+// it would answer nothing for the new branch, so the helper refuses one.
+const onBranch = (calls, b) => {
+  const out = calls.map(([re, ...rest]) => [new RegExp(re.source.replace(/branches\\?\/main/, `branches/${b}`)), ...rest]);
+  assert.ok(out.some(([re], i) => re.source !== calls[i][0].source), 'onBranch: no call names branches/main');
+  return out;
+};
+
+test('#599: a declared trunk that is not the platform\'s default branch is a trunk warning naming YAD_TRUNK', () => {
+  for (const platform of ['github', 'gitlab']) {
+    const host = platform === 'github' ? 'github.com' : 'gitlab.com';
+    const w = workspace({ platform, repos: [{ name: 'app', path: '../app', platform, git_url: `git@${host}:acme/app.git`, default_branch: 'testing' }] });
+    try {
+      const calls = platform === 'github'
+        ? [...gh('p', { rules: ALL_RULES(productJobs) }), ...onBranch(gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) }), 'testing')]
+        : [...gl('p'), ...onBranch(gl('app'), 'testing')];
+      const { r } = check(w, calls);
+      const trunk = byId(r, 'app').trunk;
+      assert.ok(trunk, `${platform}: a trunk row`);
+      assert.equal(trunk.status, 'suggest', `${platform}: a warning, not a gap — yad cannot read the variable`);
+      assert.match(trunk.message, /trunk testing is not (GitHub|GitLab)'s default branch \(main\)/);
+      assert.match(trunk.message, platform === 'github' ? /a repository variable YAD_TRUNK is set to testing$/ : /a project or group CI\/CD variable YAD_TRUNK is set to testing$/);
+      assert.equal(trunk.fix.actor, 'person');
+      assert.equal(trunk.fix.where, 'settings');
+      assert.equal(trunk.fix.url, platform === 'github' ? 'https://github.com/acme/app/settings/variables/actions' : 'https://gitlab.com/acme/app/-/settings/ci_cd');
+      assert.equal(trunk.fix.steps.length, 1, 'a code repo: only the variable');
+      assert.match(trunk.fix.steps[0], /^If it is not set already: .*YAD_TRUNK, value testing/);
+      if (platform === 'github') assert.doesNotMatch(trunk.fix.steps[0], /Variables/, 'the URL already opens the Variables tab');
+      // The trunk is protected here, so a protected variable reaches its pipelines.
+      else assert.match(trunk.fix.steps[0], /testing is protected, so "Protect variable" may stay on\./);
+      // The Product's trunk is its platform's default: no row.
+      assert.equal(byId(r, 'Product').trunk, undefined, `${platform}: same branch, no row`);
+    } finally { done(w); }
+  }
+});
+
+test('#599: on GitLab an unprotected trunk is told to untick "Protect variable"; the same branch gets no row', () => {
+  const w = workspace({ platform: 'gitlab', repos: [{ name: 'app', path: '../app', platform: 'gitlab', git_url: 'git@gitlab.com:acme/app.git', default_branch: 'testing' }] });
+  try {
+    const step = byId(check(w, [...gl('p'), ...onBranch(gl('app', { prot: false }), 'testing')]).r, 'app').trunk.fix.steps[0];
+    assert.match(step, /Untick "Protect variable": testing is not protected, and a protected variable is invisible to the pipelines of an unprotected branch, so the guard would never run there/);
+    assert.doesNotMatch(step, /may stay on/);
+  } finally { done(w); }
+  // A GitLab code repo whose trunk is the platform's default branch: no row.
+  const same = workspace({ platform: 'gitlab' });
+  try {
+    const { r } = check(same, [...gl('p'), ...gl('app')]);
+    assert.equal(byId(r, 'app').protected.status, 'ok', 'the branch was read');
+    assert.equal(byId(r, 'app').trunk, undefined);
+  } finally { done(same); }
+});
+
+test('#599: the Product\'s trunk row says gate sync still follows the default branch; no CI, no row', () => {
+  for (const platform of ['github', 'gitlab']) {
+    const w = workspace({ platform, product: { default_branch: 'testing' } });
+    try {
+      const calls = platform === 'github'
+        ? [...onBranch(gh('p', { rules: ALL_RULES(productJobs) }), 'testing'), ...gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) })]
+        : [...onBranch(gl('p'), 'testing'), ...gl('app')];
+      const trunk = byId(check(w, calls).r, 'Product').trunk;
+      assert.ok(trunk, `${platform}: a trunk row on the Product`);
+      assert.match(trunk.message, /, and the gate sync follows only main$/);
+      assert.equal(trunk.fix.steps.length, 2);
+      assert.match(trunk.fix.steps[1], /^On the Product the variable is not enough: yad-gate-sync, .*follows only the platform's default branch \(main\).*The simplest fix is to make testing the platform's default branch/);
+    } finally { done(w); }
+  }
+  // A Product whose ledger is kept locally runs no yad CI, so it has no update guard and no row.
+  const local = workspace({ product: { ledger: 'local', default_branch: 'testing' } });
+  try {
+    const { r } = check(local, [...onBranch(gh('p', { rules: ALL_RULES(REQUIRED_CHECKS.github.product) }), 'testing'), ...gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) })]);
+    assert.equal(byId(r, 'Product').protected.status, 'ok', 'the Product\'s branch was read');
+    assert.equal(byId(r, 'Product').trunk, undefined);
+    assert.equal(byId(r, 'app').trunk, undefined, 'the code repo is on main');
+  } finally { done(local); }
+  // A code repo whose entry names no platform got none of yad's workflows (the files row is a gap): no row.
+  const bare = workspace({ repos: [{ name: 'app', path: '../app', git_url: 'git@github.com:acme/app.git', default_branch: 'testing' }] });
+  try {
+    const row = byId(check(bare, [...gh('p', { rules: ALL_RULES(productJobs) }), ...onBranch(gh('app', { rules: ALL_RULES(REQUIRED_CHECKS.github.code) }), 'testing')]).r, 'app');
+    assert.equal(row.files.status, 'gap');
+    assert.equal(row.protected.status, 'ok', 'the branch was read');
+    assert.equal(row.trunk, undefined);
+  } finally { done(bare); }
+});
+
 test('E160b case 9: REQUIRED_CHECKS equals the jobs in yad\'s workflow templates and the table in docs/branch-protection.md', () => {
   const jobs = (file, re) => [...fs.readFileSync(path.join(ROOT, file), 'utf8').matchAll(re)].map((m) => m[1]);
   const ghJob = /^ {2}([a-z][a-z0-9-]*):$/gm;

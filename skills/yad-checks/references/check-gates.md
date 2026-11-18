@@ -543,13 +543,22 @@ machine-state `yad checkpoint`/`gate ci` commits) precisely so this guard runs o
 Wired into **every connected repo and the Product** (`REPO_WIRING`/`PRODUCT_WIRING` in `cli/manifest.mjs`). On
 GitHub it is a self-contained workflow (`.github/workflows/yad-update-guard.yml`, marker `# yad-managed:
 yad-checks`), gated to the default branch by a job-level `if: github.ref_name ==
-github.event.repository.default_branch`. On GitLab it is an includable fragment
+github.event.repository.default_branch || (vars.YAD_TRUNK != '' && github.ref_name == vars.YAD_TRUNK)`.
+On GitLab it is an includable fragment
 (`.gitlab/ci/yad-update-guard.yml`, marker `# yad-managed-include: yad-checks`) whose jobs run on
-`$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH`; its `include:` line
+`$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH`, or on
+`$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK`; its `include:` line
 (`- local: '.gitlab/ci/yad-update-guard.yml'`) is added to the root `.gitlab-ci.yml` the same additive way
 as the other fragments (see *Sync with existing CI* below). **On GitLab the fragment is inert until that
 include line exists** — `yad update --push` warns when it pushes to a gitlab repo whose root pipeline
 lacks it.
+
+**A trunk that is not the default branch (#599).** The files are copied as they are, with no branch
+filled in per repo. A repo whose trunk (its `default_branch` in yad's files) is not the platform's
+default sets the CI variable `YAD_TRUNK` to the trunk — a repository variable on GitHub, a project or
+group CI/CD variable on GitLab — and direct pushes to it are checked too. Unset or empty, the extra
+condition never matches. `yad ci check` shows a `trunk` warning naming the value for each such repo; it
+cannot read the variable, so it says "if it is not set already".
 
 **Prerequisites / caveats.** Direct pushes to the default branch must be permitted for the committer
 (adjust branch protection). The commits `yad update --push` creates must be **signed**, or this guard
