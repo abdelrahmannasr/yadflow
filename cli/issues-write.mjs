@@ -191,7 +191,7 @@ export const seedForeignFlags = (argv) => argv.filter((a) => a.startsWith('-') &
 
 // A leftover approvals.json the child's seed would refuse: records in it, one that does not parse, or a
 // link or a folder in its place (never read, E125 b).
-const hasApprovals = (p) => { try { const a = readPlainJSON(p); return !Array.isArray(a) || a.length > 0; } catch (e) { return e.code !== 'ENOENT'; } };
+const hasApprovals = (p) => { try { const a = readPlainJSON(p); return !Array.isArray(a) || a.length > 0; } catch (e) { return e.code !== 'ENOENT' && e.code !== 'ENOTDIR'; } };
 
 // Whether a person ever reopened the item: true, false, or null when the history could not all be read.
 function everReopened(t, number, runner) {
