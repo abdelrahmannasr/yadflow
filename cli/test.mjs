@@ -1831,6 +1831,60 @@ test('E125 b: writeJSON over a link replaces the link and leaves the file it poi
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
+// Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that
+// never ends (a link to /dev/zero) must fail the test, not freeze the whole run.
+const DEV_ZERO_SKIP = process.platform === 'win32' && 'no /dev/zero on Windows';
+const cliUrl = (f) => JSON.stringify(new URL(f, import.meta.url).href);
+function inChildWithLimit(script, args = []) {
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script, ...args], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+  assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout.trim().split('\n').pop());
+}
+
+test('E125 b readPlainJSON: a missing file, a link, a folder and a broken file each throw their own error; a plain file reads raw', { skip: E125B_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plain5-'));
+  try {
+    const sdlc = path.join(T, '.sdlc');
+    fs.mkdirSync(sdlc);
+    assert.equal(NOT_PLAIN_FILE, 'YAD_NOT_PLAIN_FILE');
+    assert.throws(() => readPlainJSON(path.join(sdlc, 'absent.json')), (e) => e.code === 'ENOENT');
+    // A link to a valid file: refused, so the caller can tell it from a missing file.
+    fs.writeFileSync(path.join(T, 'outside.json'), '{"secret":1}');
+    fs.symlinkSync(path.join(T, 'outside.json'), path.join(sdlc, 'repos.json'));
+    assert.throws(() => readPlainJSON(path.join(sdlc, 'repos.json')), (e) => e.code === NOT_PLAIN_FILE && /repos\.json is not a plain file/.test(e.message));
+    fs.mkdirSync(path.join(sdlc, 'state.json'));
+    assert.throws(() => readPlainJSON(path.join(sdlc, 'state.json')), (e) => e.code === NOT_PLAIN_FILE);
+    fs.writeFileSync(path.join(sdlc, 'approvals.json'), '{ broken');
+    assert.throws(() => readPlainJSON(path.join(sdlc, 'approvals.json')), SyntaxError);
+    // Under .sdlc/, readJSON stamps a shape; readPlainJSON gives the file as it is.
+    fs.writeFileSync(path.join(sdlc, 'product.json'), '{"name":"x"}');
+    assert.deepEqual(readPlainJSON(path.join(sdlc, 'product.json')), { name: 'x' });
+    // The bytes form: a Buffer, byte for byte, and every failure thrown. readPlainFile keeps null for no file.
+    fs.writeFileSync(path.join(T, 'crlf.md'), 'a\r\nb');
+    const bytes = readPlainBytes(path.join(T, 'crlf.md'));
+    assert.ok(Buffer.isBuffer(bytes));
+    assert.deepEqual([...bytes], [...Buffer.from('a\r\nb')]);
+    assert.throws(() => readPlainBytes(path.join(T, 'absent.md')), (e) => e.code === 'ENOENT');
+    assert.throws(() => readPlainBytes(path.join(sdlc, 'repos.json')), (e) => e.code === NOT_PLAIN_FILE);
+    assert.equal(readPlainFile(path.join(T, 'absent.md')), null);
+    assert.equal(readPlainFile(path.join(T, 'crlf.md')), 'a\r\nb');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b readPlainJSON: a link to /dev/zero is refused at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plain6-'));
+  try {
+    const p = path.join(T, 'repos.json');
+    fs.symlinkSync('/dev/zero', p);
+    const got = inChildWithLimit(`const { readPlainJSON, readPlainBytes } = await import(${cliUrl('./lib.mjs')});
+const code = (f) => { try { f(); return 'read'; } catch (e) { return e.code; } };
+process.stdout.write(JSON.stringify([code(() => readPlainJSON(process.argv[1])), code(() => readPlainBytes(process.argv[1]))]));`, [p]);
+    assert.deepEqual(got, ['YAD_NOT_PLAIN_FILE', 'YAD_NOT_PLAIN_FILE']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // lib.mjs — schemaVersion, the file-shape stamp (roadmap Part 2, rules 1 and 2)
 // ---------------------------------------------------------------------------------------------

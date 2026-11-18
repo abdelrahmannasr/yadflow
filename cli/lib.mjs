@@ -345,19 +345,32 @@ const writeShape = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVers
 // error with code NOT_PLAIN_FILE. The file is then opened with O_NOFOLLOW and O_NONBLOCK and checked again
 // on the open handle, so a link put in its place between the two steps is refused too, and opening a pipe
 // never waits for a writer. (Windows has neither flag; there the `lstat` check stands alone.)
-const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
+export const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
 const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
 const notPlain = (p) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE });
-function readPlainFile(p) {
-  let st;
-  try { st = fs.lstatSync(p); } catch { return null; }
+// The read itself. Every failure is thrown, the `lstat` one too, so a caller can tell a missing file
+// (ENOENT) from one it may not read. `encoding: null` gives the raw bytes.
+function readPlainOrThrow(p, encoding = 'utf8') {
+  const st = fs.lstatSync(p);
   if (!st.isFile()) throw notPlain(p);
   let fd;
   try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p); throw e; }
   try {
     if (!fs.fstatSync(fd).isFile()) throw notPlain(p);
-    return fs.readFileSync(fd, 'utf8');
+    return fs.readFileSync(fd, encoding === null ? undefined : encoding);
   } finally { fs.closeSync(fd); }
+}
+export function readPlainFile(p) {
+  try { fs.lstatSync(p); } catch { return null; }
+  return readPlainOrThrow(p);
+}
+// The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
+export const readPlainBytes = (p) => readPlainOrThrow(p, null);
+// One JSON file as it is on disk: no shape stamp, and nothing caught. A missing file throws ENOENT, a link
+// or a folder throws NOT_PLAIN_FILE, and a file that does not parse throws a SyntaxError. So each caller
+// keeps its own answer for each of the three, which `readJSON` (one fallback for all) cannot give.
+export function readPlainJSON(p) {
+  return JSON.parse(readPlainOrThrow(p));
 }
 // Each refused path is named once per run, on stderr: readJSON has many callers, and some print an answer
 // on stdout that another program reads (a hook, a `--json` run), which a warning there would break.
