@@ -15,6 +15,7 @@ import path from 'node:path';
 import { isEpicStatePath, MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { cpMerge } from './lib.mjs';
+import { spawnSync } from 'node:child_process';
 
 // Keep printed lines off the runner's message stream — see the same guard at the top of cli/test.mjs.
 if (process.env.NODE_TEST_CONTEXT) {
@@ -1716,4 +1717,161 @@ test('migrate --apply rebuilds .sdlc/index.json on the default branch; the index
     // Derived, never migrated: it is not a row on the plan, even once it exists.
     assert.ok(!projectJsonFiles(T).some((f) => f.endsWith(path.join('.sdlc', 'index.json'))));
   } finally { cleanup(T); }
+});
+
+// ---- E125 b: every Product file is read only as a plain file (EP-factory-safety-S02) ---------------
+// A link or a folder in place of a Product file is never followed: it could point outside the Product, or
+// at a device whose read never ends. It is reported like a file that does not parse, and never rewritten.
+const LINK_SKIP = process.platform === 'win32' && 'making a link needs admin rights on Windows';
+const DEV_ZERO_SKIP = process.platform === 'win32' && 'no /dev/zero on Windows';
+const NOT_PLAIN = /is a link or not a plain file, so it was not read/;
+
+test('E125 b migrate: a linked or folder file is an unreadable row, never followed and never rewritten', { skip: LINK_SKIP }, async () => {
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
+  const outside = path.join(T, '..', `${path.basename(T)}-outside.json`);
+  const exit = process.exitCode;
+  try {
+    // The link points at a valid file: a read that followed it would plan a stamp, and write through it.
+    fs.writeFileSync(outside, '{\n  "repos": []\n}\n');
+    fs.symlinkSync(outside, path.join(T, '.sdlc/repos.json'));
+    // A folder named like a shard file.
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc/build-state/S01.json'), { recursive: true });
+    const plan = planMigration(T);
+    const link = rowFor(plan.rows, path.join('.sdlc', 'repos.json'));
+    assert.equal(link.action, 'unreadable');
+    assert.match(link.detail, NOT_PLAIN);
+    const dir = rowFor(plan.rows, path.join('epics', 'EP-x', '.sdlc', 'build-state', 'S01.json'));
+    assert.equal(dir.action, 'unreadable');
+    assert.match(dir.detail, NOT_PLAIN);
+    const res = await grabOut(() => runMigrate(T, { apply: true }));
+    assert.match(res, /repos\.json/);
+    assert.equal(process.exitCode, 1, 'an unreadable file fails the run, as a broken one does');
+    assert.ok(fs.lstatSync(path.join(T, '.sdlc/repos.json')).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(fs.readFileSync(outside, 'utf8'), '{\n  "repos": []\n}\n', 'the file it points at is untouched');
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json.yad-orig')), 'and nothing was copied from it');
+    assert.ok(fs.lstatSync(path.join(T, 'epics/EP-x/.sdlc/build-state/S01.json')).isDirectory());
+    // The other files still migrate: one bad file does not stop the rest.
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).schemaVersion, ENGINE_SHAPE);
+  } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b migrate: a missing file and a broken file keep their own answers', async () => {
+  // Broken: the parser's message, as before. (A missing file is never a row: the plan lists files that exist.)
+  const T = project({ files: { '.sdlc/repos.json': '{ broken' } });
+  try {
+    const row = rowFor(planMigration(T).rows, path.join('.sdlc', 'repos.json'));
+    assert.equal(row.action, 'unreadable');
+    assert.doesNotMatch(row.detail, NOT_PLAIN);
+    assert.ok(!projectJsonFiles(T).some((f) => f.endsWith('approvals.json')));
+  } finally { cleanup(T); }
+});
+
+test('E125 b migrate: a .sdlc/repos.json that links to /dev/zero is reported at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = project();
+  try {
+    fs.symlinkSync('/dev/zero', path.join(T, '.sdlc/repos.json'));
+    const url = JSON.stringify(new URL('./migrate.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { planMigration } = await import(${url});
+const row = planMigration(process.argv[1]).rows.find((x) => x.file === '.sdlc/repos.json');
+process.stdout.write(JSON.stringify([row.action, row.detail]));`, T], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    const [action, detail] = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.equal(action, 'unreadable');
+    assert.match(detail, NOT_PLAIN);
+  } finally { cleanup(T); }
+});
+
+test('E125 b migrate 7 -> 8: a linked ledger refuses the move; a link put in the copy undoes it', { skip: LINK_SKIP }, async () => {
+  const { applyProductMove } = await import('./migrate.mjs');
+  {
+    const { T } = await legacyProductLevel();
+    try {
+      const comments = path.join(T, LEGACY, '.sdlc/comments.json');
+      fs.renameSync(comments, path.join(T, 'comments-outside.json'));
+      fs.symlinkSync(path.join(T, 'comments-outside.json'), comments);
+      const p = planMigration(T).product;
+      assert.equal(p.action, 'unreadable');
+      assert.match(p.detail, /comments\.json is a link or not a plain file, so it was not read — fix or restore it first/);
+    } finally { cleanup(T); }
+  }
+  {
+    // A reshaped `.sdlc/` file is judged by the same read.
+    const { T } = await legacyProductLevel({ extra: { [`${LEGACY}/.sdlc/docs-build.json`]: '{}\n' } });
+    try {
+      const f = path.join(T, LEGACY, '.sdlc/docs-build.json');
+      fs.renameSync(f, path.join(T, 'docs-build-outside.json'));
+      fs.symlinkSync(path.join(T, 'docs-build-outside.json'), f);
+      const p = planMigration(T).product;
+      assert.equal(p.action, 'unreadable');
+      assert.match(p.detail, /docs-build\.json is a link or not a plain file/);
+    } finally { cleanup(T); }
+  }
+  {
+    // The copy puts a link where the state file landed: the read after the copy refuses it, and the move
+    // is undone like any other failure.
+    const { T } = await legacyProductLevel();
+    try {
+      const move = planMigration(T).product;
+      assert.equal(move.action, 'move');
+      fs.writeFileSync(path.join(T, 'state-outside.json'), '{"kind":"discovery","steps":[]}');
+      let n = 0;
+      const copy = (src, dest, created) => {
+        cpMerge(src, dest, created);
+        if (++n === 2) { const s = path.join(dest, '.sdlc/approvals.json'); fs.rmSync(s); fs.symlinkSync(path.join(T, 'state-outside.json'), s); }
+      };
+      assert.throws(() => applyProductMove(T, move, { copy }), /nothing was moved — .*approvals\.json is not a plain file/);
+      assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the original is whole');
+      assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, 'no stray ledger folder');
+      assert.equal(fs.readFileSync(path.join(T, 'state-outside.json'), 'utf8'), '{"kind":"discovery","steps":[]}');
+    } finally { cleanup(T); }
+  }
+});
+
+test('E125 b migrate: a drifted pair with a linked name is described as one, and never settled through it', { skip: LINK_SKIP }, async () => {
+  const { describeDrift } = await import('./migrate.mjs');
+  const T = project();
+  try {
+    const legacy = path.join(T, '.sdlc/hub.json');
+    const product = path.join(T, '.sdlc/product.json');
+    fs.writeFileSync(product, '{"platform":"gitlab"}\n');
+    fs.writeFileSync(path.join(T, 'outside.json'), '{"platform":"github"}\n');
+    fs.rmSync(legacy);
+    fs.symlinkSync(path.join(T, 'outside.json'), legacy);
+    assert.deepEqual(describeDrift(product, legacy), ['hub.json is a link or not a plain file, so it was not read']);
+    fs.writeFileSync(path.join(T, 'broken.json'), '{ no');
+    assert.deepEqual(describeDrift(path.join(T, 'broken.json'), product), ['broken.json does not parse'], 'a broken file keeps its answer');
+    assert.deepEqual(describeDrift(path.join(T, 'absent.json'), product), ['absent.json does not parse'], 'and so does a missing one');
+    const exit = process.exitCode;
+    try {
+      await grabOut(() => runMigrate(T, { apply: true, keep: 'hub' })).catch((e) => e);
+    } finally { process.exitCode = exit ?? 0; }
+    assert.ok(fs.lstatSync(legacy).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(fs.readFileSync(product, 'utf8'), '{"platform":"gitlab"}\n', 'nothing was copied through the link');
+    assert.equal(fs.readFileSync(path.join(T, 'outside.json'), 'utf8'), '{"platform":"github"}\n');
+  } finally { cleanup(T); }
+});
+
+test('E125 b migrate --apply: a .gitignore that is a link is named and never written through', { skip: LINK_SKIP }, async () => {
+  const { ensureBackupsIgnored } = await import('./migrate.mjs');
+  const T = project();
+  const outside = path.join(T, '..', `${path.basename(T)}-gitignore`);
+  try {
+    fs.writeFileSync(outside, 'node_modules\n');
+    fs.symlinkSync(outside, path.join(T, '.gitignore'));
+    const errs = [];
+    const orig = console.error;
+    console.error = (...a) => errs.push(a.join(' '));
+    let added;
+    try { added = ensureBackupsIgnored(T); } finally { console.error = orig; }
+    assert.equal(added, false);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'node_modules\n', 'the file the link points at is untouched');
+    assert.ok(fs.lstatSync(path.join(T, '.gitignore')).isSymbolicLink());
+    assert.match(errs.join('\n'), /\.gitignore is a link or not a plain file, so it was not read, so `\*\.yad-orig` was not added/);
+    // A plain .gitignore still gets the line, once.
+    fs.rmSync(path.join(T, '.gitignore'));
+    fs.writeFileSync(path.join(T, '.gitignore'), 'node_modules\n');
+    assert.equal(ensureBackupsIgnored(T), true);
+    assert.match(fs.readFileSync(path.join(T, '.gitignore'), 'utf8'), /^node_modules\n\n.*\n.*\n\*\.yad-orig\n$/);
+  } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
 });

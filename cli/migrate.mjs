@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
     const raw = readRaw(ledgerOf(from, name));
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
-      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : 'does not parse'} — fix or restore it first`);
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — fix or restore it first`);
     }
     read[name] = raw.value;
   }
@@ -440,11 +440,12 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
     const raw = readRaw(path.join(from, f));
-    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} does not parse — fix or restore it first`);
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — fix or restore it first`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
     const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
-    if (serialize(stamped(obj, version)) !== fs.readFileSync(path.join(from, f), 'utf8')) reshape.push(`${FOUNDATION_DIR}/${f}`);
+    // Compared with the text this one read gave, so the judgement is about the bytes it parsed.
+    if (serialize(stamped(obj, version)) !== raw.text) reshape.push(`${FOUNDATION_DIR}/${f}`);
   }
   return {
     ...base,
@@ -484,10 +485,11 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
       throw new Error(`the copy in ${move.to}/ does not fingerprint like the original`);
     }
     const f = epicFiles(to);
-    writeState(f.state, convertDiscoveryState(JSON.parse(fs.readFileSync(f.state, 'utf8'))));
+    // Plain reads only (E125 b): a link or a folder in the copy throws, and the whole move is undone below.
+    writeState(f.state, convertDiscoveryState(readPlainJSON(f.state)));
     const relabel = (file, canonical) => {
       if (!exists(file)) return;
-      const list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const list = readPlainJSON(file);
       writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
     };
     relabel(f.approvals, canonicalApprovals);
@@ -496,7 +498,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     relabel(f.productPrsLegacy, canonicalProductPrs);
     for (const rel of move.reshape || []) {
       const file = path.join(root, rel);
-      const { obj, version } = applyMigrations(JSON.parse(fs.readFileSync(file, 'utf8')), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
+      const { obj, version } = applyMigrations(readPlainJSON(file), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
       writeJSON(file, stamped(obj, version));
     }
   } catch (e) {
@@ -551,13 +553,27 @@ function withDials(steps) {
 // Deliberately NOT readJSON: that reports an unstamped file as shape 1 (rule 2, "read old"), which is
 // the right answer for every other caller and the wrong one here. Migrate is the one place that has to
 // see the bytes as they are, so it can tell a file that already carries the key from one that does not.
+// `text` is the file as written, so a caller compares with the bytes it parsed, never with a second read.
+// Read only as a plain file (E125 b): a link or a folder in place of a Product file is `notPlain`, refused
+// like a file that does not parse, and never followed (it could point outside the Product, or at a device
+// whose read never ends). A missing file says so in `error`, as before.
 function readRaw(file) {
+  let text;
   try {
-    return { ok: true, value: JSON.parse(fs.readFileSync(file, 'utf8')) };
+    text = readPlainFile(file);
+  } catch (e) {
+    if (e?.code === NOT_PLAIN_FILE) return { ok: false, notPlain: true, error: NOT_PLAIN_SAID };
+    return { ok: false, error: e.message };
+  }
+  if (text === null) return { ok: false, error: `ENOENT: no such file or directory, open '${file}'` };
+  try {
+    return { ok: true, value: JSON.parse(text), text };
   } catch (e) {
     return { ok: false, error: e.message };
   }
 }
+// What a row or a refusal says about a link or a folder in place of a file: no path (the row names it).
+const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
 
 
 // A file's shape as recorded ON DISK. An object with no key is shape 1 by rule 1; so is an array,
@@ -625,7 +641,15 @@ export const BACKUP_IGNORE_BLOCK = [
 
 export function ensureBackupsIgnored(root) {
   const gi = path.join(root, '.gitignore');
-  const lines = exists(gi) ? fs.readFileSync(gi, 'utf8').split('\n') : [];
+  // A plain file only (E125 b): the line is written back into this file, and a write through a link would
+  // land wherever it points. A link or a folder there is left as it is, and named.
+  let text;
+  try { text = readPlainFile(gi); } catch (e) {
+    if (e?.code !== NOT_PLAIN_FILE) throw e;
+    warn(`.gitignore ${NOT_PLAIN_SAID}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
+    return false;
+  }
+  const lines = text === null ? [] : text.split('\n');
   if (lines.some((l) => l.trim() === BACKUP_IGNORE_GLOB)) return false;
   const body = lines.join('\n').replace(/\n*$/, '');
   const prefix = body ? `${body}\n\n` : '';
@@ -761,7 +785,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     }
     const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel, root });
     const next = serialize(stamped(obj, version));
-    const current = fs.readFileSync(file, 'utf8');
+    const current = raw.text;
     let changes = next !== current;
     const action = version !== from ? 'migrate' : (changes ? 'stamp' : 'unchanged');
     // `steps` lists the migrations that actually moved the file's shape. The baseline 1 → 1 runs on
@@ -877,8 +901,10 @@ export const KEEP_CHOICES = ['product', 'hub'];
 // positions of an array. Never the values — they can be long, and the files are right there.
 export function describeDrift(aPath, bPath) {
   let a; let b;
-  try { a = JSON.parse(fs.readFileSync(aPath, 'utf8')); } catch { return [`${path.basename(aPath)} does not parse`]; }
-  try { b = JSON.parse(fs.readFileSync(bPath, 'utf8')); } catch { return [`${path.basename(bPath)} does not parse`]; }
+  // Plain reads (E125 b): a link or a folder is named as such, never followed.
+  const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : 'does not parse'}`];
+  try { a = readPlainJSON(aPath); } catch (e) { return said(aPath, e); }
+  try { b = readPlainJSON(bPath); } catch (e) { return said(bPath, e); }
   const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
   if (isPlainObject(a) && isPlainObject(b)) {
     const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
@@ -896,7 +922,7 @@ export function describeDrift(aPath, bPath) {
   return ['the two files hold different kinds of value'];
 }
 
-const bytesOrNull = (abs) => { try { return fs.readFileSync(abs); } catch { return null; } };
+const bytesOrNull = (abs) => { try { return readPlainBytes(abs); } catch { return null; } };
 
 // Every drifted pair under `root`, project-relative, with what differs.
 export function driftedPairs(root) {
@@ -948,7 +974,7 @@ function checkDrift(root, pairs, keep) {
     if (seen && seen.some((b, j) => !b || !b.equals(now[j]))) {
       throw err('YAD-STATE-008', `${pairs[i].canonical} or ${pairs[i].legacy} changed since the difference was shown — nothing was written`, 'run `yad migrate` again to see the pair as it is now');
     }
-    try { JSON.parse(fs.readFileSync(src, 'utf8')); } catch {
+    try { readPlainJSON(src); } catch {
       throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept — nothing was written`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
     }
   }
@@ -958,10 +984,10 @@ function checkDrift(root, pairs, keep) {
 function settleDrift(root, pairs, keep) {
   const written = [];
   for (const { to, src, dst } of settlePlan(root, pairs, keep)) {
-    writeFileAtomic(backupPathFor(dst), fs.readFileSync(dst));
+    writeFileAtomic(backupPathFor(dst), readPlainBytes(dst));
     // The kept copy's exact bytes — the gates compare with `cmp -s` — written through a temporary file
     // and a rename, so a crash never leaves a half file.
-    writeFileAtomic(dst, fs.readFileSync(src));
+    writeFileAtomic(dst, readPlainBytes(src));
     written.push(to);
   }
   return written;
@@ -1083,7 +1109,9 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
       const partnerRel = isMirroredPath(row.file) ? mirrorPartner(row.file) : null;
       if (partnerRel) {
         const partnerFile = path.join(root, partnerRel);
-        if (exists(partnerFile) && !settledFiles.includes(partnerRel)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
+        // Only a plain file is copied (E125 b): a link there is replaced by the write below, and the file it
+        // points at is never read or touched.
+        if (fs.lstatSync(partnerFile, { throwIfNoEntry: false })?.isFile() && !settledFiles.includes(partnerRel)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
       }
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
