@@ -15126,7 +15126,8 @@ test('E125 b usage: an approvals.json that is a link is skipped with a warning, 
     let model;
     const said = grabErr(() => { model = buildModel(T, {}); });
     assert.deepEqual(model.members.map((m) => m.name), []);
-    assert.match(said, /skipped unreadable ledger EP-x\/approvals\.json: .*approvals\.json is not a plain file/);
+    assert.match(said, /skipped unreadable ledger EP-x\/approvals\.json: it is a link or not a plain file, so it was not read/);
+    assert.ok(!said.includes(T), 'no absolute path in the warning');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

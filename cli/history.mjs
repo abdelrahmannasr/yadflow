@@ -36,7 +36,6 @@
 // line): these values reach other people's terminals, as titles do (E111). `--json` carries each value
 // as the file holds it, except where a field is kept only when it is what it should be (an approver,
 // status or date only when it is text, a PR only when it is a whole number) — never a value re-typed.
-import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
@@ -191,12 +190,11 @@ function readJsonFile(file) {
     return { value: readPlainJSON(file) };
   } catch (e) {
     if (e.code === 'ENOENT') return { missing: true };
-    if (e.code === NOT_PLAIN_FILE) return { why: isFolder(file) ? 'it is a folder' : 'it is a link or not a plain file, so it was not read' };
+    if (e.code === NOT_PLAIN_FILE) return { why: e.kind === 'dir' ? 'it is a folder' : 'it is a link or not a plain file, so it was not read' };
     if (e instanceof SyntaxError) return { why: 'it does not parse' };
     return { why: e.code || e.message };
   }
 }
-const isFolder = (f) => { try { return fs.lstatSync(f).isDirectory(); } catch { return false; } };
 
 // One item's `state.json`: { state, steps } or { why }. The summary was built a moment earlier from the
 // same file; if it changed in between (a checkout, a pull), this says so rather than guessing. `state`
