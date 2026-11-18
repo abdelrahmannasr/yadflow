@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, warn, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, nodeSupport, nodeEndOfLife, ENVELOPE_KEYS } from '../cli/lib.mjs';
+import { c, log, warn, proseToStderr, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, nodeSupport, nodeEndOfLife, ENVELOPE_KEYS } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from '../cli/argv-flags.mjs';
 
@@ -523,6 +523,12 @@ ${c.bold('Build helpers')}
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(product): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
+  yad repo pack <name> [--include <globs>] [--logs] [-o <file>|-]
+                                       Pack one repo with Repomix the safe way (npx from an empty
+                                       folder, the npm registry named): with no -o, its usual
+                                       code-context pack (the registry is not stamped: \`refresh\` does
+                                       that); -o <file>, or -o - for stdout (with no other line there,
+                                       and no --json). --include: Repomix globs; --logs: the git log
   yad repo preview <name> [<pattern>] [--clear]
                                        Show, set or clear a repo's preview address pattern (#359), e.g.
                                        'https://pr-{pr}.myapp.dev' ({pr} {branch} {repo}). Review steps
@@ -617,6 +623,10 @@ function parseArgs(argv) {
     else if (a === '--post') o.post = true;
     else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--clear') o.clear = true;
+    else if (a === '--logs') o.logs = true;
+    // `-o` is `--out`'s short form, and `-o -` (#213: `yad repo pack … -o -`) names stdout, which a value
+    // starting with `-` otherwise never is.
+    else if (a === '-o') { if (argv[i + 1] === '-') { o.out = '-'; i++; } else o.out = takeValue(argv, ++i, a); }
     else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
     else if (a === '--ship') o.ship = true;
@@ -727,7 +737,7 @@ const ACTIONS = {
   tidy: { known: ['up'] },
   history: { known: ['list', 'show', 'search'], default: 'list' },
   brain: { known: ['build', 'query', 'file', 'story', 'status', 'view'], default: 'status' },
-  repo: { known: ['list', 'refresh', 'sync', 'clone', 'preview'], default: 'list' },
+  repo: { known: ['list', 'refresh', 'pack', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
   story: { known: ['frames'] },
@@ -818,6 +828,8 @@ async function main() {
   if (process.argv.slice(2).includes('--json')) beginJSON(null);
   const o = parseArgs(process.argv.slice(2));
   const cmd = o._[0];
+  // `yad repo pack <name> -o -`: stdout is the pack, so every line yad says goes to stderr, from the first.
+  if (cmd === 'repo' && o._[1] === 'pack' && o.out === '-') proseToStderr();
   runningCmd = cmd ?? null;
   // The grounding bundles a skill parses are JSON with or without the flag, so they are always a
   // --json run: one object on stdout, a refusal included, and every other line on stderr.
@@ -1549,8 +1561,17 @@ async function main() {
       // `yad repo preview <name> [<pattern>]` (#359): the one action with a third word.
       const pattern = action === 'preview' ? o._[3] : undefined;
       if (action === 'preview' && o._.length > 4) { refuse(`unexpected argument(s): ${o._.slice(4).join(' ')}`, 'use: yad repo preview <name> [<pattern>] [--clear] — quote the pattern'); break; }
+      let out;
+      if (action === 'pack') {
+        const usage = 'use: yad repo pack <name> [--include <globs>] [--logs] [-o <file>|-] — quote the globs';
+        if (o._.length > 3) { refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, usage); break; }
+        // One answer on stdout: the pack or the JSON object, never both.
+        if (o.out === '-' && inJSON()) { refuse('yad repo pack -o - takes no --json — stdout carries the pack itself', 'write it to a file with -o <file> and --json, or drop --json'); break; }
+        // A file is named where the person ran yad, not in the Product yad found from there.
+        out = o.out === undefined || o.out === '-' ? o.out : path.resolve(shellCwd(), o.out);
+      }
       result = await commands.runRepo(o.dir, { action: action || 'list', name, pattern, clear: !!o.clear, today,
-        push: o.push, allowBranch: o.allowBranch });
+        push: o.push, allowBranch: o.allowBranch, include: o.include, logs: !!o.logs, out });
       break;
     }
     case 'risk-map': {

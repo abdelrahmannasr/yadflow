@@ -1,16 +1,18 @@
-// `yad repo list|refresh|sync|clone` — connected-repo maintenance as explicit HUMAN decisions.
+// `yad repo list|refresh|pack|sync|clone|preview` — connected-repo maintenance as explicit HUMAN decisions.
 // list/refresh: staleness of the cached code-context pack (HEAD != syncedHead). Skill steps no longer
 // silently repack a stale repo; they flag it and point here. (`yad check --fix` refreshes too — also
 // human-invoked.) sync: switch every connected repo to its registry default_branch and fast-forward
 // it to origin — a working-tree-only op (it never writes the registry; a dirty tree is skipped).
 // clone (E81): clone every registered repo that is missing on this machine — `yad join`'s clone step,
 // for the repo a teammate registered after you joined. It never runs git in a repo already there.
+// pack (#213): run Repomix on one registered repo the safe way, for an agent that needs a pack (the
+// skills used to tell it to start Repomix with npx inside the repo, where a committed `.npmrc` picks the registry).
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, warn, hand, fail, writeJSON, run } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, writeJSON, run, has } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPathOk, CODE_CONTEXT_DIR, runnable, shown } from './workspace.mjs';
-import { gitHead, packRepo } from './setup.mjs';
+import { gitHead, packRepo, runRepomix } from './setup.mjs';
 import { publishCodeContext, packOf, codeMapOf } from './repo-publish.mjs';
 import { PREVIEW_KEY, patternProblems } from './preview.mjs';
 
@@ -60,7 +62,7 @@ function defaultBranch(cwd, repo) {
   return !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
 }
 
-export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false } = {}) {
+export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false, include, logs = false, out } = {}) {
   const { regPath, registry, problem } = load(root);
   if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [] }; }
   if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
@@ -230,9 +232,54 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
 
   if (action === 'preview') return previewAction(root, entries, regPath, registry, { name, pattern, clear, push });
 
-  fail(`unknown repo action: ${action} (list | refresh | sync | clone | preview)`);
+  if (action === 'pack') return packAction(root, entries, { name, include, logs, out, push });
+
+  fail(`unknown repo action: ${action} (list | refresh | pack | sync | clone | preview)`);
   process.exitCode = 1;
   return { action };
+}
+
+// `yad repo pack <name> [--include <globs>] [--logs] [-o <file>|-]` (#213): pack one registered repo with
+// Repomix, judged first exactly as `refresh` judges it, and run as `refresh` runs it (from an empty folder of
+// its own, the npm registry named, absolute paths). With no `-o` it writes the repo's usual code-context
+// pack, as `refresh` does, but writes nothing else: the registry's `syncedHead` is `refresh`'s to stamp.
+// `out` is absolute (the CLI resolves it where the person ran yad), or '-' for stdout.
+function packAction(root, entries, { name, include, logs, out, push }) {
+  const done = (extra) => ({ action: 'pack', name: name ?? null, out: out ?? null, packed: false, ...extra });
+  const usage = 'yad repo pack <name> [--include <globs>] [--logs] [-o <file>|-]';
+  const no = (s) => { fail(s); process.exitCode = 1; return done(); };
+  if (push) return no('--push does not apply to `yad repo pack` — it writes one pack and commits nothing');
+  if (!name) return no(`usage: ${usage}`);
+  // A part of the repo in the usual pack would read as the whole repo to every Shape step that loads it.
+  if (include !== undefined && out === undefined) return no('--include packs part of the repo — name where it goes with -o <file> (or -o - for stdout); the usual code-context pack holds the whole repo');
+  if (include !== undefined && (typeof include !== 'string' || !include || include.startsWith('-'))) return no(`--include takes globs, such as "src/**/*.ts" (got: ${shown(String(include))})`);
+  const matches = entries.filter((r) => r.name === name);
+  if (!matches.length) return no(`unknown repo: ${shown(name)}`);
+  if (matches.length > 1) return no(`${matches.length} entries in ${PROJECT_FILES.reposRegistry} are named ${shown(name)} — fix the registry first`);
+  const repo = matches[0];
+  // Judged before anything runs in it (E81, E125), as `refresh` judges it.
+  const j = judgeRepo(root, repo);
+  const why = notPackable(root, repo, j);
+  if (why) return no(`${j.name}: ${why} — not packed`);
+  if (out === undefined) {
+    const packed = !!packRepo(root, { ...repo, contextPack: packOf(repo) }, { report: true });
+    if (!packed) process.exitCode = 1;
+    else hand(`\`yad repo list\` still says the pack is stale or missing: \`yad repo refresh ${shown(name)}\` is what records it`);
+    return done({ out: path.resolve(root, packOf(repo)), packed });
+  }
+  if (!has('npx')) return no(`${j.name}: npx missing — not packed`);
+  const repoRoot = j.target || path.resolve(root, repo.path);
+  if (out !== '-') {
+    try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch (e) { return no(`${j.name}: cannot make the folder for ${shown(out)} (${shown(e.message)}) — not packed`); }
+  }
+  info(`${j.name}: packing with repomix …`);
+  // Repomix's own report (files packed, its secret check) on stderr: a file it flags is left out of the pack,
+  // and the person needs to hear which one.
+  const r = runRepomix(repoRoot, { include: include ?? null, logs: !!logs, out, report: true });
+  if (r.noWork) return no(`${j.name}: could not make a temporary folder for repomix (${shown(r.noWork)}) — not packed`);
+  if (!r.ok) return no(`${j.name}: repomix failed — ${shown(String(r.stderr || '').split('\n')[0]) || 'unknown error'}`);
+  ok(`${j.name}: packed ${out === '-' ? 'to stdout' : shown(out)}`);
+  return done({ packed: true });
 }
 
 // `yad repo preview <name> [<pattern>] [--clear]` (#359): show, set or clear the repo's preview address
