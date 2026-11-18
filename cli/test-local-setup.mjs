@@ -1193,7 +1193,7 @@ test('E185 part 4 review 4: a plain hooks folder and a ~ hooksPath are read wher
 const LINK_SKIP = process.platform === 'win32' && 'making a link needs admin rights on Windows';
 const NOT_PLAIN = 'is a link or not a plain file, so it was not read';
 
-test('E125 b: a script that is a link (even a dangling one) or a folder is named, never read and never rewritten', { skip: LINK_SKIP }, () => {
+test('E125 b: a script that is a link (even a dangling one) or a folder is named, never read and never rewritten', { skip: LINK_SKIP }, async () => {
   const seed = product();
   applyAll(localSetupActions(seed));
   const valid = read(path.join(seed, LOCAL_SETUP_FILE));
@@ -1222,8 +1222,16 @@ test('E125 b: a script that is a link (even a dangling one) or a folder is named
       assert.deepEqual(actions.map((a) => [a.status, a.writesNothing]), [['modified', true]], `${kind}: the view is not built from a file yad did not read`);
       assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE}: it ${NOT_PLAIN}`), kind);
       assert.match(said.join('\n'), /is a link or not a plain file, so it was not changed/, `${kind}: add and remove refuse it`);
+      // A git restore brings back a link when the link is what is committed: every hint names the real file.
+      assert.match(said.join('\n'), /the local setup script was left as it is; replace it with the real file \(not a link\), then re-run/, kind);
+      assert.match(said.join('\n'), /"hint": "replace it with the real file \(not a link\), then run this again"/, kind);
+      assert.doesNotMatch(said.join('\n'), /restore it from git/, kind);
       const st = localSetupState(dir, { items: [] });
       assert.deepEqual([st.exists, st.error], [true, NOT_PLAIN], `${kind}: the list says why`);
+      const { localSetupChecks } = await import('./doctor.mjs');
+      const rows = [];
+      localSetupChecks(rows, dir);
+      assert.equal(rows.find((r) => r.id === 'local-setup')?.hint, 'replace it with the real file (not a link); `yad local-setup` says more', kind);
       if (kind === 'folder') assert.ok(fs.lstatSync(file).isDirectory());
       else assert.ok(fs.lstatSync(file).isSymbolicLink(), `${kind}: the link is left as it is`);
       if (kind === 'link') assert.equal(read(outside), valid, 'the file it points at is untouched');

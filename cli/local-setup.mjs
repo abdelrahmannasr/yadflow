@@ -87,6 +87,10 @@ export const parseJSON = (text) => JSON.parse(text.charCodeAt(0) === 0xfeff ? te
 // outside the Product, or at a device whose read never ends. `readPlainFile` gives null for no file and throws
 // NOT_PLAIN_FILE for a link or a folder; this is what each caller says of the second.
 const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
+// What to do about a script yad refused. A link is not fixed by `git checkout`: when the link is what is
+// committed, a restore brings it back, so the hint for one says to replace it with the real file.
+const isNotPlainError = (error) => /is a link or not a plain file/.test(String(error || ''));
+export const localSetupFixHint = (error) => (isNotPlainError(error) ? 'replace it with the real file (not a link)' : 'fix it, or restore it from git');
 
 // The two lists, each step checked. `problems` names every step left out and why; the file still answers.
 //
@@ -189,7 +193,7 @@ function localSetupJsonAction(root) {
     : raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
   // Never rebuilt from nothing: that would delete every step the team wrote (memory: read strictly before a write).
   if (merged.unreadable) {
-    if (!said.has(dest)) { said.add(dest); warn(`${LOCAL_SETUP_FILE}: ${merged.unreadable} — the local setup script was left as it is; fix it (or restore it from git), then re-run \`yad check --fix\``); }
+    if (!said.has(dest)) { said.add(dest); warn(`${LOCAL_SETUP_FILE}: ${merged.unreadable} — the local setup script was left as it is; ${localSetupFixHint(merged.unreadable)}, then re-run \`yad check --fix\``); }
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
   return {
@@ -372,7 +376,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   const where = { product: root, file: LOCAL_SETUP_FILE };
   if (!st.steps.length && (st.error || !st.exists)) {
     const why = st.error ? `${LOCAL_SETUP_FILE} ${st.error}` : `this Product has no ${LOCAL_SETUP_FILE} yet`;
-    const hint = st.error ? 'fix the file, or restore it from git' : 'run `yad update` (it writes the script), then commit it through review';
+    const hint = st.error ? (isNotPlainError(st.error) ? localSetupFixHint(st.error) : 'fix the file, or restore it from git') : 'run `yad update` (it writes the script), then commit it through review';
     if (json) return emitJSON({ ok: true, ...where, exists: st.exists, committed: st.committed, error: st.error, steps: [], pending: 0, ask: 0, skipped: 0, record: st.record, problems: st.error ? [why] : [], hint });
     (st.error ? warn : info)(why);
     info(hint);
@@ -427,7 +431,7 @@ const REASON_MAX = 500;
 function stepsNamed(root, ids, verb, json) {
   if (!ids.length) return { refused: refuse(`yad local-setup ${verb} needs a step id`, `${DONE_USAGE} — \`yad local-setup list\` shows the ids`, { json }) };
   const st = localSetupState(root, { noChecks: true });
-  if (st.error) return { refused: refuse(`${LOCAL_SETUP_FILE} ${st.error}`, 'fix it, or restore it from git', { json }) };
+  if (st.error) return { refused: refuse(`${LOCAL_SETUP_FILE} ${st.error}`, localSetupFixHint(st.error), { json }) };
   if (!st.steps.length) return { refused: refuse(`this Product has no local setup steps (${LOCAL_SETUP_FILE})`, 'run `yad update` (it writes the script), then commit it through review', { json }) };
   if (!st.record.path) return { refused: refuse(`${root} is not in a git clone, so this machine's answers have nowhere to go`, 'run it from your clone of the Product', { json }) };
   if (st.record.error) return { refused: refuse(recordWarning(st.record), 'delete the file, then run this again', { json }) };
@@ -520,7 +524,8 @@ const gitName = (root) => {
   if (name.length > 80) { const chars = Array.from(name); while (chars.join('').length > 80) chars.pop(); name = chars.join(''); }
   return name && plainLine(name) && !/<!--|--!?>/.test(name) ? name : null;
 };
-const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`, 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
+const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`,
+  isNotPlainError(error) ? `${localSetupFixHint(error)}, then run this again` : 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
 
 export function runLocalSetupAdd(root, { from = null, json = false } = {}) {
   if (typeof from !== 'string' || !from) return refuse('yad local-setup add needs --from <step.json>: one step, written as a JSON object', TEAM_USAGE, { json });
@@ -591,7 +596,7 @@ const EMPTY = Object.freeze({ pending: [], ask: [], unvetted: [], skipped: [], c
 export function localSetupSection(root, { invite = false } = {}) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { ...EMPTY, error: 'could not read' }; }
-  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — fix it (or restore it from git); \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
+  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — ${isNotPlainError(st.error) ? localSetupFixHint(st.error) : 'fix it (or restore it from git)'}; \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
   // A step the script holds but yad left out (it breaks a rule, or the list is not a list) is said here too, not
   // only in `list` — even when it leaves no step at all (reviews 1, 2).
   const ignored = st.problems.filter((p) => / is ignored — | is listed twice|should be a list — ignored/.test(p));

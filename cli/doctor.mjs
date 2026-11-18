@@ -32,7 +32,7 @@ import { readOwners } from './owners.mjs';
 import { readMembers, judgedMemberFiles } from './members.mjs';
 import { loadChoices, readToolboxFile } from './toolbox.mjs';
 import { signingDoctorLine } from './signing.mjs';
-import { localSetupWaiting } from './local-setup.mjs';
+import { localSetupWaiting, localSetupFixHint } from './local-setup.mjs';
 import { nodePins, satisfies, nodeFix, dockerReasons, dockerState, glabConfigs } from './machine.mjs';
 import { allStoryFrames, FRAMES_KEY } from './story-frames.mjs';
 import { previewPattern, PREVIEW_KEY } from './preview.mjs';
@@ -131,7 +131,7 @@ export function signingChecks(checks, root) {
 export function localSetupChecks(checks, root) {
   const w = localSetupWaiting(root);
   if (!w) return;
-  if (w.error) { check(checks, 'local-setup', 'environment', 'warn', `local setup: ${forTerminal(w.error)}`, 'fix it, or restore it from git; `yad local-setup` says more'); return; }
+  if (w.error) { check(checks, 'local-setup', 'environment', 'warn', `local setup: ${forTerminal(w.error)}`, `${localSetupFixHint(w.error)}; \`yad local-setup\` says more`); return; }
   if (w.recordError) check(checks, 'local-setup-record', 'environment', 'warn', `local setup: this machine's record ${w.recordError} — read as empty, so every step is asked again`, 'delete it (inside .git/yad/): it only remembers which steps you did or said no to');
   const ids = [...w.pending, ...w.ask];
   if (!ids.length) return;
@@ -462,7 +462,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         'the target is a symbolic link or a file; `yad check --fix` refuses to write through it, so make it a real directory or drop it from `ideTargets` in `.sdlc/cli-version.json`');
     } else if (notPlain.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${notPlain.join(', ')} ${SETTINGS_NOT_PLAIN} [YAD-STATE-001]${alsoUnguarded}`,
-        'replace it with the file itself (restore it from git), then run `yad check --fix` — yad never reads or rewrites a settings file through a link');
+        'replace it with the real file (not a link), then run `yad check --fix` — yad never reads or rewrites a settings file through a link, and restoring it from git brings back a link that is committed');
     } else if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
