@@ -28,7 +28,7 @@
 // and this; two hooks at the same instant can lose an entry — one extra warning, never a broken file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, warn, fail, hand, readJSON, writeJSON } from './lib.mjs';
+import { ok, info, warn, fail, hand, readJSON, writeJSON, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRel, epicRoot, isPassed, isValidEpicId, stepStatus } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, wipName, WIP_PREFIX } from './capture.mjs';
@@ -45,11 +45,14 @@ const reviewOf = (step) => STEPS.find((s) => s.kind === 'review' && s.reviews ==
 
 // One owner file, read. `{ record }` when it is a valid assignment, `{ error }` when it is there and is not,
 // `{}` when there is none. The file's `step` must be the file's own name: a copied file names another step.
+// A link or a folder in its place is never read (E125 b): it is an error, like a file that does not parse.
 export function readOwnerFile(file, step) {
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return e.code === 'ENOENT' ? {} : { error: `cannot be read (${e.code || e.message})` }; }
   let r;
-  try { r = JSON.parse(text); } catch { return { error: 'is not valid JSON' }; }
+  try { r = readPlainJSON(file); } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    if (e.code === NOT_PLAIN_FILE) return { error: 'is a link or not a plain file, so it was not read' };
+    return { error: e instanceof SyntaxError ? 'is not valid JSON' : `cannot be read (${e.code || e.message})` };
+  }
   if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: 'is not a JSON object' };
   if (r.step !== step) return { error: `names the step ${JSON.stringify(r.step ?? null)}, not ${step}` };
   if (typeof r.owner !== 'string' || !r.owner || wipName(r.owner) !== r.owner) return { error: 'has no usable "owner" (a git name, made branch-safe)' };
@@ -58,10 +61,10 @@ export function readOwnerFile(file, step) {
     ...(r.replaced && typeof r.replaced === 'object' ? { replaced: r.replaced } : {}) } };
 }
 
-// The epic's `state.json`, read leniently: null when it is missing or broken.
+// The epic's `state.json`, read leniently: null when it is missing, broken, or not a plain file.
 export function readState(root, epic) {
   try {
-    const s = JSON.parse(fs.readFileSync(epicFiles(epicRoot(root, epic)).state, 'utf8'));
+    const s = readPlainJSON(epicFiles(epicRoot(root, epic)).state);
     return s && Array.isArray(s.steps) ? s : null;
   } catch { return null; }
 }

@@ -28294,6 +28294,40 @@ test('E47 readOwnerFile: a broken file says why; the step must be the file\'s ow
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b readOwnerFile and readState: a link or a folder in place of the file is not read', { skip: E125B_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-owners-link-'));
+  try {
+    // Both links point at valid files: a read that followed them would give a record and a state.
+    const outsideOwner = path.join(T, 'owner.json');
+    fs.writeFileSync(outsideOwner, '{"step":"architecture","owner":"ann-lee"}');
+    const owners = path.join(T, 'epics', 'EP-x', '.sdlc', 'owners');
+    fs.mkdirSync(owners, { recursive: true });
+    fs.symlinkSync(outsideOwner, path.join(owners, 'architecture.json'));
+    const refused = { error: 'is a link or not a plain file, so it was not read' };
+    assert.deepEqual(ownersMod.readOwnerFile(path.join(owners, 'architecture.json'), 'architecture'), refused);
+    fs.mkdirSync(path.join(owners, 'epic.json'));
+    assert.deepEqual(ownersMod.readOwnerFile(path.join(owners, 'epic.json'), 'epic'), refused);
+    const outsideState = path.join(T, 'state.json');
+    fs.writeFileSync(outsideState, '{"steps":[]}');
+    fs.symlinkSync(outsideState, path.join(T, 'epics', 'EP-x', '.sdlc', 'state.json'));
+    assert.equal(ownersMod.readState(T, 'EP-x'), null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b readOwnerFile and readState: a link to /dev/zero is refused at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-owners-zero-'));
+  try {
+    const sdlc = path.join(T, 'epics', 'EP-x', '.sdlc');
+    fs.mkdirSync(path.join(sdlc, 'owners'), { recursive: true });
+    fs.symlinkSync('/dev/zero', path.join(sdlc, 'owners', 'architecture.json'));
+    fs.symlinkSync('/dev/zero', path.join(sdlc, 'state.json'));
+    const got = inChildWithLimit(`const o = await import(${cliUrl('./owners.mjs')});
+const [root, file] = process.argv.slice(1);
+process.stdout.write(JSON.stringify([o.readOwnerFile(file, 'architecture'), o.readState(root, 'EP-x')]));`, [T, path.join(sdlc, 'owners', 'architecture.json')]);
+    assert.deepEqual(got, [{ error: 'is a link or not a plain file, so it was not read' }, null]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E47 stepOpen: live while the step or its review is open; a passed pair, or a step off the chain, is not', () => {
   const st = (a, r) => ({ steps: e47Steps(a, r) });
   assert.equal(ownersMod.stepOpen(st('in_progress', 'todo'), 'architecture').live, true);
