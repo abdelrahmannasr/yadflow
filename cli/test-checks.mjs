@@ -7075,6 +7075,8 @@ test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the 
     // Names git would quote without -z, names a map line cannot hold, and a directory that is not a person.
     'q"uote/x.js': 'x', 'back\\slash/x.js': 'x', 'tab\tdir/x.js': 'x', 'app/[slug]/page.tsx': 'x', 'app/api/r.ts': 'x',
     '@types/x.d.ts': 'x', '#tmp/x': 'x', 'caf\u00e9/x.js': 'x',
+    // S04: an escape and a C1 control (U+009B) in a folder name — both checks must read them the same way.
+    ...(process.platform === 'win32' ? {} : { 'es\u001bc/x.js': 'x', 'c1\u009bctl/x.js': 'x' }),
   };
   for (const [i, map] of MAPS.entries()) {
     const T = scaffoldRepo();

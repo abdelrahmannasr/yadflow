@@ -21898,13 +21898,17 @@ test('risk map: draft never writes a line the map cannot read — a parent line 
 // S04 (Product #216): a directory name holding a control character (C0, DEL, C1) or an invisible one
 // `forTerminal` replaces (a bidi control, a line separator) is never written into the committed map.
 test('risk map: draft never writes a directory whose name holds a control or invisible character', async () => {
-  const { draftRiskMap, parseRiskMap } = await import('./riskmap.mjs');
+  const { draftRiskMap, parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
   const { changedForTerminal, forTerminal } = await import('./lib.mjs');
-  // `src/in…ner/` sits under `src/x/`, which has a line, so draft asks for that folder itself — and must not write it.
-  const odd = ['ev\u001b]0;x/', 'bel\u0007/', 'del\u007f/', 'c1\u009b/', 'rtl\u202e/', 'ls\u2028/', 'src/in\u001bner/'];
-  const files = ['plain/a.js', 'src/x/a.js', ...odd.map((d) => `${d}f.js`), '.sdlc/risk-map'];
-  const d = draftRiskMap('# yad-risk-map v1\nsrc/x/ low confirmed\n', files);
-  assert.deepEqual(d.added, ['.sdlc/', 'plain/']);
+  // `src/in…ner/` sits under `src/x/`, which has a line, so draft asks for that folder itself — it must not
+  // write it, and adds its clean parent `src/` instead, which covers it. `lib/a/b\u009b/` gets `lib/a/`.
+  const odd = ['ev\u001b]0;x/', 'bel\u0007/', 'del\u007f/', 'c1\u009b/', 'rtl\u202e/', 'ls\u2028/', 'src/in\u001bner/', 'lib/a/b\u009b/'];
+  const files = ['plain/a.js', 'src/x/a.js', 'lib/a/c/a.js', ...odd.map((d) => `${d}f.js`), '.sdlc/risk-map'];
+  const d = draftRiskMap('# yad-risk-map v1\nsrc/x/ low confirmed\nlib/a/c/ low confirmed\n', files);
+  assert.deepEqual(d.added, ['.sdlc/', 'lib/a/', 'plain/', 'src/']);
+  // Every file is covered now except those in the odd top-level folders: they have no parent line to take.
+  const left = riskMapFindings(parseRiskMap(d.text), { files }).filter((f) => f.code === 'uncovered').map((f) => f.target);
+  assert.deepEqual([...left].sort(), odd.filter((x) => x.split('/').length === 2).sort());
   assert.deepEqual([...d.unwritable].sort(), [...odd].sort(), 'each such directory is listed as one draft could not write');
   assert.ok(d.text.split('\n').every((l) => !changedForTerminal(l)), `no line of the map holds such a character:\n${JSON.stringify(d.text)}`);
   assert.deepEqual(parseRiskMap(d.text).problems, []);

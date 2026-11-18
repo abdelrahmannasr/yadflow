@@ -353,8 +353,9 @@ const NEW_MAP_HEAD = [
 // (adding to it by older rules is guessing); `unwritable` lists the top-level directories whose names a
 // line cannot hold — writing one would be an unreadable line that the next draft adds again — and any
 // directory, at any depth, whose name holds a control or invisible character (`changedForTerminal`): the
-// map is committed, so such a name is named, never written. A missing header is added at the top — it is
-// not an entry.
+// map is committed, so such a name is named, never written. Below the top level, its deepest clean parent
+// is added instead, so the folder is still covered. A missing header is added at the top — it is not an
+// entry.
 export function draftRiskMap(existing, files) {
   const text = existing ?? null;
   const parsed = parseRiskMap(text ?? '');
@@ -364,9 +365,19 @@ export function draftRiskMap(existing, files) {
   const asked = riskMapFindings(parsed, { files: all }).filter((x) => x.code === 'uncovered').map((x) => x.target);
   // A name `validDir` reads but that holds a control or invisible character (an escape, a bidi control)
   // is not written either: the map is committed, and every tool that shows it would meet the name raw.
+  // Such a folder below the top level is covered by its deepest clean parent instead, added when it has no
+  // line yet — the JS and awk checks read a parent line the same way. The folder is still named as not added.
   const writable = (d) => validDir(d) && !changedForTerminal(d);
   const unwritable = asked.filter((d) => !writable(d));
-  const added = asked.filter(writable)
+  const cleanParent = (d) => {
+    if (!validDir(d)) return null;
+    const segs = d.slice(0, -1).split('/');
+    const keep = segs.slice(0, segs.findIndex((seg) => changedForTerminal(seg)));
+    return keep.length ? `${keep.join('/')}/` : null;
+  };
+  const listed = new Set(parsed.entries.map((e) => e.dir));
+  const parents = unwritable.map(cleanParent).filter((p) => p && !listed.has(p));
+  const added = [...new Set([...asked.filter(writable), ...parents])]
     .sort((a, b) => (a === './' ? -1 : b === './' ? 1 : a < b ? -1 : a > b ? 1 : 0));
   const width = Math.max(0, ...added.map((d) => d.length)) + 2;
   const newLines = added.map((d) => `${d.padEnd(width)}unset`);
