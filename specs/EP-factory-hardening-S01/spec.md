@@ -27,7 +27,14 @@ slow at best, out of memory at worst. Only `cli/detect.mjs` has a size limit, of
   team's. Readers that say why a file was not read (usage, history, the index, owner and member files) say
   it in words, not by the bare code.
 - R5. The limit is one exported constant, `MAX_PLAIN_BYTES`, also used by `cli/detect.mjs` for its config
-  files. Its 1 MiB limit for a skill or agent file stays.
+  files. Its 1 MiB limit for a skill or agent file stays. It lives in `cli/manifest.mjs` (which `cli/lib.mjs`
+  imports and re-exports), so `mirrorDrift` there uses it too: two names whose sizes differ, or a name over
+  the limit, are drift without a read of either file.
+- R6. The read never trusts the size `fstat` gave: it reads into a buffer of at most the limit plus one byte,
+  so a file that grew after the check is refused, not read to its end.
+- R7. Each plain read takes an optional `{ max }`. The brain's code graph and file list, which Graphify
+  generates and which grow with the code, are read up to 256 MiB (`BRAIN_GRAPH_MAX_BYTES`), and a graph
+  that is refused is named with the reason, never as one Graphify did not write.
 
 ## Out of scope
 
@@ -96,4 +103,10 @@ Each caller's test checks its broken-file answer and that the file is left as it
 ## T08 — Name the size limit in the error table
 **Files:**
 - docs/CLI.md
+
+## T09 — Read code graphs up to their own, larger limit, and name a refused one truthfully
+**Files:**
+- cli/product-index.mjs
+- cli/brain.mjs
+- cli/test-brain.mjs
 <!-- /yad:tasks -->
