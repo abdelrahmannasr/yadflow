@@ -1921,6 +1921,27 @@ test('E85 review 1: `yad check` from a code repo finds that repo\'s tools, as `y
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('`yad update --dry-run` previews the update and writes nothing; with --push or --open-pr it refuses', () => {
+  const { T, p, home } = product();
+  const files = () => fs.readdirSync(p, { recursive: true }).filter((f) => fs.statSync(path.join(p, f)).isFile()).sort();
+  try {
+    const before = files();
+    const dry = yad(['update', '--dry-run'], { cwd: p, home });
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+    assert.match(dry.stdout, /new\s+yad-epic/, 'the preview lists what the update would add');
+    assert.deepEqual(files(), before, 'a dry run writes no file');
+    for (const flag of ['--push', '--open-pr']) {
+      const r = yad(['update', '--dry-run', flag], { cwd: p, home });
+      assert.notEqual(r.status, 0, flag);
+      assert.match(r.stdout + r.stderr, /--dry-run writes nothing/, flag);
+    }
+    assert.deepEqual(files(), before);
+    const real = yad(['update'], { cwd: p, home });
+    assert.equal(real.status, 0, real.stdout + real.stderr);
+    assert.ok(files().length > before.length, 'without --dry-run the update still writes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E85 review 1: join\'s offer does not advise removing a tool the team chose', () => {
   const { T, p } = product();
   try {

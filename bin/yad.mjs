@@ -48,7 +48,8 @@ ${c.bold('Setup & maintenance')}
                        reported 'modified' and left alone; --overwrite-local replaces
                        it. Anything else it cannot account for is replaced only after
                        a <file>.yad-orig backup
-  yad update --push    Also commit each repo's applied changes and push them straight to the
+  yad update --dry-run Preview the update (as yad check --scope=changed): writes nothing
+  yad update --push   Also commit each repo's applied changes and push them straight to the
                        default branch of the Product + every connected repo (a chore(yad-update)
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
                        + commit-message). Announce the team & pause merges first. Also works as
@@ -992,6 +993,9 @@ async function main() {
       if (noProduct()) break;
       if (o.push && o.openPr) { refuse('--push and --open-pr publish the update two different ways — pick one', 'use --open-pr for a branch and a PR/MR per repo, or --push to push straight to each default branch'); break; }
       if (o.openPr && o.allowBranch) { refuse('--allow-branch does not apply to --open-pr: the update branch is cut from each repo\'s default branch', 'switch each repo to its default branch, then run it again'); break; }
+      // --dry-run previews the update as `yad check` does: nothing is written, committed or pushed.
+      if (o.dryRun && (o.push || o.openPr)) { refuse('--dry-run writes nothing, so it cannot also --push or --open-pr', 'preview with `yad update --dry-run`, then run it again without --dry-run'); break; }
+      if (o.dryRun) { result = await commands.reconcile(o.dir, { fix: false, scope: 'changed', force: o.force, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt }); break; }
       result = await commands.reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, openPr: o.openPr, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today, toolbox: toolboxAt, invite: true });
       break;
     case 'doctor':
