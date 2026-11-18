@@ -30815,6 +30815,15 @@ test('S04: yad risk-map draft never writes a folder name holding an escape, and 
     assert.match(uo, /unknown repo: no \[2Jpe/);
     // The message is cleaned in --json too, as the refusal beside it and `yad sync --repo` already are.
     assert.equal(JSON.parse(e79Yad(T, product, ['risk-map', 'check', `no\u001b[2Jpe`, '--json']).stdout).error, 'unknown repo: no [2Jpe');
+
+    // A registered repo with no map yet: the command to copy never carries a name that is not one plain word.
+    fs.rmSync(path.join(backend, '.sdlc', 'risk-map'));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'ba\u001bck end', path: '../backend' }] }));
+    const h = e79Yad(T, product, ['risk-map', 'check']);
+    const ho = h.stdout + h.stderr;
+    assert.ok(!hasRaw(ho), `no raw control character:\n${ho}`);
+    assert.match(ho, /risk map — ba ck end/);
+    assert.match(ho, /draft one with `yad risk-map draft <name>`/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

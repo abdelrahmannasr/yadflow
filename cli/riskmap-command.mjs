@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, forTerminal, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
+import { asArg, c, fail, forTerminal, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { judgedRepos } from './workspace.mjs';
 import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
@@ -262,7 +262,7 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
     for (const r of repos) {
       log(c.bold(`\nrisk map — ${forTerminal(r.name)}`));
       if (!r.git) { warn(`${forTerminal(r.root)} is not a git repo — skipped`); continue; }
-      if (!r.map) { info(`no ${RISK_MAP_FILE} yet — no directory has a risk level`); hand(`draft one with \`yad risk-map draft ${forTerminal(r.name)}\``); continue; }
+      if (!r.map) { info(`no ${RISK_MAP_FILE} yet — no directory has a risk level`); hand(`draft one with \`yad risk-map draft ${asArg(r.name)}\``); continue; }
       if (!r.findings.length) { ok('every directory has a confirmed level'); continue; }
       for (const f of r.findings) warn(findingLine(f));
       hand(`fix ${RISK_MAP_FILE} in ${forTerminal(r.name)} and commit it through a PR — the warnings are advisory and block nothing`);
