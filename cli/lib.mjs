@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash, randomBytes } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, SCHEMA_VERSION, VERSION, mirrorDrift, preferring } from './manifest.mjs';
+import { MAX_PLAIN_BYTES, MIRRORED_FILES, SCHEMA_VERSION, VERSION, mirrorDrift, preferring } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -359,14 +359,36 @@ const kindOf = (st) => (st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' 
 // So a plain file larger than this is refused before any byte of it is read: its size is taken from the open
 // handle, the same one the read uses. Generous on purpose: the same reads load Markdown (an epic, a story,
 // DESIGN.md), `.gitignore`, the local setup script and migrate's backups. `cli/detect.mjs` uses it too.
-export const MAX_PLAIN_BYTES = 64 * 1024 * 1024;
+// The constant lives in manifest.mjs, which this file imports, so `mirrorDrift` there uses the same one.
+// A caller whose file is generated and can be bigger (the brain's code graph) passes its own `max`.
+export { MAX_PLAIN_BYTES };
 export const FILE_TOO_BIG = 'YAD_FILE_TOO_BIG';
 // The words after a file's name, for a caller that names the file by its path inside the Product.
-export const TOO_BIG_SAID = `is larger than ${MAX_PLAIN_BYTES / (1024 * 1024)} MiB, the most yad reads, so yad did not read it`;
-const tooBig = (p, size) => Object.assign(new Error(`${p} ${TOO_BIG_SAID}`), { code: FILE_TOO_BIG, size, limit: MAX_PLAIN_BYTES });
+export const tooBigSaid = (limit = MAX_PLAIN_BYTES) => `is larger than ${limit / (1024 * 1024)} MiB, the most yad reads, so yad did not read it`;
+export const TOO_BIG_SAID = tooBigSaid();
+// `size` is the size seen: for a file that grew while it was read, the bytes read so far (more than `limit`).
+const tooBig = (p, size, limit) => Object.assign(new Error(`${p} ${tooBigSaid(limit)}`), { code: FILE_TOO_BIG, size, limit });
+// At most `max` bytes from the open file. The size `fstat` gave can be out of date by the time of the read (a
+// file that grows, or one that was empty then), so the read never trusts it: it reads into a buffer of at most
+// `max + 1` bytes, and a byte past the limit means the file is too big. No read runs to the end of the file.
+function readCapped(fd, p, size, max) {
+  let buf = Buffer.allocUnsafeSlow(Math.min(size, max) + 1);
+  let n = 0;
+  for (;;) {
+    if (n === buf.length) {
+      if (n > max) throw tooBig(p, n, max);
+      const more = Buffer.allocUnsafeSlow(Math.min(buf.length * 2, max + 1));
+      buf.copy(more, 0, 0, n);
+      buf = more;
+    }
+    const got = fs.readSync(fd, buf, n, buf.length - n, null);
+    if (got === 0) return buf.subarray(0, n);
+    n += got;
+  }
+}
 // The read itself. Every failure is thrown, the `lstat` one too, so a caller can tell a missing file
 // (ENOENT) from one it may not read. `encoding: null` gives the raw bytes.
-function readPlainOrThrow(p, encoding = 'utf8') {
+function readPlainOrThrow(p, encoding = 'utf8', { max = MAX_PLAIN_BYTES } = {}) {
   const st = fs.lstatSync(p);
   if (!st.isFile()) throw notPlain(p, kindOf(st));
   let fd;
@@ -374,23 +396,25 @@ function readPlainOrThrow(p, encoding = 'utf8') {
   try {
     const now = fs.fstatSync(fd);
     if (!now.isFile()) throw notPlain(p, kindOf(now));
-    if (now.size > MAX_PLAIN_BYTES) throw tooBig(p, now.size);
-    return fs.readFileSync(fd, encoding === null ? undefined : encoding);
+    if (now.size > max) throw tooBig(p, now.size, max);
+    const bytes = readCapped(fd, p, now.size, max);
+    return encoding === null ? bytes : bytes.toString(encoding);
   } finally { fs.closeSync(fd); }
 }
-export function readPlainFile(p) {
+// `opts.max` (each plain read takes it): the most bytes read, MAX_PLAIN_BYTES unless named.
+export function readPlainFile(p, opts) {
   try { fs.lstatSync(p); } catch { return null; }
   // A file removed between the two looks is no file, as it would have been a moment earlier.
-  try { return readPlainOrThrow(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try { return readPlainOrThrow(p, 'utf8', opts); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 // The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
-export const readPlainBytes = (p) => readPlainOrThrow(p, null);
+export const readPlainBytes = (p, opts) => readPlainOrThrow(p, null, opts);
 // One JSON file as it is on disk: no shape stamp, and nothing caught. A missing file throws ENOENT, a link
 // or a folder throws NOT_PLAIN_FILE, a file larger than MAX_PLAIN_BYTES throws FILE_TOO_BIG, and a file that
 // does not parse throws a SyntaxError. So each caller keeps its own answer for each of them, which `readJSON`
 // (one fallback for all) cannot give.
-export function readPlainJSON(p) {
-  return JSON.parse(readPlainOrThrow(p));
+export function readPlainJSON(p, opts) {
+  return JSON.parse(readPlainOrThrow(p, 'utf8', opts));
 }
 // Each refused path is named once per run, on stderr: readJSON has many callers, and some print an answer
 // on stdout that another program reads (a hook, a `--json` run), which a warning there would break.

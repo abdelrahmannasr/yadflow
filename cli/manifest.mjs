@@ -355,10 +355,19 @@ export const SETTINGS_EDIT_HINT = '.sdlc/product.json (.sdlc/hub.json on a Produ
 // this check, and a committed `.sdlc/hub.json` that links to /dev/zero made every command hang on the read.
 // `yad migrate` then names the link, and refuses to settle the pair through it. (An `lstat` of its own:
 // cli/lib.mjs, home of the plain read, imports this file.)
-const plainFile = (p) => { try { return lstatSync(p).isFile(); } catch { return false; } };
+//
+// The most bytes any plain read of a Product file takes (#215); cli/lib.mjs re-exports it, since this file
+// cannot import that one. Here it keeps the check, which runs on every command and every hook, from reading a
+// committed file of hundreds of megabytes: two names whose sizes differ are different without a read, and a
+// name larger than this counts as different too — `yad migrate` then names it as too big.
+export const MAX_PLAIN_BYTES = 64 * 1024 * 1024;
+const plainStat = (p) => { try { const st = lstatSync(p); return st.isFile() ? st : null; } catch { return null; } };
 export const mirrorDrift = (canonical, legacy) => {
   if (!existsSync(canonical) || !existsSync(legacy)) return false;
-  if (!plainFile(canonical) || !plainFile(legacy)) return true;
+  const a = plainStat(canonical);
+  const b = plainStat(legacy);
+  if (!a || !b) return true;
+  if (a.size !== b.size || a.size > MAX_PLAIN_BYTES) return true;
   try { return !readFileSync(canonical).equals(readFileSync(legacy)); } catch { return true; }
 };
 

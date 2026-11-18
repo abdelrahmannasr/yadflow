@@ -1949,6 +1949,54 @@ test('#215: a file of exactly the limit is still read', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// The size `fstat` gives can be out of date by the read (a file that grows, or one that was empty then): the read
+// stops one byte past the limit instead of running to the end of the file.
+test('#215: a file that grew past the limit after fstat is refused, not read to its end', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-grow-'));
+  const orig = fs.fstatSync;
+  try {
+    const p = sparseFile(path.join(T, 'repos.json'), MAX_PLAIN_BYTES + 4096);
+    const small = sparseFile(path.join(T, 'small.json'), 0, '');
+    // fstat says what it said before the file grew: empty.
+    fs.fstatSync = (fd, ...rest) => Object.assign(orig.call(fs, fd, ...rest), { size: 0 });
+    for (const read of [() => readPlainBytes(p), () => readPlainFile(p), () => readPlainJSON(p)]) {
+      assert.throws(read, (e) => e.code === FILE_TOO_BIG && e.size === MAX_PLAIN_BYTES + 1 && e.limit === MAX_PLAIN_BYTES);
+    }
+    fs.writeFileSync(small, '{"a":1}');
+    assert.deepEqual(readPlainJSON(small), { a: 1 }, 'a file that grew within the limit is read whole');
+    // A limit of its own, for a caller that names one.
+    fs.fstatSync = orig;
+    assert.equal(readPlainBytes(p, { max: MAX_PLAIN_BYTES * 2 }).length, MAX_PLAIN_BYTES + 4096);
+    assert.throws(() => readPlainFile(small, { max: 3 }), (e) => e.code === FILE_TOO_BIG && e.limit === 3);
+  } finally { fs.fstatSync = orig; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// mirrorDrift runs on every command and every hook: a pair whose sizes differ, or a name past the limit, is
+// different without a read of either file.
+test('#215 mirrorDrift: a 100 MiB product.json is drift without being read', async () => {
+  const { mirrorDrift, MAX_PLAIN_BYTES: manifestMax } = await import('./manifest.mjs');
+  assert.equal(manifestMax, MAX_PLAIN_BYTES, 'one limit, kept in manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-mirror-'));
+  const orig = fs.readFileSync;
+  try {
+    const product = sparseFile(path.join(T, '.sdlc/product.json'), 100 * 1024 * 1024);
+    const legacy = sparseFile(path.join(T, '.sdlc/hub.json'), 100 * 1024 * 1024);
+    const reads = [];
+    // manifest.mjs imports `readFileSync` by name: the named export follows the patch only once synced.
+    const { syncBuiltinESMExports } = await import('node:module');
+    fs.readFileSync = (f, ...rest) => { reads.push(f); return orig.call(fs, f, ...rest); };
+    syncBuiltinESMExports();
+    assert.equal(mirrorDrift(product, legacy), true, 'two equal names past the limit are drift');
+    fs.truncateSync(legacy, 10);
+    assert.equal(mirrorDrift(product, legacy), true, 'sizes that differ are drift');
+    assert.deepEqual(reads.filter((f) => String(f).startsWith(T)), [], 'neither file was read');
+  } finally {
+    fs.readFileSync = orig;
+    (await import('node:module')).syncBuiltinESMExports();
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('#215: yad repo list names a 100 MiB .sdlc/repos.json as too big instead of reading it', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-cli-'));
   try {
