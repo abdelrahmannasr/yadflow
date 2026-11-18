@@ -28,6 +28,7 @@ docs/           unset
 | Header | The first line is `# yad-risk-map v1`. |
 | One line per directory | `<dir>/ <level> <guessed\|confirmed>`, fields split on spaces or tabs, so a path holds none. |
 | Directory | Written from the repo root, ending in `/`. No leading `/` or `#`, no `.` or `..` segment, no space, tab, `*`, `?`, `[` or `\`. A directory whose name holds one of those (`app/[slug]/`) cannot have a line of its own: its parent's line covers it. At the top level (`my docs/`) nothing can, and the check says to rename it. |
+| Control or invisible characters | A directory whose name holds a control character (an escape, a bell) or an invisible one (a bidi control, a line separator) is never written by `yad risk-map draft`: it is named as not added, and below the top level its parent's line is added so the folder is still covered. **Never hand-write such a name into the map** — give the parent line its level instead. |
 | `./` | The files **at** the repo root only — not everything below it. |
 | Which line decides | The deepest listed directory above a file. |
 | Levels | `high`, `medium`, `low`, or `unset` (listed, not classified; its state may be left out). |
