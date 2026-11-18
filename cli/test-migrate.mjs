@@ -1792,7 +1792,8 @@ test('E125 b migrate 7 -> 8: a linked ledger refuses the move; a link put in the
       fs.symlinkSync(path.join(T, 'comments-outside.json'), comments);
       const p = planMigration(T).product;
       assert.equal(p.action, 'unreadable');
-      assert.match(p.detail, /comments\.json is a link or not a plain file, so it was not read — fix or restore it first/);
+      assert.match(p.detail, /comments\.json is a link or not a plain file, so it was not read — replace it with the real file \(not a link\) first$/);
+      assert.doesNotMatch(p.detail, /restore/, 'a git restore brings back a committed link');
     } finally { cleanup(T); }
   }
   {
@@ -1820,7 +1821,11 @@ test('E125 b migrate 7 -> 8: a linked ledger refuses the move; a link put in the
         cpMerge(src, dest, created);
         if (++n === 2) { const s = path.join(dest, '.sdlc/approvals.json'); fs.rmSync(s); fs.symlinkSync(path.join(T, 'state-outside.json'), s); }
       };
-      assert.throws(() => applyProductMove(T, move, { copy }), /nothing was moved — .*approvals\.json is not a plain file/);
+      let thrown;
+      try { applyProductMove(T, move, { copy }); } catch (e) { thrown = e; }
+      // Named by its Product path, never this machine's absolute one: runMigrate prints it and puts it in --json.
+      assert.equal(thrown?.message, 'nothing was moved — foundation/.sdlc/approvals.json is a link or not a plain file, so it was not read');
+      assert.ok(!thrown.message.includes(T), 'no absolute path');
       assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the original is whole');
       assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, 'no stray ledger folder');
       assert.equal(fs.readFileSync(path.join(T, 'state-outside.json'), 'utf8'), '{"kind":"discovery","steps":[]}');
@@ -1874,4 +1879,43 @@ test('E125 b migrate --apply: a .gitignore that is a link is named and never wri
     assert.equal(ensureBackupsIgnored(T), true);
     assert.match(fs.readFileSync(path.join(T, '.gitignore'), 'utf8'), /^node_modules\n\n.*\n.*\n\*\.yad-orig\n$/);
   } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b migrate --apply: a link (or a dangling one) at a .yad-orig path is replaced, never written through', { skip: LINK_SKIP }, async () => {
+  for (const dangling of [false, true]) {
+    const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
+    const target = path.join(T, '..', `${path.basename(T)}-zshenv`);
+    try {
+      if (!dangling) fs.writeFileSync(target, 'export PATH=/usr/bin\n');
+      const state = path.join(T, 'epics/EP-x/.sdlc/state.json');
+      const original = fs.readFileSync(state, 'utf8');
+      fs.symlinkSync(target, `${state}.yad-orig`);
+      // The settings file's backups too: both names of the pair are backed up by the same row.
+      fs.symlinkSync(target, path.join(T, '.sdlc/hub.json.yad-orig'));
+      await grabOut(() => runMigrate(T, { apply: true }));
+      for (const b of [`${state}.yad-orig`, path.join(T, '.sdlc/hub.json.yad-orig')]) {
+        assert.ok(fs.lstatSync(b).isFile(), `${dangling ? 'dangling' : 'link'}: ${path.basename(b)} is a plain file now`);
+      }
+      assert.equal(fs.readFileSync(`${state}.yad-orig`, 'utf8'), original, 'the backup holds the original');
+      if (dangling) assert.ok(!fs.existsSync(target), 'the target was never created');
+      else assert.equal(fs.readFileSync(target, 'utf8'), 'export PATH=/usr/bin\n', 'the target is untouched');
+    } finally { cleanup(T); fs.rmSync(target, { force: true }); }
+  }
+});
+
+test('E125 b migrate --apply: a link put in the product level after the plan is named by its Product path', { skip: LINK_SKIP }, async () => {
+  const { T } = await legacyProductLevel();
+  try {
+    const original = path.join(T, LEGACY, '.sdlc/comments.json');
+    const plan = planMigration(T).product;
+    assert.equal(plan.action, 'move');
+    // A link that appears after the plan: the apply's own read refuses it.
+    fs.renameSync(original, path.join(T, 'outside-comments.json'));
+    fs.symlinkSync(path.join(T, 'outside-comments.json'), original);
+    const { applyProductMove } = await import('./migrate.mjs');
+    let thrown;
+    try { applyProductMove(T, plan); } catch (e) { thrown = e; }
+    assert.equal(thrown?.message, 'nothing was moved — foundation/.sdlc/comments.json is a link or not a plain file, so it was not read');
+    assert.ok(!thrown.message.includes(T), 'no absolute path');
+  } finally { cleanup(T); }
 });

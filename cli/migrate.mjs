@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
     const raw = readRaw(ledgerOf(from, name));
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
-      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — fix or restore it first`);
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : 'fix or restore it first'}`);
     }
     read[name] = raw.value;
   }
@@ -440,7 +440,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
     const raw = readRaw(path.join(from, f));
-    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — fix or restore it first`);
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : 'does not parse — fix or restore it first'}`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
     const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
@@ -486,10 +486,18 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     }
     const f = epicFiles(to);
     // Plain reads only (E125 b): a link or a folder in the copy throws, and the whole move is undone below.
-    writeState(f.state, convertDiscoveryState(readPlainJSON(f.state)));
+    // The refusal names the file by its Product path: the lib's message carries this machine's absolute path,
+    // and `runMigrate` prints this one and puts it in the --json answer.
+    const plainJSON = (file) => {
+      try { return readPlainJSON(file); } catch (e) {
+        if (e?.code !== NOT_PLAIN_FILE) throw e;
+        throw Object.assign(new Error(`${path.relative(root, file).split(path.sep).join('/')} ${NOT_PLAIN_SAID}`), { code: NOT_PLAIN_FILE, kind: e.kind });
+      }
+    };
+    writeState(f.state, convertDiscoveryState(plainJSON(f.state)));
     const relabel = (file, canonical) => {
       if (!exists(file)) return;
-      const list = readPlainJSON(file);
+      const list = plainJSON(file);
       writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
     };
     relabel(f.approvals, canonicalApprovals);
@@ -498,7 +506,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     relabel(f.productPrsLegacy, canonicalProductPrs);
     for (const rel of move.reshape || []) {
       const file = path.join(root, rel);
-      const { obj, version } = applyMigrations(readPlainJSON(file), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
+      const { obj, version } = applyMigrations(plainJSON(file), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
       writeJSON(file, stamped(obj, version));
     }
   } catch (e) {
@@ -574,6 +582,8 @@ function readRaw(file) {
 }
 // What a row or a refusal says about a link or a folder in place of a file: no path (the row names it).
 const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
+// A git restore brings back a link when the link is what is committed, so the way out names the real file.
+const NOT_PLAIN_FIX = 'replace it with the real file (not a link) first';
 
 
 // A file's shape as recorded ON DISK. An object with no key is shape 1 by rule 1; so is an array,
@@ -1101,7 +1111,9 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
       // prove and the copy is unconditional.
       // A file the drift repair above already backed up keeps THAT backup: it is the copy the person did
       // not keep, and its only record. Its bytes now are the kept copy's, backed up under the other name.
-      if (!settledFiles.includes(row.file)) fs.copyFileSync(file, backupPathFor(file));
+      // Written through a temporary file and a rename (E125 b): a link already at the `.yad-orig` path (one a
+      // committer forced in) is replaced, never written through, and a dangling one never creates its target.
+      if (!settledFiles.includes(row.file)) writeFileAtomic(backupPathFor(file), readPlainBytes(file));
       // A mirrored row writes its partner too, so the partner needs a backup of its OWN pre-migration
       // bytes — taken here, before either write. Backing up only the row's file leaves the other name
       // rewritten with no way back, and on the NEXT shape bump its `.yad-orig` would be overwritten
@@ -1111,7 +1123,7 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
         const partnerFile = path.join(root, partnerRel);
         // Only a plain file is copied (E125 b): a link there is replaced by the write below, and the file it
         // points at is never read or touched.
-        if (fs.lstatSync(partnerFile, { throwIfNoEntry: false })?.isFile() && !settledFiles.includes(partnerRel)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
+        if (fs.lstatSync(partnerFile, { throwIfNoEntry: false })?.isFile() && !settledFiles.includes(partnerRel)) writeFileAtomic(backupPathFor(partnerFile), readPlainBytes(partnerFile));
       }
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
