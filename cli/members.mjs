@@ -44,7 +44,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readBlobsAt } from './git-read.mjs';
 
-import { c, log, ok, info, warn, fail, hand, run, readJSON, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, readJSON, readPlainJSON, NOT_PLAIN_FILE, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, configuredGitUrl, httpStatus } from './protection.mjs';
@@ -100,11 +100,13 @@ export function ttlDays(productConfig) {
 
 // One member file, checked. `{ record }` or `{ error }`. The file must be named by its account on the
 // Product's platform and host — a copied file names another person, and is refused, not trusted.
+// A link or a folder in its place is never read (E125 b).
 export function readMemberFile(file, { platform, host } = {}) {
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { error: `cannot be read (${e.code || e.message})` }; }
   let r;
-  try { r = JSON.parse(text); } catch { return { error: 'is not valid JSON' }; }
+  try { r = readPlainJSON(file); } catch (e) {
+    if (e.code === NOT_PLAIN_FILE) return { error: 'is a link or not a plain file, so it was not read' };
+    return { error: e instanceof SyntaxError ? 'is not valid JSON' : `cannot be read (${e.code || e.message})` };
+  }
   if (!isPlainObject(r)) return { error: 'is not a JSON object' };
   if (!Array.isArray(r.accounts) || !r.accounts.length) return { error: 'has no "accounts" list' };
   const accounts = [];

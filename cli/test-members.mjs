@@ -125,6 +125,36 @@ test('E131 readMemberFile: a usable file, and every way one is refused', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b readMemberFile: a link or a folder in place of the file is not read', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, () => {
+  const T = product();
+  try {
+    // A usable member file outside the folder: a read that followed the link would give its record.
+    const outside = path.join(T, 'outside.json');
+    put(outside, alice());
+    const f = path.join(T, M.MEMBERS_DIR, 'github-alice.json');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.symlinkSync(outside, f);
+    const refused = { error: 'is a link or not a plain file, so it was not read' };
+    assert.deepEqual(M.readMemberFile(f, GH), refused);
+    fs.mkdirSync(path.join(T, M.MEMBERS_DIR, 'github-bob.json'));
+    assert.deepEqual(M.readMemberFile(path.join(T, M.MEMBERS_DIR, 'github-bob.json'), GH), refused);
+    assert.deepEqual(M.readMemberFile(path.join(T, M.MEMBERS_DIR, 'github-carol.json'), GH), { error: 'cannot be read (ENOENT)' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b readMemberFile: a link to /dev/zero is refused at once', { skip: process.platform === 'win32' && 'no /dev/zero on Windows' }, () => {
+  const T = tmp();
+  try {
+    const f = path.join(T, 'github-alice.json');
+    fs.symlinkSync('/dev/zero', f);
+    const script = `const M = await import(${JSON.stringify(new URL('./members.mjs', import.meta.url).href)});
+process.stdout.write(JSON.stringify(M.readMemberFile(process.argv[1], { platform: 'github', host: 'github.com' })));`;
+    const r = spawnSyncNode0(process.execPath, ['--input-type=module', '-e', script, f], { encoding: 'utf8', timeout: 20000 });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.deepEqual(JSON.parse(r.stdout), { error: 'is a link or not a plain file, so it was not read' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E131 readMembers + gateMemberMap: a shared account or email joins nothing', () => {
   const T = product();
   try {
