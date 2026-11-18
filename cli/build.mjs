@@ -1323,16 +1323,33 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   // A grouped PR (#583): a squash merge leaves no Task: lines on the default branch, so `shipDrift` finds
   // only the task its branch names. The PR's own commits name the others; each of the same story is
   // shipped from that PR too. A task of another story is listed, never recorded: a person checks it.
+  // Each PR/MR is asked once per run (#218), however many stories or tasks point at it: `{ tasks }`, or
+  // `{ why }` it could not be read, with `again` on every ask after the first.
+  const asks = new Map();
+  const askPr = (repo, n) => {
+    const k = `${repo}#${n}`;
+    if (asks.has(k)) return { ...asks.get(k), again: true };
+    let got;
+    try {
+      const where = registeredRepo(root, repo);
+      if (!where.platform || !where.checkout) got = { why: 'there is no platform or checkout to read its commits from' };
+      else {
+        const asked = prTasks(where.platform, n, { cwd: where.checkout, runner });
+        got = !asked.ok || asked.partial ? { why: `its commits could not all be read (${asked.ok ? 'more than one page of them' : asked.reason})` } : { tasks: asked.tasks };
+      }
+    } catch (e) { got = { why: e.message }; }
+    asks.set(k, got);
+    return got;
+  };
   const shipGroup = async (at, n) => {
     const fix = `each other task it carries: yad build ship <story> --task <T> --repo ${at.repo} --pr ${n}`;
-    // A later sync does not ask this PR again (its branch's task has a ship now): the fix is by hand.
-    const notRead = (why) => unread.push({ repo: at.repo, pr: n, read: true, why: `PR/MR #${n}: ${why}, so other tasks it carries are not recorded — ${fix}` });
-    let where;
-    try { where = registeredRepo(root, at.repo); } catch (e) { notRead(e.message); return; }
-    if (!where.platform || !where.checkout) { notRead('there is no platform or checkout to read its commits from'); return; }
-    const asked = prTasks(where.platform, n, { cwd: where.checkout, runner });
-    if (!asked.ok || asked.partial) { notRead(`its commits could not all be read (${asked.ok ? 'more than one page of them' : asked.reason})`); return; }
-    for (const id of asked.tasks) {
+    // A later sync asks this PR again while its story is not shipped (#218); a person can also record them.
+    const got = askPr(at.repo, n);
+    if (got.why) {
+      if (!got.again) unread.push({ repo: at.repo, pr: n, read: true, why: `PR/MR #${n}: ${got.why}, so other tasks it carries are not recorded — the next sync asks again, or ${fix}` });
+      return;
+    }
+    for (const id of got.tasks) {
       const m = /^(.+)-(T\d+)$/i.exec(id);
       if (!m) continue; // not a task id: spec-link is the gate for that
       const [, story, task] = m;
@@ -1393,7 +1410,36 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
     }
     if (from) groups.push([at, from]);
   }
-  for (const [at, n] of groups) await shipGroup(at, n);
+  // A grouped PR an earlier sync missed (#218) — its commits not read, a dry run, or a yadflow that recorded
+  // only the branch's task: the PR of every ship of a story in scope that is not shipped yet is read again.
+  // A shipped story is not asked; a task with a ship is skipped by `shipGroup`, so none is recorded twice.
+  for (const ep of epic ? [epic] : epicIds(root)) {
+    let ships;
+    try { ships = readShips(epicRoot(root, ep)); } catch { continue; } // said in `drift.unreadEpics`
+    const open = new Map();
+    const isOpen = (story) => {
+      if (!open.has(story)) {
+        let st = null;
+        try { st = readStoryStatus(storyFileOf(epicRoot(root, ep), story)); } catch { /* no story file: not asked */ }
+        open.set(story, st != null && st !== 'shipped');
+      }
+      return open.get(story);
+    };
+    for (const s of ships) {
+      if (!isPlainObject(s) || s.retroactive || storyEpic(String(s.story || '')) !== ep || typeof s.repo !== 'string') continue;
+      const n = s.pr == null ? '' : prNumberFromUrl(String(s.pr)) || String(s.pr).replace(/^#/, '');
+      if (!/^\d+$/.test(n) || !isOpen(s.story)) continue;
+      groups.push([{ story: s.story, task: s.task, repo: s.repo }, Number(n)]);
+    }
+  }
+  // One read of each PR per story: a PR two tasks merged, or found both ways, is not read twice.
+  const groupSeen = new Set();
+  for (const [at, n] of groups) {
+    const k = `${at.repo}#${Number(n)}#${at.story}`;
+    if (groupSeen.has(k)) continue;
+    groupSeen.add(k);
+    await shipGroup(at, Number(n));
+  }
   // A task of another story is listed unless this run recorded it after all (its own commit, found later).
   left.push(...otherStory.filter((x) => !handled.has(keyOf(x))));
   // Stories every task of which now has a ship — and those `reconcile check` already sees as shipped in the

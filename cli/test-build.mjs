@@ -1397,6 +1397,64 @@ test('yad build sync: a squash-merged grouped PR ships every task of the story i
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad build sync: a later sync records the tasks of a grouped PR an earlier one missed, asking each PR once (#218)', async () => {
+  const { buildSync } = await import('./build.mjs');
+  const { W, P, dir, api } = workspace({ merged: [] });
+  try {
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'github', default_branch: 'main', git_url: 'https://github.com/o/api.git' }, { name: 'web', path: '../web' }] }) });
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const m = groupedMerge(api, { merge: false, trailer: false });
+    const view = { state: 'MERGED', mergedAt: '2026-10-20T10:00:00Z', mergeCommit: { oid: m }, headRefName: 'feat/EP-l-S01-T01-small-fixes', url: 'https://github.com/o/api/pull/20', body: '', statusCheckRollup: [] };
+    const answer = (ts) => ({ ok: true, stdout: JSON.stringify(ts.map((t) => ({ commit: { message: `fix: small ${t}\n\nTask: EP-l-S01-${t}` } }))), stderr: '' });
+    let commitsAnswer = { ok: false, stdout: '', stderr: 'denied' };
+    let asked = 0;
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || (cmd === 'gh' && args[0] === 'auth')) return { ok: true, stdout: '', stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [{ number: 20, headRefName: view.headRefName, baseRefName: 'main', mergedAt: view.mergedAt, mergeCommit: { oid: m } }] } } } }), stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/{owner}/{repo}/pulls/20/commits')) { asked++; return commitsAnswer; }
+      if (cmd === 'gh' && args[1] === 'view' && args[2] === '20') return { ok: true, stdout: JSON.stringify(view), stderr: '' };
+      if (cmd === 'gh' && args[1] === 'list') return { ok: true, stdout: JSON.stringify([{ number: 20, state: 'MERGED', headRefName: view.headRefName, url: view.url }]), stderr: '' };
+      return { ok: false, stdout: '', stderr: 'x' };
+    };
+    const opts = { today: '2026-10-21', runner, prReader: () => ({ ok: true, reviews: [] }) };
+    const shipFile = (t) => path.join(dir, `.sdlc/build-log/EP-l-S01-${t}-api.json`);
+    // 1. The PR's commits cannot be read: only the branch's task is recorded, and the note says a later sync asks again.
+    let r = await buildSync(P, opts);
+    assert.deepEqual(r.recorded.map((x) => x.task), ['T01']);
+    assert.equal(r.unread.filter((u) => u.pr === 20).length, 1, 'a PR not read is said once');
+    assert.match(r.unread.find((u) => u.pr === 20).why, /the next sync asks again, or each other task it carries: yad build ship <story> --task <T> --repo api --pr 20/);
+    assert.equal(fs.existsSync(shipFile('T02')), false);
+    // 2. Read again, but its commits name only T01 (as an older yadflow saw it): nothing new, and the ship of T01
+    // is never written twice.
+    commitsAnswer = answer(['T01']);
+    r = await buildSync(P, opts);
+    assert.deepEqual([r.recorded.length, r.left.length], [0, 0]);
+    // 3. A dry run, the commits now read in full: T02 is planned from the PR of T01's ship, nothing is written.
+    commitsAnswer = answer(['T01', 'T02']);
+    r = await buildSync(P, { ...opts, dryRun: true });
+    assert.deepEqual(r.planned.filter((x) => x.task).map((x) => [x.task, x.pr, x.command]), [['T02', '20', 'yad build ship EP-l-S01 --task T02 --repo api --pr 20']]);
+    assert.equal(fs.existsSync(shipFile('T02')), false);
+    // 4. The sync records T02 from PR #20, with its merge commit.
+    r = await buildSync(P, opts);
+    assert.deepEqual(r.recorded.map((x) => [x.task, x.pr, x.mergeCommit]), [['T02', view.url, m]]);
+    assert.equal(read(shipFile('T02')).mergeCommit, m);
+    // 5. Asked again: nothing new is recorded, and PR #20 is asked once, though the ships of T01 and T02 both
+    // name it (the story is still in-build: web is not cloned, so build done refuses).
+    asked = 0;
+    r = await buildSync(P, opts);
+    assert.deepEqual([r.recorded.length, r.left.length], [0, 0]);
+    assert.equal(status(dir), 'in-build');
+    assert.equal(asked, 1);
+    // 6. A shipped story is not asked again.
+    const story = path.join(dir, 'stories/EP-l-S01.md');
+    fs.writeFileSync(story, fs.readFileSync(story, 'utf8').replace(/^status:.*$/m, 'status: shipped'));
+    asked = 0;
+    r = await buildSync(P, opts);
+    assert.equal(asked, 0);
+    assert.equal(r.recorded.length, 0);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad build sync: a grouped PR merged with a merge commit ships each task once (#583)', async () => {
   const { buildSync } = await import('./build.mjs');
   const { W, P, dir, api } = workspace({ merged: [] });
