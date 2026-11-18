@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, isPlainObject, exists } from './lib.mjs';
+import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, isPlainObject, exists, forTerminal } from './lib.mjs';
 import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
 import { DEFAULT_LIFECYCLE, laneOrder, laneAuthorSteps } from './lifecycle.mjs';
 import { epicFiles, PROJECT_FILES } from './manifest.mjs';
@@ -466,6 +466,8 @@ function registeredRepo(root, repo) {
   const no = judged?.skipped[0];
   if (no) throw err(CODE, `${no.j.name} (${no.j.path}): ${no.why} — yad runs no git there`, `fix the path of ${no.j.name} in .sdlc/repos.json`);
   const hit = judged?.ok[0];
+  // `.git` is checked for the Product's own entry (`.`): it is judged `product` whether or not it is a git
+  // checkout. For any other entry judged present and not `inside`, the judgement has already seen it.
   const checkout = hit?.present && !hit.j.inside && exists(path.join(hit.target, '.git')) ? hit.target : null;
   const remote = checkout ? run('git', ['remote', 'get-url', 'origin'], { cwd: checkout }).stdout : '';
   // The folder must be the registered repo: a stale path to another clone would read that repo's PR #n.
@@ -475,7 +477,7 @@ function registeredRepo(root, repo) {
     const have = repoPathFromGitUrl(remote);
     const want = repoPathFromGitUrl(meta.git_url);
     if (!have !== !want) warn(`${repo}: could not compare the clone with its registered git_url — check ${meta.path} is ${want || 'the registered repo'}`);
-    if (have && want && have.toLowerCase() !== want.toLowerCase()) throw err(CODE, `${meta.path} is a clone of ${have}, not ${want}`, `fix the path of ${repo} in .sdlc/repos.json, or clone it with \`yad repo clone ${repo}\``);
+    if (have && want && have.toLowerCase() !== want.toLowerCase()) throw err(CODE, `${forTerminal(meta.path)} is a clone of ${forTerminal(have)}, not ${forTerminal(want)}`, `fix the path of ${repo} in .sdlc/repos.json, or clone it with \`yad repo clone ${repo}\``);
   }
   const named = typeof meta?.default_branch === 'string' && meta.default_branch ? meta.default_branch : null;
   if (named && (named.startsWith('-') || !run('git', ['check-ref-format', '--branch', named], { cwd: root }).ok)) {

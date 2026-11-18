@@ -1730,3 +1730,48 @@ test('yad build ship and the Spec Kit pin run no git in a registered folder shap
     assert.equal(fs.existsSync(marker), false, 'its config never ran');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+test('yad build ship and the Spec Kit pin run no git in a registered clone outside the workspace, or one reached through a .git folder, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git' }, async () => {
+  const { pinSpecKit } = await import('./build.mjs');
+  const { W, P } = workspace();
+  // A real clone beside the workspace folder, not in it: a bare existence test passed it.
+  const away = `${W}-elsewhere`;
+  try {
+    const { yadLogged, gitIn } = gitLogger(W);
+    initRepo(away);
+    fs.mkdirSync(path.join(away, '.specify'));
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: `../../${path.basename(away)}`, platform: 'github' }, { name: 'web', path: '../web' }] }) });
+    let r = yadLogged(P, 'build', 'ship', 'EP-l-S01', '--task', 'T01', '--repo', 'api', '--pr', '7');
+    assert.deepEqual(gitIn(away), [], 'no git ran in the clone outside the workspace');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /api \(\.\.\/\.\.\/[^)]+-elsewhere\): outside the workspace .* — yad runs no git there/);
+    assert.equal(pinSpecKit(P, 'api', 'EP-l-S01', 'spec'), null);
+    assert.equal(fs.existsSync(path.join(away, '.specify', 'feature.json')), false, 'nothing was written there');
+    assert.deepEqual(gitIn(away), [], 'no git ran in the clone outside the workspace');
+    // A clone kept inside the Product's own git folder.
+    const hidden = path.join(P, '.git', 'hidden');
+    initRepo(hidden);
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '.git/hidden', platform: 'github' }, { name: 'web', path: '../web' }] }) });
+    r = yadLogged(P, 'build', 'ship', 'EP-l-S01', '--task', 'T01', '--repo', 'api', '--pr', '7');
+    assert.deepEqual(gitIn(hidden), [], 'no git ran in the clone inside .git');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /api \(\.git\/hidden\): it runs through a \.git folder .* — yad runs no git there/);
+    assert.deepEqual(gitIn(hidden), [], 'no git ran in the clone inside .git');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); fs.rmSync(away, { recursive: true, force: true }); }
+});
+
+test('the Spec Kit pin: the Product\'s own entry is its checkout, and a folder inside a checkout has none, as before (#217)', async () => {
+  const { pinSpecKit } = await import('./build.mjs');
+  const { W, P } = workspace();
+  try {
+    // A monorepo: api is the Product itself.
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '.' }, { name: 'web', path: 'apps/web' }] }) });
+    fs.mkdirSync(path.join(P, '.specify'));
+    fs.mkdirSync(path.join(P, 'apps', 'web', '.specify'), { recursive: true });
+    assert.equal(pinSpecKit(P, 'api', 'EP-l-S01', 'spec').changed, true);
+    assert.equal(read(path.join(P, '.specify', 'feature.json')).feature_directory, 'specs/EP-l-S01');
+    // web is a folder inside the Product's checkout, with no .git of its own: not checked out, as before.
+    assert.equal(pinSpecKit(P, 'web', 'EP-l-S01', 'spec'), null);
+    assert.equal(fs.existsSync(path.join(P, 'apps', 'web', '.specify', 'feature.json')), false);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
