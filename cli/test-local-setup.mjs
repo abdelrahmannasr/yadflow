@@ -1278,6 +1278,29 @@ process.stdout.write('\\n' + JSON.stringify([actions.map((a) => a.status), m.loc
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// #215: a script larger than any real one is the team's file all the same: refused like one that does not
+// parse, never rebuilt as a missing one (that would drop every team step), and never "no file" in the list.
+test('#215: a script over 64 MiB is named as too big, never read, never rebuilt and never rewritten', async () => {
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  const TOO_BIG = 'is larger than 64 MiB, the most yad reads, so yad did not read it';
+  const dir = product();
+  try {
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    put(file, JSON.stringify({ team: [] }));
+    fs.truncateSync(file, MAX_PLAIN_BYTES + 1);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    let actions;
+    try { actions = localSetupActions(dir); actions[0].apply(); } finally { console.log = orig; }
+    assert.deepEqual(actions.map((a) => [a.status, a.writesNothing]), [['modified', true]], 'not "new": the file is there');
+    assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE}: it ${TOO_BIG} — the local setup script was left as it is`));
+    assert.equal(fs.statSync(file).size, MAX_PLAIN_BYTES + 1, 'the file is left as it is');
+    const st = localSetupState(dir, { items: [] });
+    assert.deepEqual([st.exists, st.error], [true, TOO_BIG], 'the list says why, never "no file"');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('E125 b: a script with a byte-order mark is still merged and written when it is behind', () => {
   const dir = product();
   try {

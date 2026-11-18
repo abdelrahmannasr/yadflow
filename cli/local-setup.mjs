@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject, readPlainFile, NOT_PLAIN_FILE } from './lib.mjs';
+import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
 import { productConfigPath, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import {
@@ -129,8 +129,9 @@ export function readCommittedLocalSetup(root) {
   let text = r.status === 0 ? r.stdout : null;
   const committed = text !== null;
   if (text === null) {
+    // A file too big to read (#215) is an error, never "no file": the file is there.
     try { text = readPlainFile(localSetupPath(root)); } catch (e) {
-      return { doc: null, committed: false, error: e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : null };
+      return { doc: null, committed: false, error: e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null };
     }
     if (text === null) return { doc: null, committed: false, error: null };
   }
@@ -186,10 +187,13 @@ function localSetupJsonAction(root) {
   const base = { scope: 'product', item: LOCAL_SETUP_FILE, root, paths: [], shared: LOCAL_SETUP_FILE, what: 'its yadflow steps', mergeShared: (o) => mergeLocalSetup(o, root) };
   let raw = null;
   let notPlain = false;
-  try { raw = readPlainFile(dest); } catch (e) { notPlain = e?.code === NOT_PLAIN_FILE; /* else unreadable: as missing, as before */ }
+  // A file too big to read (#215) is refused like one that does not parse, never rebuilt as a missing one.
+  let tooBig = false;
+  try { raw = readPlainFile(dest); } catch (e) { notPlain = e?.code === NOT_PLAIN_FILE; tooBig = e?.code === FILE_TOO_BIG; /* else unreadable: as missing, as before */ }
   let parsed = null;
   if (raw !== null) { try { parsed = parseJSON(raw); } catch { parsed = undefined; } }
   const merged = notPlain ? { unreadable: `it ${NOT_PLAIN_SAID}` }
+    : tooBig ? { unreadable: `it ${TOO_BIG_SAID}` }
     : raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
   // Never rebuilt from nothing: that would delete every step the team wrote (memory: read strictly before a write).
   if (merged.unreadable) {
