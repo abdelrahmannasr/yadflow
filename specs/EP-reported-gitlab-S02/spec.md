@@ -18,7 +18,10 @@ while CI (which reaches no Product and defers) passes. They also read unmerged e
 - R1. When no copy can go where CI puts the Product (no record on the base, no `git_url` in it, or no
   copy written there) and no folder is already there, `yad run checks` writes the found Product clone's
   default branch to a temp folder of its own, outside the repo, and removes it after the four gates.
-  With a recorded `default_branch` the clone lacks, the clone's `origin/HEAD` branch is read, with a note.
+  A recorded `default_branch` the Product's remote does not have (the fetch ran, and `ls-remote` says
+  no such branch) fails as product-checkout, as CI's clone does, and the four gates are skipped; when
+  the remote could not be asked (`--no-fetch`, no network), the clone's `origin/HEAD` branch is read,
+  with a note. The output gives one note on where the Product is read from, not two that disagree.
 - R2. The run passes that folder to those four gates only, in `YAD_LOCAL_PRODUCT`, and never passes on a
   value from the shell.
 - R3. Where the four gates would read an untracked folder on disk that `product-repo` (or the record)
@@ -29,12 +32,18 @@ while CI (which reaches no Product and defers) passes. They also read unmerged e
 - R4. The Product clone's branch, index and files are never touched, and its unmerged edits are never read.
 - R5. Nothing changes with no Product clone, a Product kept in the same git repo, a record that fails
   product-checkout, or a folder already at the record's path.
-- R6. `--json` marks the copy with `product.local: true`.
+- R6. `--json` marks the copy with `product.local: true` (`false` when it could not be written).
+- R7. When the copy is read because the base has no record (or no `git_url` CI can read), CI defers the
+  four gates, so a FAIL from one of them is marked `(CI defers this: <why>)` in the summary and
+  `ciDefers: true` in `--json` (on the gate and on `product`).
+- R8. A Product kept in this same repo is never copied, and the output says so.
 
 ## Out of scope
 
 A folder already at the record's path (it is read as it is, as documented). The repo's
-`.sdlc/managed.json` hashes of its own `checks/` copies (already stale before this story).
+`.sdlc/managed.json` hashes of its own `checks/` copies (already stale before this story). Telling
+which of several Products kept in one repo is meant (review finding 3): the same-repo check compares
+git tops only.
 
 ## Clarifications
 
@@ -84,4 +93,15 @@ in `cli/test-checks.mjs` fails between T01 and T02, so those two are committed b
 - docs/CLI.md
 - docs/GATES.md
 - skills/yad-checks/references/check-gates.md
+
+## T07 — Fail a recorded branch the remote lacks, mark what CI defers, and give one note
+**Files:**
+- cli/run-checks.mjs
+- cli/test-run-checks.mjs
+- cli/test-checks.mjs
+
+## T08 — Document the fetch, the deferred FAILs and the missing-branch FAIL
+**Files:**
+- docs/CLI.md
+- docs/GATES.md
 <!-- /yad:tasks -->

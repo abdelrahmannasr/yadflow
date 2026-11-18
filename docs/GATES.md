@@ -154,16 +154,26 @@ yad run checks --body pr-description.md
   branch. Two runs at once in one repo can disturb each other (the Product copy, `node_modules`); a Product copy
   that disappears while the gates read it is reported.
 - When nothing can be written where CI checks the Product out — no `.sdlc/product-link.json` on the
-  base, a record with no `git_url`, or a Product clone without that `default_branch` — the run still
-  writes your Product clone's default branch, to a temporary folder of its own outside the repo. It
+  base, a record with no `git_url`, or a copy that could not be written there — the run still writes
+  your Product clone's default branch (its `origin/HEAD` branch), to a temporary folder of its own
+  outside the repo. To do that it fetches that one branch in your Product clone: only the clone's
+  `origin/<branch>` changes, never its checked-out branch, index or files (`--no-fetch` skips it). It
   passes that folder to those four gates in the variable `YAD_LOCAL_PRODUCT`, so they read it instead
-  of the folder `product-repo` in a `link.md` reaches on this machine. A `product-repo` that reaches
-  nothing, or none at all, is answered as before. With no record, CI reaches no Product and defers, so
-  this run can give a real answer (a FAIL included) where CI passes with a deferral. That keeps them off your Product's main folder, which
-  may be on another branch (where a story's epic does not exist yet, so the gates said "orphan story
-  link" while CI passed) or hold unmerged edits. The gates read `YAD_LOCAL_PRODUCT` only outside CI
-  (when none of `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` is set), and the run never passes on a value
-  from your shell. With no Product clone, or when the Product is kept in this same repo, nothing changes.
+  of the folder `product-repo` in a `link.md` reaches on this machine. That keeps them off your
+  Product's main folder, which may be on another branch (where a story's epic does not exist yet, so
+  the gates said "orphan story link" while CI passed) or hold unmerged edits. A `product-repo` that
+  reaches nothing, or none at all, is answered as before. The gates read `YAD_LOCAL_PRODUCT` only
+  outside CI (when none of `CI`, `GITHUB_ACTIONS` and `GITLAB_CI` is set), and the run never passes on
+  a value from your shell. With no Product clone, or when the Product is kept in this same repo,
+  nothing changes (the output says which).
+- With no record (or no `git_url` CI can read), CI reaches no Product and its Product gates defer. This
+  run gives a real answer instead, so a Product gate can FAIL here where CI passes. The summary marks
+  such a FAIL `(CI defers this: no record on the base)`, and `--json` gives it `ciDefers: true`. It is
+  still worth fixing, but it does not block the pull request in CI.
+- A record whose `default_branch` the Product's remote does not have fails as
+  [product-checkout](#product-checkout), as CI's clone does, and the four gates are skipped. When the
+  remote cannot be asked (`--no-fetch`, or no network), the clone's `origin/HEAD` branch is read, with
+  a note.
 - Every gate runs, including the package install and build/test/lint (`--no-build` skips those two),
   then a summary. The exit code is 1 when a gate fails or the run is refused, and 130 when it is
   stopped with Ctrl-C.
