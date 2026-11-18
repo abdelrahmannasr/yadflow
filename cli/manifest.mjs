@@ -1,6 +1,6 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Read the version from package.json (the one source of truth) so it always
@@ -351,8 +351,14 @@ export const SETTINGS_EDIT_HINT = '.sdlc/product.json (.sdlc/hub.json on a Produ
 // Both names present and saying different things. Byte for byte, like `yad doctor` and the gates
 // (`cmp -s`): the engine writes both from one string, so any difference at all came from outside it.
 // A copy that cannot be read counts as different — it is not the same file.
+// So does a name that is a link or not a plain file (E125 b): it is never opened, because every command runs
+// this check, and a committed `.sdlc/hub.json` that links to /dev/zero made every command hang on the read.
+// `yad migrate` then names the link, and refuses to settle the pair through it. (An `lstat` of its own:
+// cli/lib.mjs, home of the plain read, imports this file.)
+const plainFile = (p) => { try { return lstatSync(p).isFile(); } catch { return false; } };
 export const mirrorDrift = (canonical, legacy) => {
   if (!existsSync(canonical) || !existsSync(legacy)) return false;
+  if (!plainFile(canonical) || !plainFile(legacy)) return true;
   try { return !readFileSync(canonical).equals(readFileSync(legacy)); } catch { return true; }
 };
 

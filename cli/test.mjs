@@ -31074,6 +31074,47 @@ test('E122: preferring / productConfigPath read the new name first, the old as a
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b mirrorDrift: a name that is a link or a folder is never opened, and counts as different', { skip: E125B_SKIP }, async () => {
+  const { mirrorDrift } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e125-mirror-'));
+  try {
+    const sdlc = path.join(T, '.sdlc');
+    fs.mkdirSync(sdlc);
+    const p = path.join(sdlc, 'product.json');
+    const h = path.join(sdlc, 'hub.json');
+    fs.writeFileSync(p, '{}\n');
+    // A link to the very same bytes: still not a plain file, so not the same file.
+    fs.writeFileSync(path.join(T, 'same.json'), '{}\n');
+    fs.symlinkSync(path.join(T, 'same.json'), h);
+    assert.equal(mirrorDrift(p, h), true);
+    assert.equal(mirrorDrift(h, p), true);
+    fs.rmSync(h);
+    fs.mkdirSync(h);
+    assert.equal(mirrorDrift(p, h), true, 'a folder too');
+    fs.rmSync(h, { recursive: true });
+    fs.writeFileSync(h, '{}\n');
+    assert.equal(mirrorDrift(p, h), false, 'two plain files with the same bytes are still one file');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b mirrorDrift: a .sdlc/hub.json that links to /dev/zero stops no command — it is refused at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e125-mirror-zero-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github"}\n');
+    fs.symlinkSync('/dev/zero', path.join(T, '.sdlc/hub.json'));
+    const got = inChildWithLimit(`const { productDriftPairs } = await import(${cliUrl('./epic-state.mjs')});
+const { describeDrift } = await import(${cliUrl('./migrate.mjs')});
+const root = process.argv[1];
+const pairs = productDriftPairs(root).map((x) => x.canonical);
+process.stdout.write(JSON.stringify([pairs, describeDrift(root + '/.sdlc/product.json', root + '/.sdlc/hub.json')]));`, [T]);
+    assert.deepEqual(got, [['.sdlc/product.json'], ['hub.json is a link or not a plain file, so it was not read']]);
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'status', '--json', '--dir', T], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1', YAD_NO_REPORT: '1' } });
+    assert.equal(r.signal, null, `yad status did not end: ${r.stderr}`);
+    assert.match(r.stdout, /YAD-STATE-008/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E122: writeMirrored compares against the new name, writes both, and a write repairs a drifted pair', async () => {
   const { writeMirrored } = await import('./lib.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122w-'));
