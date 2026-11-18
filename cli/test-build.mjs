@@ -1663,3 +1663,70 @@ test('#450 yad open-pr --via auto: a branch cut from another branch, with no bas
     assert.equal(created, 0);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+// #217: a registered folder is judged before any git runs in it, as E125 does for the other commands. A
+// logging git first on PATH writes the folder each call runs in, as the disk spells it: a call in a link to
+// api is logged as api.
+function gitLogger(W) {
+  const bin = path.join(W, 'bin');
+  const log = path.join(W, 'git-calls.log');
+  fs.mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\t%s\\n' "$(pwd -P)" "$*" >> '${log}'\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+  // gh and glab are never signed in here: nothing reaches the network.
+  for (const cli of ['gh', 'glab']) fs.writeFileSync(path.join(bin, cli), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const yadLogged = (cwd, ...args) => {
+    const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, PATH: `${bin}${path.delimiter}${ENV.PATH}`, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' }, encoding: 'utf8' });
+    return { code: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+  const gitIn = (dir) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter((l) => l.startsWith(`${dir}\t`) || l.startsWith(`${dir}/`));
+  return { yadLogged, gitIn };
+}
+// A folder the Product commits, shaped like a bare repo whose config runs a command when git reads it.
+function bareShaped(dir, marker) {
+  for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'HEAD'), 'ref: refs/heads/main\n');
+  fs.writeFileSync(path.join(dir, 'config'), `[core]\n\tbare = true\n\tfsmonitor = touch '${marker}'\n`);
+}
+
+test('yad build ship, build done and the Spec Kit pin run no git in a registered folder reached through a link inside the Product, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git, and symlinks' }, async () => {
+  const { pinSpecKit } = await import('./build.mjs');
+  const { W, P, api } = workspace();
+  try {
+    const { yadLogged, gitIn } = gitLogger(W);
+    // A link the Product commits, to a real clone: it has a `.git`, so a bare existence test passed it.
+    fs.symlinkSync('../api', path.join(P, 'evil'));
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: 'evil', platform: 'github' }, { name: 'web', path: '../web' }] }) });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-q', '-m', 'chore: a link');
+    fs.mkdirSync(path.join(api, '.specify'));
+    const why = /api \(evil\): reached through a link inside a repo's tree — yad runs no git there/;
+    let r = yadLogged(P, 'build', 'ship', 'EP-l-S01', '--task', 'T01', '--repo', 'api', '--pr', '7');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    r = yadLogged(P, 'build', 'done', 'EP-l-S01', '--no-fetch');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    assert.equal(pinSpecKit(P, 'api', 'EP-l-S01', 'spec'), null, 'the pin is not made');
+    assert.equal(fs.existsSync(path.join(api, '.specify', 'feature.json')), false, 'nothing was written through the link');
+    assert.deepEqual(gitIn(api), [], 'no git ran in the linked clone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad build ship and the Spec Kit pin run no git in a registered folder shaped like a bare repo, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git' }, async () => {
+  const { pinSpecKit } = await import('./build.mjs');
+  const { W, P } = workspace();
+  try {
+    const { yadLogged, gitIn } = gitLogger(W);
+    const marker = path.join(W, 'fsmonitor-ran');
+    const bare = path.join(P, 'bare');
+    bareShaped(bare, marker);
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: 'bare', platform: 'github' }, { name: 'web', path: '../web' }] }) });
+    const r = yadLogged(P, 'build', 'ship', 'EP-l-S01', '--task', 'T01', '--repo', 'api', '--pr', '7');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /api \(bare\): a folder on its way holds an entry named HEAD, .* — yad runs no git there/);
+    assert.equal(pinSpecKit(P, 'api', 'EP-l-S01', 'spec'), null);
+    assert.deepEqual(gitIn(bare), [], 'no git ran in the bare-shaped folder');
+    assert.equal(fs.existsSync(marker), false, 'its config never ran');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});

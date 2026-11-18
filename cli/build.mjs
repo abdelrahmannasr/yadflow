@@ -29,6 +29,7 @@ import { readCommit, tasksOfCommit, prOfCommit, shipDrift } from './ship-drift.m
 import { recordActor } from './skip.mjs';
 import { sealedEpic } from './thread.mjs';
 import { worktreeAt, sameDir } from './worktree-record.mjs';
+import { judgedRepos } from './workspace.mjs';
 
 const CODE = 'YAD-STATE-009';
 export const STORY_RE = /^EP-[a-z0-9-]+-S\d+$/;
@@ -452,12 +453,20 @@ export async function buildTrust(root, { story, repo, step, verdict, signals = {
 }
 
 // The registered repo's checkout, platform and default branch.
+// The folder is judged first (#217, as E125 does for the other commands): the registry is shared content,
+// so a folder yad may not run git in — a bare-shaped one, or one reached through a link inside a repo's
+// tree — is an error that names it and says why, and no git runs there. A repo not cloned here has no
+// checkout, as before. So does a folder inside another checkout (a monorepo's `apps/web`): the readers
+// below expect the checkout's top (its `origin`, its worktree beside it, `specs/` at its root).
 function registeredRepo(root, repo) {
   const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
-  const meta = (reg.repos || []).find((r) => r?.name === repo) || null;
+  const meta = (Array.isArray(reg?.repos) ? reg.repos : []).find((r) => r?.name === repo) || null;
   const product = readJSON(path.join(root, PROJECT_FILES.productConfig), null) || readJSON(path.join(root, '.sdlc/hub.json'), null) || {};
-  const dir = meta?.path ? path.resolve(root, meta.path) : null;
-  const checkout = dir && exists(path.join(dir, '.git')) ? dir : null;
+  const judged = meta?.path ? judgedRepos(root, { repos: [meta] }) : null;
+  const no = judged?.skipped[0];
+  if (no) throw err(CODE, `${no.j.name} (${no.j.path}): ${no.why} — yad runs no git there`, `fix the path of ${no.j.name} in .sdlc/repos.json`);
+  const hit = judged?.ok[0];
+  const checkout = hit?.present && !hit.j.inside && exists(path.join(hit.target, '.git')) ? hit.target : null;
   const remote = checkout ? run('git', ['remote', 'get-url', 'origin'], { cwd: checkout }).stdout : '';
   // The folder must be the registered repo: a stale path to another clone would read that repo's PR #n.
   // Compared by the repo's path on its host (`team/api`), so a port, an SSH host alias, a token in the URL
@@ -469,7 +478,7 @@ function registeredRepo(root, repo) {
     if (have && want && have.toLowerCase() !== want.toLowerCase()) throw err(CODE, `${meta.path} is a clone of ${have}, not ${want}`, `fix the path of ${repo} in .sdlc/repos.json, or clone it with \`yad repo clone ${repo}\``);
   }
   const named = typeof meta?.default_branch === 'string' && meta.default_branch ? meta.default_branch : null;
-  if (named && (named.startsWith('-') || !run('git', ['check-ref-format', '--branch', named]).ok)) {
+  if (named && (named.startsWith('-') || !run('git', ['check-ref-format', '--branch', named], { cwd: root }).ok)) {
     throw err(CODE, `.sdlc/repos.json names a default_branch for ${repo} git cannot use: ${named}`, 'fix default_branch in .sdlc/repos.json');
   }
   return { meta, checkout, platform: meta?.platform || detectPlatform(remote) || product.platform || null, defaultBranch: named };
