@@ -31168,6 +31168,20 @@ process.stdout.write(JSON.stringify([pairs, describeDrift(root + '/.sdlc/product
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b writeMirrored: a product.json that links to /dev/zero is replaced at once, never read', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e125-mirrored-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.symlinkSync('/dev/zero', path.join(T, '.sdlc/product.json'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github"}\n');
+    const got = inChildWithLimit(`const { writeProductConfig } = await import(${cliUrl('./lib.mjs')});
+process.stdout.write(JSON.stringify(writeProductConfig(process.argv[1], { platform: 'github' })));`, [T]);
+    assert.deepEqual(got, ['.sdlc/product.json', '.sdlc/hub.json']);
+    assert.ok(fs.lstatSync(path.join(T, '.sdlc/product.json')).isFile(), 'the link is replaced by a plain file');
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E122: writeMirrored compares against the new name, writes both, and a write repairs a drifted pair', async () => {
   const { writeMirrored } = await import('./lib.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e122w-'));

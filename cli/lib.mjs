@@ -585,8 +585,11 @@ export function writeMirrored(canonicalPath, legacyPath, obj) {
   // says nothing changed, nothing is written, and `yad doctor` reports the missing file for ever.
   // A drifted pair fails the same test (the other copy is not `next`), so a write repairs it too.
   const bothPresent = fs.existsSync(canonicalPath) && fs.existsSync(legacyPath);
+  // The drift check first: it never opens a name that is a link or not a plain file (E125 b), and a pair that
+  // has one is drift. Then the plain read, so a link to /dev/zero is never read; a throw falls through to the
+  // write, which replaces the link and never writes through it.
   try {
-    if (bothPresent && fs.readFileSync(readable, 'utf8') === next && !mirrorDrift(canonicalPath, legacyPath)) return [];
+    if (bothPresent && !mirrorDrift(canonicalPath, legacyPath) && readPlainFile(readable) === next) return [];
   } catch { /* unreadable — treat as a first write and fall through */ }
   writeJSON(legacyPath, obj);
   writeJSON(canonicalPath, obj);
