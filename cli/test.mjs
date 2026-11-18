@@ -28871,6 +28871,59 @@ process.stdout.write(JSON.stringify([o.readOwnerFile(file, 'architecture'), o.re
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #215: each reader that names why a file was not read names a file too big to read in words, never by the
+// bare error code, and gives the answer it gives for a broken file.
+const tooBigFile = (f) => sparseFile(f, MAX_PLAIN_BYTES + 1);
+test('#215: history and usage name a file over 64 MiB as too big', () => {
+  const why = `it ${TOO_BIG_SAID}`;
+  {
+    const T = historyProduct();
+    try {
+      tooBigFile(path.join(T, 'epics/EP-old/.sdlc/state.json'));
+      assert.deepEqual(readState(T, 'EP-old'), { why });
+      assert.equal(itemHistory(T, { id: 'EP-old' }).stepsWhy, why);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-usage-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+      tooBigFile(path.join(T, 'epics/EP-x/.sdlc/approvals.json'));
+      let model;
+      const said = grabErr(() => { model = buildModel(T, {}); });
+      assert.deepEqual(model.members.map((m) => m.name), []);
+      assert.match(said, new RegExp(`skipped unreadable ledger EP-x/approvals\\.json: ${why}`));
+      assert.ok(!said.includes(T), 'no absolute path in the warning');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('#215: the index and the owner files name a file over 64 MiB as too big', async () => {
+  const { readInput } = await import('./product-index.mjs');
+  const why = `it ${TOO_BIG_SAID}`;
+  {
+    const T = indexFixture();
+    try {
+      assert.deepEqual(readInput(tooBigFile(path.join(T, 'big.md'))), { error: why });
+      fs.mkdirSync(path.join(T, 'epics', 'EP-a', '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE()));
+      writeIndex(T);
+      tooBigFile(indexPath(T));
+      assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: `.sdlc/index.json ${TOO_BIG_SAID}` });
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-owners-'));
+    try {
+      const owner = tooBigFile(path.join(T, 'epics', 'EP-x', '.sdlc', 'owners', 'architecture.json'));
+      assert.deepEqual(ownersMod.readOwnerFile(owner, 'architecture'), { error: TOO_BIG_SAID });
+      tooBigFile(path.join(T, 'epics', 'EP-x', '.sdlc', 'state.json'));
+      assert.equal(ownersMod.readState(T, 'EP-x'), null, 'a broken state reads as none');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
 test('E47 stepOpen: live while the step or its review is open; a passed pair, or a step off the chain, is not', () => {
   const st = (a, r) => ({ steps: e47Steps(a, r) });
   assert.equal(ownersMod.stepOpen(st('in_progress', 'todo'), 'architecture').live, true);
