@@ -6,7 +6,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -381,6 +381,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // action for `.claude` and correctly reports "already up to date". Never name a remedy that
     // cannot reach the thing being reported.
     const unreadable = [];
+    // Settings files that are a link or not a plain file (E125 b): never read, so neither "does not parse"
+    // nor "not wired" — `yad check --fix` refuses them too, and only replacing the file clears it.
+    const notPlain = [];
     // Targets with no pre-edit hook protocol at all. Collected rather than skipped: a project whose
     // only target is `.agents` had this whole section report `ok` — "agent ledger guard wired" — while
     // nothing local guarded anything, because the loop found no adapter and said nothing. Silence
@@ -416,10 +419,17 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       // parse. The warning would then repeat forever with advice that can never apply.
       // Read ONCE and reuse: parsing the same file twice lets `unreadable` and the merge check
       // describe different content if it changes in between.
+      // A plain file only (E125 b): the file is committed, so a link could point outside the Product or at a
+      // device whose read never ends. A link whose target is missing is a link too, not a missing file.
       let settings = null;
-      if (exists(settingsPath)) {
+      let text;
+      try { text = readPlainFile(settingsPath); } catch (e) {
+        if (e?.code === NOT_PLAIN_FILE) { notPlain.push(relDest); continue; }
+        text = ''; // cannot be read: reported below as a file that does not parse, as before
+      }
+      if (text !== null) {
         let parsed;
-        try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* reported below */ }
+        try { parsed = JSON.parse(text); } catch { /* reported below */ }
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
         settings = parsed;
       }
@@ -450,6 +460,9 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     if (unsafeTargets.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unsafeTargets.join(', ')} is not a usable directory${alsoUnguarded}`,
         'the target is a symbolic link or a file; `yad check --fix` refuses to write through it, so make it a real directory or drop it from `ideTargets` in `.sdlc/cli-version.json`');
+    } else if (notPlain.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${notPlain.join(', ')} ${SETTINGS_NOT_PLAIN} [YAD-STATE-001]${alsoUnguarded}`,
+        'replace it with the file itself (restore it from git), then run `yad check --fix` — yad never reads or rewrites a settings file through a link');
     } else if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
@@ -745,7 +758,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         // What is on disk (what yad last wrote) against what the default branch holds (what CI reads):
         // a record updated on disk and never committed is as stale as a missing one (review 2).
         let disk = null;
-        try { disk = JSON.parse(fs.readFileSync(path.join(dir, PRODUCT_LINK), 'utf8')); } catch { /* none, or not JSON */ }
+        try { disk = readPlainJSON(path.join(dir, PRODUCT_LINK)); } catch { /* none, not JSON, or not a plain file (E125 b) */ }
         let there;
         try { there = shown.ok ? JSON.parse(shown.stdout) : null; } catch { there = null; }
         const ignored = run('git', ['check-ignore', '-q', '--', PRODUCT_LINK], { cwd: dir }).ok;
@@ -2998,6 +3011,14 @@ export function lineEndingChecks(root, checks, { platform = process.platform, ru
 // a post-edit protocol runs it, and which of the team's OWN GitHub workflows start on a push to any branch —
 // those run on every `yad/wip/*` push. yadflow's own templates exclude the branches; a team's file is theirs,
 // so it is named, never edited.
+// One IDE settings file, parsed, or null when it is missing or does not parse. Read only as a plain file
+// (E125 b): a link or a folder is null too, and `named` says why beside the file's name.
+const SETTINGS_NOT_PLAIN = 'is a link or not a plain file, so it was not read';
+function settingsOf(root, rel) {
+  try { return { settings: readPlainJSON(path.join(root, rel)), named: rel }; } catch (e) {
+    return { settings: null, named: e?.code === NOT_PLAIN_FILE ? `${rel} (${SETTINGS_NOT_PLAIN.replace(/^is /, '')})` : rel };
+  }
+}
 export function captureChecks(root, checks, cfg) {
   if (cfg && cfg.capture === false) {
     check(checks, 'capture', 'project', 'ok', 'wip capture is off (`"capture": false` in the Product config)');
@@ -3012,12 +3033,8 @@ export function captureChecks(root, checks, cfg) {
     if (!safe.has(ide)) continue;
     const adapter = CAPTURE_ADAPTERS[ide];
     if (!adapter) { noProtocol.push(ide); continue; }
-    const settingsPath = path.join(root, adapter.settings);
-    let settings = null;
-    if (exists(settingsPath)) {
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { settings = null; }
-    }
-    if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) unwired.push(adapter.settings);
+    const { settings, named } = settingsOf(root, adapter.settings);
+    if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) unwired.push(named);
   }
   const byHand = noProtocol.length ? ` — ${noProtocol.join(', ')} has no post-edit hook yad wires; run \`yad capture\` there by hand` : '';
   if (unwired.length) {
@@ -3074,13 +3091,9 @@ export function activityChecks(root, checks, cfg) {
   const safe = new Set(safeIdeTargetStateFor(root, ideTargetsFor(root)).targets);
   for (const adapter of ACTIVITY_ADAPTERS) {
     if (!safe.has(adapter.target)) continue;
-    const settingsPath = path.join(root, adapter.settings);
-    let settings = null;
-    if (exists(settingsPath)) {
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { settings = null; }
-    }
+    const { settings, named } = settingsOf(root, adapter.settings);
     if (!isPlainObject(settings) || mergeHookSettings(settings, adapter).changed || !hookMatcherFires(settings, adapter)) {
-      const where = `${adapter.settings} (${adapter.event})`;
+      const where = `${named} (${adapter.event})`;
       if (!unwired.includes(where)) unwired.push(where);
     }
   }

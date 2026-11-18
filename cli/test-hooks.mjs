@@ -1254,3 +1254,47 @@ process.stdout.write('\\n' + JSON.stringify(all.filter((a) => a.shared === '.cla
     assert.ok(statuses.length && statuses.every((s) => s === 'modified'), JSON.stringify(statuses));
   } finally { cleanup(T); }
 });
+
+test('E125 b doctor: a linked settings file is named as one, for the ledger guard and for capture', { skip: LINK_SKIP }, async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = await oldProduct();
+  const outside = path.join(T, '..', `${path.basename(T)}-doctor.json`);
+  try {
+    await quietly(() => fixHooks(T));
+    const check = (id) => collectDoctor(T).checks.find((c) => c.id === id);
+    assert.equal(check('hooks').status, 'ok', check('hooks').message);
+    fs.writeFileSync(outside, fs.readFileSync(path.join(T, '.claude/settings.json')));
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.symlinkSync(outside, path.join(T, '.claude/settings.json'));
+    const hooks = check('hooks');
+    assert.equal(hooks.status, 'warn');
+    assert.match(hooks.message, /agent ledger guard cannot be wired — \.claude\/settings\.json is a link or not a plain file, so it was not read \[YAD-STATE-001\]/);
+    assert.match(hooks.hint, /replace it with the file itself/);
+    assert.match(check('capture').message, /wip capture not wired: \.claude\/settings\.json \(a link or not a plain file, so it was not read\)/);
+    // A link whose target is gone is a link, not a missing file: never "run `yad check --fix`".
+    fs.rmSync(outside);
+    assert.match(check('hooks').message, /\.claude\/settings\.json is a link or not a plain file/);
+    // A broken plain file keeps its own answer.
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), '{ nope');
+    assert.match(check('hooks').message, /\.claude\/settings\.json does not parse/);
+    assert.match(check('capture').message, /wip capture not wired: \.claude\/settings\.json(?! \()/);
+  } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b doctor: a settings file that links to /dev/zero is reported at once', { skip: IS_WINDOWS && 'no /dev/zero on Windows' }, async () => {
+  const T = await oldProduct();
+  try {
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.symlinkSync('/dev/zero', path.join(T, '.claude/settings.json'));
+    const url = JSON.stringify(new URL('./doctor.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { collectDoctor } = await import(${url});
+const checks = collectDoctor(process.argv[1]).checks;
+process.stdout.write('\\n' + JSON.stringify(['hooks', 'capture'].map((id) => checks.find((c) => c.id === id).message)));`, T], { encoding: 'utf8', timeout: 30000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1', YAD_PLATFORM_READ: '0', YAD_PLATFORM_LOGIN: '0' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    const [hooks, capture] = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.match(hooks, /\.claude\/settings\.json is a link or not a plain file/);
+    assert.match(capture, /\.claude\/settings\.json \(a link or not a plain file/);
+  } finally { cleanup(T); }
+});
