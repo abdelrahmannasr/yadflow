@@ -1065,13 +1065,17 @@ writes it (E42) and sets `currentStep` to the first re-authored step.
 
 - `inherited` — `true` when this step's artifact is taken by reference from the thread (not authored here).
 - `inheritedFrom` — the epic along the parent's line that owns the referenced artifact (not always the parent).
-- `boundHash` — the artifact's hash at inherit time (contract surface hash for `architecture`; the
+- `boundHash` — the artifact's hash at inherit time (for `architecture`, the contract surface hash its
+  owner's lock resolves to — another epic's surface when that lock is a pointer, #598; the
   `storiesHash`/file hash for others — without the frontmatter `status:` line from shape 9, and an older
   whole-file hash is still accepted). The gate predicate short-circuits an `inherited` step as
   **satisfied** iff `boundHash` still equals the current hash of that artifact in the owning epic
   (`inheritedFrom`) — which holds unless the owner's copy changes, so inherited steps never block and are
   never re-reviewed. Compare against the owner's copy, not the child's: a change-epic writes its own
   `epic.md` (the change brief), which is not the epic it carries.
+- `boundFrom` — only on a carried `architecture` step whose owner's lock is a pointer (#598): the epic
+  whose `contract.md` surface `boundHash` was taken from. `inheritedFrom` still names the epic that
+  approved the step.
 
 `approvals.json` gets a **provenance** record per inherited gate (not a forged approval):
 
@@ -1095,6 +1099,7 @@ refused before anything is written:
 | the step or its review is unfinished | nothing approved exists yet | finish it on the owner first |
 | architecture approved, but no usable lock | rule 5 — you may skip authoring a contract, never having one | lock the owner's surface first |
 | the owner's surface no longer matches its lock | a pointer would pass the drift down the thread | re-lock the owner first |
+| the owner's lock is a pointer that breaks — a ref outside `epics/` or to no epic's lock, a loop, more than 8 hops, a missing lock, a hash that differs from the next lock's, or a last `contract.md` that no longer matches (#598) | the walk cannot reach a `contract.md` the lock really copies | fix the lock the message names (`yad doctor` runs the same walk) |
 | the route has no such step (a short lane) | nothing to inherit | leave the base out |
 
 A brownfield anchor (`kind: stub`, or a light-promoted `backfill-done`) is the one exception: its chain
@@ -1103,8 +1108,8 @@ was never started, so its bases carry `boundHash: null` and no pointer-lock is w
 ## The pointer-lock — `contract-lock.json` in a change-epic
 
 When `architecture` is inherited, `yad epic new` writes a **derived** `contract-lock.json` carrying the
-parent's hash **verbatim** so `contract-check.sh` (which reads only `hash`) passes unchanged. There is
-no `contract.md` in the child to edit, so the surface physically cannot drift.
+parent's hash **verbatim** so `contract-check.sh` passes unchanged: it compares `hash`, and follows `ref` / `inheritedFrom` one hop to read the surface in the owner's `contract.md`. There is
+no `contract.md` in the child to edit, so the surface physically cannot drift. When the owner's lock is itself a pointer, the engine follows it to the epic that holds `contract.md`, and `inheritedFrom` / `ref` name that epic (flattened — one hop for every reader; #598).
 
 ```json
 { "artifact": "contract.md", "hash": "sha256:<parent hash, verbatim>", "lockedAt": "<date>",

@@ -11,7 +11,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
+import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -975,38 +975,46 @@ function contractLockCheck(checks, root, epic, ledger) {
   const short = (h) => `${h.slice(0, 19)}…`;
 
   if (lock.inheritedFrom || lock.ref) {
-    // The ref is repo-controlled text, so keep it inside this Product's epics/ — a lock file must not be
-    // able to point the check at arbitrary JSON elsewhere on disk.
-    const epicsDir = path.join(root, 'epics');
-    const refPath = path.resolve(path.join(epicDir, '.sdlc'), lock.ref || `../../${lock.inheritedFrom}/.sdlc/contract-lock.json`);
-    if (refPath !== epicsDir && !refPath.startsWith(epicsDir + path.sep)) {
-      check(checks, id, 'epics', 'fail',
-        `${epic}: pointer-lock ref '${lock.ref}' resolves outside epics/`,
-        'a pointer-lock must reference another epic in this Product — fix `ref` (`yad epic new --parent` writes ../../EP-<owner>/.sdlc/contract-lock.json, where the owner is the epic along the parent\'s line that holds the contract)');
+    // THE SAME WALK `yad epic new --parent` RUNS (#598), so the two never disagree: follow the pointers
+    // to the epic whose contract.md the lock copies — each ref inside this Product's epics/ (a lock file
+    // must not point the check at arbitrary JSON elsewhere on disk), no loop, a few hops at most, every
+    // hash equal to the next, and that last contract.md still hashing to its lock.
+    // A pointer-lock epic has no contract.md by construction (the surface physically cannot drift). One
+    // that DOES have a contract.md is a change-epic that re-authored architecture but left the inherited
+    // fields behind: its pointer is still followed (`followOwn`), and then its live surface is verified
+    // below rather than trusting the pointer.
+    const own = exists(path.join(epicDir, 'contract.md'));
+    const w = resolveContractLock(root, epicDir, { followOwn: true });
+    if (w.broken) {
+      const [message, hint] = w.broken === 'outside' && w.at === epic
+        ? [`${epic}: pointer-lock ref '${forTerminal(w.ref)}' resolves outside epics/ (or to no epic's .sdlc/contract-lock.json)`,
+          'a pointer-lock must reference another epic in this Product — fix `ref` (`yad epic new --parent` writes ../../EP-<owner>/.sdlc/contract-lock.json, where the owner is the epic along the parent\'s line that holds the contract)']
+        : w.broken === 'missing' && w.chain.length === 2
+          ? [`${epic}: pointer-lock references ${w.at}, whose contract-lock.json is missing or has no hash`,
+            're-seed the change-epic (`yad epic new --parent`) so it points at the real lock of the epic that owns the contract']
+          : w.broken === 'mismatch' && w.from === epic
+            ? [`${epic}: pointer-lock pins ${short(stored)} but ${w.at} now locks ${short(w.locked)}`,
+              'the inherited surface was re-locked upstream — re-copy the owner\'s hash, or re-author architecture in this epic']
+            : [`${epic}: pointer-lock cannot be followed — ${describeLockBreak(w)}`,
+              'point the lock straight at the epic that holds contract.md, with that epic\'s hash (`yad epic new --parent` writes ../../EP-<owner>/.sdlc/contract-lock.json), or fix the lock named above'];
+      check(checks, id, 'epics', 'fail', message, hint);
       return;
     }
-    const parent = readJSON(refPath, null);
-    if (!parent || typeof parent.hash !== 'string') {
-      check(checks, id, 'epics', 'fail',
-        `${epic}: pointer-lock references ${lock.inheritedFrom || lock.ref}, whose contract-lock.json is missing or has no hash`,
-        're-seed the change-epic (`yad epic new --parent`) so it points at the real lock of the epic that owns the contract');
+    if (!own && w.hops.length > 1) {
+      // Sound, but CI follows ONE hop: checks/contract-check.sh reads the lock this one names and then
+      // that epic's contract.md, which a pointer epic does not have. `yad epic new --parent` writes a
+      // flattened lock for this reason; an older one is flattened by hand, with the hash unchanged.
+      check(checks, id, 'epics', 'warn',
+        `${epic}: pointer-lock matches ${w.ownerId} via ${w.chain.slice(1, -1).join(' → ')} (${short(stored)}), but CI's contract-check follows one hop and will refuse it`,
+        `flatten it: in ${epicRel(epic)}/.sdlc/contract-lock.json set "inheritedFrom": "${w.ownerId}" and "ref": "../../${w.ownerId}/.sdlc/contract-lock.json", and leave "hash" as it is`);
       return;
     }
-    if (parent.hash !== stored) {
-      check(checks, id, 'epics', 'fail',
-        `${epic}: pointer-lock pins ${short(stored)} but ${lock.inheritedFrom || 'its parent'} now locks ${short(parent.hash)}`,
-        'the inherited surface was re-locked upstream — re-copy the owner\'s hash, or re-author architecture in this epic');
-      return;
-    }
-    // A pointer-lock epic has no contract.md by construction (the surface physically cannot drift).
-    // One that DOES have a contract.md is a change-epic that re-authored architecture but left the
-    // inherited fields behind, so verify the live surface as well rather than trusting the pointer.
-    if (!exists(path.join(epicDir, 'contract.md'))) {
-      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${lock.inheritedFrom || 'its parent'} (${short(stored)})`);
+    if (!own) {
+      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${w.ownerId} (${short(stored)})`);
       return;
     }
     check(checks, `${id}:inherited`, 'epics', 'warn',
-      `${epic}: lock is marked inherited from ${lock.inheritedFrom || lock.ref} but this epic has its own contract.md`,
+      `${epic}: lock is marked inherited from ${forTerminal(lock.inheritedFrom || lock.ref)} but this epic has its own contract.md`,
       're-authored architecture? drop `inheritedFrom`/`ref` and re-lock against this epic\'s surface');
     // and fall through to verify the live surface too
   }
