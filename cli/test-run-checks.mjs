@@ -125,6 +125,59 @@ test('yad run checks: the Product is read from its default branch, not from loca
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+// #597: with nothing CI checks out (no record on the base, or one with no git_url), or no copy written where
+// it does (the Product clone has no origin/<default_branch>), the gates used to follow
+// product-repo to the Product's main folder, whatever branch it was on, and report an orphan story link
+// that CI never sees. The found Product clone's default branch is read instead, from a temp folder.
+test('yad run checks: with no record on the base, the Product is still read from its default branch, not its main folder (#597)', () => {
+  for (const shape of ['none', 'no git_url', 'no such branch']) {
+    const { W, product, backend } = workspace({ storyStatus: 'shipped' });
+    try {
+      const record = { none: null, 'no git_url': JSON.stringify({ path: '.yad/product' }), 'no such branch': JSON.stringify({ git_url: path.join(W, 'remotes/product.git'), path: '.yad/product', default_branch: 'gone' }) }[shape];
+      git(backend, 'checkout', '-q', 'main');
+      if (record === null) git(backend, 'rm', '-q', '.sdlc/product-link.json');
+      else write(backend, { '.sdlc/product-link.json': record });
+      // product-repo points at the Product's main folder, beside this repo.
+      commitAll(backend, 'chore: no record', { 'specs/EP-demo-S01/link.md': fm({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../../product' }) });
+      git(backend, 'push', '-q', 'origin', 'main');
+      git(backend, 'checkout', '-q', 'feature');
+      git(backend, 'rebase', '-q', 'main');
+      // The main folder is on another branch, where the epic does not exist, and holds an unmerged edit.
+      git(product, 'checkout', '-q', '-b', 'other');
+      git(product, 'rm', '-r', '-q', 'epics/EP-demo');
+      git(product, 'commit', '-q', '-m', 'chore: drop the epic');
+      write(product, { 'epics/NOTES.md': 'not merged\n' });
+      const r = yad(backend, ['run', 'checks', '--no-build', '--json']);
+      const what = `${shape}: ${r.out}`;
+      if (shape === 'no such branch') assert.match(r.out, /the Product clone has no origin\/gone, so its origin\/HEAD's main is read/, what);
+      assert.doesNotMatch(r.out, /orphan story link/, what);
+      assert.match(r.out, /the Product's main \([0-9a-f]{12}\) is written to a temp folder of this run, and the Product-reading gates read it/, what);
+      // main has the story shipped, as CI would read it; the main folder has no epic at all.
+      assert.match(r.out, /FAIL \[epic-open\]: \w+ EP-demo-S01-T01 targets SEALED epic EP-demo/, what);
+      assert.match(r.out, /PASS \[lineage-check\]: \w+ EP-demo-S01-T01 -> EP-demo \(genesis feature epic\)/, what);
+      const json = JSON.parse(r.stdout);
+      assert.equal(json.product.local, true, what);
+      assert.equal(json.product.placed, false, what);
+      assert.equal(git(product, 'rev-parse', '--abbrev-ref', 'HEAD'), 'other', 'the Product clone stays on its branch');
+      assert.ok(fs.existsSync(path.join(product, 'epics/NOTES.md')), 'and keeps its unmerged edit');
+      assert.ok(!fs.existsSync(path.join(backend, '.yad')), 'nothing is written into the repo');
+    } finally { fs.rmSync(W, { recursive: true, force: true }); }
+  }
+});
+
+test('yad run checks: a YAD_LOCAL_PRODUCT from the shell never reaches a gate (#597)', () => {
+  const { W, backend } = workspace();
+  try {
+    // With the record, the copy goes where CI puts it; a value from the shell must not override it.
+    const elsewhere = path.join(W, 'elsewhere');
+    fs.mkdirSync(path.join(elsewhere, 'epics'), { recursive: true });
+    const r = spawnSync(process.execPath, [YAD, 'run', 'checks', '--no-build'], { cwd: backend, env: { ...ENV, PWD: backend, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', YAD_LOCAL_PRODUCT: elsewhere }, encoding: 'utf8' });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.doesNotMatch(out, /orphan story link|wrote out for this run/, out);
+    assert.match(out, /PASS \[lineage-check\]: \w+ EP-demo-S01-T01 -> EP-demo \(genesis feature epic\)/, out);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad run checks: a contract file the base changed after the branch split is not this branch\'s change (#363 shape)', () => {
   const { W, backend } = workspace();
   try {
