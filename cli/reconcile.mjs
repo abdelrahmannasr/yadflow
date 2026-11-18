@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, NOT_PLAIN_FILE,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -343,7 +343,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // Read BEFORE anything is applied. Several adapters can share one file, so it is one entry per file
   // (E157 update review 11).
   const shared = new Map();
-  const sharedText = (f) => (exists(f) ? fs.readFileSync(f, 'utf8') : null);
+  // Read only as a plain file (E125 b). A link or a folder is null, like no file: its action writes nothing
+  // and has said why, so it is never staged and never given a row here.
+  const sharedText = (f) => { try { return readPlainFile(f); } catch (e) { if (e?.code === NOT_PLAIN_FILE) return null; throw e; } };
   if (openPr) {
     for (const a of actions) {
       // Only a file this run writes, or one already right: a rules block `yad update` leaves out (an unwired

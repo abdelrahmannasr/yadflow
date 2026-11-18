@@ -1738,3 +1738,28 @@ test('#508: a git add that fails fatally beside an ignored folder names no ignor
   }
 });
 
+
+test('E125 b: hook settings that are a link never ride the update, and are never written through', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { reconcile } = await import('./reconcile.mjs');
+  const { P, R, A } = await twoClones();
+  const outside = path.join(P, 'outside-settings.json');
+  try {
+    const creator = () => ({ ok: true, url: 'https://github.com/acme/product/pull/7' });
+    put(path.join(A, '.claude/settings.json'), { permissions: { allow: ['Bash(ls)'] } });
+    git(A, ['add', '.claude/settings.json']); git(A, ['commit', '-q', '-m', 'chore: settings']); git(A, ['push', '-q']);
+    fs.writeFileSync(outside, '{"permissions":{"allow":["Bash(ls)"]}}\n');
+    fs.rmSync(path.join(A, '.claude/settings.json'));
+    fs.symlinkSync(outside, path.join(A, '.claude/settings.json'));
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    let r;
+    try { r = await reconcile(A, { fix: true, scope: 'changed', openPr: true, creator }); } finally { console.log = orig; }
+    assert.match(said.join('\n'), /\.claude\/settings\.json is a link or not a plain file, so it was not read/);
+    assert.ok(!r.commits.some((c) => c.reason === 'settings-uncommitted'), JSON.stringify(r.commits));
+    const files = git(R, ['diff', '--name-only', 'main', `chore/yad-update-v${(await import('./manifest.mjs')).VERSION}`]).split('\n');
+    assert.ok(!files.includes('.claude/settings.json'), files.join(', '));
+    assert.ok(fs.lstatSync(path.join(A, '.claude/settings.json')).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(fs.readFileSync(outside, 'utf8'), '{"permissions":{"allow":["Bash(ls)"]}}\n', 'the file it points at is untouched');
+  } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
+});
