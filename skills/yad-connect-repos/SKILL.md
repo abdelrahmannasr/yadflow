@@ -53,9 +53,11 @@ Tell the person which tools you used and which fallbacks, and why.
   Impeccable, later) are installed/run **here** and target the connected code repos **by path**. The
   code repos themselves need no install for this. (The Build CI gates are the exception — they
   live inside each code repo; see `yad-checks`.)
-- **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@1.18.1 [flags]` —
-  NOT a slash-command. Run exactly that version: it is the one yadflow vetted, and `@latest` would
-  take a release nobody checked. It secret-scans by default (Secretlint).
+- **Repomix runs through yad** (#213): `yad repo pack <repo> [--include "<globs>"] [--logs] [-o <file>|-]`.
+  It runs `npx repomix@1.18.1` (the version yadflow vetted, never `@latest`) from an empty folder of its
+  own, with the npm registry named, so a `.npmrc` committed to a repo cannot choose where Repomix comes
+  from. **Never start Repomix with npx yourself inside a repo.** Repomix secret-scans by default (Secretlint)
+  and leaves a flagged file out of the pack; when the pack goes to a file, yad shows Repomix's report.
 - Registry: `{project-root}/.sdlc/repos.json` (project-wide, shared across all epics — NOT per-epic).
 - Per-repo cache: `{project-root}/.sdlc/code-context/<repo>/` holds `pack.md` + `code-map.md`.
 
@@ -76,7 +78,7 @@ Tell the person which tools you used and which fallbacks, and why.
 
   A nested path (`demo-repos/api`, the demo layout) also works. A path that escapes the workspace
   (`../../elsewhere`, or an absolute path outside it) is rejected and skipped — the registry path is
-  later used as a working directory (repomix) and written into (`.coderabbit.yaml`, CI wiring).
+  later packed by Repomix and written into (`.coderabbit.yaml`, CI wiring).
   It is stored **exactly as typed**; every consumer re-resolves it against the project root.
 
   The workspace is the trust boundary, so **put the Product one level below it** (`project/product`), not
@@ -115,13 +117,16 @@ Determine where the code is:
   `gitlab`; record it as `platform`. A local-only repo with no remote records `platform: null`.
 
 ### Step 2 — Pack the repo (Repomix, the full cached context layer)
-From the code repo, run (flags from `config.yaml` `code_context.pack_flags`):
+`yad repo pack` packs only a repo listed in `repos.json`. On a first `connect`, write the repo's entry
+first (Step 4 lists the fields; `syncedHead` and `lastSyncedAt` are filled in Step 4). Then run:
 ```
-npx repomix@1.18.1 --compress --include-logs --style markdown -o {project-root}/.sdlc/code-context/<repo>/pack.md
+yad repo pack <repo>
 ```
-`--compress` (Tree-sitter structural compression) keeps it small and signal-dense; `--include-logs`
-adds recent git history; Secretlint secret-scans by default. **If a secret is reported, STOP and have
-it redacted before any AI reads the pack.** Pack the whole repo, or the source boundary from the
+It writes `{project-root}/.sdlc/code-context/<repo>/pack.md` with the flags from `config.yaml`
+`code_context.pack_flags`, as `yad repo refresh` does. `--compress` (Tree-sitter structural
+compression) keeps it small and signal-dense; `--include-logs` adds recent git history; Secretlint
+secret-scans by default. **If a secret is reported, STOP and have it redacted before any AI reads the
+pack.** Pack the whole repo, or the source boundary from the
 project's constitution if one is defined. (If Repomix is not used — see **When a tool is missing** — degrade: hand-assemble the
 same context — the repo's source tree + recent git log — and record `source: repomix-unavailable`.)
 
@@ -137,8 +142,8 @@ when a phase needs depth).
 Each code repo keeps `.sdlc/risk-map` **in the code repo**: one line per directory saying `high`, `medium`
 or `low`, and **no names** (E65). Format, rubric and edit rules: `references/risk-map.md`.
 
-1. Run `yad risk-map draft <path>` with the repo's **path**, not its name: on a first `connect` the repo is
-   not in `repos.json` until Step 4, and a name it does not know is refused. It adds an `unset` line for
+1. Run `yad risk-map draft <path>` with the repo's **path**, not its name: the path works whether or not
+   the repo's entry in `repos.json` is complete, and a name it does not know is refused. It adds an `unset` line for
    every directory no line covers and never changes a line that is already there.
 2. For every `unset` line, **read the code in that directory** — the pack, the code-map, and the files
    themselves when those do not say — and decide the level by the rubric. Judge by what the code does,
@@ -288,9 +293,9 @@ the repo's default branch.
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may
 re-run Repomix **live**, scoped to that area:
 ```bash
-npx repomix@1.18.1 --compress --include "<area globs>" --style markdown -o -
+yad repo pack <repo> --include "<area globs>" -o -
 ```
-Same CLI, invoked ad hoc — no registry write. A **stale repo** (HEAD ≠ `syncedHead`) is different: the
+Same pack, run ad hoc, printed on stdout (yad's own lines go to stderr) — no registry write. A **stale repo** (HEAD ≠ `syncedHead`) is different: the
 phase **flags it and stops**, pointing the human at `yad repo refresh <repo>` (or `yad check --fix`) —
 it does not silently re-pack. Refreshing the cache is a human decision. Documented in
 `references/code-context.md`.

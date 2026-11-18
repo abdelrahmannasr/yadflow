@@ -6,16 +6,19 @@ variant; backfill is the one-feature-at-a-time variant).
 
 ## Layer 1 — the cached pack (full context)
 
-Run from the Product, targeting the connected repo (flags from `config.yaml`
-`code_context.pack_flags`):
+Run from the Product, naming the connected repo:
 
 ```
-npx repomix@1.18.1 --compress --include-logs --style markdown \
-  -o {project-root}/.sdlc/code-context/<repo>/pack.md
+yad repo pack <repo>
 ```
+
+It runs `npx repomix@1.18.1 --compress --include-logs --style markdown` (the flags in `config.yaml`
+`code_context.pack_flags`) from an empty folder of its own, with the npm registry named, and writes
+`{project-root}/.sdlc/code-context/<repo>/pack.md`. Never start Repomix with npx inside the repo: npm reads a
+`.npmrc` committed there, which could send it to another registry.
 
 - `--compress` — Tree-sitter structural compression (keeps the pack small and signal-dense).
-- `--include-logs` — recent git history (default 50; `--include-logs-count N` to change).
+- `--include-logs` — recent git history (the last 50 commits).
 - `--style markdown` — human/AI-readable; the default output is `repomix-output.xml`.
 - **Secretlint runs by default** — if a secret is reported, **STOP and redact** before any AI reads the
   pack. Never let a secret reach the model or the cache.
@@ -73,7 +76,7 @@ When a Shape phase needs an area not captured in the code-map, it may re-pack th
 scoped to the area, without writing the cache:
 
 ```bash
-npx repomix@1.18.1 --compress --include "<area globs>" --style markdown -o -
+yad repo pack <repo> --include "<area globs>" -o -
 ```
 
 This is for a one-off look at a specific area. **Staleness is a human decision, not an automatic
