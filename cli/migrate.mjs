@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, MAX_PLAIN_BYTES, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
     const raw = readRaw(ledgerOf(from, name));
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
-      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : 'fix or restore it first'}`);
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : raw.tooBig ? TOO_BIG_FIX : 'fix or restore it first'}`);
     }
     read[name] = raw.value;
   }
@@ -440,7 +440,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
     const raw = readRaw(path.join(from, f));
-    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : `${raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — fix or restore it first`}`);
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : raw.tooBig ? `${TOO_BIG_SAID} — ${TOO_BIG_FIX}` : 'does not parse — fix or restore it first'}`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
     const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
@@ -589,6 +589,8 @@ function readRaw(file) {
 const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
 // A git restore brings back a link when the link is what is committed, so the way out names the real file.
 const NOT_PLAIN_FIX = 'replace it with the real file (not a link) first';
+// Nor does a restore help a file too big to read (#215), when the big file is what is committed.
+const TOO_BIG_FIX = 'replace it with a file of the right size first';
 
 
 // A file's shape as recorded ON DISK. An object with no key is shape 1 by rule 1; so is an array,
@@ -983,6 +985,10 @@ function checkDrift(root, pairs, keep) {
         throw err('YAD-STATE-008', `${rel} is a symbolic link — yad does not settle a pair through one, and nothing was written`, 'replace it with the file itself (or delete it and keep the other name), then run `yad migrate --apply` again');
       }
       if (!st.isFile()) throw err('YAD-STATE-008', `${rel} is not a file — nothing was written`, `make ${rel} a file again (restore it from git), then run \`yad migrate --apply\` again`);
+      // Named, not "cannot be read": yad reads no file this big, to keep it or to back it up (#215).
+      if (st.size > MAX_PLAIN_BYTES) {
+        throw err('YAD-STATE-008', `${rel} ${TOO_BIG_SAID} — nothing was written`, `replace ${rel} with a file of the right size${rel === from ? `, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})` : ''}, then run \`yad migrate --apply\` again`);
+      }
     }
     const seen = pairs[i].seen;
     const now = [pairs[i].canonical, pairs[i].legacy].map((rel) => bytesOrNull(path.join(root, rel)));

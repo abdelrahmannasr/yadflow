@@ -1921,6 +1921,31 @@ test('#215 migrate: a file over 64 MiB is an unreadable row, a drift named as to
   } finally { process.exitCode = exit ?? 0; cleanup(T); }
 });
 
+test('#215 migrate: a too-big ledger at the product level, or a too-big name in a drifted pair, is named with its own fix', async () => {
+  {
+    const { T } = await legacyProductLevel();
+    try {
+      await makeTooBig(path.join(T, LEGACY, '.sdlc/comments.json'));
+      const p = planMigration(T).product;
+      assert.equal(p.action, 'unreadable');
+      assert.match(p.detail, /comments\.json is larger than 64 MiB, the most yad reads, so yad did not read it — replace it with a file of the right size first$/);
+    } finally { cleanup(T); }
+  }
+  {
+    const T = project();
+    const exit = process.exitCode;
+    try {
+      fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"gitlab"}\n');
+      await makeTooBig(path.join(T, '.sdlc/hub.json'));
+      const thrown = await grabOut(() => runMigrate(T, { apply: true, keep: 'hub' })).then(() => null, (e) => e);
+      assert.equal(thrown?.code, 'YAD-STATE-008', String(thrown));
+      assert.equal(thrown.message, '.sdlc/hub.json is larger than 64 MiB, the most yad reads, so yad did not read it — nothing was written');
+      assert.match(thrown.hint, /^replace \.sdlc\/hub\.json with a file of the right size, or keep the other copy \(--keep product\)/);
+      assert.equal(fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'), '{"platform":"gitlab"}\n', 'nothing was written');
+    } finally { process.exitCode = exit ?? 0; cleanup(T); }
+  }
+});
+
 test('#215 migrate 7 -> 8: a ledger in the copy that is over 64 MiB undoes the move, named by its Product path', async () => {
   const { applyProductMove } = await import('./migrate.mjs');
   const { T } = await legacyProductLevel();
