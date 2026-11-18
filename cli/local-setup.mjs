@@ -90,7 +90,12 @@ const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
 // What to do about a script yad refused. A link is not fixed by `git checkout`: when the link is what is
 // committed, a restore brings it back, so the hint for one says to replace it with the real file.
 const isNotPlainError = (error) => /is a link or not a plain file/.test(String(error || ''));
-export const localSetupFixHint = (error) => (isNotPlainError(error) ? 'replace it with the real file (not a link)' : 'fix it, or restore it from git');
+// Nor is a file too big to read (#215): when the big file is what is committed, git has no smaller copy.
+const isTooBigError = (error) => String(error || '').includes(TOO_BIG_SAID);
+// Whether the error has a fix of its own, not the usual "fix it, or restore it from git".
+const hasOwnFix = (error) => isNotPlainError(error) || isTooBigError(error);
+export const localSetupFixHint = (error) => (isNotPlainError(error) ? 'replace it with the real file (not a link)'
+  : isTooBigError(error) ? 'replace it with a file of the right size' : 'fix it, or restore it from git');
 
 // The two lists, each step checked. `problems` names every step left out and why; the file still answers.
 //
@@ -209,6 +214,7 @@ function localSetupJsonAction(root) {
       let text;
       try { text = readPlainFile(dest); } catch (e) {
         if (e?.code === NOT_PLAIN_FILE) { warn(`${LOCAL_SETUP_FILE} ${NOT_PLAIN_SAID} — left untouched`); return; }
+        if (e?.code === FILE_TOO_BIG) { warn(`${LOCAL_SETUP_FILE} ${TOO_BIG_SAID} — left untouched`); return; }
         text = ''; // cannot be read: refused below, as a file that does not parse
       }
       if (text !== null) {
@@ -380,7 +386,7 @@ export function runLocalSetupList(root, { json = false } = {}) {
   const where = { product: root, file: LOCAL_SETUP_FILE };
   if (!st.steps.length && (st.error || !st.exists)) {
     const why = st.error ? `${LOCAL_SETUP_FILE} ${st.error}` : `this Product has no ${LOCAL_SETUP_FILE} yet`;
-    const hint = st.error ? (isNotPlainError(st.error) ? localSetupFixHint(st.error) : 'fix the file, or restore it from git') : 'run `yad update` (it writes the script), then commit it through review';
+    const hint = st.error ? (hasOwnFix(st.error) ? localSetupFixHint(st.error) : 'fix the file, or restore it from git') : 'run `yad update` (it writes the script), then commit it through review';
     if (json) return emitJSON({ ok: true, ...where, exists: st.exists, committed: st.committed, error: st.error, steps: [], pending: 0, ask: 0, skipped: 0, record: st.record, problems: st.error ? [why] : [], hint });
     (st.error ? warn : info)(why);
     info(hint);
@@ -495,7 +501,7 @@ const STEP_KEYS = Object.freeze(['id', 'title', 'purpose', 'impact', 'when', 'co
 // it, with yadflow's steps, and add never writes yadflow's part (review 1). → { doc } | { error }
 function workingScript(root) {
   let text;
-  try { text = readPlainFile(localSetupPath(root)); } catch (e) { return { error: e?.code === NOT_PLAIN_FILE ? 'is a link or not a plain file' : 'cannot be read' }; }
+  try { text = readPlainFile(localSetupPath(root)); } catch (e) { return { error: e?.code === NOT_PLAIN_FILE ? 'is a link or not a plain file' : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'cannot be read' }; }
   if (text === null) return { error: 'is not here yet — `yad check --fix` (or `yad update`) writes it' };
   let doc;
   try { doc = parseJSON(text); } catch { return { error: 'does not parse' }; }
@@ -529,7 +535,7 @@ const gitName = (root) => {
   return name && plainLine(name) && !/<!--|--!?>/.test(name) ? name : null;
 };
 const scriptRefused = (error, json) => refuse(`${LOCAL_SETUP_FILE} ${error}, so it was not changed`,
-  isNotPlainError(error) ? `${localSetupFixHint(error)}, then run this again` : 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
+  hasOwnFix(error) ? `${localSetupFixHint(error)}, then run this again` : 'fix it, or restore it from git (`git checkout -- .sdlc/local-setup.json`), then run this again', { json });
 
 export function runLocalSetupAdd(root, { from = null, json = false } = {}) {
   if (typeof from !== 'string' || !from) return refuse('yad local-setup add needs --from <step.json>: one step, written as a JSON object', TEAM_USAGE, { json });
@@ -600,7 +606,7 @@ const EMPTY = Object.freeze({ pending: [], ask: [], unvetted: [], skipped: [], c
 export function localSetupSection(root, { invite = false } = {}) {
   let st;
   try { st = localSetupState(root); } catch (e) { warn(`local setup: could not read the steps (${forTerminal(e?.message ?? String(e))})`); return { ...EMPTY, error: 'could not read' }; }
-  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — ${isNotPlainError(st.error) ? localSetupFixHint(st.error) : 'fix it (or restore it from git)'}; \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
+  if (st.error) { warn(`local setup: ${st.committed ? 'the committed ' : ''}${LOCAL_SETUP_FILE} ${st.error} — ${hasOwnFix(st.error) ? localSetupFixHint(st.error) : 'fix it (or restore it from git)'}; \`yad local-setup\` says more`); return { ...EMPTY, error: st.error }; }
   // A step the script holds but yad left out (it breaks a rule, or the list is not a list) is said here too, not
   // only in `list` — even when it leaves no step at all (reviews 1, 2).
   const ignored = st.problems.filter((p) => / is ignored — | is listed twice|should be a list — ignored/.test(p));
