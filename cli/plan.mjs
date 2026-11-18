@@ -1245,7 +1245,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   if (notPlain) {
     if (!unparsedSaid.has(`${dest}\0not-plain`)) {
       unparsedSaid.add(`${dest}\0not-plain`);
-      warn(`${named} ${SETTINGS_NOT_PLAIN} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with the file itself (from git), then re-run \`yad check --fix\``);
+      warn(`${named} ${SETTINGS_NOT_PLAIN} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with the real file (not a link), then re-run \`yad check --fix\``);
     }
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
@@ -1283,7 +1283,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       // The same plain read: a link or a folder put there since the plan is left untouched.
       let text;
       try { text = readPlainFile(dest); } catch (e) {
-        if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the file itself, then re-run \`yad check --fix\``); return; }
+        if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
         text = '';  // unreadable — refused below, as a file that does not parse
       }
       if (text !== null) {

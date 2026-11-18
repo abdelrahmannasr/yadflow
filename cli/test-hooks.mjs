@@ -1180,6 +1180,8 @@ test('E125 b settings: a linked or folder settings file is named, never read and
     fs.mkdirSync(path.join(T, '.cursor/hooks.json'));
     const { value: actions, said } = await quietly(() => fixHooks(T));
     assert.match(said, NOT_PLAIN);
+    assert.match(said, /cannot be written; replace it with the real file \(not a link\), then re-run `yad check --fix`/);
+    assert.doesNotMatch(said, /from git/, 'a git restore brings back a committed link');
     assert.match(said, /\.cursor\/hooks\.json is a link or not a plain file, so it was not read/);
     const settings = actions.filter((a) => a.shared === '.claude/settings.json' || a.shared === '.cursor/hooks.json');
     assert.ok(settings.length && settings.every((a) => a.status === 'modified' && a.writesNothing), JSON.stringify(settings.map((a) => [a.item, a.status])));
@@ -1269,7 +1271,7 @@ test('E125 b doctor: a linked settings file is named as one, for the ledger guar
     const hooks = check('hooks');
     assert.equal(hooks.status, 'warn');
     assert.match(hooks.message, /agent ledger guard cannot be wired — \.claude\/settings\.json is a link or not a plain file, so it was not read \[YAD-STATE-001\]/);
-    assert.match(hooks.hint, /replace it with the file itself/);
+    assert.match(hooks.hint, /^replace it with the real file \(not a link\)/);
     assert.match(check('capture').message, /wip capture not wired: \.claude\/settings\.json \(a link or not a plain file, so it was not read\)/);
     // A link whose target is gone is a link, not a missing file: never "run `yad check --fix`".
     fs.rmSync(outside);
