@@ -79,6 +79,11 @@ scoped to the area, without writing the cache:
 yad repo pack <repo> --include "<area globs>" -o -
 ```
 
+On stdout Repomix prints **no report**, so you cannot see its secret check there: a file it flags is
+still left out of the pack, but nothing says which. When you need to know (an area that may hold keys,
+config or test fixtures), write the pack to a file instead — `-o <file>` outside any `.sdlc` or `.git`
+folder — and read the report yad shows; if a secret is reported, STOP and have it redacted first.
+
 This is for a one-off look at a specific area. **Staleness is a human decision, not an automatic
 side-effect:** when a repo is stale (HEAD ≠ `syncedHead`), the phase **flags it and stops** —
 "`<repo>` is stale; run `yad repo refresh <repo>` to re-pack the cache + `syncedHead`" — rather than

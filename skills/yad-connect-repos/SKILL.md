@@ -295,7 +295,12 @@ re-run Repomix **live**, scoped to that area:
 ```bash
 yad repo pack <repo> --include "<area globs>" -o -
 ```
-Same pack, run ad hoc, printed on stdout (yad's own lines go to stderr) — no registry write. A **stale repo** (HEAD ≠ `syncedHead`) is different: the
+Same pack, run ad hoc, printed on stdout (yad's own lines go to stderr) — no registry write.
+On stdout Repomix prints **no report**, so you cannot see its secret check there: a file it flags is
+still left out of the pack, but nothing says which. When you need to know (an area that may hold keys,
+config or test fixtures), write the pack to a file instead — `-o <file>` outside any `.sdlc` or `.git`
+folder — and read the report yad shows; if a secret is reported, STOP and have it redacted first.
+A **stale repo** (HEAD ≠ `syncedHead`) is different: the
 phase **flags it and stops**, pointing the human at `yad repo refresh <repo>` (or `yad check --fix`) —
 it does not silently re-pack. Refreshing the cache is a human decision. Documented in
 `references/code-context.md`.
