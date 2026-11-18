@@ -54,7 +54,19 @@ const parse = (text) => { try { return JSON.parse(text); } catch { return null; 
 
 // The Product's settings under either name (product.json from 4.0, hub.json before). Drift between the two
 // is refused by the other gates and the CLI; here the first one found is read.
-const settingsFile = ['.sdlc/product.json', '.sdlc/hub.json'].find((f) => fs.existsSync(f)) || null;
+// Each name must be a plain file of its own (E125 b). The PR's branch is what is checked out, so a PR could
+// put a link there: one to a file outside the checkout would hand this gate settings nobody reviewed, and one
+// to /dev/zero would make the read never end. This script cannot use the engine's plain read, so it looks
+// with lstat itself, and refuses a link, a folder or a device before reading anything.
+const lstatOf = (f) => { try { return fs.lstatSync(f); } catch { return null; } };
+for (const f of ['.sdlc/product.json', '.sdlc/hub.json']) {
+  const st = lstatOf(f);
+  if (st && !st.isFile()) {
+    say(`FAIL [member-check]: ${f} is ${st.isSymbolicLink() ? 'a link' : 'not a plain file'}, so it was not read — the Product's settings must be a plain file in the repo; replace it with the real file`);
+    process.exit(1);
+  }
+}
+const settingsFile = ['.sdlc/product.json', '.sdlc/hub.json'].find((f) => lstatOf(f)) || null;
 const settings = settingsFile ? parse(fs.readFileSync(settingsFile, 'utf8')) : null;
 const platform = settings?.platform === 'github' || settings?.platform === 'gitlab' ? settings.platform : null;
 // The Product's host, from its clone URL (`git@host:…` or `https://host/…`), else the platform's own.

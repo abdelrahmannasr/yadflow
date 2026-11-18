@@ -1271,3 +1271,30 @@ test('E131 originDefault: origin/HEAD and the settings disagreeing trusts nothin
     assert.equal(M.originDefault(T), 'main');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E125 b: the gate reads the Product's settings only as a plain file (EP-factory-safety-S02) -----
+// It cannot import the engine, so it looks with lstat itself. Each run has a time limit: a read that followed
+// a link to /dev/zero would never end.
+test('E125 b member-check: a settings file that is a link, a folder or a link to /dev/zero is refused before any read', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, () => {
+  const cases = [
+    ['a link', (T) => { put(path.join(T, '..', `${path.basename(T)}-outside.json`), { platform: 'github' }); fs.rmSync(path.join(T, '.sdlc/product.json')); fs.symlinkSync(path.join(T, '..', `${path.basename(T)}-outside.json`), path.join(T, '.sdlc/product.json')); }, /^FAIL \[member-check\]: \.sdlc\/product\.json is a link, so it was not read — the Product's settings must be a plain file in the repo; replace it with the real file$/m],
+    ['a link to /dev/zero', (T) => { fs.rmSync(path.join(T, '.sdlc/product.json')); fs.symlinkSync('/dev/zero', path.join(T, '.sdlc/product.json')); }, /\.sdlc\/product\.json is a link, so it was not read/],
+    ['a folder under the old name', (T) => { fs.mkdirSync(path.join(T, '.sdlc/hub.json')); }, /^FAIL \[member-check\]: \.sdlc\/hub\.json is not a plain file, so it was not read/m],
+  ];
+  for (const [name, make, want] of cases) {
+    const g = gateRepo();
+    try {
+      make(g.T);
+      const r = spawnSyncNode(CHECK, ['main'], { cwd: g.T, timeout: 20000, env: { ...process.env, ...as('alice') } });
+      assert.equal(r.signal, null, `${name}: the read did not end`);
+      assert.equal(r.status, 1, `${name}: ${r.stdout}`);
+      assert.match(r.stdout, want, name);
+    } finally { fs.rmSync(g.T, { recursive: true, force: true }); fs.rmSync(path.join(g.T, '..', `${path.basename(g.T)}-outside.json`), { force: true }); }
+  }
+  // A plain file is read as before.
+  const g = gateRepo();
+  try {
+    g.commitAs('x@y.z', { 'other.txt': 'x' });
+    assert.equal(g.check(as('alice')).code, 0);
+  } finally { fs.rmSync(g.T, { recursive: true, force: true }); }
+});
