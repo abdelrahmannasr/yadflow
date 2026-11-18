@@ -123,6 +123,19 @@ test('a defect with no definite link gets a stub parent', async () => {
   reset();
 });
 
+test('a leftover approvals.json that is a link counts as records, so no stub parent is made (E125 b)', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const T = product();
+  // The link points at an empty ledger: a read that followed it would see no records and go on.
+  fs.writeFileSync(path.join(T, 'outside.json'), '[]');
+  fs.mkdirSync(path.join(T, 'epics/EP-fix/.sdlc'), { recursive: true });
+  fs.symlinkSync(path.join(T, 'outside.json'), path.join(T, 'epics/EP-fix/.sdlc/approvals.json'));
+  await W.runEpicNewFromIssue(T, { slug: 'fix', issue: '7', today, env, runner: platform().runner });
+  assert.equal(exists(T, 'EP-fix-parent'), false);
+  assert.equal(exists(T, 'EP-fix'), false);
+  assert.equal(process.exitCode, 1);
+  reset();
+});
+
 test('a defect naming an existing epic threads off it, and an epic that does not exist does not count', async () => {
   const T = product();
   await seed(T, 'base');

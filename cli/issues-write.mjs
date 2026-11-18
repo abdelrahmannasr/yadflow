@@ -6,7 +6,7 @@
 // The item must be read before anything is created. A failed write-back leaves the link in place and says so.
 import fs from 'node:fs';
 import path from 'node:path';
-import { run, readJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON } from './lib.mjs';
+import { run, readJSON, readPlainJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { epicIds, epicRoot, isGenesisType, isValidEpicId, PRODUCT_EPICS, WORK_ITEM_TYPES } from './epic-state.mjs';
 import { addItemLabels, closeItem, commentOnItem, removeItemLabels } from './platform.mjs';
@@ -189,8 +189,9 @@ const SEED_FLAGS = new Set(['--issue', '--type', '--profile', '--stub', '--paren
 // `epic new --issue` writes to a platform, so a flag it does not use (`--repo`, `--dry-run`) is refused, not dropped.
 export const seedForeignFlags = (argv) => argv.filter((a) => a.startsWith('-') && !SEED_FLAGS.has(a.split('=')[0]));
 
-// A leftover approvals.json the child's seed would refuse: records in it, or one that does not parse.
-const hasApprovals = (p) => { if (!fs.existsSync(p)) return false; try { const a = JSON.parse(fs.readFileSync(p, 'utf8')); return !Array.isArray(a) || a.length > 0; } catch { return true; } };
+// A leftover approvals.json the child's seed would refuse: records in it, one that does not parse, or a
+// link or a folder in its place (never read, E125 b).
+const hasApprovals = (p) => { try { const a = readPlainJSON(p); return !Array.isArray(a) || a.length > 0; } catch (e) { return e.code !== 'ENOENT'; } };
 
 // Whether a person ever reopened the item: true, false, or null when the history could not all be read.
 function everReopened(t, number, runner) {
