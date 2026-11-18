@@ -30416,7 +30416,9 @@ function packNpx(T) {
   const bin = path.join(T, 'npx-bin');
   const log = path.join(T, 'npx-calls.log');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | tr '\\n' ','; echo; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\necho PACK\n`, { mode: 0o755 });
+  // It writes PACK to the file after `-o`, and with NPX_FAIL set fails as Repomix would, printing nothing on stdout.
+  fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | tr '\\n' ','; echo; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\n`
+    + 'if [ -n "$NPX_FAIL" ]; then echo "boom: repomix broke" >&2; exit 1; fi\nprev=; for a in "$@"; do [ "$prev" = "-o" ] && echo PACK > "$a"; prev=$a; done\necho PACK\n', { mode: 0o755 });
   return {
     env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
     ran: () => fs.existsSync(log),
@@ -30441,7 +30443,11 @@ test('#213: yad repo pack runs npx from an empty folder of its own, names the re
     assert.equal(entries, 'package.json,', 'only its own package.json: the planted .npmrc is never read');
     assert.ok(!fs.existsSync(cwd), 'and it is removed afterwards');
     const out = path.join(backend, 'out', 'pack.md');
-    assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${REPOMIX_VERSION}`, backend, '--compress', '--include', 'src/**,lib/*.ts', '--include-logs', '--style', 'markdown', '-o', out]);
+    // Repomix writes into its own temp folder; the pack is then put at the file named.
+    assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${REPOMIX_VERSION}`, backend, '--compress', '--include', 'src/**,lib/*.ts', '--include-logs', '--style', 'markdown', '-o', args.at(-1)]);
+    // The temp folder by the path os.tmpdir() gives (npx saw its real path; it is gone now, so not resolved).
+    assert.equal(args.at(-1), path.join(os.tmpdir(), path.basename(cwd), 'pack.md'));
+    assert.equal(fs.readFileSync(out, 'utf8'), 'PACK\n');
     assert.ok(fs.existsSync(path.dirname(out)), 'the folder for the file is made');
     const json = JSON.parse(r.stdout);
     assert.equal(json.command, 'repo pack');
@@ -30505,6 +30511,102 @@ test('#213: yad repo pack never packs a refused folder — a bare-shaped one or 
     assert.deepEqual(f.gitInBare(), []);
     f.untouched();
     assert.ok(!fs.existsSync(path.join(f.product, 'x.md')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213 review: yad repo pack -o never writes into a .sdlc or .git folder, over a link or a non-file, or through a link that leads nowhere', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    const npx = packNpx(T);
+    const victim = path.join(T, 'victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, path.join(T, 'out-link.md'));
+    fs.symlinkSync(path.join(product, '.sdlc'), path.join(T, 'to-sdlc'));
+    fs.symlinkSync(path.join(T, 'nowhere'), path.join(T, 'dangling'));
+    fs.mkdirSync(path.join(T, 'a-dir'));
+    const cases = [
+      [path.join(product, '.sdlc', 'x.md'), /inside a \.sdlc folder/],
+      [path.join(backend, '.sdlc', 'new', 'x.md'), /inside a \.sdlc folder/],
+      [path.join(backend, '.git', 'hooks', 'post-checkout'), /inside a \.git folder/],
+      [path.join(T, 'to-sdlc', 'x.md'), /inside a \.sdlc folder/],
+      [path.join(T, 'out-link.md'), /is a link or not a plain file/],
+      [path.join(T, 'a-dir'), /is a link or not a plain file/],
+      [path.join(T, 'dangling', 'x.md'), /through a link that leads nowhere/],
+    ];
+    for (const [out, why] of cases) {
+      const r = e79Yad(T, backend, ['repo', 'pack', 'backend', '-o', out], npx.env);
+      assert.equal(r.status, 1, `${out}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, why, out);
+      assert.match(r.stdout, /— not packed/);
+    }
+    assert.ok(!npx.ran(), 'npx never ran');
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep');
+    assert.ok(!fs.existsSync(path.join(product, '.sdlc', 'x.md')) && !fs.existsSync(path.join(backend, '.sdlc')));
+    assert.ok(!fs.existsSync(path.join(backend, '.git', 'hooks', 'post-checkout')));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213 review: placeFile puts the pack at a path that became a link without writing through it', { skip: E125_SKIP }, async () => {
+  const { placeFile } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const from = path.join(T, 'pack.md');
+    const victim = path.join(T, 'victim.txt');
+    const to = path.join(T, 'out.md');
+    fs.writeFileSync(from, 'PACK');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, to);
+    assert.equal(placeFile(from, to), null);
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'keep', 'the file the link named is untouched');
+    assert.ok(fs.lstatSync(to).isFile() && fs.readFileSync(to, 'utf8') === 'PACK', 'the link is replaced by the pack');
+    assert.deepEqual(fs.readdirSync(T).sort(), ['out.md', 'pack.md', 'victim.txt'], 'no temporary name is left');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213 review: a % reaches no Windows shell, -o - belongs to repo pack alone, and the guard reads -o and -m by their long names', async () => {
+  const { launcherUnsafe } = await import('./setup.mjs');
+  assert.equal(launcherUnsafe(['/r', 'src/%PATH%/**', null], 'win32'), 'src/%PATH%/**');
+  assert.equal(launcherUnsafe(['C:\\out\\50%.md'], 'win32'), 'C:\\out\\50%.md');
+  assert.equal(launcherUnsafe(['src/%PATH%/**'], 'linux'), null, 'no shell string elsewhere');
+  assert.equal(launcherUnsafe(['/r', null, '-'], 'win32'), null);
+  const { yadWords } = await import('./agent-guard.mjs');
+  assert.deepEqual(yadWords(['repo', 'pack', 'x', '-o', 'f']), { words: ['repo', 'pack'], flags: ['out'], help: false });
+  assert.deepEqual(yadWords(['-m', 's', 'commit', '--manual']).flags, ['message', 'manual']);
+  const { reaches } = await import('./agent-rules.mjs');
+  assert.ok(reaches(['repo', 'pack'], yadWords(['repo', 'pack', 'x', '-o', 'f']).flags).includes('local-write'));
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const r = e79Yad(T, product, ['usage', '-o', '-']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /-o - \(stdout\) is only for `yad repo pack`/);
+    assert.ok(!fs.existsSync(path.join(product, '-')), 'no file named -');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#213 review: --include starting with - is refused, and a failed Repomix under -o - prints nothing on stdout and leaves no temp folder', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const { backend } = e80Workspace(T);
+    const npx = packNpx(T);
+    const eq = e79Yad(T, backend, ['repo', 'pack', 'backend', '--include=-x', '-o', 'p.md'], npx.env);
+    assert.equal(eq.status, 1);
+    assert.match(eq.stdout, /--include takes globs/);
+    const sp = e79Yad(T, backend, ['repo', 'pack', 'backend', '--include', '-x', '-o', 'p.md'], npx.env);
+    assert.equal(sp.status, 1);
+    assert.match(sp.stdout, /--include expects a value/);
+    assert.ok(!npx.ran(), 'npx never ran');
+    const env = { ...npx.env, NPX_FAIL: '1' };
+    const r = e79Yad(T, backend, ['repo', 'pack', 'backend', '-o', '-'], env);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(r.stdout, '', 'nothing on stdout');
+    assert.match(r.stderr, /backend: repomix failed — boom: repomix broke/);
+    assert.ok(!fs.existsSync(npx.call().cwd), 'the temp folder is removed');
+    const f = e79Yad(T, backend, ['repo', 'pack', 'backend', '-o', 'p.md'], env);
+    assert.equal(f.status, 1);
+    assert.ok(!fs.existsSync(path.join(backend, 'p.md')), 'no file is written');
+    assert.ok(!fs.existsSync(npx.call().cwd));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
