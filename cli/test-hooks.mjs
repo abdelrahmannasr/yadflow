@@ -1257,6 +1257,26 @@ process.stdout.write('\\n' + JSON.stringify(all.filter((a) => a.shared === '.cla
   } finally { cleanup(T); }
 });
 
+// #215: a settings file larger than any real one is the team's file all the same. It is named, never read and
+// never rewritten, and nothing is proved about it, so the old hook scripts it may name are kept.
+test('#215 settings: a settings file over 64 MiB is named as too big, never read and never rewritten', async () => {
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  const T = await oldProduct();
+  try {
+    const dest = path.join(T, '.claude/settings.json');
+    fs.writeFileSync(dest, '{}');
+    fs.truncateSync(dest, MAX_PLAIN_BYTES + 1);
+    const { value: actions, said } = await quietly(() => fixHooks(T));
+    assert.match(said, /\.claude\/settings\.json is larger than 64 MiB, the most yad reads, so yad did not read it — yad's entries in it \(hooks, the read-only allow list\) cannot be written; replace it with a file of the right size/);
+    assert.doesNotMatch(said, /settings\.json does not parse/);
+    const settings = actions.filter((a) => a.shared === '.claude/settings.json');
+    assert.ok(settings.length && settings.every((a) => a.status === 'modified' && a.writesNothing), JSON.stringify(settings.map((a) => [a.item, a.status])));
+    assert.equal(fs.statSync(dest).size, MAX_PLAIN_BYTES + 1, 'the file is left as it is');
+    assert.equal(fs.readFileSync(dest).subarray(0, 2).toString(), '{}');
+    for (const s of ['ledger-guard.sh', 'yad-capture.sh']) assert.ok(fs.existsSync(path.join(T, 'hooks', s)), `${s} is kept`);
+  } finally { cleanup(T); }
+});
+
 test('E125 b doctor: a linked settings file is named as one, for the ledger guard and for capture', { skip: LINK_SKIP }, async () => {
   const { collectDoctor } = await import('./doctor.mjs');
   const T = await oldProduct();

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, NOT_PLAIN_FILE,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -347,8 +347,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // (E157 update review 11).
   const shared = new Map();
   // Read only as a plain file (E125 b). A link or a folder is null, like no file: its action writes nothing
-  // and has said why, so it is never staged and never given a row here.
-  const sharedText = (f) => { try { return readPlainFile(f); } catch (e) { if (e?.code === NOT_PLAIN_FILE) return null; throw e; } };
+  // and has said why, so it is never staged and never given a row here. A file too big to read (#215) is null
+  // the same way: its action writes nothing either.
+  const sharedText = (f) => { try { return readPlainFile(f); } catch (e) { if (e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG) return null; throw e; } };
   if (openPr) {
     for (const a of actions) {
       // Only a file this run writes, or one already right: a rules block `yad update` leaves out (an unwired
