@@ -336,12 +336,50 @@ const carriesShape = (p, v) => isPlainObject(v) && underSdlcDir(p);
 const readShape  = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? 1, ...v } : v);
 const writeShape = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? SCHEMA_VERSION, ...v } : v);
 
+// A JSON file yad reads must be a plain file of its own (E125 b). Anyone who can commit to the Product
+// controls its files: a committed `.sdlc/repos.json` that links to `/dev/zero` made yad hang on a read
+// that never ends, and a link elsewhere made yad read a file outside the Product. So the entry is looked at
+// with `lstat` first, and a link, a folder, a device or a pipe is never opened.
+//
+// Returns the file's text, `null` when there is no file (the same as `existsSync` saying no), or throws an
+// error with code NOT_PLAIN_FILE. The file is then opened with O_NOFOLLOW and O_NONBLOCK and checked again
+// on the open handle, so a link put in its place between the two steps is refused too, and opening a pipe
+// never waits for a writer. (Windows has neither flag; there the `lstat` check stands alone.)
+const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
+const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
+const notPlain = (p) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE });
+function readPlainFile(p) {
+  let st;
+  try { st = fs.lstatSync(p); } catch { return null; }
+  if (!st.isFile()) throw notPlain(p);
+  let fd;
+  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p); throw e; }
+  try {
+    if (!fs.fstatSync(fd).isFile()) throw notPlain(p);
+    return fs.readFileSync(fd, 'utf8');
+  } finally { fs.closeSync(fd); }
+}
+// Each refused path is named once per run, on stderr: readJSON has many callers, and some print an answer
+// on stdout that another program reads (a hook, a `--json` run), which a warning there would break.
+const refusedOnce = new Set();
+function sayRefused(p, e) {
+  if (refusedOnce.has(p)) return;
+  refusedOnce.add(p);
+  const s = `${e.message} — replace it with the real file (from git), then run the command again`;
+  if (jsonRun) warn(s); else note(`${c.yellow('!')} ${s}`);
+}
+
 export function readJSON(p, def = null) {
   try {
+    const text = readPlainFile(p);
+    if (text === null) return def;
     // "Read old, write new" (rule 2): an unstamped file reads back as shape 1, so a caller never has
     // to ask whether the file it just loaded predates the stamp.
-    return readShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
-  } catch {
+    return readShape(p, JSON.parse(text));
+  } catch (e) {
+    // A link or a folder in place of the file reads as no file, like a file that does not parse — but it is
+    // named, because the person should replace it.
+    if (e?.code === NOT_PLAIN_FILE) sayRefused(p, e);
     // The caller's own default is returned untouched: it is not a file, and stamping it would invent
     // a shape for something that was never read from disk.
     return def;
@@ -350,10 +388,17 @@ export function readJSON(p, def = null) {
 // Strict variant for ledger files (the source of truth): a missing file is a normal state and
 // returns `def`, but a file that exists and fails to parse must throw — silently defaulting a
 // corrupt approvals.json to [] would let the next sync rewrite it and permanently lose approvals.
+// A link or a folder in place of a ledger file is refused without reading it (E125 b): it may point at a
+// file outside the Product, or at a device whose read never ends.
 export function readJSONStrict(p, def = null) {
-  if (!fs.existsSync(p)) return def;
+  let text;
+  try { text = readPlainFile(p); } catch (e) {
+    if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
+    throw err('YAD-STATE-001', `cannot read ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
+  }
+  if (text === null) return def;
   try {
-    return readShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
+    return readShape(p, JSON.parse(text));
   } catch (e) {
     throw err('YAD-STATE-001', `corrupt JSON in ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
@@ -367,9 +412,11 @@ export function writeJSON(p, obj) {
   // whether or not anything changed — so this keeps an unchanged sync from touching the file at all
   // (no mtime churn, nothing for a watcher or a `git add -A` to notice). A backstop, not the fix: the
   // load-bearing guarantee is that the serialized bytes are canonically ordered (see #163).
+  // Only a plain file is read to compare: a link or a folder there counts as different, and writeFileAtomic
+  // then replaces it, so the write never follows the link (E125 b).
   try {
-    if (fs.readFileSync(p, 'utf8') === data) return;
-  } catch { /* missing or unreadable — fall through and write it */ }
+    if (readPlainFile(p) === data) return;
+  } catch { /* not a plain file, or unreadable — fall through and write it */ }
   writeFileAtomic(p, data);
 }
 
