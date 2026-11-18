@@ -20,6 +20,8 @@ working folder, so npm reads a `.npmrc` committed there, which can point it at a
   file once per run. `writeJSON` replaces a link instead of reading it. A missing file behaves as today.
 - R3. `packRepo` runs `npx` from a new temporary folder (removed afterwards), with
   `--registry=https://registry.npmjs.org/`, and passes the repo folder and the output file as absolute paths.
+  The temp folder holds its own `package.json`, so npm stops there and never reads a `.npmrc` from a shared
+  temp folder such as `/tmp`; if it cannot be made, the pack is skipped with a warning.
 
 ## Out of scope
 
