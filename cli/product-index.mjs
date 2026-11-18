@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { isPlainObject, writeJSON, info, warn, readPlainFile, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
+import { isPlainObject, writeJSON, info, warn, readPlainFile, readPlainBytes, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
 import { isVerifiedLedger } from './manifest.mjs';
 import { productGit, resolveDefaultBranch, branchToCommitOn } from './productcommit.mjs';
 import {
@@ -53,6 +53,7 @@ export function readInput(file) {
   } catch (e) {
     if (e.code === 'ENOENT') return { absent: true };
     if (e.code === NOT_PLAIN_FILE) return { error: e.kind === 'dir' ? 'EISDIR' : 'it is a link or not a plain file' };
+    if (e.code === FILE_TOO_BIG) return { error: `it ${TOO_BIG_SAID}` };
     return { error: e.code || e.message };
   }
   return { bytes: raw.includes(13) ? Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : raw };
@@ -203,7 +204,7 @@ export function indexFreshness(root, prebuilt = null) {
   try {
     onDisk = readPlainJSON(file);
   } catch (e) {
-    return { state: 'unreadable', why: e.code === NOT_PLAIN_FILE ? '.sdlc/index.json is a link or not a plain file, so it was not read' : '.sdlc/index.json does not parse' };
+    return { state: 'unreadable', why: e.code === NOT_PLAIN_FILE ? '.sdlc/index.json is a link or not a plain file, so it was not read' : e.code === FILE_TOO_BIG ? `.sdlc/index.json ${TOO_BIG_SAID}` : '.sdlc/index.json does not parse' };
   }
   if (!isPlainObject(onDisk) || typeof onDisk.inputs !== 'string') {
     return { state: 'unreadable', why: '.sdlc/index.json records no input hash' };

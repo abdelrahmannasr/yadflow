@@ -28,7 +28,7 @@
 // and this; two hooks at the same instant can lose an entry — one extra warning, never a broken file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, warn, fail, hand, readJSON, writeJSON, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
+import { ok, info, warn, fail, hand, readJSON, writeJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRel, epicRoot, isPassed, isValidEpicId, stepStatus } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, wipName, WIP_PREFIX } from './capture.mjs';
@@ -51,6 +51,7 @@ export function readOwnerFile(file, step) {
   try { r = readPlainJSON(file); } catch (e) {
     if (e.code === 'ENOENT') return {};
     if (e.code === NOT_PLAIN_FILE) return { error: 'is a link or not a plain file, so it was not read' };
+    if (e.code === FILE_TOO_BIG) return { error: TOO_BIG_SAID };
     return { error: e instanceof SyntaxError ? 'is not valid JSON' : `cannot be read (${e.code || e.message})` };
   }
   if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: 'is not a JSON object' };
