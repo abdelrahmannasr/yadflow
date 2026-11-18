@@ -27270,8 +27270,10 @@ test('E1 only cli/lib.mjs writes a JSON answer to stdout', () => {
 // link to /dev/zero never hangs a command. A direct `JSON.parse(fs.readFileSync(…))` skips that. Each file
 // below reads something that is not the Product's, and says what; `count` pins how many such reads it has, so
 // a NEW direct read in one of them fails this test too. A read that keeps the text first and parses it later
-// (`const t = fs.readFileSync(p); JSON.parse(t)`) is not seen here: review catches that shape.
-const DIRECT_JSON_READ = /\b(?:JSON\.parse|parseJSON)\(\s*(?:fs\.)?readFileSync\(/;
+// (`const t = fs.readFileSync(p); JSON.parse(t)`), or one split over two lines, is not seen here: review
+// catches that shape. Any module name before `.readFileSync(` counts (`nodeFs.readFileSync(`), and so does a
+// `String(…)` around it; `.toString()` after it changes nothing the match looks at.
+const DIRECT_JSON_READ = /\b(?:JSON\.parse|parseJSON)\(\s*(?:String\(\s*)?(?:[A-Za-z_$][\w$]*\.)?readFileSync\(/;
 const DIRECT_JSON_READ_ALLOWED = [
   { file: 'cli/lib.mjs', count: 0, reason: 'the plain read itself lives here' },
   { file: 'cli/manifest.mjs', count: 1, reason: 'the engine\'s own package.json, found through import.meta.url' },
@@ -27287,21 +27289,35 @@ const DIRECT_JSON_READ_ALLOWED = [
 ];
 
 test('E125 b the matcher sees each direct shape, and none of the plain reads', () => {
-  for (const line of ["JSON.parse(fs.readFileSync(p, 'utf8'))", "JSON.parse(readFileSync(p, 'utf8'))", "parseJSON(fs.readFileSync(dest, 'utf8'))", "x = JSON.parse( fs.readFileSync(p))"]) {
+  for (const line of ["JSON.parse(fs.readFileSync(p, 'utf8'))", "JSON.parse(readFileSync(p, 'utf8'))", "parseJSON(fs.readFileSync(dest, 'utf8'))", "x = JSON.parse( fs.readFileSync(p))",
+    "JSON.parse(nodeFs.readFileSync(p, 'utf8'))", 'JSON.parse(String(fs.readFileSync(p)))', 'JSON.parse(fs.readFileSync(p).toString())', "JSON.parse($fs.readFileSync(p, 'utf8'))"]) {
     assert.ok(DIRECT_JSON_READ.test(line), line);
   }
-  for (const line of ['readPlainJSON(p)', "JSON.parse(readPlainFile(p) ?? '{}')", 'parseJSON(readPlainFile(p))', 'JSON.parse(text)', "parseFrontmatter(fs.readFileSync(file, 'utf8'))"]) {
+  for (const line of ['readPlainJSON(p)', "JSON.parse(readPlainFile(p) ?? '{}')", 'parseJSON(readPlainFile(p))', 'JSON.parse(text)', "parseFrontmatter(fs.readFileSync(file, 'utf8'))",
+    'JSON.parse(String(readPlainBytes(p)))', 'JSON.parse(readPlainBytes(p).toString())']) {
     assert.ok(!DIRECT_JSON_READ.test(line), line);
   }
 });
 
-test('E125 b only the listed files parse a direct fs.readFileSync, each as often as listed', () => {
+// Every engine source file under cli/, in every subfolder: not a test file, not the tests' own fixtures, and
+// not the third-party browser bundles in a `vendor/` folder.
+function engineSources(dir = 'cli') {
+  const out = [];
+  for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) { if (e.name !== 'fixtures' && e.name !== 'vendor' && e.name !== 'node_modules') out.push(...engineSources(rel)); continue; }
+    if (/\.m?js$/.test(e.name) && !e.name.startsWith('test')) out.push(rel);
+  }
+  return out;
+}
+
+test('E125 b only the listed files parse a direct readFileSync, each as often as listed', () => {
   const allowed = new Map(DIRECT_JSON_READ_ALLOWED.map((a) => [a.file, a]));
   const hits = new Map();
   const offenders = [];
-  for (const f of fs.readdirSync(path.join(ROOT, 'cli'))) {
-    if (!f.endsWith('.mjs') || f.startsWith('test')) continue;
-    const rel = `cli/${f}`;
+  const sources = engineSources();
+  assert.ok(sources.some((f) => f.startsWith('cli/brain/')) && sources.some((f) => f.startsWith('cli/map/')), 'the subfolders are scanned');
+  for (const rel of sources) {
     fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
       if (/^\s*\/\//.test(line) || !DIRECT_JSON_READ.test(line)) return;
       hits.set(rel, (hits.get(rel) || 0) + 1);
