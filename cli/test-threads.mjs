@@ -1762,6 +1762,10 @@ test('yad epic new --parent: a parent whose lock points at another epic binds th
     ['one hop', (T) => pointerEpic(T, 'EP-x', 'EP-y')],
     // X -> Z -> Y: the child still points straight at Y.
     ['two hops', (T) => { pointerEpic(T, 'EP-z', 'EP-y'); pointerEpic(T, 'EP-x', 'EP-z'); }],
+    // A ref that is not a string is not read; `inheritedFrom` names the lock, as contract-check.sh does.
+    ['one hop, a ref that is not a string', (T) => pointerEpic(T, 'EP-x', 'EP-y', { ref: 42 })],
+    // An absolute ref that names another epic's lock in this Product is that lock.
+    ['one hop, an absolute ref', (T) => pointerEpic(T, 'EP-x', 'EP-y', { ref: lockFile(T, 'EP-y') })],
   ]) {
     for (const inherits of ['architecture,contract', 'contract,architecture']) {
       const T = productConfig();
@@ -1778,7 +1782,9 @@ test('yad epic new --parent: a parent whose lock points at another epic binds th
           assert.equal(by[id].status, 'satisfied', `${what}: ${id}`);
           assert.equal(by[id].inheritedFrom, 'EP-x', `${what}: ${id} is carried from the epic that approved it`);
           assert.equal(by[id].boundHash, contractSurfaceHash(Y), `${what}: ${id} binds to the surface the lock leads to`);
+          assert.equal(by[id].boundFrom, 'EP-y', `${what}: ${id} names the epic that surface is in`);
         }
+        assert.equal(by.epic.boundFrom, undefined, `${what}: a step bound to its owner's own file names no other epic`);
         const lock = sdlcOf(T, 'EP-fix', 'contract-lock.json');
         assert.equal(lock.hash, sdlcOf(T, 'EP-y', 'contract-lock.json').hash, `${what}: the hash is unchanged`);
         assert.equal(lock.inheritedFrom, 'EP-y', `${what}: flattened — the lock names the epic holding contract.md`);
@@ -1793,9 +1799,10 @@ test('yad epic new --parent: a parent whose lock points at another epic binds th
         assert.equal(gate.passed, true, what);
         const checks = [];
         epicChecks(checks, T);
-        for (const id of ['EP-fix', 'EP-x']) {
-          assert.equal(checks.find((c) => c.id === `epic:${id}:contract-lock`)?.status, 'ok', `${what}: doctor on ${id}`);
-        }
+        assert.equal(checks.find((c) => c.id === 'epic:EP-fix:contract-lock')?.status, 'ok', `${what}: doctor on the child`);
+        // X itself: one hop is ok; two hops are sound but CI follows one, so doctor says to flatten it.
+        const onX = checks.find((c) => c.id === 'epic:EP-x:contract-lock');
+        assert.equal(onX?.status, name.startsWith('one hop') ? 'ok' : 'warn', `${what}: doctor on EP-x`);
         const fails = checks.filter((c) => c.id.startsWith('epic:EP-fix') && c.status === 'fail');
         assert.deepEqual(fails, [], `${what}: doctor flags nothing on the child`);
       } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1820,6 +1827,12 @@ test('yad epic new --parent: a pointer lock that breaks is refused, naming the b
     }, /points at EP-y, but EP-y has no contract\.md with a CONTRACT-SURFACE block/],
     ['a ref out of epics/', (T) => { contractEpic(T, 'EP-y'); pointerEpic(T, 'EP-x', 'EP-y', { ref: '../../../../etc/contract-lock.json' }); },
       /points at no other epic in this Product, but EP-x's lock names ref '\.\.\/\.\.\/\.\.\/\.\.\/etc\/contract-lock\.json', which is not another epic's/],
+    ['an absolute ref outside the Product', (T) => { contractEpic(T, 'EP-y'); pointerEpic(T, 'EP-x', 'EP-y', { ref: path.join(os.tmpdir(), 'EP-y/.sdlc/contract-lock.json') }); },
+      /EP-x's lock names ref '[^']*EP-y\/\.sdlc\/contract-lock\.json', which is not another epic's/],
+    ['a ref that is not a string, and no inheritedFrom', (T) => {
+      contractEpic(T, 'EP-y'); pointerEpic(T, 'EP-x', 'EP-y');
+      fs.writeFileSync(lockFile(T, 'EP-x'), JSON.stringify({ artifact: 'contract.md', hash: sdlcOf(T, 'EP-y', 'contract-lock.json').hash, ref: ['../../EP-y/.sdlc/contract-lock.json'] }));
+    }, /EP-x's lock names ref '\.\.\/\.\.\/undefined\/\.sdlc\/contract-lock\.json', which is not another epic's/],
     ['a ref to another file', (T) => { contractEpic(T, 'EP-y'); pointerEpic(T, 'EP-x', 'EP-y', { ref: '../../EP-y/.sdlc/state.json' }); },
       /which is not another epic's \.sdlc\/contract-lock\.json inside epics\//],
     // Not a pointer, and no contract.md: the message names contract.md, not architecture.md.
@@ -1868,6 +1881,49 @@ test('resolveContractLock: the walk stops after MAX_LOCK_HOPS hops, and a contra
     assert.deepEqual([here.ownerId, here.pointer], ['EP-own', false]);
     assert.equal(resolveContractLock(T, own, { followOwn: true }).broken, 'mismatch');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: a lock is never followed through a link (#598 review)', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { resolveContractLock } = await import('./epic-state.mjs');
+  for (const [name, build, what] of [
+    // `epics/EP-y` is a link to a real, matching epic OUTSIDE the Product: its path text is inside epics/.
+    ['a linked epic folder', (T, U) => {
+      const out = contractEpic(U, 'EP-y');
+      fs.symlinkSync(out, epicRoot(T, 'EP-y'));
+      pointerEpic(T, 'EP-x', 'EP-y', { hash: sdlcOf(U, 'EP-y', 'contract-lock.json').hash });
+    }, 'EP-y'],
+    ['a linked .sdlc folder', (T, U) => {
+      const out = contractEpic(U, 'EP-y');
+      const Y = contractEpic(T, 'EP-y');
+      fs.rmSync(path.join(Y, '.sdlc'), { recursive: true });
+      fs.symlinkSync(path.join(out, '.sdlc'), path.join(Y, '.sdlc'));
+      pointerEpic(T, 'EP-x', 'EP-y', { hash: sdlcOf(U, 'EP-y', 'contract-lock.json').hash });
+    }, 'EP-y/.sdlc'],
+    ['a linked contract.md', (T, U) => {
+      const out = contractEpic(U, 'EP-y');
+      const Y = contractEpic(T, 'EP-y');
+      fs.rmSync(path.join(Y, 'contract.md'));
+      fs.symlinkSync(path.join(out, 'contract.md'), path.join(Y, 'contract.md'));
+      fs.writeFileSync(lockFile(T, 'EP-y'), JSON.stringify({ artifact: 'contract.md', hash: sdlcOf(U, 'EP-y', 'contract-lock.json').hash }));
+      pointerEpic(T, 'EP-x', 'EP-y');
+    }, 'EP-y/contract.md'],
+  ]) {
+    const T = productConfig();
+    const U = productConfig();
+    build(T, U);
+    try {
+      const w = resolveContractLock(T, epicRoot(T, 'EP-x'));
+      assert.equal(w.broken, 'link', name);
+      assert.equal(w.what, what, name);
+      const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-x', inherits: 'architecture,contract' });
+      assert.equal(failed, true, name);
+      assert.match(out, /is a link or not a plain (file|folder), and a lock is followed only through this Product's own folders/, `${name}: ${out}`);
+      assert.equal(seeded(T, 'EP-fix'), false, name);
+    } finally {
+      fs.rmSync(T, { recursive: true, force: true });
+      fs.rmSync(U, { recursive: true, force: true });
+    }
+  }
 });
 
 test('yad epic new --parent: the header wins over no flag, and a contradicting flag is refused', async () => {

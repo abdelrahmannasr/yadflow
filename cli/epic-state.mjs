@@ -1900,7 +1900,9 @@ export function gatePredicate({
   // entry. It is pre-marked `done` in state.json, so the gate is normally never invoked on it; this
   // short-circuit makes a direct call safe and surfaces a corrupted boundHash (a referenced artifact
   // cannot change under the child, so a mismatch is corruption — re-thread, do not silently pass).
-  // COMPARE AGAINST THE OWNER'S COPY. `boundHash` is the hash of the artifact in `inheritedFrom`, and the
+  // COMPARE AGAINST THE OWNER'S COPY. `boundHash` is the hash of the artifact in `inheritedFrom` — for a
+  // carried ARCHITECTURE step, the contract surface its owner's lock resolves to, which is another epic's
+  // (named in `boundFrom`) when that lock is a pointer (#598) — and the
   // child's folder is not always empty where that artifact's name would be: a change-epic writes its own
   // `epic.md` (the change brief), so hashes taken from the CHILD's folder for a carried `epic-review`
   // would read as drift that is not there. No caller runs the predicate on a carried step today.
@@ -4397,11 +4399,15 @@ export const MAX_LOCK_HOPS = 8;
 // not a pointer. There, contract.md's CONTRACT-SURFACE block must hash to the lock. On the way:
 //   * every ref must resolve to exactly epics/<EP-id>/.sdlc/contract-lock.json in this Product (the rule
 //     checks/contract-check.sh applies), so a lock file cannot send the walk elsewhere;
+//   * that check compares path TEXT, so a link is refused at every level the walk reads: an epic
+//     folder, its .sdlc folder, the lock and contract.md (`readJSONStrict` refuses only the last part
+//     of a path, and `fs.existsSync` / `contractSurfaceHash` follow links). An `epics/EP-y` that links
+//     to a folder outside the Product would otherwise be read, and CI (contract-check.sh, `pwd -P`)
+//     refuses the lock that walk would write;
 //   * an epic seen twice is a loop, and more than MAX_LOCK_HOPS hops is refused;
 //   * each lock's hash must equal the hash of the lock it points at.
 // `followOwn` follows the first epic's pointer even when it has a contract.md of its own (doctor checks
-// that leftover pointer as well as the live surface). Files are read with `readJSONStrict`: a link or a
-// folder in place of a lock is refused, never followed.
+// that leftover pointer as well as the live surface).
 //
 // Returns `{ ownerId, dir, hash, hops, chain, pointer }` — `hops` the epics passed to after the first,
 // `chain` the first plus the hops, `pointer` true when at least one pointer was followed — or
@@ -4413,10 +4419,19 @@ export function resolveContractLock(root, epicDir, { followOwn = false } = {}) {
   let dir = path.resolve(epicDir);
   const chain = [path.basename(dir)];
   let prev = null; // the lock just followed: { id, hash }
+  // A link, or a name that is there but is not what it should be (a file in place of a folder).
+  const notPlain = (p, kind) => {
+    let st;
+    try { st = fs.lstatSync(p); } catch { return false; } // absent: the reads below say what is missing
+    return st.isSymbolicLink() || (kind === 'dir' ? !st.isDirectory() : !st.isFile());
+  };
   for (;;) {
     const id = path.basename(dir);
     seen.add(dir);
     const broken = (kind, extra = {}) => ({ broken: kind, at: id, from: prev?.id ?? null, hops, chain, ...extra });
+    for (const [p, kind, what] of [[dir, 'dir', id], [path.join(dir, '.sdlc'), 'dir', `${id}/.sdlc`], [path.join(dir, 'contract.md'), 'file', `${id}/contract.md`]]) {
+      if (notPlain(p, kind)) return broken('link', { what });
+    }
     let lock;
     try { lock = readJSONStrict(path.join(dir, '.sdlc', 'contract-lock.json'), null); } catch { lock = undefined; }
     if (!isPlainObject(lock) || !LOCK_HASH.test(String(lock.hash || ''))) return broken(prev ? 'missing' : 'unusable');
@@ -4456,6 +4471,7 @@ export function describeLockBreak(w) {
     case 'unusable': return `${w.at} holds no usable contract lock`;
     case 'missing': return `${w.at}'s contract-lock.json is missing or has no usable hash${via}`;
     case 'mismatch': return `${w.from}'s lock pins ${short(w.pinned)} but ${w.at} now locks ${short(w.locked)}${via}`;
+    case 'link': return `${w.what} is a link or not a plain ${w.what.endsWith('.md') ? 'file' : 'folder'}, and a lock is followed only through this Product's own folders${via}`;
     case 'outside': return `${w.at}'s lock names ref '${forTerminal(w.ref)}', which is not another epic's .sdlc/contract-lock.json inside epics/`;
     case 'loop': return `the locks point in a loop back to ${w.to} (${[...w.chain, w.to].join(' → ')})`;
     case 'too-deep': return `the locks point on for more than ${MAX_LOCK_HOPS} hops${via}`;
@@ -4583,6 +4599,7 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
           `finish it on ${owner} first, or leave ${base} out of inherits and author it here`);
       }
       let boundHash = artifactHash(ownerDir, stepDef(id).artifact);
+      let boundFrom = null; // the epic whose surface `boundHash` is, when it is not the owner
       // The architecture steps bind to the contract surface, not to architecture.md (`artifactHash`). An
       // owner whose lock is a POINTER has no contract.md of its own: follow the pointers to the epic that
       // has one, and bind to that surface (#598).
@@ -4597,12 +4614,13 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
             `run \`yad doctor\` and fix the lock it names, or leave ${base} out of inherits`);
         }
         boundHash = w.hash;
+        boundFrom = w.ownerId;
       }
       if (!boundHash) {
         return refuse(`${owner} approved ${id}${rides}, but ${stepDef(id).artifact} is not there to bind to`,
           `restore it on ${owner}, or leave ${base} out of inherits`);
       }
-      carried.set(id, { owner, boundHash });
+      carried.set(id, { owner, boundHash, boundFrom });
     }
     if (base === 'architecture') {
       // Rule 5, through the same walk `yad doctor` runs: the owner's lock, followed to the epic whose
@@ -4647,6 +4665,9 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
       inherited: true,
       inheritedFrom: hit.owner,
       boundHash: hit.boundHash,
+      // Only when the owner's lock is a pointer (#598): the surface `boundHash` was taken from lives in
+      // another epic than `inheritedFrom`, the one that approved the step.
+      ...(hit.boundFrom ? { boundFrom: hit.boundFrom } : {}),
       record: stepRecord({ reason: `carried by reference from ${hit.owner}`, date: today, link: hit.owner }),
       risk_tags: riskTags,
     };
