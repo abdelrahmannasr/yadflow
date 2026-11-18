@@ -277,6 +277,24 @@ function platformRows(add, root, t, s, { solo }) {
 
   if (gh) githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps });
   else gitlabRows(add, t, s, { branch, rulesPage, mrPage, settings, solo });
+  trunkRow(add, t, p, { branch, web, gh });
+}
+
+// #599: the update guard checks a direct push to the platform's default branch, and to the branch the YAD_TRUNK
+// CI variable names. A repo whose trunk (as the Product declares it) is another branch needs that variable. yad
+// cannot read a variable's value (GitLab shows it to a Maintainer only), so this is a warning, said as "if not
+// set already", never a gap that could not clear. A repo that runs no yad CI has no guard, and no row.
+function trunkRow(add, t, p, { branch, web, gh }) {
+  if (!t.ciRuns || typeof p.platformDefault !== 'string' || !p.platformDefault || p.branch === p.platformDefault) return;
+  const other = forTerminal(p.platformDefault);
+  const where = gh ? 'a repository variable' : 'a project or group CI/CD variable';
+  const url = gh ? `${web}/settings/variables/actions` : `${web}/-/settings/ci_cd`;
+  add('trunk', 'suggest', `the trunk ${branch} is not ${gh ? 'GitHub' : 'GitLab'}'s default branch (${other}): the update guard checks a direct push to ${branch} only when ${where} YAD_TRUNK is set to ${branch}`, {
+    actor: 'person', where: 'settings', url,
+    steps: gh
+      ? [`If it is not set already: open ${url} → Variables → New repository variable: name YAD_TRUNK, value ${branch}.`]
+      : [`If it is not set already: open ${url} → Variables → Add variable: key YAD_TRUNK, value ${branch} (or set it once on the group, for all its projects). Leave "Protect variable" off unless ${branch} is a protected branch: a protected variable reaches only pipelines on protected branches. Set it there, not in yad's fragment: yad rewrites its files on every update.`],
+  });
 }
 
 function githubRows(add, root, t, s, { branch, web, rulesPage, settings, solo, protectSteps }) {
