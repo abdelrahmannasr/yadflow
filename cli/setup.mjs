@@ -18,6 +18,7 @@ import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 import { offerToolbox, REPOMIX_VERSION } from './toolbox.mjs';
+import { DEFAULT_REGISTRY } from './update-notice.mjs';
 import { localSetupActions, localSetupSection, hasTeamSteps } from './local-setup.mjs';
 import { LOCAL_SETUP_DOC } from './local-setup-steps.mjs';
 import { readAllowList } from './agent-rules.mjs';
@@ -1070,12 +1071,22 @@ export function packRepo(root, repo) {
   // no `..`, `.git` part or link on the way (E125) — the rule `yad repo refresh` keeps.
   if (!codeContextPathOk(root, repo.contextPack)) { warn(`${nm}: the pack path ${forTerminal(String(repo.contextPack ?? ''))} is not under ${CODE_CONTEXT_DIR}/ in the Product — skipped repomix pack`); return false; }
   if (!has('npx')) { warn(`${nm}: npx missing — skipped repomix pack`); return false; }
-  const out = path.join(root, repo.contextPack);
+  const out = path.resolve(root, repo.contextPack);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${nm}: packing with repomix …`);
-  // The vetted version, never `@latest` (E88): a new Repomix release reaches users only once it is vetted.
-  const r = runLauncher('npx', [`repomix@${REPOMIX_VERSION}`, '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
+  // npx runs from a fresh empty folder of the person's own, never from the code repo (E125 b). npm reads a
+  // `.npmrc` in the folder it runs from and its parents, so one committed to the repo or the Product could
+  // send npm to another registry, whose "repomix" would then run here. Repomix also loads its config
+  // (`repomix.config.*`, which may be code) from the folder it runs from. So the registry is named, and the
+  // repo and the pack are passed as absolute paths.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-repomix-'));
+  let r;
+  try {
+    // The vetted version, never `@latest` (E88): a new Repomix release reaches users only once it is vetted.
+    // `--registry` goes before the package: npx passes anything after it to Repomix.
+    r = runLauncher('npx', [`--registry=${DEFAULT_REGISTRY}/`, `repomix@${REPOMIX_VERSION}`, repoRoot, '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: work });
+  } finally { fs.rmSync(work, { recursive: true, force: true }); }
   if (r.ok) { ok(`${nm}: cached ${forTerminal(repo.contextPack)}`); hand(`${nm}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${nm}: repomix failed — ${forTerminal(r.stderr.split('\n')[0]) || 'unknown error'}`);
   return false;

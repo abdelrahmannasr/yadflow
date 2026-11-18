@@ -30317,6 +30317,35 @@ test('E125: packRepo writes a pack only under .sdlc/code-context/, and yad setup
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E125 b: packRepo runs npx from an empty folder of its own, names the npm registry, and passes absolute paths', { skip: E125_SKIP }, async () => {
+  const { packRepo } = await import('./setup.mjs');
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    // A `.npmrc` committed to the code repo and to the Product: npm would read either one from where it runs.
+    for (const dir of [backend, product]) fs.writeFileSync(path.join(dir, '.npmrc'), 'registry=https://evil.example/\n');
+    // An npx on PATH that logs where it ran, what was in that folder, and each argument on its own line.
+    const bin = path.join(T, 'npx-bin');
+    const log = path.join(T, 'npx-calls.log');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\n{ pwd -P; ls -A | wc -l | tr -d ' '; for a in "$@"; do printf '%s\\n' "$a"; done; } > '${log}'\n`, { mode: 0o755 });
+    const saved = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${saved}`;
+    let packed;
+    try { await grab(() => { packed = packRepo(product, { name: 'backend', path: '../backend', contextPack: '.sdlc/code-context/backend/pack.md' }); }); } finally { process.env.PATH = saved; }
+    assert.equal(packed, true);
+    const [cwd, entries, ...args] = fs.readFileSync(log, 'utf8').trim().split('\n');
+    const real = (p) => fs.realpathSync(p);
+    assert.ok(cwd.startsWith(path.join(real(os.tmpdir()), 'yad-repomix-')), `npx ran in a temp folder of its own: ${cwd}`);
+    assert.ok(!cwd.startsWith(real(T)), 'not in the workspace, the Product or the repo');
+    assert.equal(entries, '0', 'the folder was empty: no .npmrc and no repomix config there');
+    assert.ok(!fs.existsSync(cwd), 'and it is removed afterwards');
+    const out = path.join(product, '.sdlc', 'code-context', 'backend', 'pack.md');
+    assert.deepEqual(args, ['--registry=https://registry.npmjs.org/', `repomix@${(await import('./toolbox.mjs')).REPOMIX_VERSION}`, backend, '--compress', '--include-logs', '--style', 'markdown', '-o', out]);
+    assert.ok(path.isAbsolute(args[2]) && path.isAbsolute(args.at(-1)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125 review: connecting a repo by flag or by answer runs no git in a bare-shaped folder', { skip: E125_SKIP }, async () => {
   const { registerRepo } = await import('./setup.mjs');
   const T = e79Tmp();

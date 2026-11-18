@@ -17,7 +17,8 @@ import { c, exists, readJSON, writeJSON, PKG_ROOT } from './lib.mjs';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 1500;
-const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
+// The public npm registry. Also the one `yad setup` and `yad repo refresh` pin npx to when they run Repomix.
+export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 
 // An env var counts as "set" only when it carries a meaningful value — `CI=false` and `CI=0` are
 // common in shells that always export the name.
