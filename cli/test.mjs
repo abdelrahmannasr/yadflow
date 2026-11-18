@@ -13056,6 +13056,64 @@ test('doctor: a pointer-lock ref that escapes epics/ is refused', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor: a pointer-lock is followed over every hop, with the walk `yad epic new --parent` uses (#598)', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const seed = (id) => {
+    fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify({
+      epicId: id, currentStep: 'ready-for-build',
+      steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+    }));
+    return path.join(T, 'epics', id);
+  };
+  const genesis = seed('EP-gen');
+  fs.writeFileSync(path.join(genesis, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  const hash = surfHash(genesis);
+  fs.writeFileSync(path.join(genesis, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash }));
+  const pointer = (dir, to, h = hash) => fs.writeFileSync(path.join(dir, '.sdlc/contract-lock.json'), JSON.stringify({
+    artifact: 'contract.md', hash: h, inheritedFrom: to, ref: `../../${to}/.sdlc/contract-lock.json`,
+  }));
+  // EP-chg -> EP-mid -> EP-gen: neither pointer epic has a contract.md.
+  const mid = seed('EP-mid');
+  const chg = seed('EP-chg');
+  pointer(mid, 'EP-gen');
+  pointer(chg, 'EP-mid');
+  const status = async (epic) => (await doctorOn(T)).checks.find((x) => x.id === `epic:${epic}:contract-lock`);
+  try {
+    const clean = await status('EP-chg');
+    assert.equal(clean?.status, 'ok');
+    assert.match(clean.message, /pointer-lock matches EP-gen via EP-mid/);
+
+    // The second hop breaks; one hop alone would have read EP-mid's hash and said ok.
+    pointer(mid, 'EP-gone');
+    let hit = await status('EP-chg');
+    assert.equal(hit?.status, 'fail');
+    assert.match(hit.message, /EP-chg: pointer-lock cannot be followed — EP-gone's contract-lock\.json is missing or has no usable hash \(EP-chg → EP-mid → EP-gone\)/);
+
+    // A loop.
+    pointer(mid, 'EP-chg');
+    hit = await status('EP-chg');
+    assert.equal(hit?.status, 'fail');
+    assert.match(hit.message, /the locks point in a loop back to EP-chg \(EP-chg → EP-mid → EP-chg\)/);
+
+    // A hash that changes between the second and third lock.
+    pointer(mid, 'EP-gen', `sha256:${'d'.repeat(64)}`);
+    pointer(chg, 'EP-mid', `sha256:${'d'.repeat(64)}`);
+    hit = await status('EP-chg');
+    assert.equal(hit?.status, 'fail');
+    assert.match(hit.message, /EP-mid's lock pins sha256:dddddddddddd… but EP-gen now locks/);
+
+    // The end of the chain drifted from its own lock: the pointer copies a surface nobody holds any more.
+    pointer(mid, 'EP-gen');
+    pointer(chg, 'EP-mid');
+    fs.writeFileSync(path.join(genesis, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+    hit = await status('EP-chg');
+    assert.equal(hit?.status, 'fail');
+    assert.match(hit.message, /EP-gen's contract surface no longer matches its lock/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor: a done review whose approvals all went stale is reported', async () => {
   const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
   const { T } = scaffold();
