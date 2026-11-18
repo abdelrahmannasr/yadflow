@@ -28,7 +28,8 @@ function commandsOf(cls) {
     // A command whose flags raise it says which, so `yad dial` reads as "not with --to".
     const raised = Object.entries(e.flags ?? {}).filter(([, c]) => c !== cls).map(([f]) => `\`--${f}\``);
     if (e.class === cls) out.push(raised.length ? `\`yad ${key}\` (not with ${raised.join(', ')})` : `\`yad ${key}\``);
-    for (const [flag, c] of Object.entries(e.flags ?? {})) if (c === cls) out.push(`\`yad ${key} --${flag}\``);
+    // A flag of the command's own class (`repo pack --out`) is classed only so the rules know it: no line.
+    for (const [flag, c] of Object.entries(e.flags ?? {})) if (c === cls && c !== e.class) out.push(`\`yad ${key} --${flag}\``);
   }
   return out;
 }

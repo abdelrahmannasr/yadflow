@@ -241,6 +241,9 @@ export const COMMAND_CLASS = {
   'brain view': { class: 'local-write' },
   'repo list': { class: 'read' },
   'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
+  // #213: runs Repomix (npx from an empty temp folder) and writes one pack — the usual one, a file named,
+  // or stdout. Nothing leaves the machine but the npm download.
+  'repo pack': { class: 'local-write', flags: { out: 'local-write' } },
   'repo sync': { class: 'local-write' },
   'repo clone': { class: 'local-write' },
   'repo preview': { class: 'local-write' },
