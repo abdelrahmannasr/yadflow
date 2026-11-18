@@ -539,3 +539,77 @@ test('the add rollback never unlinks a node_modules symlink git tracks at origin
     for (const at of [P, api, web]) assert.equal(git(at, 'worktree', 'list').split('\n').length, 1);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+// #217: each registered folder is judged before any git runs in it, as E125 does for the other commands. A
+// logging git first on PATH writes the folder each call runs in, as the disk spells it: a call in a link to
+// api is logged as api.
+function gitLogger(W) {
+  const bin = path.join(W, 'bin');
+  const log = path.join(W, 'git-calls.log');
+  fs.mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\t%s\\n' "$(pwd -P)" "$*" >> '${log}'\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+  const env = { PATH: `${bin}${path.delimiter}${ENV.PATH}` };
+  const gitIn = (dir) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter((l) => l.startsWith(`${dir}\t`) || l.startsWith(`${dir}/`));
+  return { env, gitIn, clear: () => fs.rmSync(log, { force: true }) };
+}
+
+test('yad worktree add, list and remove run no git in a registered folder reached through a link inside the Product, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git, and symlinks' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    const { env, gitIn, clear } = gitLogger(W);
+    // A link the Product commits, to a real clone: it has a `.git`, so a bare existence test passed it.
+    fs.symlinkSync('../api', path.join(P, 'evil'));
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'evil', path: 'evil' }] }) });
+    const why = /evil \(evil\): reached through a link inside a repo's tree — yad runs no git there/;
+    let r = yadWith(env, P, 'worktree', 'add', 'EP-x', '--repo', 'evil');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    assert.equal(fs.existsSync(path.join(P, 'evil--EP-x')), false, 'no worktree was made');
+    assert.deepEqual(gitIn(api), [], 'no git ran in the linked clone');
+    // The registered clone itself still works, by its own path.
+    r = yadWith(env, P, 'worktree', 'add', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.ok(fs.existsSync(awt));
+    clear();
+    r = yadWith(env, P, 'worktree', 'list', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees.map((w) => [w.repo, w.path]), [['api', awt]], 'api\'s worktree is listed once, never again through the link');
+    assert.deepEqual(json(r).skipped.map((s) => [s.repo, s.path]), [['evil', 'evil']]);
+    assert.match(json(r).skipped[0].why, /reached through a link/);
+    r = yadWith(env, P, 'worktree', 'remove', 'EP-x', '--repo', 'evil');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    assert.deepEqual(gitIn(api), [], 'list and remove ran no git in the main clone, nor through the link');
+    r = yadWith(env, P, 'worktree', 'remove', 'EP-x', '--all', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).removed.map((x) => x.repo), ['api']);
+    assert.deepEqual(json(r).skipped.map((s) => s.repo), ['evil']);
+    assert.match(r.stderr, why);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add, list and remove run no git in a registered folder shaped like a bare repo, and say why (#217)', { skip: process.platform === 'win32' && 'a shell script as git' }, () => {
+  const { W, P } = workspace();
+  try {
+    const { env, gitIn } = gitLogger(W);
+    const marker = path.join(W, 'fsmonitor-ran');
+    const bare = path.join(P, 'bare');
+    for (const d of ['objects', 'refs']) fs.mkdirSync(path.join(bare, d), { recursive: true });
+    write(bare, { HEAD: 'ref: refs/heads/main\n', config: `[core]\n\tbare = true\n\tfsmonitor = touch '${marker}'\n` });
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'bare', path: 'bare' }] }) });
+    const why = /bare \(bare\): a folder on its way holds an entry named HEAD, .* — yad runs no git there/;
+    let r = yadWith(env, P, 'worktree', 'add', 'EP-x', '--repo', 'bare');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    r = yadWith(env, P, 'worktree', 'list', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).skipped.map((s) => s.repo), ['bare']);
+    assert.match(r.stderr, why);
+    r = yadWith(env, P, 'worktree', 'remove', 'EP-x', '--repo', 'bare');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, why);
+    assert.deepEqual(gitIn(bare), [], 'no git ran in the bare-shaped folder');
+    assert.equal(fs.existsSync(marker), false, 'its config never ran');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});

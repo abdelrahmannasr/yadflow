@@ -22,6 +22,7 @@ import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
 import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
+import { judgedRepos } from './workspace.mjs';
 
 const CODE = 'YAD-STATE-010';
 const git = (cwd, ...args) => run('git', args, { cwd });
@@ -86,7 +87,11 @@ function productMain(root) {
 }
 
 // The checkouts an epic's worktrees can be made from: the Product, and every registered code repo.
-// → [{ repo: null|name, main, defaultBranch, missing, nested }]
+// Each entry is judged before any git runs (#217, as E125 does for the other commands): the registry is
+// shared content, so a folder yad may not run git in — a bare-shaped one, or one reached through a link
+// inside a repo's tree — is `refused`, with the reason, and never acted on. A folder inside another
+// checkout (a monorepo's `apps/web`) has no `.git` of its own to hold worktrees: it counts as not cloned.
+// → [{ repo: null|name, main, defaultBranch, missing, nested, refused (why, or absent) }]
 function targetsOf(productRoot) {
   const main = productMain(productRoot);
   const config = readJSON(productConfigPath(main), null) || {};
@@ -97,8 +102,13 @@ function targetsOf(productRoot) {
     const at = path.resolve(main, r.path);
     if (sameDir(at, main)) continue; // the Product's own entry (a monorepo): its worktree is the Product's
     const named = typeof r.default_branch === 'string' && r.default_branch ? r.default_branch : null;
-    const nested = within(at, main) && !sameDir(at, main); // on disk, as the disk spells it
-    out.push({ repo: r.name, main: at, defaultBranch: named, missing: !fs.existsSync(path.join(at, '.git')), nested });
+    const judged = judgedRepos(main, { repos: [r] });
+    const no = judged.skipped[0];
+    if (no) { out.push({ repo: r.name, main: at, defaultBranch: named, missing: false, nested: false, refused: no.why, shownPath: no.j.path }); continue; }
+    const hit = judged.ok[0];
+    const missing = !hit.present || !!hit.j.inside || !fs.existsSync(path.join(at, '.git'));
+    const nested = !missing && within(at, main) && !sameDir(at, main); // on disk, as the disk spells it
+    out.push({ repo: r.name, main: at, defaultBranch: named, missing, nested });
   }
   return out;
 }
@@ -193,12 +203,18 @@ function pickTargets(productRoot, epic, { repo = null, all = false }) {
 
 // ---- the commands ----------------------------------------------------------------------------------
 
+// A registered folder yad runs no git in, said the same way by every command (#217).
+const refusedLine = (t) => `${forTerminal(t.repo)} (${t.shownPath}): ${t.refused} — yad runs no git there`;
+const REFUSED_HINT = 'fix its path in .sdlc/repos.json, or move the folder aside and clone it with `yad repo clone`';
+const refusedRow = (t) => ({ repo: t.repo, path: t.shownPath, why: t.refused });
+
 export async function runWorktreeAdd(productRoot, { epic, repo = null, all = false, dryRun = false, today = null } = {}) {
   const targets = pickTargets(productRoot, epic, { repo, all });
   const plans = [];
   // Every target is checked — and fetched — before any worktree is made, so a refusal makes nothing.
   for (const t of targets) {
     const name = t.repo ?? 'the Product';
+    if (t.refused) throw err(CODE, refusedLine(t), REFUSED_HINT);
     if (t.missing) throw err(CODE, `${t.repo} is not cloned here (${t.main})`, `\`yad repo clone ${t.repo}\` fetches it`);
     const mine = yadWorktrees(t.main).find((w) => w.epic === epic && (w.repo ?? null) === t.repo);
     const where = worktreePath(t.main, epic);
@@ -316,7 +332,9 @@ export function dropExcludeLines(main, rels) {
 
 export async function runWorktreeList(productRoot, { epic = null } = {}) {
   const rows = [];
+  const skipped = [];
   for (const t of targetsOf(productRoot)) {
+    if (t.refused) { skipped.push(refusedRow(t)); continue; }
     if (t.missing) continue;
     for (const w of yadWorktrees(t.main)) {
       if (epic && w.epic !== epic) continue;
@@ -333,19 +351,25 @@ export async function runWorktreeList(productRoot, { epic = null } = {}) {
     if (r.locked) bits.push('locked');
     info(`${r.epic}  ${r.repo ?? 'Product'}  ${r.path}  (${bits.join(', ')})`);
   }
-  return { worktrees: rows };
+  for (const s of skipped) warn(`${forTerminal(s.repo)} (${s.path}): ${s.why} — yad runs no git there, so its worktrees are not listed`);
+  return { worktrees: rows, ...(skipped.length ? { skipped } : {}) };
 }
 
 export async function runWorktreeRemove(productRoot, { epic, repo = null, all = false, cwd = process.cwd() } = {}) {
   // --all: every checkout's worktree for the epic, also one of a repo the epic no longer names.
   const picked = pickTargets(productRoot, epic, { repo, all });
   const targets = all ? targetsOf(productRoot) : picked;
+  const named = repo && repo !== true ? picked[0] : null;
+  if (named?.refused) throw err(CODE, refusedLine(named), REFUSED_HINT);
   const found = [];
+  const skipped = [];
   for (const t of targets) {
+    if (t.refused) { skipped.push(refusedRow(t)); continue; }
     if (t.missing) continue;
     const w = yadWorktrees(t.main).find((x) => x.epic === epic && (x.repo ?? null) === t.repo);
     if (w) found.push({ t, w });
   }
+  for (const s of skipped) warn(`${forTerminal(s.repo)} (${s.path}): ${s.why} — yad runs no git there, so it was left alone`);
   if (!found.length) throw err(CODE, `no yad worktree for ${epic}${repo && repo !== true ? ` in ${repo}` : ''}`, '`yad worktree list` shows them');
   // Every one is checked before any is removed: with --all, one refusal removes nothing.
   const refused = [];
@@ -375,5 +399,5 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
     ok(`removed ${f.w.path}`);
     removed.push({ repo: f.t.repo, path: f.w.path });
   }
-  return { epic, removed };
+  return { epic, removed, ...(skipped.length ? { skipped } : {}) };
 }
