@@ -6,6 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
+  readPlainFile, readPlainJSON, NOT_PLAIN_FILE,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -347,7 +348,7 @@ const hasOurHookEntry = (root, ide) => [HOOK_ADAPTERS[ide], CAPTURE_ADAPTERS[ide
   const full = path.join(root, adapter.settings);
   if (!lstatIfPresent(full)) return false;
   try {
-    const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
+    const parsed = readPlainJSON(full);
     const entries = parsed?.hooks?.[adapter.event];
     if (!Array.isArray(entries)) return false;
     return entries.some((entry) => entryIsOurs(adapter, entry));
@@ -1198,13 +1199,20 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
 const unparsedSaid = new Set();
+// What is said of a settings file that is a link or not a plain file (E125 b), after its name.
+const SETTINGS_NOT_PLAIN = 'is a link or not a plain file, so it was not read';
 // `where` names a connected code repo in the warnings (E158b); the Product's own files need no name.
 function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(obj, adapter), where = null) {
   const ide = adapter.target;
   const relDest = adapter.settings;
   const named = where ? `${where}/${relDest}` : relDest;
   const dest = path.join(root, relDest);
-  const raw = exists(dest) ? fs.readFileSync(dest, 'utf8') : null;
+  // A plain file only (E125 b): the file is committed in the Product, so a link there could point outside
+  // it, or at a device whose read never ends. A link or a folder is never read and never written — not even
+  // one whose target is missing, which a "missing" answer would replace with a new file.
+  let raw = null;
+  let notPlain = false;
+  try { raw = readPlainFile(dest); } catch (e) { if (e?.code !== NOT_PLAIN_FILE) throw e; notPlain = true; }
   let parsed = null;
   let unreadable = false;
   if (raw !== null) {
@@ -1234,6 +1242,13 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   // `--overwrite-local`, so a plain `yad check --fix` would print nothing but the generic drift
   // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
   // since this action deliberately writes nothing. The specific reason has to surface either way.
+  if (notPlain) {
+    if (!unparsedSaid.has(`${dest}\0not-plain`)) {
+      unparsedSaid.add(`${dest}\0not-plain`);
+      warn(`${named} ${SETTINGS_NOT_PLAIN} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with the file itself (from git), then re-run \`yad check --fix\``);
+    }
+    return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
+  }
   if (unreadable) {
     // Said once per file, not once per action: up to four share `.claude/settings.json` (E158 review 1).
     if (!unparsedSaid.has(`${dest}\0${raw}`)) {
@@ -1265,9 +1280,15 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
     // backup, since that is the branch above. Re-check instead, and refuse the same way.
     apply: () => {
       if (!changed && raw !== null) return;
-      if (exists(dest)) {
+      // The same plain read: a link or a folder put there since the plan is left untouched.
+      let text;
+      try { text = readPlainFile(dest); } catch (e) {
+        if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the file itself, then re-run \`yad check --fix\``); return; }
+        text = '';  // unreadable — refused below, as a file that does not parse
+      }
+      if (text !== null) {
         let current;
-        try { current = JSON.parse(fs.readFileSync(dest, 'utf8')); } catch { /* unreadable — refused below */ }
+        try { current = JSON.parse(text); } catch { /* unreadable — refused below */ }
         if (!current || typeof current !== 'object' || Array.isArray(current)) {
           warn(`${named} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
@@ -1416,7 +1437,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
       // whether we wrote it or the team did, and a key that might be theirs is not ours to delete —
       // so a hooks.json we emptied is left as `{"version": 1}` rather than removed.
       let parsed;
-      try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* refused below */ }
+      try { parsed = readPlainJSON(settingsPath); } catch { /* refused below */ }
       if (isPlainObject(parsed) && unmergeHookSettings(parsed, adapter).changed) {
         actions.push({
           scope: adapter.target,
@@ -1427,7 +1448,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
           paths: [],
           apply: () => {
             let current;
-            try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+            try { current = readPlainJSON(settingsPath); } catch { return; }
             if (!isPlainObject(current)) return;
             const { settings, changed } = unmergeHookSettings(current, adapter);
             if (changed) writeJSON(settingsPath, settings);
@@ -1789,7 +1810,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: adapter.target,
@@ -1799,7 +1820,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
       paths: [],
       apply: () => {
         let current;
-        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        try { current = readPlainJSON(settingsPath); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
         if (changed) writeJSON(settingsPath, settings);
@@ -1883,7 +1904,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: scope || adapter.target,
@@ -1893,7 +1914,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
       paths: [],
       apply: () => {
         let current;
-        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        try { current = readPlainJSON(settingsPath); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
         if (changed) writeJSON(settingsPath, settings);
@@ -1985,7 +2006,7 @@ function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
   let wholeList = false;
   if (!kept) {
     try {
-      const allow = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.allow;
+      const allow = readPlainJSON(file)?.permissions?.allow;
       wholeList = Array.isArray(allow) && [readAllowList(), ...SHIPPED_ALLOW_LISTS].some((list) => list.every((e) => allow.includes(e)));
     } catch { return []; }
   }
@@ -1997,7 +2018,7 @@ function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
     return allow.length === obj.permissions.allow.length ? null : { ...obj, permissions: { ...obj.permissions, allow } };
   };
   let parsed;
-  try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  try { parsed = readPlainJSON(file); } catch { return []; }
   if (!without(parsed)) return [];
   return [{
     scope,
@@ -2007,7 +2028,7 @@ function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
     paths: [],
     apply: () => {
       let current;
-      try { current = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+      try { current = readPlainJSON(file); } catch { return; }
       const next = without(current);
       if (next) writeJSON(file, next);
     },
@@ -2044,7 +2065,7 @@ function agentGuardOrphans(root, kept, adapters, scope = null) {
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: scope || adapter.target,
@@ -2054,7 +2075,7 @@ function agentGuardOrphans(root, kept, adapters, scope = null) {
       paths: [],
       apply: () => {
         let current;
-        try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+        try { current = readPlainJSON(settingsPath); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
         if (changed) writeJSON(settingsPath, settings);
@@ -2150,13 +2171,19 @@ function namedIn(raw, scriptRel) {
   for (const file of HOOK_SETTINGS_FILES) {
     const text = raw(file);
     if (text === null) continue;
+    if (text === NOT_READ) { where.push(file); continue; }
     let parsed;
     try { parsed = JSON.parse(text); } catch { if (namesScript(text, scriptRel)) where.push(file); continue; }
     if (commandsIn(parsed).some((cmd) => namesScript(cmd, scriptRel))) where.push(file);
   }
   return where;
 }
-const onDisk = (root) => (file) => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } };
+// A link or a folder in place of a settings file is never read (E125 b): it is NOT_READ, which `namedIn` counts
+// as naming the script — nothing can be proved about it, so the script is kept, as for a file that does not parse.
+const NOT_READ = Symbol('not a plain file');
+const onDisk = (root) => (file) => {
+  try { return readPlainFile(path.join(root, file)); } catch (e) { return e?.code === NOT_PLAIN_FILE ? NOT_READ : null; }
+};
 // `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
 // reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.
 // The old scripts that belonged to the ledger guard, which only a verified Product has.
@@ -2210,7 +2237,7 @@ function afterThisRun(root, ideTargets) {
   const read = onDisk(root);
   return (file) => {
     const text = read(file);
-    if (text === null) return null;
+    if (text === null || text === NOT_READ) return text;
     let settings;
     try { settings = JSON.parse(text); } catch { return text; }
     if (!isPlainObject(settings)) return text;

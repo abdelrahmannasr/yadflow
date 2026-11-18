@@ -1154,3 +1154,103 @@ test('E48 review 6: core.hooksPath typed with another case names the default fol
     assert.equal(gitHookState(product).state, caseBlind ? 'missing' : 'hooks-path');
   } finally { cleanup(T); }
 });
+
+// ---- E125 b: the IDE settings files are read only as plain files (EP-factory-safety-S02) -----------
+// They are committed in the Product, so a link there could point outside it, or at a device whose read never
+// ends. A link or a folder is named like a file that does not parse, and never read or rewritten.
+const LINK_SKIP = IS_WINDOWS && 'making a link needs admin rights on Windows';
+const NOT_PLAIN = /\.claude\/settings\.json is a link or not a plain file, so it was not read/;
+const quietly = async (fn) => {
+  const said = [];
+  const orig = console.log;
+  console.log = (...a) => { said.push(a.join(' ')); };
+  try { return { value: await fn(), said: said.join('\n') }; } finally { console.log = orig; }
+};
+
+test('E125 b settings: a linked or folder settings file is named, never read and never rewritten', { skip: LINK_SKIP }, async () => {
+  const T = await oldProduct();
+  const outside = path.join(T, '..', `${path.basename(T)}-settings.json`);
+  try {
+    // The link points at the very file it replaced: a read that followed it would rewrite the bash entries.
+    const before = fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8');
+    fs.writeFileSync(outside, before);
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.symlinkSync(outside, path.join(T, '.claude/settings.json'));
+    fs.rmSync(path.join(T, '.cursor/hooks.json'));
+    fs.mkdirSync(path.join(T, '.cursor/hooks.json'));
+    const { value: actions, said } = await quietly(() => fixHooks(T));
+    assert.match(said, NOT_PLAIN);
+    assert.match(said, /\.cursor\/hooks\.json is a link or not a plain file, so it was not read/);
+    const settings = actions.filter((a) => a.shared === '.claude/settings.json' || a.shared === '.cursor/hooks.json');
+    assert.ok(settings.length && settings.every((a) => a.status === 'modified' && a.writesNothing), JSON.stringify(settings.map((a) => [a.item, a.status])));
+    assert.ok(fs.lstatSync(path.join(T, '.claude/settings.json')).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(fs.readFileSync(outside, 'utf8'), before, 'the file it points at is untouched');
+    assert.ok(fs.lstatSync(path.join(T, '.cursor/hooks.json')).isDirectory());
+    // Nothing can be proved about a file that was not read, so every old script is kept.
+    for (const s of ['ledger-guard.sh', 'ledger-guard-cursor.sh', 'yad-capture.sh']) assert.ok(fs.existsSync(path.join(T, 'hooks', s)), `${s} is kept`);
+  } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b settings: a dangling link is not a missing file, and a link put in after the plan is not written through', { skip: LINK_SKIP }, async () => {
+  const { hookActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  const outside = path.join(T, '..', `${path.basename(T)}-later.json`);
+  try {
+    const dest = path.join(T, '.claude/settings.json');
+    fs.rmSync(dest);
+    fs.symlinkSync(path.join(T, 'nowhere.json'), dest);
+    const { value: planned } = await quietly(() => hookActions(T, ['.claude']).find((a) => a.shared === '.claude/settings.json'));
+    assert.deepEqual([planned.status, planned.writesNothing], ['modified', true]);
+    planned.apply();
+    assert.ok(fs.lstatSync(dest).isSymbolicLink(), 'still the link');
+    assert.ok(!fs.existsSync(path.join(T, 'nowhere.json')), 'and nothing was created where it points');
+    // Planned on a plain file, then a link put in its place before apply: left untouched.
+    fs.rmSync(dest);
+    fs.writeFileSync(dest, '{"permissions":{}}');
+    const outdated = hookActions(T, ['.claude']).find((a) => a.shared === '.claude/settings.json');
+    assert.equal(outdated.status, 'outdated');
+    fs.writeFileSync(outside, '{"permissions":{}}');
+    fs.rmSync(dest);
+    fs.symlinkSync(outside, dest);
+    const { said } = await quietly(() => outdated.apply());
+    assert.match(said, NOT_PLAIN);
+    assert.match(said, /left untouched/);
+    assert.ok(fs.lstatSync(dest).isSymbolicLink());
+    assert.equal(fs.readFileSync(outside, 'utf8'), '{"permissions":{}}');
+  } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b settings: an entry for a dropped target is never taken out of a linked settings file', { skip: LINK_SKIP }, async () => {
+  const { orphanHookActions, orphanCaptureHookActions, orphanAgentGuardActions, orphanAllowListActions } = await import('./plan.mjs');
+  const T = await oldProduct();
+  const outside = path.join(T, '..', `${path.basename(T)}-wired.json`);
+  try {
+    await quietly(() => fixHooks(T));
+    const wired = fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8');
+    const planOf = () => [...orphanHookActions(T, ['.cursor']), ...orphanCaptureHookActions(T, ['.cursor']), ...orphanAgentGuardActions(T, ['.cursor']), ...orphanAllowListActions(T, ['.cursor'])]
+      .filter((a) => /^settings/.test(a.item));
+    assert.ok(planOf().length, 'a plain file has entries to take out');
+    fs.writeFileSync(outside, wired);
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.symlinkSync(outside, path.join(T, '.claude/settings.json'));
+    assert.deepEqual(planOf(), [], 'a linked one has none: it is not read');
+    assert.equal(fs.readFileSync(outside, 'utf8'), wired);
+  } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b settings: a settings file that links to /dev/zero is refused at once', { skip: IS_WINDOWS && 'no /dev/zero on Windows' }, async () => {
+  const T = await oldProduct();
+  try {
+    fs.rmSync(path.join(T, '.claude/settings.json'));
+    fs.symlinkSync('/dev/zero', path.join(T, '.claude/settings.json'));
+    const url = JSON.stringify(new URL('./plan.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const p = await import(${url});
+const T = process.argv[1];
+const all = [...p.hookActions(T), ...p.captureHookActions(T), ...p.agentGuardActions(T), ...p.orphanHookActions(T, ['.cursor']), ...p.legacyHookScriptActions(T)];
+process.stdout.write('\\n' + JSON.stringify(all.filter((a) => a.shared === '.claude/settings.json').map((a) => a.status)));`, T], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    const statuses = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.ok(statuses.length && statuses.every((s) => s === 'modified'), JSON.stringify(statuses));
+  } finally { cleanup(T); }
+});
