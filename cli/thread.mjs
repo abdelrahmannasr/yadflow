@@ -112,7 +112,7 @@ export async function runThread(root, { epic, json = false } = {}) {
       const stub = s.nodes[0]?.stub ? c.yellow('  [stub · backfill pending]') : '';
       // The genesis epic's grouping theme (E31). This list is where a person looks to see which
       // threads belong together, so it is the one place the tag earns its keep most.
-      const theme = s.nodes[0]?.theme ? c.dim(` #${s.nodes[0].theme}`) : '';
+      const theme = s.nodes[0]?.theme ? c.dim(` #${forTerminal(s.nodes[0].theme)}`) : '';
       log(`  ${c.bold(r)}${theme}  ${c.dim(`${s.nodes.length} epic(s)`)}${stub}${debt}`);
     }
     log(c.dim('\n  yad thread <epic>   show one thread in full'));
@@ -129,13 +129,13 @@ export async function runThread(root, { epic, json = false } = {}) {
     const tag = typeTag(n.type);
     const seal = n.sealed ? c.dim(' [sealed]') : '';
     const stub = n.stub ? c.yellow(' [stub · backfill pending]') : '';
-    const dep = n.depth ? c.dim(` ${n.depth}`) : '';
+    const dep = n.depth ? c.dim(` ${forTerminal(n.depth)}`) : '';
     // The grouping theme prints only when there is one. An epic with no theme is normal, and an
     // empty `theme: —` on every line would be noise on a surface people read top to bottom.
-    const theme = n.theme ? c.dim(` #${n.theme}`) : '';
-    log(`  • ${c.bold(n.id)}  ${tag}${dep}${theme}  ${c.dim('@ ' + n.currentStep)}${seal}${stub}`);
+    const theme = n.theme ? c.dim(` #${forTerminal(n.theme)}`) : '';
+    log(`  • ${c.bold(n.id)}  ${tag}${dep}${theme}  ${c.dim('@ ' + forTerminal(n.currentStep))}${seal}${stub}`);
     if (n.parent) log(c.dim(`      parent: ${n.parent}   inherits: [${n.inherits.join(', ') || '—'}]`));
-    if (n.defect) log(c.dim(`      defect: ${n.defect.severity || '?'} · escaped@${n.defect.escape_stage || '?'} · ${n.defect.root_cause || ''}`));
+    if (n.defect) log(c.dim(`      defect: ${forTerminal(n.defect.severity || '?')} · escaped@${forTerminal(n.defect.escape_stage || '?')} · ${forTerminal(n.defect.root_cause || '')}`));
     if (n.brokenThread) log(c.red(`      ✗ ${n.brokenThread}`));
   }
   log(c.bold('\n  Current truth') + c.dim('  (authoritative source per artifact)'));

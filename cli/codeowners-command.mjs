@@ -189,7 +189,7 @@ function printRepo(name, r) {
     const partial = r.notRead.length ? ' (from the lines yad could read)' : '';
     if (i.quiet.length) {
       const gl = r.platform === 'gitlab' ? '; on GitLab an @name can also be a group, which never commits' : '';
-      hand(`no commit on the checked-out branch in the last ${WINDOW_WORDS} carries a ${host} noreply address for ${i.quiet.join(', ')}${partial} — a hint only: they may commit under another address or work in other repos, so this does not mean they have left${gl}`);
+      hand(`no commit on the checked-out branch in the last ${WINDOW_WORDS} carries a ${host} noreply address for ${i.quiet.map(forTerminal).join(', ')}${partial} — a hint only: they may commit under another address or work in other repos, so this does not mean they have left${gl}`);
     } else if (i.checked) {
       info(`every @login ${r.path} lists${partial} has a commit in the last ${WINDOW_WORDS} with its ${host} noreply address`);
     }

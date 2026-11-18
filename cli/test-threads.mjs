@@ -295,14 +295,19 @@ test('sealedEpic + openDebtOnThread + threadSummary reflect ship + debt state', 
   assert.ok(s.nodes.find((n) => n.id === 'EP-gen').sealed);
 });
 
-test('E125 (c): yad thread prints an open debt reason from the Product cleaned', async () => {
+test('E125 (c): yad thread prints an open debt reason and an epic theme from the Product cleaned', async () => {
   const T = productConfig();
   try {
     writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped'] });
     writeEpic(T, 'EP-hot', { kind: 'hotfix', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] },
       { debt: [{ thread: 'EP-gen', epicId: 'EP-hot', status: 'open', reason: 'outage\u001b]0;pwned\u0007\u001b[2J', requires: ['regression-test\u001b[31m'] }] });
+    // The theme of an epic, free text in epic.md, is cleaned too, in the list and in the thread.
+    writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen', theme: 'cart\u001b]0;pwned\u0007' }, { stories: ['shipped'] });
     const out = await grab(() => runThread(T, { epic: 'EP-gen' }));
     assert.match(out, /EP-hot: outage/);
+    assert.match(out, /#cart/);
+    const list = await grab(() => runThread(T, {}));
+    assert.ok(!list.includes('\u001b') && !list.includes('\u0007'), `the thread list is cleaned too: ${JSON.stringify(list)}`);
     // The tests run with no terminal, so yad adds no colour codes of its own: any ESC or BEL came from the Product.
     assert.ok(!out.includes('\u001b') && !out.includes('\u0007'), `no escape from the Product reaches the terminal: ${JSON.stringify(out)}`);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
