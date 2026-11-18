@@ -506,7 +506,7 @@ export async function resolveProfile(root, opts = {}) {
 // the remaining steps — install, Product platform, optional tools, repos, wiring — and persists the profile.
 export async function runSetup(root, opts = {}) {
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
-  log(c.dim(`target: ${root}`));
+  log(c.dim(`target: ${forTerminal(root)}`));
   // E159: a bad flag value, or (under --json) an unanswered question, is refused here — before anything is written.
   assertSetupAnswered(root, opts);
   const notes = [];
