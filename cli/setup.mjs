@@ -1066,8 +1066,12 @@ export function ensurePackIgnored(root) {
 // goes straight to yad's own stdout (never held in memory: a pack is often bigger than a captured buffer).
 // `include` is Repomix's own `--include` text (globs, comma-separated); `logs` adds the recent git log.
 // `report`: to a file, Repomix's own summary (its secret check included) is shown on stderr, not dropped.
+// `place` (`yad repo pack -o <file>`): Repomix writes into its temp folder, and the pack is then put at `out`
+// without following a link there (see `placeFile`).
 // Returns run()'s result, or `{ ok: false, noWork: <why> }` when the temporary folder could not be made.
-export function runRepomix(repoRoot, { include = null, logs = false, out, report = false }) {
+export function runRepomix(repoRoot, { include = null, logs = false, out, report = false, place = false }) {
+  const odd = launcherUnsafe([repoRoot, include, out]);
+  if (odd !== null) return { ok: false, stderr: `${odd} holds a %, which the Windows shell npx runs through would read as a variable` };
   // npx runs from a fresh empty folder of the person's own, never from the code repo (E125 b). npm reads a
   // `.npmrc` in the folder it runs from and its parents, so one committed to the repo or the Product could
   // send npm to another registry, whose "repomix" would then run here. Repomix also loads its config
@@ -1084,15 +1088,40 @@ export function runRepomix(repoRoot, { include = null, logs = false, out, report
     return { ok: false, stderr: '', noWork: e.message };
   }
   const args = [repoRoot, '--compress', ...(include ? ['--include', include] : []), ...(logs ? ['--include-logs'] : []), '--style', 'markdown',
-    ...(out === '-' ? ['--stdout'] : ['-o', out])];
+    ...(out === '-' ? ['--stdout'] : ['-o', place ? path.join(work, 'pack.md') : out])];
   try {
     // The vetted version, never `@latest` (E88): a new Repomix release reaches users only once it is vetted.
     // `--registry` goes before the package: npx passes anything after it to Repomix.
     // To stdout, Repomix's output is passed straight through; its errors are still read.
     const stdio = out === '-' ? ['ignore', 'inherit', 'pipe'] : report ? ['ignore', 2, 'pipe'] : undefined;
-    return runLauncher('npx', [`--registry=${DEFAULT_REGISTRY}/`, `repomix@${REPOMIX_VERSION}`, ...args],
+    const r = runLauncher('npx', [`--registry=${DEFAULT_REGISTRY}/`, `repomix@${REPOMIX_VERSION}`, ...args],
       { cwd: work, ...(stdio ? { stdio } : {}) });
+    if (!r.ok || !place || out === '-') return r;
+    const why = placeFile(path.join(work, 'pack.md'), out);
+    return why ? { ...r, ok: false, stderr: why } : r;
   } finally { fs.rmSync(work, { recursive: true, force: true }); }
+}
+
+// On Windows npx runs through a shell string (`launcherInvocation`), where `%NAME%` is replaced by a
+// variable's value. The first of `values` with a `%` there, or null. `platform` is for tests.
+export function launcherUnsafe(values, platform = process.platform) {
+  if (platform !== 'win32') return null;
+  return values.find((v) => typeof v === 'string' && v.includes('%')) ?? null;
+}
+
+// Put the file `from` at `to` without following a link at `to`: copied to a new name beside it (made fresh,
+// so never through a link), then renamed over `to` — a rename replaces a link, never writes through it.
+// The reason it could not, or null.
+export function placeFile(from, to) {
+  const tmp = path.join(path.dirname(to), `.${path.basename(to)}.yad-${process.pid}-${Date.now()}`);
+  try {
+    fs.copyFileSync(from, tmp, fs.constants.COPYFILE_EXCL);
+    fs.renameSync(tmp, to);
+    return null;
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    return `could not write ${to} (${e.message})`;
+  }
 }
 
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off). `report`: show
