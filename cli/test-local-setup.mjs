@@ -27,7 +27,7 @@ process.env.YAD_PLATFORM_LOGIN = '0';
 process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 
-const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS, runLocalSetupDone, runLocalSetupSkip } = await import('./local-setup.mjs');
+const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS, runLocalSetupDone, runLocalSetupSkip, runLocalSetupRemove } = await import('./local-setup.mjs');
 const { localSetupRecordPath, readLocalSetupRecord } = await import('./local-setup-record.mjs');
 const { yadflowSteps, stepHash, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC } = await import('./local-setup-steps.mjs');
 const { applyMarkedBlock } = await import('./marked-block.mjs');
@@ -1185,4 +1185,101 @@ test('E185 part 4 review 4: a plain hooks folder and a ~ hooksPath are read wher
     fs.chmodSync(at, 0o755);
     assert.equal(localSetupNoticeStates(dir)[0].state, 'hand-wired');
   } finally { process.env.HOME = prev; }
+});
+
+// ---- E125 b: the script is read only as a plain file (EP-factory-safety-S02) ------------------------
+// It is committed in the Product, so a link there could point outside it, or at a device whose read never
+// ends. A link or a folder is refused like a file that does not parse, and never read or rewritten.
+const LINK_SKIP = process.platform === 'win32' && 'making a link needs admin rights on Windows';
+const NOT_PLAIN = 'is a link or not a plain file, so it was not read';
+
+test('E125 b: a script that is a link (even a dangling one) or a folder is named, never read and never rewritten', { skip: LINK_SKIP }, () => {
+  const seed = product();
+  applyAll(localSetupActions(seed));
+  const valid = read(path.join(seed, LOCAL_SETUP_FILE));
+  for (const kind of ['link', 'dangling', 'folder']) {
+    const dir = product();
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    const outside = path.join(dir, '..', `${path.basename(dir)}-outside.json`);
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      if (kind === 'folder') fs.mkdirSync(file);
+      else {
+        if (kind === 'link') fs.writeFileSync(outside, valid);
+        fs.symlinkSync(outside, file);
+      }
+      const said = [];
+      const orig = console.log;
+      console.log = (...a) => { said.push(a.join(' ')); };
+      let actions;
+      try {
+        actions = localSetupActions(dir);
+        actions[0].apply();
+        runLocalSetupRemove(dir, { ids: ['docker'], json: true });
+      } finally { console.log = orig; }
+      assert.equal(process.exitCode, 1, `${kind}: the refusal fails the command`);
+      process.exitCode = 0;
+      assert.deepEqual(actions.map((a) => [a.status, a.writesNothing]), [['modified', true]], `${kind}: the view is not built from a file yad did not read`);
+      assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE}: it ${NOT_PLAIN}`), kind);
+      assert.match(said.join('\n'), /is a link or not a plain file, so it was not changed/, `${kind}: add and remove refuse it`);
+      const st = localSetupState(dir, { items: [] });
+      assert.deepEqual([st.exists, st.error], [true, NOT_PLAIN], `${kind}: the list says why`);
+      if (kind === 'folder') assert.ok(fs.lstatSync(file).isDirectory());
+      else assert.ok(fs.lstatSync(file).isSymbolicLink(), `${kind}: the link is left as it is`);
+      if (kind === 'link') assert.equal(read(outside), valid, 'the file it points at is untouched');
+      if (kind === 'dangling') assert.ok(!fs.existsSync(outside), 'nothing was created where it points');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { force: true }); }
+  }
+  fs.rmSync(seed, { recursive: true, force: true });
+});
+
+test('E125 b: a link put in place of the script after the plan is not written through', { skip: LINK_SKIP }, () => {
+  const dir = product();
+  const outside = path.join(dir, '..', `${path.basename(dir)}-later.json`);
+  try {
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    put(file, JSON.stringify({ team: [] }));
+    const [json] = localSetupActions(dir);
+    assert.equal(json.status, 'outdated');
+    fs.writeFileSync(outside, JSON.stringify({ team: [] }));
+    fs.rmSync(file);
+    fs.symlinkSync(outside, file);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try { json.apply(); } finally { console.log = orig; }
+    assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE} ${NOT_PLAIN} — left untouched`));
+    assert.ok(fs.lstatSync(file).isSymbolicLink());
+    assert.equal(read(outside), JSON.stringify({ team: [] }));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { force: true }); }
+});
+
+test('E125 b: a script that links to /dev/zero is refused at once', { skip: process.platform === 'win32' && 'no /dev/zero on Windows' }, () => {
+  const dir = product();
+  try {
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.symlinkSync('/dev/zero', path.join(dir, LOCAL_SETUP_FILE));
+    const url = JSON.stringify(new URL('./local-setup.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const m = await import(${url});
+const dir = process.argv[1];
+const actions = m.localSetupActions(dir);
+process.stdout.write('\\n' + JSON.stringify([actions.map((a) => a.status), m.localSetupState(dir, { items: [] }).error]));`, dir], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), [['modified'], NOT_PLAIN]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('E125 b: a script with a byte-order mark is still merged and written when it is behind', () => {
+  const dir = product();
+  try {
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    put(file, `\ufeff${JSON.stringify({ team: [teamStep()], yadflow: [] })}`);
+    const [json] = localSetupActions(dir);
+    assert.equal(json.status, 'outdated', 'read past the mark, so not "does not parse"');
+    json.apply();
+    const doc = JSON.parse(read(file));
+    assert.equal(doc.team[0].id, 'docker', 'the team\'s step is kept');
+    assert.ok(doc.yadflow.some((s) => s.id === 'yadflow-cli'), 'yad\'s steps are written');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

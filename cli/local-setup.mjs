@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject } from './lib.mjs';
+import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject, readPlainFile, NOT_PLAIN_FILE } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
 import { productConfigPath, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import {
@@ -83,6 +83,10 @@ export function stepProblems(s, source) {
 
 // A file's text as JSON, a byte-order mark (some Windows editors add one) read past.
 export const parseJSON = (text) => JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+// The file is committed in the Product, so it is read only as a plain file (E125 b): a link there could point
+// outside the Product, or at a device whose read never ends. `readPlainFile` gives null for no file and throws
+// NOT_PLAIN_FILE for a link or a folder; this is what each caller says of the second.
+const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
 
 // The two lists, each step checked. `problems` names every step left out and why; the file still answers.
 //
@@ -121,7 +125,10 @@ export function readCommittedLocalSetup(root) {
   let text = r.status === 0 ? r.stdout : null;
   const committed = text !== null;
   if (text === null) {
-    try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch { return { doc: null, committed: false, error: null }; }
+    try { text = readPlainFile(localSetupPath(root)); } catch (e) {
+      return { doc: null, committed: false, error: e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : null };
+    }
+    if (text === null) return { doc: null, committed: false, error: null };
   }
   try {
     const doc = parseJSON(text);
@@ -174,10 +181,12 @@ function localSetupJsonAction(root) {
   const dest = localSetupPath(root);
   const base = { scope: 'product', item: LOCAL_SETUP_FILE, root, paths: [], shared: LOCAL_SETUP_FILE, what: 'its yadflow steps', mergeShared: (o) => mergeLocalSetup(o, root) };
   let raw = null;
-  try { raw = fs.readFileSync(dest, 'utf8'); } catch { /* missing */ }
+  let notPlain = false;
+  try { raw = readPlainFile(dest); } catch (e) { notPlain = e?.code === NOT_PLAIN_FILE; /* else unreadable: as missing, as before */ }
   let parsed = null;
   if (raw !== null) { try { parsed = parseJSON(raw); } catch { parsed = undefined; } }
-  const merged = raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
+  const merged = notPlain ? { unreadable: `it ${NOT_PLAIN_SAID}` }
+    : raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
   // Never rebuilt from nothing: that would delete every step the team wrote (memory: read strictly before a write).
   if (merged.unreadable) {
     if (!said.has(dest)) { said.add(dest); warn(`${LOCAL_SETUP_FILE}: ${merged.unreadable} — the local setup script was left as it is; fix it (or restore it from git), then re-run \`yad check --fix\``); }
@@ -189,8 +198,13 @@ function localSetupJsonAction(root) {
     // Re-read at apply time: setup and reconcile build every action before applying any.
     apply: () => {
       let now = {};
-      if (fs.existsSync(dest)) {
-        try { now = parseJSON(fs.readFileSync(dest, 'utf8')); } catch { warn(`${LOCAL_SETUP_FILE} does not parse — left untouched`); return; }
+      let text;
+      try { text = readPlainFile(dest); } catch (e) {
+        if (e?.code === NOT_PLAIN_FILE) { warn(`${LOCAL_SETUP_FILE} ${NOT_PLAIN_SAID} — left untouched`); return; }
+        text = ''; // cannot be read: refused below, as a file that does not parse
+      }
+      if (text !== null) {
+        try { now = parseJSON(text); } catch { warn(`${LOCAL_SETUP_FILE} does not parse — left untouched`); return; }
       }
       const next = mergeLocalSetup(now, root);
       if (next.unreadable) { warn(`${LOCAL_SETUP_FILE}: ${next.unreadable} — left untouched`); return; }
@@ -286,7 +300,7 @@ export function localSetupActions(root) {
   let doc = null;
   let now = {};
   if (!json.writesNothing) {
-    try { now = parseJSON(fs.readFileSync(localSetupPath(root), 'utf8')); } catch { /* new */ }
+    try { now = parseJSON(readPlainFile(localSetupPath(root)) ?? '{}'); } catch { /* new */ }
     doc = mergeLocalSetup(isPlainObject(now) ? now : {}, root).settings;
   }
   const actions = [json];
@@ -473,7 +487,8 @@ const STEP_KEYS = Object.freeze(['id', 'title', 'purpose', 'impact', 'when', 'co
 // it, with yadflow's steps, and add never writes yadflow's part (review 1). → { doc } | { error }
 function workingScript(root) {
   let text;
-  try { text = fs.readFileSync(localSetupPath(root), 'utf8'); } catch (e) { return { error: e.code === 'ENOENT' ? 'is not here yet — `yad check --fix` (or `yad update`) writes it' : 'cannot be read' }; }
+  try { text = readPlainFile(localSetupPath(root)); } catch (e) { return { error: e?.code === NOT_PLAIN_FILE ? 'is a link or not a plain file' : 'cannot be read' }; }
+  if (text === null) return { error: 'is not here yet — `yad check --fix` (or `yad update`) writes it' };
   let doc;
   try { doc = parseJSON(text); } catch { return { error: 'does not parse' }; }
   if (!isPlainObject(doc) || (doc.team !== undefined && !Array.isArray(doc.team)) || (doc.yadflow !== undefined && !Array.isArray(doc.yadflow))) return { error: 'is not the shape yad writes' };
