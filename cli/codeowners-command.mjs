@@ -17,7 +17,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
-import { c, fail, hand, info, log, ok, run, warn, emitJSON } from './lib.mjs';
+import { c, fail, hand, info, log, ok, run, warn, emitJSON, forTerminal } from './lib.mjs';
 import { deadLines, diskCodeowners, ownersFor, parseCodeowners } from './codeowners.mjs';
 import { OWNER_WINDOW, gitEnv, recentLoginsFor, repoFiles, targets } from './riskmap-command.mjs';
 import { PUBLIC_HOST, remoteHost } from './openpr.mjs';
@@ -176,11 +176,11 @@ function printRepo(name, r) {
   if (r.none && !r.unguarded) { info(`none — ${r.none}; nothing to check`); return; }
   const findings = codeownersFindings(r);
   if (r.none) {
-    for (const f of findings) warn(f.message);
+    for (const f of findings) warn(forTerminal(f.message));
     hand(unguardedHint(r.platform, r.unguarded));
     return;
   }
-  for (const f of findings) warn(f.message);
+  for (const f of findings) warn(forTerminal(f.message));
   if (!findings.length) ok(`${r.path}: every line yad can read matches a file`);
   const i = r.inactive;
   if (i?.unknown) info(`owners with recent commits: not known — ${i.unknown}`);

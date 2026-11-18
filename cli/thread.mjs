@@ -150,7 +150,7 @@ export async function runThread(root, { epic, json = false } = {}) {
   }
   if (s.openDebt.length) {
     log(c.red('\n  ⚠ Open reconcile debt (blocks the next change until paid):'));
-    for (const d of s.openDebt) log(`    ${d.epicId}: ${d.reason || ''} — requires [${(d.requires || []).join(', ')}]`);
+    for (const d of s.openDebt) log(`    ${forTerminal(d.epicId)}: ${forTerminal(d.reason || '')} — requires [${(d.requires || []).map(forTerminal).join(', ')}]`);
   } else {
     log(c.green('\n  ✓ no open reconcile debt'));
   }
