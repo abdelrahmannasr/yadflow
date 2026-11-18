@@ -38,7 +38,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { c, emitJSON, info, log, samePath } from './lib.mjs';
+import { c, emitJSON, info, log, samePath, readPlainFile, NOT_PLAIN_FILE } from './lib.mjs';
 import { IDE_AGENTS, IDE_OPENCODE_DIR } from './manifest.mjs';
 
 // A SKILL.md or agent file bigger than this is not hashed or parsed — no real one comes near it, and a
@@ -90,6 +90,8 @@ const CODEX_CONFIG_PLACES = [
 // too big to read — the same answer for the same cause, whichever file it is.
 const NOT_JSON = 'could not be read as a JSON object';
 const NOT_SERVERS = '`mcpServers` is not an object';
+// A file in the project folder that is a link or not a plain file (E125 b): never read, and said so.
+const NOT_PLAIN = 'is a link or not a plain file, so it was not read';
 
 const CLAUDE_USER_CONFIG = '.claude.json';
 const CLAUDE_PLUGINS = '.claude/plugins/installed_plugins.json';
@@ -115,11 +117,28 @@ function bytesOf(file, max = MAX_FILE_BYTES) {
 
 // Parsed JSON, `undefined` when the file is not there, and `null` when it is there but does not parse
 // (or is too big to read) — the caller reports that as a problem rather than as "no servers".
-function jsonOf(file, { comments = false } = {}) {
-  if (!statOf(file)) return undefined;
-  const bytes = bytesOf(file, MAX_CONFIG_BYTES);
-  if (!bytes) return null;
-  const text = bytes.toString('utf8').replace(/^\uFEFF/, '');
+// `plain` is for a file in the project folder, which the team commits (E125 b): it is read only as a plain
+// file, so a link there (to a file outside the project, or to a device whose read never ends) or a folder is
+// never opened; that is NOT_PLAIN_DOC, which the caller names. A file in the home folder is the person's
+// own and is read as before: skill managers and dotfile setups link those on purpose — and so is the project
+// folder's when the project IS the home folder.
+const NOT_PLAIN_DOC = Symbol('not a plain file');
+function jsonOf(file, { comments = false, plain = false } = {}) {
+  let text;
+  if (plain) {
+    let st;
+    try { st = fs.lstatSync(file); } catch { return undefined; }
+    if (!st.isFile()) return NOT_PLAIN_DOC;
+    if (st.size > MAX_CONFIG_BYTES) return null;
+    try { text = readPlainFile(file); } catch (e) { return e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_DOC : null; }
+    if (text === null) return undefined;
+  } else {
+    if (!statOf(file)) return undefined;
+    const bytes = bytesOf(file, MAX_CONFIG_BYTES);
+    if (!bytes) return null;
+    text = bytes.toString('utf8');
+  }
+  text = text.replace(/^\uFEFF/, '');
   try { return JSON.parse(comments ? stripJsonComments(text) : text); } catch { return null; }
 }
 
@@ -454,8 +473,9 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
   for (const place of scopes(AGENT_PLACES)) items.push(...agentsIn(baseOf(place.scope, root, home), place));
 
   for (const place of scopes(MCP_JSON_PLACES)) {
-    const doc = jsonOf(path.join(baseOf(place.scope, root, home), place.file), { comments: !!place.comments });
+    const doc = jsonOf(path.join(baseOf(place.scope, root, home), place.file), { comments: !!place.comments, plain: place.scope === 'project' && !sameFolder });
     if (doc === undefined) continue;
+    if (doc === NOT_PLAIN_DOC) { problem(place.scope, place.file, NOT_PLAIN); continue; }
     if (!isPlainObject(doc)) { problem(place.scope, place.file, NOT_JSON); continue; }
     if (doc.mcpServers === undefined) continue;
     if (!isPlainObject(doc.mcpServers)) { problem(place.scope, place.file, NOT_SERVERS); continue; }
@@ -517,8 +537,9 @@ function claudePlugins(root, home, problem) {
   const inHome = path.resolve(root) === path.resolve(home) || samePath(root, home);
   const enabledIn = [['project', '.claude/settings.local.json'], ['project', '.claude/settings.json'], ...(inHome ? [] : [['user', CLAUDE_USER_SETTINGS]])]
     .map(([scope, rel]) => {
-      const d = jsonOf(path.join(scope === 'user' ? home : root, rel));
-      if (d === null || (d !== undefined && !isPlainObject(d))) problem(scope, rel, NOT_JSON);
+      const d = jsonOf(path.join(scope === 'user' ? home : root, rel), { plain: scope === 'project' && !inHome });
+      if (d === NOT_PLAIN_DOC) problem(scope, rel, NOT_PLAIN);
+      else if (d === null || (d !== undefined && !isPlainObject(d))) problem(scope, rel, NOT_JSON);
       return isPlainObject(d?.enabledPlugins) ? d.enabledPlugins : null;
     });
   const enabledOf = (id) => {

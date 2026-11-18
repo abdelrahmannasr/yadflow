@@ -2224,3 +2224,67 @@ test('E165 PR 2: the flow offers the connect step — yad-ui and the test step b
   assert.match(section, /offer to connect it, once: run `yad toolbox connect <id> --json` and follow the\nconnect-tool rule\. On a no, or when a step fails, use the fallback\./);
   assert.match(section, /not turned off, not removed\nby the team/, 'a plugin turned off, or a tool the team removed, is never offered');
 });
+
+// ---- E125 b: a project file is read only as a plain file (EP-factory-safety-S02) -------------------
+const LINK_SKIP = process.platform === 'win32' && 'links need admin rights on Windows';
+const NOT_PLAIN = 'is a link or not a plain file, so it was not read';
+
+test('E125 b detect: a project MCP or settings file that is a link or a folder is a problem, never read', { skip: LINK_SKIP }, () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    // Valid files outside the project: a read that followed the link would list their servers.
+    put(path.join(T, 'outside.json'), JSON.stringify({ mcpServers: { leaked: { command: 'x' } }, enabledPlugins: { 'a@m': true } }));
+    fs.mkdirSync(path.join(proj, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'outside.json'), path.join(proj, '.mcp.json'));
+    fs.mkdirSync(path.join(proj, '.cursor/mcp.json'));
+    // A dangling link is a link too, not a missing file.
+    fs.symlinkSync(path.join(T, 'nowhere.json'), path.join(proj, '.gemini-settings-link'));
+    fs.mkdirSync(path.join(proj, '.gemini'));
+    fs.renameSync(path.join(proj, '.gemini-settings-link'), path.join(proj, '.gemini/settings.json'));
+    put(path.join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'a@m': [{ scope: 'user' }] } }));
+    fs.mkdirSync(path.join(proj, '.claude'));
+    fs.symlinkSync(path.join(T, 'outside.json'), path.join(proj, '.claude/settings.json'));
+    // The home folder's own files are the person's: a link there is followed, as before.
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'outside.json'), path.join(home, '.cursor/mcp.json'));
+    const { items, problems } = detectInstalled(proj, { home });
+    assert.deepEqual(problems.filter((p) => p.problem === NOT_PLAIN).map((p) => p.where).sort(), ['.claude/settings.json', '.cursor/mcp.json', '.gemini/settings.json', '.mcp.json']);
+    assert.deepEqual(find(items, 'mcp', 'leaked').map((i) => i.where), ['~/.cursor/mcp.json'], 'only the home folder\'s link is followed');
+    assert.equal(find(items, 'plugin', 'a@m')[0].enabled, null, 'the linked settings file is not read for the plugin\'s switch');
+    // A broken project file keeps its own answer.
+    fs.rmSync(path.join(proj, '.mcp.json'));
+    put(path.join(proj, '.mcp.json'), '{ broken');
+    assert.deepEqual(detectInstalled(proj, { home }).problems.find((p) => p.where === '.mcp.json'), { where: '.mcp.json', problem: 'could not be read as a JSON object' });
+    // A byte-order mark is still read past.
+    fs.rmSync(path.join(proj, '.mcp.json'));
+    put(path.join(proj, '.mcp.json'), `\ufeff${JSON.stringify({ mcpServers: { bom: { command: 'x' } } })}`);
+    assert.equal(find(detectInstalled(proj, { home }).items, 'mcp', 'bom').length, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b detect: a project .mcp.json that links to /dev/zero is a problem at once', { skip: process.platform === 'win32' && 'no /dev/zero on Windows' }, () => {
+  const T = tmp();
+  try {
+    fs.mkdirSync(path.join(T, 'p'));
+    fs.symlinkSync('/dev/zero', path.join(T, 'p', '.mcp.json'));
+    const url = JSON.stringify(new URL('./detect.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { detectInstalled } = await import(${url});
+process.stdout.write(JSON.stringify(detectInstalled(process.argv[1], { home: process.argv[2] }).problems));`, path.join(T, 'p'), path.join(T, 'h')], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), [{ where: '.mcp.json', problem: NOT_PLAIN }]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E125 b detect: run in the home folder, its own linked files are read as the person\'s', { skip: LINK_SKIP }, () => {
+  const T = tmp();
+  try {
+    put(path.join(T, 'dotfiles/mcp.json'), JSON.stringify({ mcpServers: { mine: { command: 'x' } } }));
+    fs.symlinkSync(path.join(T, 'dotfiles/mcp.json'), path.join(T, '.mcp.json'));
+    const { items, problems } = detectInstalled(T, { home: T });
+    assert.deepEqual(problems, []);
+    assert.equal(find(items, 'mcp', 'mine').length, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
