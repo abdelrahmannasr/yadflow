@@ -2288,3 +2288,40 @@ test('E125 b detect: run in the home folder, its own linked files are read as th
     assert.equal(find(items, 'mcp', 'mine').length, 1);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('E125 b detect: a project .codex/config.toml that is a link, a folder or a link to /dev/zero is a problem, never read', { skip: LINK_SKIP }, () => {
+  const T = tmp();
+  const proj = path.join(T, 'p');
+  const home = path.join(T, 'h');
+  try {
+    put(path.join(T, 'outside.toml'), '[mcp_servers.leaked]\ncommand = "x"\n');
+    fs.mkdirSync(path.join(proj, '.codex'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'outside.toml'), path.join(proj, '.codex/config.toml'));
+    // The home folder's own is the person's: followed, as before.
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    fs.symlinkSync(path.join(T, 'outside.toml'), path.join(home, '.codex/config.toml'));
+    let got = detectInstalled(proj, { home });
+    assert.deepEqual(got.problems, [{ where: '.codex/config.toml', problem: NOT_PLAIN }]);
+    assert.deepEqual(find(got.items, 'mcp', 'leaked').map((i) => i.where), ['~/.codex/config.toml']);
+    fs.rmSync(path.join(proj, '.codex/config.toml'));
+    fs.mkdirSync(path.join(proj, '.codex/config.toml'));
+    assert.deepEqual(detectInstalled(proj, { home }).problems, [{ where: '.codex/config.toml', problem: NOT_PLAIN }]);
+    // A plain file is read as before.
+    fs.rmSync(path.join(proj, '.codex/config.toml'), { recursive: true });
+    put(path.join(proj, '.codex/config.toml'), '[mcp_servers.mine]\ncommand = "x"\n');
+    got = detectInstalled(proj, { home });
+    assert.deepEqual(got.problems, []);
+    assert.deepEqual(find(got.items, 'mcp', 'mine').map((i) => i.where), ['.codex/config.toml']);
+    // Run in the home folder, its own linked file is the person's.
+    fs.rmSync(path.join(proj, '.codex/config.toml'));
+    assert.deepEqual(detectInstalled(home, { home }).problems, []);
+    if (process.platform !== 'win32') {
+      fs.symlinkSync('/dev/zero', path.join(proj, '.codex/config.toml'));
+      const url = JSON.stringify(new URL('./detect.mjs', import.meta.url).href);
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { detectInstalled } = await import(${url});
+process.stdout.write(JSON.stringify(detectInstalled(process.argv[1], { home: process.argv[2] }).problems));`, proj, path.join(T, 'none')], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+      assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+      assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), [{ where: '.codex/config.toml', problem: NOT_PLAIN }]);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

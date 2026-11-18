@@ -38,7 +38,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { c, emitJSON, info, log, samePath, readPlainFile, NOT_PLAIN_FILE } from './lib.mjs';
+import { c, emitJSON, info, log, samePath, readPlainBytes, NOT_PLAIN_FILE } from './lib.mjs';
 import { IDE_AGENTS, IDE_OPENCODE_DIR } from './manifest.mjs';
 
 // A SKILL.md or agent file bigger than this is not hashed or parsed — no real one comes near it, and a
@@ -108,37 +108,40 @@ function entriesOf(dir) {
   try { return fs.readdirSync(dir).sort(); } catch { return []; }
 }
 
-// A file's bytes, or null when it is missing, not a file, too big or unreadable.
-function bytesOf(file, max = MAX_FILE_BYTES) {
+// `plain` is for an agent config file in the project folder, which the team commits (E125 b): it is read only
+// as a plain file, so a link there (to a file outside the project, or to a device whose read never ends) or a
+// folder is never opened; that is NOT_PLAIN_DOC, which the caller names. A file in the home folder is the
+// person's own and is read as before: skill managers and dotfile setups link those on purpose — and so is the
+// project folder's when the project IS the home folder. Skills and agent files keep following links in both
+// places: installing one as a link is a supported layout, and a device is never read (only a regular file is).
+const NOT_PLAIN_DOC = Symbol('not a plain file');
+// Whether there is an entry at `file`, as the read in that mode sees it: a link counts in `plain` mode.
+const present = (file, plain) => (plain ? !!fs.lstatSync(file, { throwIfNoEntry: false }) : !!statOf(file));
+
+// A file's bytes, or null when it is missing, not a file, too big or unreadable — or NOT_PLAIN_DOC for a
+// link or a folder, in `plain` mode.
+function bytesOf(file, max = MAX_FILE_BYTES, { plain = false } = {}) {
+  if (plain) {
+    let st;
+    try { st = fs.lstatSync(file); } catch { return null; }
+    if (!st.isFile()) return NOT_PLAIN_DOC;
+    if (st.size > max) return null;
+    try { return readPlainBytes(file); } catch (e) { return e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_DOC : null; }
+  }
   const st = statOf(file);
   if (!st?.isFile() || st.size > max) return null;
   try { return fs.readFileSync(file); } catch { return null; }
 }
 
 // Parsed JSON, `undefined` when the file is not there, and `null` when it is there but does not parse
-// (or is too big to read) — the caller reports that as a problem rather than as "no servers".
-// `plain` is for a file in the project folder, which the team commits (E125 b): it is read only as a plain
-// file, so a link there (to a file outside the project, or to a device whose read never ends) or a folder is
-// never opened; that is NOT_PLAIN_DOC, which the caller names. A file in the home folder is the person's
-// own and is read as before: skill managers and dotfile setups link those on purpose — and so is the project
-// folder's when the project IS the home folder.
-const NOT_PLAIN_DOC = Symbol('not a plain file');
+// (or is too big to read) — the caller reports that as a problem rather than as "no servers". In `plain`
+// mode (see above) a link or a folder is NOT_PLAIN_DOC.
 function jsonOf(file, { comments = false, plain = false } = {}) {
-  let text;
-  if (plain) {
-    let st;
-    try { st = fs.lstatSync(file); } catch { return undefined; }
-    if (!st.isFile()) return NOT_PLAIN_DOC;
-    if (st.size > MAX_CONFIG_BYTES) return null;
-    try { text = readPlainFile(file); } catch (e) { return e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_DOC : null; }
-    if (text === null) return undefined;
-  } else {
-    if (!statOf(file)) return undefined;
-    const bytes = bytesOf(file, MAX_CONFIG_BYTES);
-    if (!bytes) return null;
-    text = bytes.toString('utf8');
-  }
-  text = text.replace(/^\uFEFF/, '');
+  if (!present(file, plain)) return undefined;
+  const bytes = bytesOf(file, MAX_CONFIG_BYTES, { plain });
+  if (bytes === NOT_PLAIN_DOC) return bytes;
+  if (!bytes) return null;
+  const text = bytes.toString('utf8').replace(/^\uFEFF/, '');
   try { return JSON.parse(comments ? stripJsonComments(text) : text); } catch { return null; }
 }
 
@@ -507,8 +510,10 @@ export function detectInstalled(root, { home = os.homedir() } = {}) {
 
   for (const place of scopes(CODEX_CONFIG_PLACES)) {
     const file = path.join(baseOf(place.scope, root, home), place.file);
-    const bytes = bytesOf(file, MAX_CONFIG_BYTES);
-    if (!bytes) { if (statOf(file)) problem(place.scope, place.file, 'could not be read'); continue; }
+    const plain = place.scope === 'project' && !sameFolder;
+    const bytes = bytesOf(file, MAX_CONFIG_BYTES, { plain });
+    if (bytes === NOT_PLAIN_DOC) { problem(place.scope, place.file, NOT_PLAIN); continue; }
+    if (!bytes) { if (present(file, plain)) problem(place.scope, place.file, 'could not be read'); continue; }
     const text = bytes.toString('utf8');
     const where = shownPath(place.scope, place.file);
     for (const name of tomlTableNames(text, 'mcp_servers')) items.push({ kind: 'mcp', name, scope: place.scope, where, agents: ['Codex CLI'] });
