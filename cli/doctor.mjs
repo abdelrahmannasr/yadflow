@@ -3068,7 +3068,8 @@ export function brandChecks(root, checks) {
   if (r.brand.source) {
     const src = brandPath(root, r.brand.source);
     let text = null;
-    try { text = src ? fs.readFileSync(src, 'utf8') : null; } catch { /* a folder, or unreadable */ }
+    // A plain file only (E125 b): a folder, a device or a pipe is "cannot be read", never opened.
+    try { text = src ? readPlainFile(src) : null; } catch { /* not a plain file, or unreadable */ }
     if (!src) stale = `its source ${t(r.brand.source)} is not in the Product any more`;
     else if (text === null) stale = `its source ${t(r.brand.source)} cannot be read`;
     else if (r.brand.sourceHash && sourceFingerprint(text) !== r.brand.sourceHash) stale = `${t(r.brand.source)} changed since ${BRAND_FILE} was made`;

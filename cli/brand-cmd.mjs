@@ -8,7 +8,7 @@
 // prose (tables) is the yad-brand skill's job: the agent reads it and writes the same file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, readJSON, writeJSON } from './lib.mjs';
+import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, readJSON, readPlainFile, writeJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { BRAND_FILE, BRAND_VERSION, ROLES, isColor, FAMILY_RE, IMAGE_CAP, checkBrand, readBrand, contrastProblems, sourceFingerprint, brandPath } from './brand.mjs';
 
@@ -262,7 +262,8 @@ export async function runBrand(root, { action = 'show', args = [], from = null, 
     if (r.origin === 'product' && r.brand.source) {
       const src = brandPath(root, r.brand.source);
       let text = null;
-      try { text = src ? fs.readFileSync(src, 'utf8') : null; } catch { /* a folder, or unreadable */ }
+      // A plain file only (E125 b): a folder, a device or a pipe is "cannot be read", never opened.
+      try { text = src ? readPlainFile(src) : null; } catch { /* not a plain file, or unreadable */ }
       if (!src) stale = `its source ${r.brand.source} is not in the Product any more`;
       else if (text === null) stale = `its source ${r.brand.source} cannot be read`;
       else if (!r.brand.sourceHash) stale = null;
@@ -297,7 +298,10 @@ export async function runBrand(root, { action = 'show', args = [], from = null, 
     if (!src) return refuse(`no ${forTerminal(srcRel)} in the Product`, 'name the design system with --from <file> (a DESIGN.md), or ask the agent to fill the brand with the yad-brand skill', { json });
     for (const [flag, rel] of [['--logo', logo], ['--mark', mark]]) if (rel && !brandPath(root, rel)) return refuse(`${flag} ${forTerminal(rel)} is not a file inside the Product`, null, { json });
     let text;
-    try { text = fs.readFileSync(src, 'utf8'); } catch { return refuse(`${forTerminal(srcRel)} cannot be read as a file`, null, { json }); }
+    // A plain file only (E125 b): a folder, a device or a pipe is refused before any read, and a file gone
+    // since `brandPath` looked is refused the same way.
+    try { text = readPlainFile(src); } catch { text = null; }
+    if (text === null) return refuse(`${forTerminal(srcRel)} cannot be read as a file`, null, { json });
     // Relative to the Product's REAL path: `src` is real (brandPath), and a Product reached through a link
     // must never write a path that leaves it, or this machine's folders, into a committed file (review 1).
     const { brand, report } = brandFromDesign(root, text, { from: path.relative(fs.realpathSync(root), src).split(path.sep).join('/'), logo, mark });

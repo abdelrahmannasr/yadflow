@@ -588,3 +588,47 @@ test('#553 review 2: a dark primary is made lighter from rgb() too; one yadflow 
   assert.equal(lighter('hsl(1 2% 3%)'), null);
   assert.match(lighter('oklch(60% 0.2 250 / 50%)'), /^oklch\(0\.800 0\.2 250 \/ 50%\)$/);
 });
+
+// ---- E125 b: the design source is read only as a plain file (EP-factory-safety-S02) -----------------
+// `brandPath` already keeps the source inside the Product (a link out of it is "not in the Product"). What is
+// left is a pipe or a device inside it: opening a pipe with no writer never ends, so it is refused unopened.
+test('E125 b: a design source that is a pipe is "cannot be read" at once — for check, init and the doctor row', { skip: process.platform === 'win32' && 'no named pipes as files on Windows' }, async () => {
+  const { ws, root } = product({ design: YAML_DESIGN });
+  try {
+    await captured(() => runBrand(root, { action: 'init', json: true }));
+    fs.rmSync(path.join(root, 'DESIGN.md'));
+    const made = spawnSync('mkfifo', [path.join(root, 'DESIGN.md')]);
+    if (made.status !== 0) return;
+    const brandUrl = JSON.stringify(new URL('./brand-cmd.mjs', import.meta.url).href);
+    const doctorUrl = JSON.stringify(new URL('./doctor.mjs', import.meta.url).href);
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { runBrand } = await import(${brandUrl});
+const { brandChecks } = await import(${doctorUrl});
+const lib = await import(${JSON.stringify(new URL('./lib.mjs', import.meta.url).href)});
+const root = process.argv[1];
+const out = [];
+const orig = console.log;
+console.log = (s) => out.push(String(s));
+await runBrand(root, { action: 'check', json: true }); lib.endJSON();
+await runBrand(root, { action: 'init', force: true, json: true }); lib.endJSON();
+console.log = orig;
+process.exitCode = 0; // the init refusal sets it; this run reports through its output
+const rows = []; brandChecks(root, rows);
+process.stdout.write('\\n' + JSON.stringify([JSON.parse(out[0]).stale, JSON.parse(out[1]).error, rows.find((x) => x.id === 'brand').message]));`, root], { encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1' } });
+    assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    const [stale, refused, row] = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.match(stale, /its source DESIGN\.md cannot be read/);
+    assert.match(refused, /DESIGN\.md cannot be read as a file/);
+    assert.match(row, /its source DESIGN\.md cannot be read/);
+  } finally { done(ws); }
+});
+
+test('E125 b: a design source that links to another file inside the Product is still read, as before', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { ws, root } = product({ files: { 'design/DESIGN.md': YAML_DESIGN } });
+  try {
+    fs.symlinkSync(path.join(root, 'design/DESIGN.md'), path.join(root, 'DESIGN.md'));
+    const made = await captured(() => runBrand(root, { action: 'init', json: true }));
+    assert.equal(made.brand.source, 'design/DESIGN.md', 'read at its real path inside the Product');
+    assert.equal((await captured(() => runBrand(root, { action: 'check', json: true }))).stale, null);
+  } finally { done(ws); }
+});
