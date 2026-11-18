@@ -22,11 +22,16 @@ title or reorder what a line shows.
 - R2. `validDir`, `dirToAdd` and the `uncovered` finding are unchanged: each has an awk twin in
   `checks/risk-map-check.sh` that a parity test holds equal, and the check reads a hand-written line the
   same way in both.
+- R2b. A flagged folder below the top level is covered by its deepest parent folder with a clean name:
+  `yad risk-map draft` adds that parent's line when it has none, and still lists the flagged folder as not
+  added. The risk-map reference tells an agent never to hand-write such a name.
 - R3. The repo names and paths `yad setup` prints go through `forTerminal`: a found folder (its prompt,
   `registered`, the greenfield note), a repo named by `--add-repo` or typed in, a path refused before git
   runs, an unknown platform, and each file wired into a repo. A name inside a command to copy uses `asArg`.
   The registry keeps the raw values.
-- R4. `yad init` prints a Product folder it found (and the repos it found) through `forTerminal`.
+- R4. `yad init` prints a Product folder it found (and the repos it found) through `forTerminal`, in every
+  line, also with a single Product; the `cd` hint to copy names `<the Product folder>` when the name is not
+  a plain folder name.
 - R5. `yad risk-map`'s "unknown repo" line cleans the name it echoes.
 
 ## Out of scope
@@ -75,4 +80,15 @@ folder holding an escape; an init test with a Product folder holding one.
 **Files:**
 - cli/workspace.mjs
 - cli/test.mjs
+
+## T05 — Cover a flagged nested folder by its clean parent's line
+**Files:**
+- cli/riskmap.mjs
+- cli/test.mjs
+- cli/test-checks.mjs
+
+## T06 — Say how such folders are covered, and never to hand-write them
+**Files:**
+- docs/CLI.md
+- skills/yad-connect-repos/references/risk-map.md
 <!-- /yad:tasks -->
