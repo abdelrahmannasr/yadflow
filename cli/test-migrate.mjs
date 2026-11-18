@@ -1881,6 +1881,68 @@ test('E125 b migrate --apply: a .gitignore that is a link is named and never wri
   } finally { cleanup(T); fs.rmSync(outside, { force: true }); }
 });
 
+// #215: a Product file larger than any real one is refused before it is read, with the answer a broken file
+// gets, and named by its Product path.
+const TOO_BIG = /is larger than 64 MiB, the most yad reads, so yad did not read it/;
+const makeTooBig = async (file) => {
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  fs.writeFileSync(file, '{}');
+  fs.truncateSync(file, MAX_PLAIN_BYTES + 1);
+};
+
+test('#215 migrate: a file over 64 MiB is an unreadable row, a drift named as too big, and a .gitignore left as it is', async () => {
+  const { describeDrift, ensureBackupsIgnored } = await import('./migrate.mjs');
+  const T = project();
+  const exit = process.exitCode;
+  try {
+    await makeTooBig(path.join(T, '.sdlc/repos.json'));
+    const row = rowFor(planMigration(T).rows, path.join('.sdlc', 'repos.json'));
+    assert.equal(row.action, 'unreadable');
+    assert.match(row.detail, TOO_BIG);
+    assert.ok(!row.detail.includes(T), 'the row names no absolute path');
+    await grabOut(() => runMigrate(T, { apply: true }));
+    assert.equal(process.exitCode, 1, 'an unreadable file fails the run, as a broken one does');
+    process.exitCode = 0;
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json.yad-orig')), 'nothing was copied from it');
+    // A drifted pair: the too-big copy is named as one.
+    await makeTooBig(path.join(T, 'big.json'));
+    assert.deepEqual(describeDrift(path.join(T, 'big.json'), path.join(T, '.sdlc/product.json')), ['big.json is larger than 64 MiB, the most yad reads, so yad did not read it']);
+    // A .gitignore too big to read is left as it is and named, like a link there; it no longer throws.
+    await makeTooBig(path.join(T, '.gitignore'));
+    const size = fs.statSync(path.join(T, '.gitignore')).size;
+    const errs = [];
+    const orig = console.error;
+    console.error = (...a) => errs.push(a.join(' '));
+    let added;
+    try { added = ensureBackupsIgnored(T); } finally { console.error = orig; }
+    assert.equal(added, false);
+    assert.equal(fs.statSync(path.join(T, '.gitignore')).size, size, 'the .gitignore is untouched');
+    assert.match(errs.join('\n'), /\.gitignore is larger than 64 MiB, the most yad reads, so yad did not read it, so `\*\.yad-orig` was not added/);
+  } finally { process.exitCode = exit ?? 0; cleanup(T); }
+});
+
+test('#215 migrate 7 -> 8: a ledger in the copy that is over 64 MiB undoes the move, named by its Product path', async () => {
+  const { applyProductMove } = await import('./migrate.mjs');
+  const { T } = await legacyProductLevel();
+  try {
+    const move = planMigration(T).product;
+    assert.equal(move.action, 'move');
+    // The copy runs synchronously, so the hook that makes the copied ledger too big must too.
+    const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+    let n = 0;
+    const copy = (src, dest, created) => {
+      cpMerge(src, dest, created);
+      if (++n === 2) { const f = path.join(dest, '.sdlc/approvals.json'); fs.writeFileSync(f, '[]'); fs.truncateSync(f, MAX_PLAIN_BYTES + 1); }
+    };
+    let thrown;
+    try { applyProductMove(T, move, { copy }); } catch (e) { thrown = e; }
+    assert.equal(thrown?.message, 'nothing was moved — foundation/.sdlc/approvals.json is larger than 64 MiB, the most yad reads, so yad did not read it');
+    assert.ok(!thrown.message.includes(T), 'no absolute path');
+    assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the original is whole');
+    assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, 'no stray ledger folder');
+  } finally { cleanup(T); }
+});
+
 test('E125 b migrate --apply: a link (or a dangling one) at a .yad-orig path is replaced, never written through', { skip: LINK_SKIP }, async () => {
   for (const dangling of [false, true]) {
     const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });

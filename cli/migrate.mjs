@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
     const raw = readRaw(ledgerOf(from, name));
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
-      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : 'fix or restore it first'}`);
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : 'fix or restore it first'}`);
     }
     read[name] = raw.value;
   }
@@ -440,7 +440,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
     const raw = readRaw(path.join(from, f));
-    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : 'does not parse — fix or restore it first'}`);
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : `${raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — fix or restore it first`}`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
     const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
@@ -488,10 +488,13 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     // Plain reads only (E125 b): a link or a folder in the copy throws, and the whole move is undone below.
     // The refusal names the file by its Product path: the lib's message carries this machine's absolute path,
     // and `runMigrate` prints this one and puts it in the --json answer.
+    // A file too big to read (#215) is named the same way.
     const plainJSON = (file) => {
       try { return readPlainJSON(file); } catch (e) {
+        const rel = path.relative(root, file).split(path.sep).join('/');
+        if (e?.code === FILE_TOO_BIG) throw Object.assign(new Error(`${rel} ${TOO_BIG_SAID}`), { code: FILE_TOO_BIG, size: e.size, limit: e.limit });
         if (e?.code !== NOT_PLAIN_FILE) throw e;
-        throw Object.assign(new Error(`${path.relative(root, file).split(path.sep).join('/')} ${NOT_PLAIN_SAID}`), { code: NOT_PLAIN_FILE, kind: e.kind });
+        throw Object.assign(new Error(`${rel} ${NOT_PLAIN_SAID}`), { code: NOT_PLAIN_FILE, kind: e.kind });
       }
     };
     writeState(f.state, convertDiscoveryState(plainJSON(f.state)));
@@ -564,13 +567,15 @@ function withDials(steps) {
 // `text` is the file as written, so a caller compares with the bytes it parsed, never with a second read.
 // Read only as a plain file (E125 b): a link or a folder in place of a Product file is `notPlain`, refused
 // like a file that does not parse, and never followed (it could point outside the Product, or at a device
-// whose read never ends). A missing file says so in `error`, as before.
+// whose read never ends). A missing file says so in `error`, as before. A file too big to read (#215) is
+// `tooBig`, refused like a file that does not parse; its `error` names no path (the row names the file).
 function readRaw(file) {
   let text;
   try {
     text = readPlainFile(file);
   } catch (e) {
     if (e?.code === NOT_PLAIN_FILE) return { ok: false, notPlain: true, error: NOT_PLAIN_SAID };
+    if (e?.code === FILE_TOO_BIG) return { ok: false, tooBig: true, error: TOO_BIG_SAID };
     return { ok: false, error: e.message };
   }
   if (text === null) return { ok: false, error: `ENOENT: no such file or directory, open '${file}'` };
@@ -655,8 +660,9 @@ export function ensureBackupsIgnored(root) {
   // land wherever it points. A link or a folder there is left as it is, and named.
   let text;
   try { text = readPlainFile(gi); } catch (e) {
-    if (e?.code !== NOT_PLAIN_FILE) throw e;
-    warn(`.gitignore ${NOT_PLAIN_SAID}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
+    // A file too big to read (#215) is left as it is too: rewriting it would mean reading it whole.
+    if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG) throw e;
+    warn(`.gitignore ${e.code === FILE_TOO_BIG ? TOO_BIG_SAID : NOT_PLAIN_SAID}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
     return false;
   }
   const lines = text === null ? [] : text.split('\n');
@@ -912,7 +918,7 @@ export const KEEP_CHOICES = ['product', 'hub'];
 export function describeDrift(aPath, bPath) {
   let a; let b;
   // Plain reads (E125 b): a link or a folder is named as such, never followed.
-  const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : 'does not parse'}`];
+  const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'does not parse'}`];
   try { a = readPlainJSON(aPath); } catch (e) { return said(aPath, e); }
   try { b = readPlainJSON(bPath); } catch (e) { return said(bPath, e); }
   const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
