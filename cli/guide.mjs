@@ -16,9 +16,8 @@
 // the action from `nextAction` (the same answer `yad next --json` gives, whose keys are frozen), and
 // where the person is from `yad status`. Text from the Product's own files passes through `forTerminal`:
 // it reaches a model, and a control character there is never wanted.
-import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, info, hand, readJSON, forTerminal, exists } from './lib.mjs';
+import { c, log, info, hand, readJSON, readPlainFile, forTerminal, exists } from './lib.mjs';
 import { VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
 import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds } from './epic-state.mjs';
@@ -381,7 +380,8 @@ const versionIn = (text) => { try { const v = JSON.parse(text)?.version; return 
 function committedVersion(root, file) {
   const shown = productGit(root)('show', `HEAD:${file}`);
   if (shown.ok) return versionIn(shown.stdout);
-  try { return versionIn(fs.readFileSync(path.join(root, file), 'utf8')); } catch { return null; }
+  // A link in the file's place is not followed (E125 b): no version, as for a broken file.
+  try { return versionIn(readPlainFile(path.join(root, file))); } catch { return null; }
 }
 
 export function installState(root, running = VERSION) {

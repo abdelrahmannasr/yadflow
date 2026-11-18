@@ -8,7 +8,7 @@
 // prose (tables) is the yad-brand skill's job: the agent reads it and writes the same file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, writeJSON } from './lib.mjs';
+import { c, log, ok, info, warn, refuse, emitJSON, forTerminal, readJSON, writeJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { BRAND_FILE, BRAND_VERSION, ROLES, isColor, FAMILY_RE, IMAGE_CAP, checkBrand, readBrand, contrastProblems, sourceFingerprint, brandPath } from './brand.mjs';
 
@@ -239,7 +239,7 @@ export function brandFromDesign(root, text, { name = null, from = 'DESIGN.md', l
   const images = findFiles(root, (n) => /\.(svg|png|webp|jpe?g)$/i.test(n)).filter((f) => smallEnough(root, f));
   const logoFile = logo || prefer(images.filter((f) => /logo|wordmark/i.test(path.posix.basename(f))));
   const markFile = mark || prefer(images.filter((f) => /mark|icon|favicon|symbol/i.test(path.posix.basename(f)))) || logoFile;
-  const productName = (() => { try { const n = JSON.parse(fs.readFileSync(productConfigPath(root), 'utf8')).name; return typeof n === 'string' && n.trim() ? n : null; } catch { return null; } })();
+  const productName = (() => { const n = readJSON(productConfigPath(root), null)?.name; return typeof n === 'string' && n.trim() ? n : null; })();
   const title = name || (typeof fm?.name === 'string' && fm.name) || (typeof fm?.title === 'string' && fm.title) || productName || (/^#\s+(.+)$/m.exec(String(text).replace(/^---[\s\S]*?\n---/, ''))?.[1]) || path.basename(root);
   const cleanName = String(title).split(/\s+[—–-]\s+|\s+\(/)[0].trim().slice(0, 80);
   const brand = {
