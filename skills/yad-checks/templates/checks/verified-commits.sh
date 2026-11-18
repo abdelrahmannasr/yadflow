@@ -14,15 +14,17 @@
 # Merge-commit signature exemption: a merge that introduces NO content of its own is signature-waived,
 # because every change it carries already lives in its individually signature-checked parents. This
 # unblocks platform merge buttons that do not sign the merge commit (self-hosted GitLab: the signature
-# API returns 404). "No content of its own" is decided by redoing the merge: with git 2.36 or newer and
-# a merge of exactly two parents, the merge is waived when `git show --remerge-diff` prints nothing —
-# the commit is exactly what git's own automatic merge of the two parents gives, so a clean merge of
-# nearby lines in one file passes (#600). A merge whose result differs from that redone merge — an
-# extra change, or a conflict resolved by hand, even one that keeps one side — still requires a verified
-# signature (fail-closed). On older git, when the parents share no merge base (a shallow clone, or
-# unrelated histories), on any git error, and for a merge of three or more parents, the gate uses the
-# older test instead: the combined diff (`git diff-tree --cc`) must be empty. An error never waives a
-# merge.
+# API returns 404). Only a merge of exactly two parents can be waived; a merge of three or more parents
+# (an octopus merge) always needs a verified signature. "No content of its own" is decided by redoing
+# the merge: with git 2.36 or newer in a clone that is not shallow, the merge is waived when
+# `git show --remerge-diff` prints nothing — the commit is exactly what git's own automatic merge of the
+# two parents gives, so a clean merge of nearby lines in one file passes (#600). Parents with no merge
+# base (unrelated histories) are redone against an empty tree, so a hand-picked mix shows as conflicts.
+# A merge whose result differs from that redone merge — an extra change, or a conflict resolved by
+# hand, even one that keeps one side — still requires a verified signature (fail-closed), and so does a
+# merge git fails to redo. Only on older git, or in a shallow clone (where the merge base may be cut
+# off), does the gate use the older test instead: the combined diff (`git diff-tree --cc`) must be
+# empty. An error never waives a merge.
 #
 # Degradation is explicit, never silent:
 #   - no GitHub/GitLab remote  -> signature check SKIPPED with a warning (no platform, no badge)
@@ -31,6 +33,9 @@
 # GitLab note: the signature API is not readable with CI_JOB_TOKEN — provide a CI variable
 # GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope; see the pipeline fragment header.
 set -euo pipefail
+# Read the commits as they are: a `refs/replace/` object must not stand in for a commit or tree this gate
+# judges.
+export GIT_NO_REPLACE_OBJECTS=1
 
 # --- shared Product settings file (byte-identical across the gates; they are standalone by design, so
 # --- it is duplicated, not sourced) ---
@@ -167,34 +172,56 @@ git_has_remerge_diff() {
   case "$minor" in ''|*[!0-9]*) return 1 ;; esac
   [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 36 ]; }
 }
+# The redone-merge test needs git 2.36+ and a clone that is not shallow; asked once per run. Anything
+# else (old git, a shallow clone, a failed question) keeps the combined-diff test.
 remerge_ok=0
-git_has_remerge_diff && remerge_ok=1
+if git_has_remerge_diff && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ]; then
+  remerge_ok=1
+fi
 
-# 0 when a merge commit introduced NO content of its own.
-# With git 2.36+ and exactly two parents that share a merge base, git redoes the merge
-# (`--remerge-diff`) and prints how the commit differs from that redone merge. Empty output means the
-# commit is exactly git's own automatic merge of its parents — every change lives in an
-# individually-checked parent. A non-empty answer is final: an extra change or a conflict resolved by
-# hand (even to one side, which the combined diff below misses) is content of the merge's own.
-# Otherwise — older git, no merge base (a shallow clone cut it off, or unrelated histories: the redone
-# merge would be a two-way merge full of spurious conflicts), a failed command, 3+ parents — fall back
-# to the combined diff (--cc): it lists only hunks that differ from ALL parents, so it is empty for a
-# merge of disjoint files but not for one where both sides edited nearby lines of one file.
-# The flags stop local config from hiding a change: no external diff or textconv driver, submodule
-# changes shown even under diff.ignoreSubmodules, and no diff.relative narrowing.
+# 0 when a merge commit introduced NO content of its own. Only a two-parent merge can be: an octopus
+# merge (3+ parents) is never waived — redoing it is not supported, and a platform merge button never
+# makes one.
+# With remerge_ok, git redoes the merge (`--remerge-diff`) and prints how the commit differs from that
+# redone merge. Empty output means the commit is exactly git's own automatic merge of its parents —
+# every change lives in an individually-checked parent. Any output is final: an extra change or a
+# conflict resolved by hand (even to one side, which the combined diff below misses) is content of the
+# merge's own. Parents with no merge base (unrelated histories) are redone against an empty tree, so a
+# result that mixes the two sides shows as conflicts. When git fails to redo the merge, the answer is
+# "has content" (the signature is required), and the reason is printed.
+# The flags stop config from changing the answer: no external diff or textconv driver, submodule
+# changes shown even under diff.ignoreSubmodules, no diff.relative narrowing, and rename detection set
+# the same on every runner (merge.renames / merge.directoryRenames).
+# Without remerge_ok (git older than 2.36, or a shallow clone), fall back to the combined diff (--cc):
+# it lists only hunks that differ from ALL parents, so it is empty for a merge of disjoint files but not
+# for one where both sides edited nearby lines of one file.
 merge_introduces_no_content() {
   # `local` on its own line: `local out=$(...)` would mask the substitution's exit status (local
   # always returns 0). A git error (e.g. a parent tree missing in a shallow clone) must fail closed —
   # an empty stdout from a *failed* command is not evidence the merge is content-free.
-  local out parents
-  parents="$(git log -1 --format=%P "$1")" || return 1
-  # shellcheck disable=SC2086 # word-split on purpose: count the parent shas
-  set -- "$1" $parents
-  if [ "$remerge_ok" = 1 ] && [ "$#" -eq 3 ] && git merge-base "$2" "$3" >/dev/null 2>&1; then
-    if out="$(git show --remerge-diff --no-ext-diff --no-textconv --ignore-submodules=none --no-relative --format= "$1" 2>/dev/null)"; then
+  local out parents errf why id
+  # Plumbing, which reads no log.* config (log.showSignature would add lines to `git log` output).
+  parents="$(git rev-list --parents -n1 "$1")" || return 1
+  id="$(git rev-parse --short "$1")" || return 1
+  # shellcheck disable=SC2086 # word-split on purpose: the commit, then its parents
+  set -- $parents
+  if [ "$#" -gt 3 ]; then
+    echo "WARN [verified-commits]: ${id} merges $(( $# - 1 )) parents — only a merge of two parents can go unsigned, so this one needs a verified signature."
+    return 1
+  fi
+  [ "$#" -eq 3 ] || return 1
+  if [ "$remerge_ok" = 1 ]; then
+    errf="$(mktemp)" || return 1
+    if out="$(git -c merge.renames=true -c merge.directoryRenames=conflict show --remerge-diff --no-ext-diff --no-textconv --ignore-submodules=none --no-relative --format= "$1" 2>"$errf")"; then
+      rm -f "$errf"
       [ -z "$out" ]
       return
     fi
+    # git's own words, on one line and without control characters (a path in them comes from the repo).
+    why="$(head -n 3 "$errf" | tr '\n' ' ' | LC_ALL=C tr -d '\000-\037\177')"
+    rm -f "$errf"
+    echo "WARN [verified-commits]: ${id} — git could not redo the merge to check it (git show --remerge-diff failed: ${why:-no message}), so it needs a verified signature."
+    return 1
   fi
   out="$(git diff-tree --cc --no-commit-id -r "$1")" || return 1
   [ -z "$out" ]
@@ -203,15 +230,16 @@ merge_introduces_no_content() {
 rc=0
 while IFS= read -r sha; do
   [ -z "$sha" ] && continue
-  short="$(git log -1 --format=%h "$sha")"
+  short="$(git rev-parse --short "$sha")"
 
-  # A merge commit (2+ parents) whose content is all in its parents may go unsigned — see
+  # A merge commit of two parents whose content is all in its parents may go unsigned — see
   # merge_introduces_no_content. Every other commit, merges with content of their own included, needs
   # the signature: a platform merge commit is Verified, so a locally-forged merge pushed
   # direct-to-default cannot dodge the check. The PR-triggered gates see one too: a GitHub pull_request run
   # and a GitLab merged-results pipeline check a merge the platform made, unsigned and content-free (#433).
   is_merge=0
-  [ "$(git log -1 --format=%P "$sha" | wc -w | tr -d '[:space:]')" -ge 2 ] && is_merge=1
+  # `rev-list --parents` prints the commit, then its parents; plumbing, so log.* config adds nothing.
+  [ "$(git rev-list --parents -n1 "$sha" | wc -w | tr -d '[:space:]')" -ge 3 ] && is_merge=1
 
   if [ -n "$platform" ]; then
     if signature_verified "$sha"; then

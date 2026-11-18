@@ -12017,7 +12017,7 @@ test('verified-commits gate: an unsigned content-free merge is signature-waived;
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('verified-commits gate: a clean merge of nearby lines is waived by redoing the merge; an extra change, a hand-resolved conflict, old git and a cut-off merge base are handled (issue #600)', () => {
+test('verified-commits gate: a clean merge of nearby lines is waived by redoing the merge; an extra change, a hand-resolved conflict, a failed redo, unrelated histories, an octopus merge, old git and a shallow clone are handled (issue #600)', () => {
   // A platform merge button (GitLab) never signs its merge commit. When both sides edited nearby lines
   // of one file, git merges them on its own, yet the combined diff (--cc) shows those hunks — so the
   // old check failed a merge that added nothing. git 2.36+ redoes the merge (`--remerge-diff`): an
@@ -12084,6 +12084,14 @@ test('verified-commits gate: a clean merge of nearby lines is waived by redoing 
     const weird = gitShim('git version weird');
     shims.push(weird);
     assert.ok(failed(runIn(T, base, weird).out, clean), 'an unreadable version falls back');
+    // The 2.35 / 2.36 boundary, and a Windows version string.
+    for (const [version, redone] of [['git version 2.35.9', false], ['git version 2.36.0', true], ['git version 2.45.1.windows.1', true]]) {
+      const dir = gitShim(version);
+      shims.push(dir);
+      const out = runIn(T, base, dir).out;
+      assert.equal(waived(out, clean), redone, `${version}: ${out}`);
+      assert.equal(failed(out, clean), !redone, `${version}: ${out}`);
+    }
 
     // The same merge amended with an extra change in the merged file: content of its own -> FAIL.
     fs.writeFileSync(path.join(T, 'n.txt'), '1\n2 topic\n3\n4 main\n5\n6 smuggled\n');
@@ -12118,10 +12126,74 @@ test('verified-commits gate: a clean merge of nearby lines is waived by redoing 
     assert.ok(failed(r.out, resolved), r.out);
     assert.ok(waived(r.out, clean), 'the clean merge below it is still waived');
 
-    // A shallow clone that cut off the merge base: redoing the merge would be a two-way merge full of
-    // spurious conflicts, so the gate uses the combined diff, as before. A merge of disjoint files passes.
-    git(T, 'checkout', '-q', '-b', 'disjoint', 'main');
-    git(T, 'reset', '-q', '--hard', base);
+    // git fails to redo the merge: no waiver (the combined diff would have waived this one), and why.
+    const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gitshim-'));
+    shims.push(broken);
+    fs.writeFileSync(path.join(broken, 'git'), `#!/usr/bin/env bash\nfor a in "$@"; do [ "$a" = --remerge-diff ] && { echo 'fatal: remerge broke' >&2; exit 128; }; done\nexec '${realGit}' "$@"\n`);
+    fs.chmodSync(path.join(broken, 'git'), 0o755);
+    r = runIn(T, base, broken);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, resolved), r.out);
+    assert.ok(!waived(r.out, resolved), r.out);
+    assert.match(r.out, new RegExp(`WARN \\[verified-commits\\]: ${resolved} — git could not redo the merge to check it \\(git show --remerge-diff failed: fatal: remerge broke \\), so it needs a verified signature\\.`), r.out);
+
+    // Unrelated histories (no merge base): git redoes the merge against an empty tree. A merge that
+    // takes a.txt from one side and n.txt from the other passes the combined diff, but not this.
+    git(T, 'checkout', '-q', '--orphan', 'unrelated');
+    git(T, 'rm', '-rfq', '.');
+    fs.writeFileSync(path.join(T, 'a.txt'), 'other a\n');
+    fs.writeFileSync(path.join(T, 'n.txt'), 'other n\n');
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', 'feat: an unrelated root');
+    git(T, 'checkout', '-q', '-b', 'mixed', base);
+    try { git(T, ...merger, 'merge', '-q', '--allow-unrelated-histories', '-m', 'Merge unrelated', 'unrelated'); assert.fail('expected a conflict'); }
+    catch (e) { if (e.code === 'ERR_ASSERTION') throw e; }
+    git(T, 'checkout', '-q', '--ours', 'a.txt');
+    git(T, 'checkout', '-q', '--theirs', 'n.txt');
+    git(T, 'add', 'a.txt', 'n.txt');
+    git(T, ...merger, 'commit', '-q', '--no-edit');
+    const mixed = short();
+    assert.equal(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff misses it');
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, mixed), r.out);
+
+    // An octopus merge (3 parents) is never waived, even of disjoint files.
+    for (const b of ['o1', 'o2']) {
+      git(T, 'checkout', '-q', '-b', b, base);
+      fs.writeFileSync(path.join(T, `${b}.txt`), `${b}\n`);
+      git(T, 'add', '-A');
+      git(T, 'commit', '-q', '-m', `feat: ${b}`);
+    }
+    git(T, 'checkout', '-q', '-b', 'octopus', base);
+    git(T, ...merger, 'merge', '-q', '--no-ff', '-m', 'Merge o1 and o2', 'o1', 'o2');
+    const octopus = short();
+    assert.equal(git(T, 'diff-tree', '--cc', '--no-commit-id', '-r', 'HEAD').toString(), '', 'the combined diff is empty');
+    r = runIn(T, base);
+    assert.equal(r.code, 1, r.out);
+    assert.ok(failed(r.out, octopus), r.out);
+    assert.match(r.out, new RegExp(`WARN \\[verified-commits\\]: ${octopus} merges 3 parents — only a merge of two parents can go unsigned`), r.out);
+
+    // log.showSignature=true must not change how commits are read: a signed (but not platform-Verified)
+    // commit with no change is not taken for a merge, and its short id stays clean.
+    if (spawnSync('ssh-keygen', ['-?'], { stdio: 'ignore' }).error === undefined) {
+      const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-key-'));
+      shims.push(keyDir);
+      execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', path.join(keyDir, 'key')], { stdio: 'pipe' });
+      git(T, 'checkout', '-q', '-b', 'signed', base);
+      git(T, '-c', 'gpg.format=ssh', '-c', `user.signingkey=${path.join(keyDir, 'key')}`, 'commit', '-q', '--allow-empty', '-S', '-m', 'chore: signed, empty');
+      const signed = short();
+      git(T, 'config', 'log.showSignature', 'true');
+      r = runIn(T, base);
+      git(T, 'config', '--unset', 'log.showSignature');
+      assert.equal(r.code, 1, r.out);
+      assert.ok(failed(r.out, signed), r.out);
+      assert.doesNotMatch(r.out, /unsigned merge commit/, r.out);
+    }
+
+    // A shallow clone (here it cut off the merge base): redoing the merge would be a two-way merge full
+    // of spurious conflicts, so the gate uses the combined diff, as before. A disjoint merge passes.
+    git(T, 'checkout', '-q', '-b', 'disjoint', base);
     git(T, 'checkout', '-q', '-b', 'side');
     fs.writeFileSync(path.join(T, 'side.txt'), 'side\n');
     git(T, 'add', '-A');
