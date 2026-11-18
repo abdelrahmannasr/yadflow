@@ -21,6 +21,7 @@
     "checks/risk-map-check.sh": "sha256:92fb6562540d4c9ca7f493179e1a55d738e74a7e1682321573eebfafd5866753",
     "checks/risk-route.sh": "sha256:cc399357915a0b618cef4df0e5f8afc94203065f3d02b127be69aa04b1614b9b",
     "checks/spec-link.sh": "sha256:b7df46648a677277aee66e48a52d0f43258fef40057fa20a6d134546f2a6c96f",
-    "checks/verified-commits.sh": "sha256:f64464333a776810a21214658daf75a91d23fc7b0d55e31509d6869c573aff3b"
+    "checks/verified-commits.sh": "sha256:f64464333a776810a21214658daf75a91d23fc7b0d55e31509d6869c573aff3b",
+    "checks/yad-activity.mjs": "sha256:ee9d3974aded5d87834056659ea9536f8c5d48ecb61159032e82e527e4393e64"
   }
 }
