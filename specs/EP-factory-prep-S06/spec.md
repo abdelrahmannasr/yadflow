@@ -16,8 +16,9 @@ title, clear the screen, or overwrite a line.
   before colour is added, so yad's own colours stay.
 - R2. `yad risk-map` prints finding codes, targets, messages, repo names, roots and the draft's lists
   cleaned.
-- R3. `yad thread` prints open debt (epic id, reason, requirements) cleaned; `yad codeowners` prints its
-  finding messages cleaned.
+- R3. `yad thread` prints open debt (epic id, reason, requirements), epic themes, steps, depths and
+  defect fields (severity, escape stage, root cause) cleaned; `yad codeowners` prints its finding messages
+  and the quiet owners' logins cleaned.
 - R4. Normal text prints unchanged; `--json` output keeps the raw values.
 
 ## Out of scope
