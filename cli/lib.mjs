@@ -354,9 +354,72 @@ const writeShape = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVers
 // on the open handle, so a link put in its place between the two steps is refused too, and opening a pipe
 // never waits for a writer. (Windows has neither flag; there the `lstat` check stands alone.)
 export const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
+
+// A linked FOLDER inside the Product (#214). The checks above look at the file's own name only, so a committed
+// `.sdlc` (or `epics/`, an epic's folder, `.sdlc/build-state/`) that links elsewhere made yad read and write
+// files outside the Product under the Product's names. So a path inside the Product is read or written only
+// when each folder between the Product's folder and the file is a real folder, not a link: the file's real
+// folder is then the folder its path names inside the Product's real folder. A path outside the Product is
+// read as before. The Product's folder is set once per command, when yad settles it (`setProductRoot`); a
+// caller whose files live in another folder (a code repo's risk map) names that folder with `{ within }`.
+//
+// Each folder is looked at with `lstat` on every read and write, never cached: it costs a few microseconds a
+// folder, and yad itself can swap a folder mid-command (a `git checkout` of a branch that commits a link).
+let productRoot = null;
+const rootOf = (dir) => {
+  const at = path.resolve(dir);
+  let real = at;
+  try { real = fs.realpathSync(at); } catch { /* not made yet: its own spelling only */ }
+  return { at, real };
+};
+// `null` ends it (between tests, or a command that leaves the Product).
+export function setProductRoot(dir) { productRoot = dir ? rootOf(dir) : null; }
+// The path of `abs` inside `root` ('' for the root itself), or null when it is not inside. Both spellings of
+// the root count: on macOS the temp folder is `/var/…` and `/private/var/…`, and some callers resolve first.
+function insideRoot(root, abs) {
+  for (const base of root.real === root.at ? [root.at] : [root.at, root.real]) {
+    const rel = path.relative(base, abs);
+    if (rel === '') return { base, rel };
+    if (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return { base, rel };
+  }
+  return null;
+}
+// The first folder between the root and `p`'s folder that is a link, or null. A folder that is not there
+// ends the walk: nothing below it exists, and a write makes real folders from there down.
+function linkedFolderOf(p, within) {
+  const root = within ? rootOf(within) : productRoot;
+  if (!root) return null;
+  const hit = insideRoot(root, path.dirname(path.resolve(p)));
+  if (!hit || hit.rel === '') return null;
+  let at = hit.base;
+  for (const part of hit.rel.split(path.sep)) {
+    at = path.join(at, part);
+    let st;
+    try { st = fs.lstatSync(at); } catch { return null; }
+    if (st.isSymbolicLink()) return at;
+    if (!st.isDirectory()) return null;
+  }
+  return null;
+}
+// A path as yad names it: inside the Product, by its path there (never the absolute path, which would land
+// in a `--json` run's warnings); outside it, as the caller gave it.
+function productShown(p, within) {
+  const root = within ? rootOf(within) : productRoot;
+  const hit = root && insideRoot(root, path.resolve(p));
+  return hit && hit.rel !== '' ? hit.rel : p;
+}
+// "<folder> is a link, so yad did not read <file> (…)": the folder first, as it is the one to replace.
+const linkedFolder = (p, folder, within, verb) => Object.assign(
+  new Error(`${productShown(folder, within)} is a link, so yad did not ${verb} ${productShown(p, within)} (it ${verb}s a file there only through real folders)`),
+  { code: NOT_PLAIN_FILE, kind: 'link', folder: productShown(folder, within) },
+);
+function refuseLinkedFolder(p, within, verb) {
+  const folder = linkedFolderOf(p, within);
+  if (folder) throw linkedFolder(p, folder, within, verb);
+}
 const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
 // `kind` says what was there instead: 'dir', 'link' or 'other' (a device, a pipe, a socket).
-const notPlain = (p, kind) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE, kind });
+const notPlain = (p, kind, within) => Object.assign(new Error(`${productShown(p, within)} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE, kind });
 const kindOf = (st) => (st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : 'other');
 // No Product file yad reads comes near this size (#215). Anyone who can commit to the Product could
 // commit a file of hundreds of megabytes, and every command that reads it would load it whole into memory.
@@ -371,16 +434,16 @@ export const FILE_TOO_BIG = 'YAD_FILE_TOO_BIG';
 export const tooBigSaid = (limit = MAX_PLAIN_BYTES) => `is larger than ${limit / (1024 * 1024)} MiB, the most yad reads, so yad did not read it`;
 export const TOO_BIG_SAID = tooBigSaid();
 // `size` is the size seen: for a file that grew while it was read, the bytes read so far (more than `limit`).
-const tooBig = (p, size, limit) => Object.assign(new Error(`${p} ${tooBigSaid(limit)}`), { code: FILE_TOO_BIG, size, limit });
+const tooBig = (p, size, limit, within) => Object.assign(new Error(`${productShown(p, within)} ${tooBigSaid(limit)}`), { code: FILE_TOO_BIG, size, limit });
 // At most `max` bytes from the open file. The size `fstat` gave can be out of date by the time of the read (a
 // file that grows, or one that was empty then), so the read never trusts it: it reads into a buffer of at most
 // `max + 1` bytes, and a byte past the limit means the file is too big. No read runs to the end of the file.
-function readCapped(fd, p, size, max) {
+function readCapped(fd, p, size, max, within) {
   let buf = Buffer.allocUnsafeSlow(Math.min(size, max) + 1);
   let n = 0;
   for (;;) {
     if (n === buf.length) {
-      if (n > max) throw tooBig(p, n, max);
+      if (n > max) throw tooBig(p, n, max, within);
       const more = Buffer.allocUnsafeSlow(Math.min(buf.length * 2, max + 1));
       buf.copy(more, 0, 0, n);
       buf = more;
@@ -392,24 +455,32 @@ function readCapped(fd, p, size, max) {
 }
 // The read itself. Every failure is thrown, the `lstat` one too, so a caller can tell a missing file
 // (ENOENT) from one it may not read. `encoding: null` gives the raw bytes.
-function readPlainOrThrow(p, encoding = 'utf8', { max = MAX_PLAIN_BYTES } = {}) {
+function readPlainOrThrow(p, encoding = 'utf8', opts = {}) {
+  refuseLinkedFolder(p, opts?.within, 'read');
+  return readPlainAt(p, encoding, opts);
+}
+function readPlainAt(p, encoding = 'utf8', { max = MAX_PLAIN_BYTES, within } = {}) {
   const st = fs.lstatSync(p);
-  if (!st.isFile()) throw notPlain(p, kindOf(st));
+  if (!st.isFile()) throw notPlain(p, kindOf(st), within);
   let fd;
-  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p, 'link'); throw e; }
+  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p, 'link', within); throw e; }
   try {
     const now = fs.fstatSync(fd);
-    if (!now.isFile()) throw notPlain(p, kindOf(now));
-    if (now.size > max) throw tooBig(p, now.size, max);
-    const bytes = readCapped(fd, p, now.size, max);
+    if (!now.isFile()) throw notPlain(p, kindOf(now), within);
+    if (now.size > max) throw tooBig(p, now.size, max, within);
+    const bytes = readCapped(fd, p, now.size, max, within);
     return encoding === null ? bytes : bytes.toString(encoding);
   } finally { fs.closeSync(fd); }
 }
-// `opts.max` (each plain read takes it): the most bytes read, MAX_PLAIN_BYTES unless named.
+// `opts.max` (each plain read takes it): the most bytes read, MAX_PLAIN_BYTES unless named. `opts.within`: the
+// folder whose sub-folders must not be links, when it is not the Product's.
 export function readPlainFile(p, opts) {
+  // Before the first look: a linked folder whose target has no such file must not read as "no file", which
+  // a caller would then write.
+  refuseLinkedFolder(p, opts?.within, 'read');
   try { fs.lstatSync(p); } catch { return null; }
   // A file removed between the two looks is no file, as it would have been a moment earlier.
-  try { return readPlainOrThrow(p, 'utf8', opts); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try { return readPlainAt(p, 'utf8', opts); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 // The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
 export const readPlainBytes = (p, opts) => readPlainOrThrow(p, null, opts);
@@ -424,12 +495,15 @@ export function readPlainJSON(p, opts) {
 // on stdout that another program reads (a hook, a `--json` run), which a warning there would break.
 const refusedOnce = new Set();
 function sayRefused(p, e) {
-  if (refusedOnce.has(p)) return;
-  refusedOnce.add(p);
+  // A linked folder is named once, not once for each file read under it.
+  const key = e.folder ? `folder:${e.folder}` : p;
+  if (refusedOnce.has(key)) return;
+  refusedOnce.add(key);
   // A file too big to read is most often the committed file itself, so git has no other copy to restore.
-  const fix = e.code === FILE_TOO_BIG ? 'replace it with a file of the right size' : 'replace it with the real file (from git)';
+  const fix = e.code === FILE_TOO_BIG ? 'replace it with a file of the right size'
+    : e.folder ? 'replace the link with the real folder (from git)' : 'replace it with the real file (from git)';
   const s = `${e.message} — ${fix}, then run the command again`;
-  if (jsonRun) warn(s); else note(`${c.yellow('!')} ${s}`);
+  if (jsonRun) warn(s); else note(`${c.yellow('!')} ${forTerminal(s)}`);
 }
 
 export function readJSON(p, def = null) {
@@ -457,21 +531,23 @@ export function readJSON(p, def = null) {
 export function readJSONStrict(p, def = null) {
   let text;
   try { text = readPlainFile(p); } catch (e) {
+    if (e?.code === NOT_PLAIN_FILE && e.folder) throw err('YAD-STATE-001', e.message, 'replace the link with the real folder from git (`git checkout -- <folder>`) — never delete a ledger blindly');
     if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
     if (e?.code === FILE_TOO_BIG) throw err('YAD-STATE-001', e.message, 'restore the file from a commit where it had its real size (`git log -- <file>`) — never delete a ledger blindly');
-    throw err('YAD-STATE-001', `cannot read ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
+    throw err('YAD-STATE-001', `cannot read ${productShown(p)}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
   if (text === null) return def;
   try {
     return readShape(p, JSON.parse(text));
   } catch (e) {
-    throw err('YAD-STATE-001', `corrupt JSON in ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
+    throw err('YAD-STATE-001', `corrupt JSON in ${productShown(p)}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
 }
 // Atomic: serialize first, write a sibling tmp file (same dir = same filesystem),
 // then rename over the target. A killed process can never leave a truncated ledger
 // file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.
-export function writeJSON(p, obj) {
+// `opts.within`, as for the plain reads: the folder whose sub-folders must not be links, when not the Product's.
+export function writeJSON(p, obj, opts) {
   const data = JSON.stringify(writeShape(p, obj), null, 2) + '\n';
   // Byte-identical content is not a write. The ledger writers are unconditional — they re-serialize
   // whether or not anything changed — so this keeps an unchanged sync from touching the file at all
@@ -480,14 +556,20 @@ export function writeJSON(p, obj) {
   // Only a plain file is read to compare: a link or a folder there counts as different, and writeFileAtomic
   // then replaces it, so the write never follows the link (E125 b).
   try {
-    if (readPlainFile(p) === data) return;
+    if (readPlainFile(p, opts) === data) return;
   } catch { /* not a plain file, or unreadable — fall through and write it */ }
-  writeFileAtomic(p, data);
+  writeFileAtomic(p, data, opts);
 }
 
 // Write `data` to `p` through a fresh temporary file and a rename: a crash leaves the old file or the new
 // one, never half of either, and a link standing at `p` is replaced rather than followed.
-export function writeFileAtomic(p, data) {
+// A linked folder on the way is refused before any folder is made (#214): `mkdirSync` and the rename would
+// follow it. The refusal is a YAD-STATE-001 with a hint, so a command stops with a clear answer; it keeps
+// the plain read's `kind` and `folder`.
+export function writeFileAtomic(p, data, opts) {
+  try { refuseLinkedFolder(p, opts?.within, 'write'); } catch (e) {
+    throw Object.assign(err('YAD-STATE-001', e.message, 'replace the link with the real folder from git (`git checkout -- <folder>`), then run the command again'), { kind: e.kind, folder: e.folder });
+  }
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
