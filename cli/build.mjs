@@ -1159,6 +1159,42 @@ export function recordAutoOpen(file, { story, repo, task = null, tasks = null, r
   writeJSON(file, { ...bs, repos: { ...bs.repos, [repo]: { ...lane, opened } } });
 }
 
+// The default branch of a registered checkout: the registry's, else its `origin/HEAD`, else main.
+function defaultBranchOf(where) {
+  const head = run('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { cwd: where.checkout }).stdout;
+  return where.defaultBranch || (head.startsWith('origin/') ? head.slice(7) : 'main');
+}
+
+// The tasks `story` owes in a checkout: its `specs/<story>/tasks.md`, or a light spec's tasks block, on
+// `origin/<branch>` as last fetched — read by git, no network. `{ tasks, why }`: `tasks` null when they
+// cannot be read, `why` set when they cannot be read or name none.
+function owedTasks(where, story, branch) {
+  const show = (file) => run('git', ['show', `refs/remotes/origin/${branch}:specs/${story}/${file}`], { cwd: where.checkout });
+  const shown = show('tasks.md');
+  if (shown.ok) {
+    const tasks = parseTaskIds(shown.stdout);
+    return { tasks, why: tasks.length ? null : `specs/${story}/tasks.md on origin/${branch} names no task (T01, T02, …)` };
+  }
+  // A light spec keeps its tasks in spec.md (#348) — only when its link.md says so.
+  const link = show('link.md');
+  const spec = link.ok ? show('spec.md') : null;
+  if (!link.ok || !isLightSpec(link.stdout)) {
+    // A tasks block with no light mode named is most likely a link.md the reader cannot parse (CRLF, a
+    // quoted value): say so, rather than only that tasks.md is missing.
+    return { tasks: null, why: spec?.ok && lightTasksBlock(spec.stdout) !== null
+      ? `no specs/${story}/tasks.md on origin/${branch}, and its link.md does not say \`spec-mode: light\` (plain, on its own line), so the tasks block in spec.md is not read`
+      : `no specs/${story}/tasks.md on origin/${branch}` };
+  }
+  const block = spec.ok ? lightTasksBlock(spec.stdout) : null;
+  if (block === null) {
+    return { tasks: null, why: spec.ok
+      ? `specs/${story}/spec.md on origin/${branch} is a light spec without one ${LIGHT_TASKS.begin} … ${LIGHT_TASKS.end} block`
+      : `specs/${story}/link.md on origin/${branch} says spec-mode: light, but there is no spec.md` };
+  }
+  const tasks = parseTaskIds(block);
+  return { tasks, why: tasks.length ? null : `the tasks block of specs/${story}/spec.md on origin/${branch} names no task (T01, T02, …)` };
+}
+
 export async function buildDone(root, { story, today, fetch = true } = {}) {
   const ctx = storyContext(root, story);
   // The epic is in Build — what featureStatus asks too: a reopened stories review takes it out again.
@@ -1174,41 +1210,14 @@ export async function buildDone(root, { story, today, fetch = true } = {}) {
     if (skipped.includes(repo)) continue;
     const where = registeredRepo(root, repo);
     if (!where.checkout) { owed[repo] = null; why[repo] = 'not checked out here (`yad repo clone` fetches it)'; continue; }
-    const head = run('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { cwd: where.checkout }).stdout;
-    const branch = where.defaultBranch || (head.startsWith('origin/') ? head.slice(7) : 'main');
+    const branch = defaultBranchOf(where);
     // A stale copy could miss a task added since: a failed fetch refuses, unless --no-fetch asked for the copy.
     if (fetch && !run('git', ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: where.checkout }).ok) {
       throw err(CODE, `could not fetch ${branch} in ${repo} to read the tasks it owes`, `check the network and your login, and that ${branch} is ${repo}'s default branch (default_branch in .sdlc/repos.json); or pass --no-fetch to read the last fetched copy`);
     }
-    const show = (file) => run('git', ['show', `refs/remotes/origin/${branch}:specs/${story}/${file}`], { cwd: where.checkout });
-    const shown = show('tasks.md');
-    if (shown.ok) {
-      owed[repo] = parseTaskIds(shown.stdout);
-      if (!owed[repo].length) why[repo] = `specs/${story}/tasks.md on origin/${branch} names no task (T01, T02, …)`;
-      continue;
-    }
-    // A light spec keeps its tasks in spec.md (#348) — only when its link.md says so.
-    const link = show('link.md');
-    const spec = link.ok ? show('spec.md') : null;
-    if (!link.ok || !isLightSpec(link.stdout)) {
-      owed[repo] = null;
-      // A tasks block with no light mode named is most likely a link.md the reader cannot parse (CRLF, a
-      // quoted value): say so, rather than only that tasks.md is missing.
-      why[repo] = spec?.ok && lightTasksBlock(spec.stdout) !== null
-        ? `no specs/${story}/tasks.md on origin/${branch}, and its link.md does not say \`spec-mode: light\` (plain, on its own line), so the tasks block in spec.md is not read`
-        : `no specs/${story}/tasks.md on origin/${branch}`;
-      continue;
-    }
-    const block = spec.ok ? lightTasksBlock(spec.stdout) : null;
-    if (block === null) {
-      owed[repo] = null;
-      why[repo] = spec.ok
-        ? `specs/${story}/spec.md on origin/${branch} is a light spec without one ${LIGHT_TASKS.begin} … ${LIGHT_TASKS.end} block`
-        : `specs/${story}/link.md on origin/${branch} says spec-mode: light, but there is no spec.md`;
-      continue;
-    }
-    owed[repo] = parseTaskIds(block);
-    if (!owed[repo].length) why[repo] = `the tasks block of specs/${story}/spec.md on origin/${branch} names no task (T01, T02, …)`;
+    const got = owedTasks(where, story, branch);
+    owed[repo] = got.tasks;
+    if (got.why) why[repo] = got.why;
   }
   const plan = planDone({ story, declared: ctx.entry.repos, skipped, owed, ships });
   if (!plan.shipped) {
@@ -1317,44 +1326,77 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   const keyOf = (x) => `${x.story}/${x.task}/${x.repo}`;
   const unread = [];
   const otherStory = [];
+  // What a person may want to know, though nothing is wrong yet (#218): `{ story, repo?, why }`.
+  const notes = [];
   // The PRs to read for grouped tasks, after every task's own finding is handled: a task's own merge is
   // the better evidence (a stacked PR can still list the commits of a task that merged on its own).
   const groups = [];
   // A grouped PR (#583): a squash merge leaves no Task: lines on the default branch, so `shipDrift` finds
   // only the task its branch names. The PR's own commits name the others; each of the same story is
   // shipped from that PR too. A task of another story is listed, never recorded: a person checks it.
-  const shipGroup = async (at, n) => {
+  // Each PR/MR is asked once per run (#218), however many stories or tasks point at it: `{ tasks }`, or
+  // `{ why }` it could not be read, with `again` on every ask after the first. Two keys: `asks` is the
+  // platform read, per repo and PR; `groupSeen` (below) is one `shipGroup` per repo, PR and story, as a PR
+  // can carry tasks of two stories that each have a ship from it.
+  const asks = new Map();
+  const askPr = (repo, n) => {
+    const k = `${repo}#${n}`;
+    if (asks.has(k)) return { ...asks.get(k), again: true };
+    let got;
+    try {
+      const where = registeredRepo(root, repo);
+      if (!where.platform || !where.checkout) got = { why: 'there is no platform or checkout to read its commits from' };
+      else {
+        const asked = prTasks(where.platform, n, { cwd: where.checkout, runner });
+        got = !asked.ok || asked.partial ? { why: `its commits could not all be read (${asked.ok ? 'more than one page of them' : asked.reason})` } : { tasks: asked.tasks };
+      }
+    } catch (e) { got = { why: e.message }; }
+    asks.set(k, got);
+    return got;
+  };
+  // `again`: the PR is read again from a ship an earlier run recorded (#218), so what it lists is likely
+  // listed before — marked so a person can tell it from news.
+  const shipGroup = async (at, n, again = false) => {
     const fix = `each other task it carries: yad build ship <story> --task <T> --repo ${at.repo} --pr ${n}`;
-    // A later sync does not ask this PR again (its branch's task has a ship now): the fix is by hand.
-    const notRead = (why) => unread.push({ repo: at.repo, pr: n, read: true, why: `PR/MR #${n}: ${why}, so other tasks it carries are not recorded — ${fix}` });
-    let where;
-    try { where = registeredRepo(root, at.repo); } catch (e) { notRead(e.message); return; }
-    if (!where.platform || !where.checkout) { notRead('there is no platform or checkout to read its commits from'); return; }
-    const asked = prTasks(where.platform, n, { cwd: where.checkout, runner });
-    if (!asked.ok || asked.partial) { notRead(`its commits could not all be read (${asked.ok ? 'more than one page of them' : asked.reason})`); return; }
-    for (const id of asked.tasks) {
+    // A later sync asks this PR again while its story is not shipped (#218); a person can also record them.
+    const got = askPr(at.repo, n);
+    if (got.why) {
+      if (!got.again) unread.push({ repo: at.repo, pr: n, read: true, why: `PR/MR #${n}: ${got.why}, so other tasks it carries are not recorded — the next sync asks again, or ${fix}` });
+      return;
+    }
+    for (const id of got.tasks) {
       const m = /^(.+)-(T\d+)$/i.exec(id);
       if (!m) continue; // not a task id: spec-link is the gate for that
       const [, story, task] = m;
       const g = { story, task, repo: at.repo };
       if (handled.has(keyOf(g)) || hasShip(g)) continue;
       const cmd = `yad build ship ${story} --task ${task} --repo ${at.repo} --pr ${n}`;
-      if (story !== at.story) { otherStory.push({ ...g, why: `PR/MR #${n} carries it, but it is a task of another story than ${at.story}`, fix: cmd, command: cmd }); continue; }
+      if (story !== at.story) { otherStory.push({ ...g, why: `PR/MR #${n} carries it, but it is a task of another story than ${at.story}`, fix: cmd, command: cmd, ...(again ? { again: true } : {}) }); continue; }
       handled.add(keyOf(g));
       touched.add(story);
       if (dryRun) { planned.push({ ...g, pr: String(n), command: cmd }); continue; }
       try {
         const res = await buildShip(root, { ...g, pr: String(n), byHand: false, today, fetch, runner, prReader });
         recorded.push({ ...g, pr: res.ship.pr, mergeCommit: res.ship.mergeCommit, file: res.file });
+        noteShip(g);
       } catch (e) {
         left.push({ ...g, why: e.message, fix: e.hint || null, command: cmd });
       }
     }
   };
-  // Does the task already have a ship? A ledger that cannot be read is `build ship`'s to refuse, by its cause.
-  const hasShip = (g) => {
-    try { return readShips(epicRoot(root, storyEpic(g.story))).some((s) => keyOf(s) === keyOf(g)); } catch { return false; }
+  // Does the task already have a ship? Each epic's ledger is read once per run, and a ship this run records
+  // is added to it. A ledger that cannot be read is `build ship`'s to refuse, by its cause.
+  const shipCache = new Map();
+  const shipsOf = (ep) => {
+    if (!shipCache.has(ep)) {
+      let ships = null;
+      try { ships = readShips(epicRoot(root, ep)); } catch { /* null: unread */ }
+      shipCache.set(ep, ships);
+    }
+    return shipCache.get(ep);
   };
+  const hasShip = (g) => (shipsOf(storyEpic(g.story)) || []).some((s) => keyOf(s) === keyOf(g));
+  const noteShip = (g) => { shipsOf(storyEpic(g.story))?.push({ story: g.story, task: g.task, repo: g.repo }); };
   for (const f of drift.findings.filter((x) => x.kind === 'merged-no-ship')) {
     const at = { story: f.story, task: f.task, repo: f.repo };
     if (handled.has(keyOf(at))) continue;
@@ -1386,6 +1428,7 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
         res = await ship({ pr: by[1] });
       }
       recorded.push({ ...at, pr: res.ship.pr, mergeCommit: res.ship.mergeCommit, file: res.file });
+      noteShip(at);
       touched.add(f.story);
     } catch (e) {
       left.push({ ...at, why: e.message, fix: e.hint || f.fix, command: cmd });
@@ -1393,9 +1436,77 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
     }
     if (from) groups.push([at, from]);
   }
-  for (const [at, n] of groups) await shipGroup(at, n);
-  // A task of another story is listed unless this run recorded it after all (its own commit, found later).
-  left.push(...otherStory.filter((x) => !handled.has(keyOf(x))));
+  // A grouped PR an earlier sync missed (#218) — its commits not read, a dry run, or a yadflow that recorded
+  // only the branch's task: the PR of every ship of a story in scope that is not shipped yet is read again,
+  // but only while a task in the story's task list (read locally, no network) has no ship in that repo. A
+  // shipped story is not asked; a task with a ship is skipped by `shipGroup`, so none is recorded twice.
+  let registry = [];
+  try { const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }); registry = Array.isArray(reg?.repos) ? reg.repos : []; } catch { /* drift says it */ }
+  // A ship's link names its repo: `https://host/team/api/pull/9` is `team/api` (null for `#9`).
+  const linkRepo = (pr) => {
+    const m = String(pr).match(/^(.*?)(?:\/-)?\/(?:pull|pulls|merge_requests)\/\d+(?:[/?#].*)?$/);
+    return m ? repoPathFromGitUrl(m[1]) : null;
+  };
+  for (const ep of epic ? [epic] : epicIds(root)) {
+    const ships = shipsOf(ep);
+    if (!ships) continue; // said in `drift.unreadEpics`
+    const open = new Map();
+    const isOpen = (story) => {
+      if (!open.has(story)) {
+        let st = null;
+        let why = null;
+        try {
+          st = readStoryStatus(storyFileOf(epicRoot(root, ep), story));
+          if (st == null) why = 'its story file has no single `status:` line';
+        } catch (e) { why = e.message; }
+        if (why) notes.push({ story, why: `its status could not be read (${why}), so its PRs/MRs are not read again for tasks an earlier sync missed — fix the story file, or record them with \`yad build ship\`` });
+        open.set(story, st != null && st !== 'shipped');
+      }
+      return open.get(story);
+    };
+    // Does `story` still owe a task in `repo` with no ship? Unknown counts as yes, and is said.
+    const owing = new Map();
+    const owes = (story, repo) => {
+      const k = `${story}/${repo}`;
+      if (!owing.has(k)) {
+        let where = null;
+        try { where = registeredRepo(root, repo); } catch { /* `shipGroup` says why */ }
+        const got = where?.checkout ? owedTasks(where, story, defaultBranchOf(where)) : null;
+        if (got && !got.tasks?.length) notes.push({ story, repo, why: `${got.why} — so its PRs/MRs are read again, in case they carry tasks an earlier sync missed` });
+        owing.set(k, !got?.tasks?.length || got.tasks.some((t) => !hasShip({ story, task: t, repo })));
+      }
+      return owing.get(k);
+    };
+    for (const s of [...ships]) {
+      if (!isPlainObject(s) || s.retroactive || typeof s.story !== 'string' || storyEpic(s.story) !== ep || typeof s.repo !== 'string') continue;
+      const n = s.pr == null ? '' : prNumberFromUrl(String(s.pr)) || String(s.pr).replace(/^#/, '');
+      if (!/^\d+$/.test(n) || !isOpen(s.story) || !owes(s.story, s.repo)) continue;
+      // A link to a PR of another repo than the ship's would read the wrong PR #n here.
+      const have = linkRepo(s.pr);
+      const meta = registry.find((r) => r?.name === s.repo);
+      const want = typeof meta?.git_url === 'string' ? repoPathFromGitUrl(meta.git_url) : null;
+      if (have && want && have.toLowerCase() !== want.toLowerCase()) {
+        unread.push({ repo: s.repo, pr: Number(n), read: false, why: `the ship of ${forTerminal(s.story)} / ${forTerminal(String(s.task))} links ${forTerminal(String(s.pr))}, a PR/MR of ${forTerminal(have)}, not of ${forTerminal(want)}, so it is not read again — check its \`pr\`` });
+        continue;
+      }
+      groups.push([{ story: s.story, task: s.task, repo: s.repo }, Number(n), true]);
+    }
+  }
+  // One read of each PR per story: a PR two tasks merged, or found both ways, is not read twice.
+  const groupSeen = new Set();
+  for (const [at, n, again] of groups) {
+    const k = `${at.repo}#${Number(n)}#${at.story}`;
+    if (groupSeen.has(k)) continue;
+    groupSeen.add(k);
+    await shipGroup(at, Number(n), again);
+  }
+  // A task of another story is listed once, unless this run recorded it after all (its own commit, found later).
+  const listed = new Set();
+  for (const x of otherStory) {
+    if (handled.has(keyOf(x)) || listed.has(keyOf(x))) continue;
+    listed.add(keyOf(x));
+    left.push(x);
+  }
   // Stories every task of which now has a ship — and those `reconcile check` already sees as shipped in the
   // code but not in their status — are set shipped by `build done`, which checks it all again.
   const done = [];
@@ -1424,9 +1535,10 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   if (dryRun) for (const p of planned) info(`would run: ${p.command}`);
   for (const r of recorded) ok(`recorded ${r.story} / ${r.task} in ${r.repo}`);
   for (const d of done) ok(`${d} is shipped`);
-  for (const l of left) warn(`not recorded: ${l.story} / ${l.task} in ${l.repo} — ${l.why}${l.fix ? ` (${l.fix})` : ''}`);
+  for (const l of left) warn(`not recorded${l.again ? ' (again)' : ''}: ${l.story} / ${l.task} in ${l.repo} — ${l.why}${l.fix ? ` (${l.fix})` : ''}`);
   for (const n of notDone) info(`${n.story} not set shipped yet — ${n.why}`);
   for (const x of forPerson) warn(x.kind === 'possible' ? `${x.repo} ${String(x.sha || '').slice(0, 12)} may be ${x.stories.join(', ')} (${x.token}) — check it by hand` : `${x.repo} ${String(x.sha || '').slice(0, 12)} names ${x.task}, a story no file holds — check the trailer`);
+  for (const x of notes) info(forTerminal(`${x.story}${x.repo ? ` in ${x.repo}` : ''}: ${x.why}`));
   for (const r of unread) warn(`${r.repo || r.epic || r.story || 'repos.json'}: ${r.read ? 'read in part' : 'not read'}${r.why ? ` — ${r.why}` : r.note ? ` — ${r.note}` : ''}`);
   if (!dryRun && !recorded.length && !done.length && !left.length) {
     if (unread.length) info(`nothing recorded in what was read — ${unread.length} repo(s), ledger(s), stories or registry not read in full, so merged work there is unknown`);
@@ -1435,6 +1547,6 @@ export async function buildSync(root, { epic = null, dryRun = false, today, fetc
   if (recorded.length || done.length) hand('commit with `yad checkpoint --push`');
   return {
     epic, dryRun, changed: recorded.length > 0 || done.length > 0,
-    recorded, done, ...(dryRun ? { planned } : {}), left, notDone, forPerson, unread,
+    recorded, done, ...(dryRun ? { planned } : {}), left, notDone, forPerson, unread, notes,
   };
 }

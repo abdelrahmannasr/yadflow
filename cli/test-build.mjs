@@ -1397,6 +1397,123 @@ test('yad build sync: a squash-merged grouped PR ships every task of the story i
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad build sync: a later sync records the tasks of a grouped PR an earlier one missed, asking each PR once (#218)', async () => {
+  const { buildSync } = await import('./build.mjs');
+  // T03 is still owed after the PR ships T01 and T02, so the story's PR stays worth reading.
+  const { W, P, dir, api } = workspace({ merged: [], tasks: '# Tasks\n\n- [ ] T01 — a\n- [ ] T02 — b\n- [ ] T03 — c\n' });
+  try {
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'github', default_branch: 'main', git_url: 'https://github.com/o/api.git' }, { name: 'web', path: '../web' }] }) });
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const m = groupedMerge(api, { merge: false, trailer: false });
+    const view = { state: 'MERGED', mergedAt: '2026-10-20T10:00:00Z', mergeCommit: { oid: m }, headRefName: 'feat/EP-l-S01-T01-small-fixes', url: 'https://github.com/o/api/pull/20', body: '', statusCheckRollup: [] };
+    const answer = (ts) => ({ ok: true, stdout: JSON.stringify(ts.map((t) => ({ commit: { message: `fix: small ${t}\n\nTask: EP-l-S01-${t}` } }))), stderr: '' });
+    let commitsAnswer = { ok: false, stdout: '', stderr: 'denied' };
+    let asked = 0;
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || (cmd === 'gh' && args[0] === 'auth')) return { ok: true, stdout: '', stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args.includes('graphql')) return { ok: true, stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [{ number: 20, headRefName: view.headRefName, baseRefName: 'main', mergedAt: view.mergedAt, mergeCommit: { oid: m } }] } } } }), stderr: '' };
+      if (cmd === 'gh' && args[0] === 'api' && args[1].startsWith('repos/{owner}/{repo}/pulls/20/commits')) { asked++; return commitsAnswer; }
+      if (cmd === 'gh' && args[1] === 'view' && args[2] === '20') return { ok: true, stdout: JSON.stringify(view), stderr: '' };
+      if (cmd === 'gh' && args[1] === 'list') return { ok: true, stdout: JSON.stringify([{ number: 20, state: 'MERGED', headRefName: view.headRefName, url: view.url }]), stderr: '' };
+      return { ok: false, stdout: '', stderr: 'x' };
+    };
+    const opts = { today: '2026-10-21', runner, prReader: () => ({ ok: true, reviews: [] }) };
+    const shipFile = (t) => path.join(dir, `.sdlc/build-log/EP-l-S01-${t}-api.json`);
+    // 1. The PR's commits cannot be read: only the branch's task is recorded, and the note says a later sync asks again.
+    let r = await buildSync(P, opts);
+    assert.deepEqual(r.recorded.map((x) => x.task), ['T01']);
+    assert.equal(r.unread.filter((u) => u.pr === 20).length, 1, 'a PR not read is said once');
+    assert.match(r.unread.find((u) => u.pr === 20).why, /the next sync asks again, or each other task it carries: yad build ship <story> --task <T> --repo api --pr 20/);
+    assert.equal(fs.existsSync(shipFile('T02')), false);
+    // 2. Read again, but its commits name only T01 (as an older yadflow saw it): nothing new, and the ship of T01
+    // is never written twice.
+    commitsAnswer = answer(['T01']);
+    r = await buildSync(P, opts);
+    assert.deepEqual([r.recorded.length, r.left.length], [0, 0]);
+    // 3. A dry run, the commits now read in full: T02 is planned from the PR of T01's ship, nothing is written.
+    commitsAnswer = answer(['T01', 'T02']);
+    r = await buildSync(P, { ...opts, dryRun: true });
+    assert.deepEqual(r.planned.filter((x) => x.task).map((x) => [x.task, x.pr, x.command]), [['T02', '20', 'yad build ship EP-l-S01 --task T02 --repo api --pr 20']]);
+    assert.equal(fs.existsSync(shipFile('T02')), false);
+    // 4. The sync records T02 from PR #20, with its merge commit.
+    r = await buildSync(P, opts);
+    assert.deepEqual(r.recorded.map((x) => [x.task, x.pr, x.mergeCommit]), [['T02', view.url, m]]);
+    assert.equal(read(shipFile('T02')).mergeCommit, m);
+    // 5. Asked again: nothing new is recorded, and PR #20 is asked once, though the ships of T01 and T02 both
+    // name it (T03 has no ship yet, so the story is still in-build).
+    asked = 0;
+    r = await buildSync(P, opts);
+    assert.deepEqual([r.recorded.length, r.left.length], [0, 0]);
+    assert.equal(status(dir), 'in-build');
+    assert.equal(asked, 1);
+    // 6. A shipped story is not asked again.
+    const story = path.join(dir, 'stories/EP-l-S01.md');
+    fs.writeFileSync(story, fs.readFileSync(story, 'utf8').replace(/^status:.*$/m, 'status: shipped'));
+    asked = 0;
+    r = await buildSync(P, opts);
+    assert.equal(asked, 0);
+    assert.equal(r.recorded.length, 0);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad build sync: what a re-read asks, skips and lists — other stories, no PR, retro, every task shipped, another repo (#218)', async () => {
+  const { buildSync } = await import('./build.mjs');
+  const { W, P, dir, api } = workspace({ merged: [] });
+  try {
+    write(P, {
+      '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'github', default_branch: 'main', git_url: 'https://github.com/o/api.git' }, { name: 'web', path: '../web' }] }),
+      'epics/EP-l/stories/EP-l-S02.md': '---\nid: EP-l-S02\nepic: EP-l\nstatus: in-build\nrepos: [api]\n---\n# S02\n',
+      'epics/EP-l/stories/EP-l-S03.md': '---\nid: EP-l-S03\nepic: EP-l\nstatus: in-build\nrepos: [api]\n---\n# S03\n',
+    });
+    // S02 owes T01 and T02 on api's main; S03 has no task list there.
+    write(api, { 'specs/EP-l-S02/tasks.md': '# Tasks\n\n- [ ] T01 — a\n- [ ] T02 — b\n' });
+    git(api, 'add', '-A');
+    git(api, 'commit', '-q', '-m', 'docs: S02 tasks');
+    git(api, 'push', '-q', 'origin', 'main');
+    const ship = (story, task, pr, extra = {}) => ({ [`.sdlc/build-log/${story}-${task}-api.json`]: JSON.stringify({ story, task, repo: 'api', pr, mergeCommit: null, shippedAt: '2026-10-20', ...extra }) });
+    write(dir, {
+      ...ship('EP-l-S01', 'T01', '#30'), // re-read: S01 still owes T02
+      ...ship('EP-l-S01', 'T05', 'none'), ...ship('EP-l-S01', 'T06', 'local'), // no PR: skipped
+      ...ship('EP-l-S01', 'retro', '#31', { retroactive: true }), // retroactive: skipped
+      ...ship('EP-l-S02', 'T01', '#40'), ...ship('EP-l-S02', 'T02', '#40'), // every task shipped: not asked
+      ...ship('EP-l-S03', 'T01', 'https://github.com/o/other/pull/50'), // a PR of another repo
+      ...ship('EP-l-S04', 'T01', '#60'), // no story file: its status cannot be read
+    });
+    const calls = [];
+    const msg = (id) => ({ commit: { message: `fix: ${id}\n\nTask: ${id}` } });
+    const runner = (cmd, args) => {
+      if (cmd === 'which' || (cmd === 'gh' && args[0] === 'auth')) return { ok: true, stdout: '', stderr: '' };
+      const m = cmd === 'gh' && args[0] === 'api' && String(args[1]).match(/^repos\/\{owner\}\/\{repo\}\/pulls\/(\d+)\/commits/);
+      if (m) {
+        calls.push(Number(m[1]));
+        return { ok: true, stdout: JSON.stringify(['EP-l-S01-T01', 'EP-l-S01-T02', 'EP-l-S02-T03', 'EP-m-S01-T01'].map(msg)), stderr: '' };
+      }
+      return { ok: false, stdout: '', stderr: 'x' };
+    };
+    const lines = [];
+    const was = console.log;
+    console.log = (x) => lines.push(String(x));
+    let r;
+    try { r = await buildSync(P, { today: '2026-10-21', runner, prReader: () => ({ ok: true, reviews: [] }), dryRun: true }); } finally { console.log = was; }
+    assert.ok(lines.some((l) => /not recorded \(again\): EP-l-S02 \/ T03 in api/.test(l)), lines.join('\n'));
+    // Only PR #30 is asked: no PR, a retro ship, a story with every task shipped, another repo's link and an
+    // unreadable story are not.
+    assert.deepEqual(calls, [30]);
+    assert.deepEqual(r.planned.filter((x) => x.task).map((x) => [x.story, x.task, x.pr]), [['EP-l-S01', 'T02', '30']]);
+    // Tasks of another story or epic are listed, never planned or recorded, and marked as read again.
+    assert.deepEqual(r.left.map((x) => [x.story, x.task, x.again]).sort(), [['EP-l-S02', 'T03', true], ['EP-m-S01', 'T01', true]]);
+    assert.match(r.left[0].command, /^yad build ship EP-[lm]-S0[12] --task T0[13] --repo api --pr 30$/);
+    const cross = r.unread.find((u) => u.pr === 50);
+    assert.equal(cross.repo, 'api');
+    assert.match(cross.why, /links https:\/\/github\.com\/o\/other\/pull\/50, a PR\/MR of o\/other, not of o\/api, so it is not read again/);
+    // Unknown is never an all-clear: a story with no task list counts as owing (S03 is then held back only by its
+    // link to another repo), and it is said.
+    assert.match(r.notes.find((x) => x.story === 'EP-l-S03').why, /no specs\/EP-l-S03\/tasks\.md on origin\/main — so its PRs\/MRs are read again/);
+    assert.match(r.notes.find((x) => x.story === 'EP-l-S04').why, /its status could not be read \(no story file for EP-l-S04\)/);
+    assert.equal(r.notes.some((x) => x.story === 'EP-l-S02'), false);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad build sync: a grouped PR merged with a merge commit ships each task once (#583)', async () => {
   const { buildSync } = await import('./build.mjs');
   const { W, P, dir, api } = workspace({ merged: [] });
