@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID,
+  readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -1217,7 +1217,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   let tooBig = false;
   try { raw = readPlainFile(dest); } catch (e) {
     if (e?.code === FILE_TOO_BIG) tooBig = true;
-    else if (e?.code === NOT_PLAIN_FILE) notPlain = true;
+    else if (e?.code === NOT_PLAIN_FILE) notPlain = notPlainSaid(e, SETTINGS_NOT_PLAIN);
     else throw e;
   }
   let parsed = null;
@@ -1252,7 +1252,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   if (notPlain) {
     if (!unparsedSaid.has(`${dest}\0not-plain`)) {
       unparsedSaid.add(`${dest}\0not-plain`);
-      warn(`${named} ${SETTINGS_NOT_PLAIN} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with the real file (not a link), then re-run \`yad check --fix\``);
+      warn(`${named} ${notPlain} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with the real file (not a link), then re-run \`yad check --fix\``);
     }
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
@@ -1291,7 +1291,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       // The same plain read: a link or a folder put there since the plan is left untouched.
       let text;
       try { text = readPlainFile(dest); } catch (e) {
-        if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
+        if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${notPlainSaid(e, SETTINGS_NOT_PLAIN)} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
         if (e?.code === FILE_TOO_BIG) { warn(`${named} ${TOO_BIG_SAID} — left untouched; replace it with a file of the right size, then re-run \`yad check --fix\``); return; }
         text = '';  // unreadable — refused below, as a file that does not parse
       }

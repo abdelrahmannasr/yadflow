@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { asArg, c, fail, forTerminal, hand, info, log, ok, readJSONStrict, run, warn, emitJSON } from './lib.mjs';
+import { asArg, c, fail, forTerminal, hand, info, log, ok, readJSONStrict, readPlainFile, run, warn, emitJSON, writeFileAtomic, FILE_TOO_BIG, NOT_PLAIN_FILE } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { judgedRepos } from './workspace.mjs';
 import { changeLevel, draftRiskMap, folderPathspec, highTouched, parseRiskMap, pathspecsFor, rankAuthors, recentAuthors, RISK_MAP_FILE, riskMapFindings, touchedFolders } from './riskmap.mjs';
@@ -26,11 +26,14 @@ export function repoFiles(repoRoot) {
   return [...new Set(r.stdout.split('\0').filter(Boolean))];
 }
 
+// The map's text, or null when there is none. A map that is a link, sits in a linked `.sdlc` (#214) or is
+// too big is not read: `{ refused }` says why, so it is never taken for a missing map and drafted over.
 export function readRiskMap(repoRoot) {
   const file = path.join(repoRoot, RISK_MAP_FILE);
   try {
-    return fs.readFileSync(file, 'utf8');
-  } catch {
+    return readPlainFile(file, { within: repoRoot });
+  } catch (e) {
+    if (e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG) return { refused: e.message };
     return null;
   }
 }
@@ -230,6 +233,8 @@ export function recentLoginsFor(repoRoot, ref = 'HEAD', { window = OWNER_WINDOW 
 
 export function checkRepo(repoRoot) {
   const text = readRiskMap(repoRoot);
+  // A map yad may not read is named as a finding, the way a line it cannot read is.
+  if (text?.refused) return { git: run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot }).ok, map: true, findings: [{ code: 'unreadable', target: null, message: text.refused }] };
   // No map: nothing to check, so the repo's file list (slow on a large repo) is never read.
   if (text === null) return { git: run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: repoRoot }).ok, map: false, findings: [] };
   const files = repoFiles(repoRoot);
@@ -276,12 +281,11 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
       const files = repoFiles(t.root);
       if (!files) { results.push({ name: t.name, git: false, added: [], written: false }); continue; }
       const before = readRiskMap(t.root);
+      if (before?.refused) { results.push({ name: t.name, git: true, added: [], unwritable: [], refused: `not read: ${before.refused}`, written: false }); continue; }
       const d = draftRiskMap(before, files);
       const changed = !d.refused && d.text !== before;
-      if (changed && !dryRun) {
-        fs.mkdirSync(path.join(t.root, '.sdlc'), { recursive: true });
-        fs.writeFileSync(path.join(t.root, RISK_MAP_FILE), d.text);
-      }
+      // Through a fresh file and a rename, never through a link at the map or a linked `.sdlc` (#214).
+      if (changed && !dryRun) writeFileAtomic(path.join(t.root, RISK_MAP_FILE), d.text, { within: t.root });
       results.push({ name: t.name, git: true, added: d.added, unwritable: d.unwritable, refused: d.refused, written: changed && !dryRun });
     }
     if (json) {
@@ -290,7 +294,7 @@ export async function runRiskMap(root, { action = 'check', name, json = false, d
       for (const r of results) {
         log(c.bold(`\nrisk map — ${forTerminal(r.name)}`));
         if (!r.git) { warn('not a git repo — skipped'); continue; }
-        if (r.refused) { fail(`${RISK_MAP_FILE} is ${r.refused} — nothing was written over it`); continue; }
+        if (r.refused) { fail(`${RISK_MAP_FILE} is ${forTerminal(r.refused)} — nothing was written over it`); continue; }
         if (r.unwritable.length) warn(`not added — a map line cannot hold these names (a space, \`#\`, \`*\`, \`?\`, \`[\`, \`\\\`, or a control or invisible character): ${r.unwritable.map(forTerminal).join(' ')}; rename them to give them a level`);
         if (!r.added.length) { ok('every directory already has a line — nothing to add'); continue; }
         (r.written ? ok : info)(`${r.written ? 'added' : 'would add'} ${r.added.length} unset line(s): ${r.added.map(forTerminal).join(' ')}`);

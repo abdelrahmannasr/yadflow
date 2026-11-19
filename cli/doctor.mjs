@@ -6,7 +6,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -226,7 +226,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
       productConfig = readJSONStrict(productPath, null);
     } catch (e) {
       productConfigBroken = true;
-      check(checks, 'product', 'project', 'fail', `${settingsRel} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+      // Under a linked folder (#214) it is not read at all: named as such, never as a file that does not parse.
+      check(checks, 'product', 'project', 'fail', `${settingsRel} ${e.folder ? notPlainSaid(e) : 'does not parse'} [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
     }
     if (productConfigBroken) { /* reported above */ }
     else if (typeof productConfig !== 'object' || Array.isArray(productConfig) || productConfig === null) check(checks, 'product', 'project', 'fail', `${settingsRel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
@@ -1280,7 +1281,7 @@ function shapeCheckFor(checks, id, label, rows, engine) {
   const unreadable = rows.filter((r) => r.from === null);
   if (unreadable.length) {
     check(checks, `${id}:unreadable`, 'shape', 'fail',
-      `${label}: ${unreadable.length} state file(s) do not parse — ${unreadable.map((r) => r.file).join(', ')}`,
+      `${label}: ${unreadable.length} state file(s) do not parse — ${unreadable.map((r) => (r.folder ? `${r.file} (under ${r.folder}, a linked folder, so not read)` : r.file)).join(', ')}`,
       'restore them from git — a broken state file blocks `yad migrate` and cannot be read by the gate');
   }
 
@@ -3032,7 +3033,7 @@ export function lineEndingChecks(root, checks, { platform = process.platform, ru
 const SETTINGS_NOT_PLAIN = 'is a link or not a plain file, so it was not read';
 function settingsOf(root, rel) {
   try { return { settings: readPlainJSON(path.join(root, rel)), named: rel }; } catch (e) {
-    const why = e?.code === NOT_PLAIN_FILE ? SETTINGS_NOT_PLAIN : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null;
+    const why = e?.code === NOT_PLAIN_FILE ? notPlainSaid(e, SETTINGS_NOT_PLAIN) : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null;
     return { settings: null, named: why ? `${rel} (${why.replace(/^is /, '')})` : rel };
   }
 }

@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
+import { c, emitJSON, forTerminal, info, log, ok, refuse, warn, writeJSON, isPlainObject, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid, LINKED_FOLDER_FIX } from './lib.mjs';
 import { markedBlockAction } from './plan.mjs';
 import { productConfigPath, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import {
@@ -89,12 +89,14 @@ export const parseJSON = (text) => JSON.parse(text.charCodeAt(0) === 0xfeff ? te
 const NOT_PLAIN_SAID = 'is a link or not a plain file, so it was not read';
 // What to do about a script yad refused. A link is not fixed by `git checkout`: when the link is what is
 // committed, a restore brings it back, so the hint for one says to replace it with the real file.
-const isNotPlainError = (error) => /is a link or not a plain file/.test(String(error || ''));
+const isNotPlainError = (error) => /is a link or not a plain file|a linked folder/.test(String(error || ''));
+// Under a linked folder (#214), the folder is what to replace.
+const isLinkedFolderError = (error) => /a linked folder/.test(String(error || ''));
 // Nor is a file too big to read (#215): when the big file is what is committed, git has no smaller copy.
 const isTooBigError = (error) => String(error || '').includes(TOO_BIG_SAID);
 // Whether the error has a fix of its own, not the usual "fix it, or restore it from git".
 const hasOwnFix = (error) => isNotPlainError(error) || isTooBigError(error);
-export const localSetupFixHint = (error) => (isNotPlainError(error) ? 'replace it with the real file (not a link)'
+export const localSetupFixHint = (error) => (isLinkedFolderError(error) ? LINKED_FOLDER_FIX : isNotPlainError(error) ? 'replace it with the real file (not a link)'
   : isTooBigError(error) ? 'replace it with a file of the right size' : 'fix it, or restore it from git');
 
 // The two lists, each step checked. `problems` names every step left out and why; the file still answers.
@@ -136,7 +138,7 @@ export function readCommittedLocalSetup(root) {
   if (text === null) {
     // A file too big to read (#215) is an error, never "no file": the file is there.
     try { text = readPlainFile(localSetupPath(root)); } catch (e) {
-      return { doc: null, committed: false, error: e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null };
+      return { doc: null, committed: false, error: e?.code === NOT_PLAIN_FILE ? notPlainSaid(e, NOT_PLAIN_SAID) : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : null };
     }
     if (text === null) return { doc: null, committed: false, error: null };
   }
@@ -194,10 +196,10 @@ function localSetupJsonAction(root) {
   let notPlain = false;
   // A file too big to read (#215) is refused like one that does not parse, never rebuilt as a missing one.
   let tooBig = false;
-  try { raw = readPlainFile(dest); } catch (e) { notPlain = e?.code === NOT_PLAIN_FILE; tooBig = e?.code === FILE_TOO_BIG; /* else unreadable: as missing, as before */ }
+  try { raw = readPlainFile(dest); } catch (e) { notPlain = e?.code === NOT_PLAIN_FILE && notPlainSaid(e, NOT_PLAIN_SAID); tooBig = e?.code === FILE_TOO_BIG; /* else unreadable: as missing, as before */ }
   let parsed = null;
   if (raw !== null) { try { parsed = parseJSON(raw); } catch { parsed = undefined; } }
-  const merged = notPlain ? { unreadable: `it ${NOT_PLAIN_SAID}` }
+  const merged = notPlain ? { unreadable: `it ${notPlain}` }
     : tooBig ? { unreadable: `it ${TOO_BIG_SAID}` }
     : raw === null ? mergeLocalSetup({}, root) : parsed === undefined ? { unreadable: 'it does not parse' } : mergeLocalSetup(parsed, root);
   // Never rebuilt from nothing: that would delete every step the team wrote (memory: read strictly before a write).
@@ -213,7 +215,7 @@ function localSetupJsonAction(root) {
       let now = {};
       let text;
       try { text = readPlainFile(dest); } catch (e) {
-        if (e?.code === NOT_PLAIN_FILE) { warn(`${LOCAL_SETUP_FILE} ${NOT_PLAIN_SAID} — left untouched`); return; }
+        if (e?.code === NOT_PLAIN_FILE) { warn(`${LOCAL_SETUP_FILE} ${notPlainSaid(e, NOT_PLAIN_SAID)} — left untouched`); return; }
         if (e?.code === FILE_TOO_BIG) { warn(`${LOCAL_SETUP_FILE} ${TOO_BIG_SAID} — left untouched`); return; }
         text = ''; // cannot be read: refused below, as a file that does not parse
       }
@@ -501,7 +503,7 @@ const STEP_KEYS = Object.freeze(['id', 'title', 'purpose', 'impact', 'when', 'co
 // it, with yadflow's steps, and add never writes yadflow's part (review 1). → { doc } | { error }
 function workingScript(root) {
   let text;
-  try { text = readPlainFile(localSetupPath(root)); } catch (e) { return { error: e?.code === NOT_PLAIN_FILE ? 'is a link or not a plain file' : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'cannot be read' }; }
+  try { text = readPlainFile(localSetupPath(root)); } catch (e) { return { error: e?.code === NOT_PLAIN_FILE ? notPlainSaid(e, 'is a link or not a plain file') : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'cannot be read' }; }
   if (text === null) return { error: 'is not here yet — `yad check --fix` (or `yad update`) writes it' };
   let doc;
   try { doc = parseJSON(text); } catch { return { error: 'does not parse' }; }

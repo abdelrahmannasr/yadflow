@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, warn, proseToStderr, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, nodeSupport, nodeEndOfLife, ENVELOPE_KEYS } from '../cli/lib.mjs';
+import { c, log, warn, proseToStderr, closePrompts, askYesNo, refuse, beginJSON, inJSON, emitJSON, jsonEmitted, jsonFailure, stripAnsi, isPlainObject, forTerminal, nodeSupport, nodeEndOfLife, ENVELOPE_KEYS, setProductRoot, refuseLinkedSettings } from '../cli/lib.mjs';
 import { runLedgerGuardHook, runStagedLedgerGuard, runAgentGuardHook } from '../cli/hook.mjs';
 import { VALUE_FLAGS, LIST_FLAGS } from '../cli/argv-flags.mjs';
 
@@ -912,6 +912,11 @@ async function main() {
         if (typeof hit?.meta?.name === 'string') o.repo = hit.meta.name;
       }
     }
+    // #214: the Product's folder, once settled, is where a file is read or written only when no folder on
+    // its way is a link. The Product found, never a `--dir` subfolder of it; nothing when none was found.
+    // A Product whose `.sdlc` is a link stops here (YAD-STATE-001): a lenient read of its settings would run
+    // a verified Product as an unverified one.
+    if (found?.root && !found.problem && !found.elsewhere) { setProductRoot(found.root); refuseLinkedSettings(found.root); }
   }
   // A command that WRITES the Product never writes into a folder that is not one (a code repo, say).
   // Asked by each such command AFTER its own usage checks, so a mistyped command still hears what is
@@ -950,6 +955,9 @@ async function main() {
       // A workspace folder holds a Product; it never becomes a second one (E80 review 2 — following
       // "run yad setup" from the workspace folder did exactly that, and hid the real one from its repos).
       if (commands.workspaceProduct(o.dir)) { refuse(`this folder is a workspace — its Product is ${path.relative(process.cwd(), commands.workspaceProduct(o.dir)) || '.'}`, 'run `yad setup` there, or `yad next` from inside it'); break; }
+      // #214: setup writes the Product in this folder.
+      setProductRoot(o.dir);
+      refuseLinkedSettings(o.dir);
       result = await commands.runSetup(o.dir, {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
@@ -1039,6 +1047,8 @@ async function main() {
       const usage = 'usage: yad toolbox list | check | add <id> [--custom …] | remove <id> | connect <id> [--verify]   [--json] [--dir <folder>]';
       if (!['list', 'check', 'add', 'remove', 'connect'].includes(action)) { refuse(`unknown toolbox action: ${action} (list, check, add, remove, connect)`, usage); break; }
       const found = commands.findProduct(dirGiven ? o.dir : shellCwd());
+      // #214: the team's choices are the Product's `.sdlc/toolbox.json`.
+      if (found?.root && !found.problem && !found.elsewhere) { setProductRoot(found.root); refuseLinkedSettings(found.root); }
       const rel = (p) => path.relative(process.cwd(), p) || '.';
       if (action === 'list' || action === 'check') {
         if (id) { refuse(`yad toolbox ${action} takes no more words (got: ${id})`, usage); break; }
@@ -1677,7 +1687,7 @@ main()
       return;
     }
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
-    log(c.red(`\nyad failed${code}: ${err?.message || err}`));
+    log(c.red(`\nyad failed${code}: ${forTerminal(err?.message || err)}`));
     if (err?.hint) log(c.yellow(`  → ${err.hint}`));
     if (code) log(c.dim('  (see the error codes in https://github.com/abdelrahmannasr/yadflow/blob/main/docs/CLI.md#error-codes, or run `yad doctor`)'));
     process.exitCode = 1;
