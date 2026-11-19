@@ -207,6 +207,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // cannot trust) has said why at plan time, and `--overwrite-local` cannot fix it either: it is left out here
   // and from what --fix applies, so no run says it was fixed.
   const modified = actions.filter((a) => a.status === 'modified' && !a.writesNothing);
+  // A file yad may not write (#222: a folder or a device in its place, a file under a linked folder of the
+  // Product) is named on every run, and writes nothing, so the other files are still fixed.
+  for (const a of actions.filter((x) => x.writesNothing && x.refused)) warn(forTerminal(`${shown(a)}/${a.item} ${a.refused}`));
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
@@ -391,7 +394,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     applied++;
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
-    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
+    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.replacesLink ? ' (it was a link: yad\'s file replaces it, the link was not followed)' : ''}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
   }
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —

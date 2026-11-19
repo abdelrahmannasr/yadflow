@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, readPlainText, writeFileAtomic, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
+  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -40,19 +40,40 @@ const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 const isExecutable = (dest) => {
   try { return process.platform === 'win32' || !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
 };
-// A link, a folder or a device at `dest` (or a file under a linked folder) is `missing`, as a file yad cannot
-// read is (#222): it is never read, and never backed up by reading through it. `apply` then puts the real file
-// in its place: `copyFile` replaces a link, never writes through it, and refuses a linked folder.
-const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
-  scope,
-  item,
-  status: contentSha(dest) === null ? 'missing'
-    : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
-      : 'outdated',
-  root,
-  paths: root ? [rel(root, dest)] : [],
-  apply: () => copyFile(src, dest, { exec }),
-});
+// What stands at a file yad writes (#222), read only as a plain file: 'plain', 'missing' (nothing there), 'link'
+// (a link at the file's own name, dangling or not), or 'refused' with the words that say why yad writes nothing:
+// a folder or a device there, a file larger than yad reads, or a file under a linked folder of the Product.
+function destState(dest) {
+  try { readPlainBytes(dest); return { state: 'plain' }; } catch (e) {
+    if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return { state: 'missing' };
+    if (e?.code === NOT_PLAIN_FILE && e.folder) return { state: 'refused', refused: `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\`` };
+    if (e?.code === NOT_PLAIN_FILE && e.kind === 'link') return { state: 'link' };
+    if (e?.code === NOT_PLAIN_FILE) return { state: 'refused', refused: `is ${e.kind === 'dir' ? 'a folder' : 'a device, a pipe or a socket'}, not a file, so yad did not write it — remove it (\`git rm -r\` when it is committed), then re-run \`yad check --fix\`` };
+    if (e?.code === FILE_TOO_BIG) return { state: 'refused', refused: `${TOO_BIG_SAID}, nor replaced it (there would be no copy of it) — replace it with a file of the right size or delete it, then re-run \`yad check --fix\`` };
+    throw e;
+  }
+}
+// A file yad installs from its template. What stands at `dest` decides (#222), never read through:
+//   nothing there      'missing'
+//   a link             'missing', with `replacesLink`: `copyFile` puts the real file in the link's place (a rename
+//                      replaces the link itself, never writes through it), and setup and `yad check --fix` say so
+//   a folder, a device, a file too big, or one under a linked folder of the Product
+//                      'modified' with `writesNothing` and `refused` (the words setup and check print): nothing is
+//                      written, so the other files of the same run are still written
+//   a plain file       'ok' or 'outdated', as its bytes and execute bit say
+const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => {
+  const at = destState(dest);
+  const base = { scope, item, root, paths: root ? [rel(root, dest)] : [] };
+  if (at.state === 'refused') return { ...base, status: 'modified', writesNothing: true, refused: at.refused, apply: () => {} };
+  return {
+    ...base,
+    status: at.state !== 'plain' ? 'missing'
+      : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
+        : 'outdated',
+    ...(at.state === 'link' ? { replacesLink: true } : {}),
+    apply: () => copyFile(src, dest, { exec }),
+  };
+};
 const dirAction = (scope, item, src, dest, { root } = {}) => ({
   scope,
   item,
@@ -145,8 +166,8 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
     managed,
     backup,
     apply: () => {
-      // The copy, too, never writes through a link at `<dest>.yad-orig` (#222).
-      if (backup) copyFile(dest, backup);
+      // The copy reads only a plain file and never writes through a link at `<dest>.yad-orig` (#222).
+      if (backup) backupPlain(dest, backup);
       copyFile(src, dest, { exec });
     },
   };
@@ -613,7 +634,7 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
       // left the new file unrecorded, and the next update replaced the edits a person copied into it (review 2).
       managed: { src: asset(w.src), dest: path.join(baseRoot, newDest), root: baseRoot },
       apply: () => {
-        if (backup) copyFile(oldPath, backup);
+        if (backup) backupPlain(oldPath, backup);
         fs.rmSync(oldPath, { force: true });
         // Only into an empty path. A file already at the new name is the new name's own wired-file action's
         // to judge — with its provenance and its backup — and may hold the team's edits (review 1).
@@ -992,7 +1013,10 @@ function productLinkAction(root, repo, repoRoot) {
       ...base, status: 'modified', backup,
       // Only a plain file is saved (#222): a link, a folder or a device is never read or copied through, and
       // `writeJSON` replaces it.
-      apply: () => { if (readPlainText(dest) !== null) copyFile(dest, backup); writeJSON(dest, want); },
+      apply: () => {
+        try { backupPlain(dest, backup); } catch (e) { if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG && e?.code !== 'ENOENT') throw e; }
+        writeJSON(dest, want);
+      },
     };
   }
   const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
@@ -1365,8 +1389,10 @@ export function markedBlockAction(root, relDest, lines, { scope = 'product', mar
       if (now.refused) { warn(`${scope}/${relDest}: ${now.refused} — left untouched`); return; }
       if (now.state === 'ok') return;
       const next = applyMarkedBlock(now.raw, opts);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, next.text);
+      // Through a new file and a rename (#222): a link put at `dest` since the check is replaced, never written
+      // through. The file keeps its mode.
+      const st = lstatIfPresent(dest);
+      writeFileAtomic(dest, next.text, st?.isFile() ? { mode: st.mode & 0o777 } : undefined);
     },
   };
 }
