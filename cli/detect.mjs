@@ -38,14 +38,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { c, emitJSON, info, log, samePath, readPlainBytes, NOT_PLAIN_FILE } from './lib.mjs';
+import { c, emitJSON, info, log, samePath, readPlainBytes, NOT_PLAIN_FILE, MAX_PLAIN_BYTES } from './lib.mjs';
 import { IDE_AGENTS, IDE_OPENCODE_DIR } from './manifest.mjs';
 
 // A SKILL.md or agent file bigger than this is not hashed or parsed — no real one comes near it, and a
 // huge file in a skills folder is not something to read into memory on every run.
 const MAX_FILE_BYTES = 1024 * 1024;
-// Config files are allowed more: Claude Code's `~/.claude.json` keeps per-project history and grows.
-const MAX_CONFIG_BYTES = 64 * 1024 * 1024;
+// Config files are allowed more: Claude Code's `~/.claude.json` keeps per-project history and grows. The
+// most any plain read takes, so a file read in `plain` mode meets one limit, not two.
+const MAX_CONFIG_BYTES = MAX_PLAIN_BYTES;
 
 // Skill folders: `<place>/<skill>/SKILL.md`. The project list is the installer's own table, so the two
 // cannot drift; Cursor's `.codex/skills` compatibility folder is added (Codex itself does not read it).

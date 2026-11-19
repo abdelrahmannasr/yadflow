@@ -37,7 +37,7 @@
 // as the file holds it, except where a field is kept only when it is what it should be (an approver,
 // status or date only when it is text, a PR only when it is a whole number) — never a value re-typed.
 import path from 'node:path';
-import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON, readPlainJSON, NOT_PLAIN_FILE } from './lib.mjs';
+import { c, log, info, warn, fail, hand, exists, isPlainObject, emitJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { buildIndex } from './product-index.mjs';
 import {
@@ -191,6 +191,7 @@ function readJsonFile(file) {
   } catch (e) {
     if (e.code === 'ENOENT') return { missing: true };
     if (e.code === NOT_PLAIN_FILE) return { why: e.kind === 'dir' ? 'it is a folder' : 'it is a link or not a plain file, so it was not read' };
+    if (e.code === FILE_TOO_BIG) return { why: `it ${TOO_BIG_SAID}` };
     if (e instanceof SyntaxError) return { why: 'it does not parse' };
     return { why: e.code || e.message };
   }

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, NOT_PLAIN_FILE,
+  readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -1212,9 +1212,16 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   // one whose target is missing, which a "missing" answer would replace with a new file.
   let raw = null;
   let notPlain = false;
-  try { raw = readPlainFile(dest); } catch (e) { if (e?.code !== NOT_PLAIN_FILE) throw e; notPlain = true; }
+  // A file too big to read (#215) is the team's file all the same: refused below like one that does not
+  // parse, and never treated as missing, which would write a new file over it.
+  let tooBig = false;
+  try { raw = readPlainFile(dest); } catch (e) {
+    if (e?.code === FILE_TOO_BIG) tooBig = true;
+    else if (e?.code === NOT_PLAIN_FILE) notPlain = true;
+    else throw e;
+  }
   let parsed = null;
-  let unreadable = false;
+  let unreadable = tooBig;
   if (raw !== null) {
     try { parsed = JSON.parse(raw); } catch { unreadable = true; }
     if (!unreadable && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) unreadable = true;
@@ -1253,7 +1260,8 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
     // Said once per file, not once per action: up to four share `.claude/settings.json` (E158 review 1).
     if (!unparsedSaid.has(`${dest}\0${raw}`)) {
       unparsedSaid.add(`${dest}\0${raw}`);
-      warn(`${named} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
+      warn(tooBig ? `${named} ${TOO_BIG_SAID} — yad's entries in it (hooks, the read-only allow list) cannot be written; replace it with a file of the right size, then re-run \`yad check --fix\``
+        : `${named} does not parse — yad's entries in it (hooks, the read-only allow list) cannot be written; fix the JSON, then re-run \`yad check --fix\``);
     }
     return { ...base, status: 'modified', writesNothing: true, apply: () => {} };
   }
@@ -1284,6 +1292,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       let text;
       try { text = readPlainFile(dest); } catch (e) {
         if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${SETTINGS_NOT_PLAIN} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
+        if (e?.code === FILE_TOO_BIG) { warn(`${named} ${TOO_BIG_SAID} — left untouched; replace it with a file of the right size, then re-run \`yad check --fix\``); return; }
         text = '';  // unreadable — refused below, as a file that does not parse
       }
       if (text !== null) {
@@ -2178,11 +2187,12 @@ function namedIn(raw, scriptRel) {
   }
   return where;
 }
-// A link or a folder in place of a settings file is never read (E125 b): it is NOT_READ, which `namedIn` counts
-// as naming the script — nothing can be proved about it, so the script is kept, as for a file that does not parse.
+// A link or a folder in place of a settings file is never read (E125 b), nor a file too big to read (#215): it
+// is NOT_READ, which `namedIn` counts as naming the script — nothing can be proved about it, so the script is
+// kept, as for a file that does not parse.
 const NOT_READ = Symbol('not a plain file');
 const onDisk = (root) => (file) => {
-  try { return readPlainFile(path.join(root, file)); } catch (e) { return e?.code === NOT_PLAIN_FILE ? NOT_READ : null; }
+  try { return readPlainFile(path.join(root, file)); } catch (e) { return e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG ? NOT_READ : null; }
 };
 // `HEAD:./<file>` is read relative to the Product (the `./`), so a Product in a subfolder of its repository
 // reads its own files. Not a repository, no commit yet, or a file never committed: nothing is committed.

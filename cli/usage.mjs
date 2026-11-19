@@ -29,7 +29,7 @@
 // a login.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, note, warn, fail, readJSON, readPlainJSON, NOT_PLAIN_FILE, run, emitJSON, collectWarning } from './lib.mjs';
+import { c, log, ok, note, warn, fail, readJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, run, emitJSON, collectWarning } from './lib.mjs';
 import { brandForPage } from './brand.mjs';
 import { writeOrSave } from './reports-dir.mjs';
 import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
@@ -51,7 +51,7 @@ function readLedger(p, def) {
   } catch (e) {
     if (e.code === 'ENOENT') return def;
     // The reason names no absolute path: the ledger is already named by its epic, relative to the Product.
-    const why = e.code === NOT_PLAIN_FILE ? 'it is a link or not a plain file, so it was not read' : e instanceof SyntaxError ? e.message : (e.code || e.message);
+    const why = e.code === NOT_PLAIN_FILE ? 'it is a link or not a plain file, so it was not read' : e.code === FILE_TOO_BIG ? `it ${TOO_BIG_SAID}` : e instanceof SyntaxError ? e.message : (e.code || e.message);
     { const w = `skipped unreadable ledger ${path.basename(path.dirname(path.dirname(p)))}/${path.basename(p)}: ${why}`; collectWarning(w); note(c.yellow(w)); }
     return def;
   }

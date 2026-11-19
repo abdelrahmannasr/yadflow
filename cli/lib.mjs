@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash, randomBytes } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, SCHEMA_VERSION, VERSION, mirrorDrift, preferring } from './manifest.mjs';
+import { MAX_PLAIN_BYTES, MIRRORED_FILES, SCHEMA_VERSION, VERSION, mirrorDrift, preferring } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -358,9 +358,41 @@ const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.
 // `kind` says what was there instead: 'dir', 'link' or 'other' (a device, a pipe, a socket).
 const notPlain = (p, kind) => Object.assign(new Error(`${p} is not a plain file (a link, a folder or a device), so yad did not read it`), { code: NOT_PLAIN_FILE, kind });
 const kindOf = (st) => (st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'link' : 'other');
+// No Product file yad reads comes near this size (#215). Anyone who can commit to the Product could
+// commit a file of hundreds of megabytes, and every command that reads it would load it whole into memory.
+// So a plain file larger than this is refused before any byte of it is read: its size is taken from the open
+// handle, the same one the read uses. Generous on purpose: the same reads load Markdown (an epic, a story,
+// DESIGN.md), `.gitignore`, the local setup script and migrate's backups. `cli/detect.mjs` uses it too.
+// The constant lives in manifest.mjs, which this file imports, so `mirrorDrift` there uses the same one.
+// A caller whose file is generated and can be bigger (the brain's code graph) passes its own `max`.
+export { MAX_PLAIN_BYTES };
+export const FILE_TOO_BIG = 'YAD_FILE_TOO_BIG';
+// The words after a file's name, for a caller that names the file by its path inside the Product.
+export const tooBigSaid = (limit = MAX_PLAIN_BYTES) => `is larger than ${limit / (1024 * 1024)} MiB, the most yad reads, so yad did not read it`;
+export const TOO_BIG_SAID = tooBigSaid();
+// `size` is the size seen: for a file that grew while it was read, the bytes read so far (more than `limit`).
+const tooBig = (p, size, limit) => Object.assign(new Error(`${p} ${tooBigSaid(limit)}`), { code: FILE_TOO_BIG, size, limit });
+// At most `max` bytes from the open file. The size `fstat` gave can be out of date by the time of the read (a
+// file that grows, or one that was empty then), so the read never trusts it: it reads into a buffer of at most
+// `max + 1` bytes, and a byte past the limit means the file is too big. No read runs to the end of the file.
+function readCapped(fd, p, size, max) {
+  let buf = Buffer.allocUnsafeSlow(Math.min(size, max) + 1);
+  let n = 0;
+  for (;;) {
+    if (n === buf.length) {
+      if (n > max) throw tooBig(p, n, max);
+      const more = Buffer.allocUnsafeSlow(Math.min(buf.length * 2, max + 1));
+      buf.copy(more, 0, 0, n);
+      buf = more;
+    }
+    const got = fs.readSync(fd, buf, n, buf.length - n, null);
+    if (got === 0) return buf.subarray(0, n);
+    n += got;
+  }
+}
 // The read itself. Every failure is thrown, the `lstat` one too, so a caller can tell a missing file
 // (ENOENT) from one it may not read. `encoding: null` gives the raw bytes.
-function readPlainOrThrow(p, encoding = 'utf8') {
+function readPlainOrThrow(p, encoding = 'utf8', { max = MAX_PLAIN_BYTES } = {}) {
   const st = fs.lstatSync(p);
   if (!st.isFile()) throw notPlain(p, kindOf(st));
   let fd;
@@ -368,21 +400,25 @@ function readPlainOrThrow(p, encoding = 'utf8') {
   try {
     const now = fs.fstatSync(fd);
     if (!now.isFile()) throw notPlain(p, kindOf(now));
-    return fs.readFileSync(fd, encoding === null ? undefined : encoding);
+    if (now.size > max) throw tooBig(p, now.size, max);
+    const bytes = readCapped(fd, p, now.size, max);
+    return encoding === null ? bytes : bytes.toString(encoding);
   } finally { fs.closeSync(fd); }
 }
-export function readPlainFile(p) {
+// `opts.max` (each plain read takes it): the most bytes read, MAX_PLAIN_BYTES unless named.
+export function readPlainFile(p, opts) {
   try { fs.lstatSync(p); } catch { return null; }
   // A file removed between the two looks is no file, as it would have been a moment earlier.
-  try { return readPlainOrThrow(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  try { return readPlainOrThrow(p, 'utf8', opts); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 // The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
-export const readPlainBytes = (p) => readPlainOrThrow(p, null);
+export const readPlainBytes = (p, opts) => readPlainOrThrow(p, null, opts);
 // One JSON file as it is on disk: no shape stamp, and nothing caught. A missing file throws ENOENT, a link
-// or a folder throws NOT_PLAIN_FILE, and a file that does not parse throws a SyntaxError. So each caller
-// keeps its own answer for each of the three, which `readJSON` (one fallback for all) cannot give.
-export function readPlainJSON(p) {
-  return JSON.parse(readPlainOrThrow(p));
+// or a folder throws NOT_PLAIN_FILE, a file larger than MAX_PLAIN_BYTES throws FILE_TOO_BIG, and a file that
+// does not parse throws a SyntaxError. So each caller keeps its own answer for each of them, which `readJSON`
+// (one fallback for all) cannot give.
+export function readPlainJSON(p, opts) {
+  return JSON.parse(readPlainOrThrow(p, 'utf8', opts));
 }
 // Each refused path is named once per run, on stderr: readJSON has many callers, and some print an answer
 // on stdout that another program reads (a hook, a `--json` run), which a warning there would break.
@@ -390,7 +426,9 @@ const refusedOnce = new Set();
 function sayRefused(p, e) {
   if (refusedOnce.has(p)) return;
   refusedOnce.add(p);
-  const s = `${e.message} — replace it with the real file (from git), then run the command again`;
+  // A file too big to read is most often the committed file itself, so git has no other copy to restore.
+  const fix = e.code === FILE_TOO_BIG ? 'replace it with a file of the right size' : 'replace it with the real file (from git)';
+  const s = `${e.message} — ${fix}, then run the command again`;
   if (jsonRun) warn(s); else note(`${c.yellow('!')} ${s}`);
 }
 
@@ -404,7 +442,8 @@ export function readJSON(p, def = null) {
   } catch (e) {
     // A link or a folder in place of the file reads as no file, like a file that does not parse — but it is
     // named, because the person should replace it.
-    if (e?.code === NOT_PLAIN_FILE) sayRefused(p, e);
+    // A file too big to read is named the same way.
+    if (e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG) sayRefused(p, e);
     // The caller's own default is returned untouched: it is not a file, and stamping it would invent
     // a shape for something that was never read from disk.
     return def;
@@ -419,6 +458,7 @@ export function readJSONStrict(p, def = null) {
   let text;
   try { text = readPlainFile(p); } catch (e) {
     if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
+    if (e?.code === FILE_TOO_BIG) throw err('YAD-STATE-001', e.message, 'restore the file from a commit where it had its real size (`git log -- <file>`) — never delete a ledger blindly');
     throw err('YAD-STATE-001', `cannot read ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
   if (text === null) return def;

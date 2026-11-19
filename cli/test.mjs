@@ -1889,6 +1889,131 @@ process.stdout.write(JSON.stringify([code(() => readPlainJSON(process.argv[1])),
 });
 
 // ---------------------------------------------------------------------------------------------
+// lib.mjs — a Product file larger than any real one is refused before it is read (#215)
+// ---------------------------------------------------------------------------------------------
+const { MAX_PLAIN_BYTES, FILE_TOO_BIG, TOO_BIG_SAID } = await import('./lib.mjs');
+// A sparse file of `size` bytes that starts with `head`: it takes no room on disk, so a file far past the limit
+// costs nothing to make.
+function sparseFile(p, size, head = '{}') {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, head);
+  fs.truncateSync(p, size);
+  return p;
+}
+
+test('#215: the limit is one constant of 64 MiB, and detect reads its config files up to it', async () => {
+  assert.equal(MAX_PLAIN_BYTES, 64 * 1024 * 1024);
+  assert.equal(FILE_TOO_BIG, 'YAD_FILE_TOO_BIG');
+  assert.match(TOO_BIG_SAID, /^is larger than 64 MiB/);
+  // detect has no limit of its own for config files: it imports this one.
+  const src = fs.readFileSync(path.join(ROOT, 'cli/detect.mjs'), 'utf8');
+  assert.match(src, /const MAX_CONFIG_BYTES = MAX_PLAIN_BYTES;/);
+  assert.match(src, /const MAX_FILE_BYTES = 1024 \* 1024;/, 'the 1 MiB limit for a skill file stays');
+});
+
+test('#215: a file one byte over the limit is refused by every plain read, at once, naming the file and the limit', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-'));
+  try {
+    const p = sparseFile(path.join(T, '.sdlc', 'repos.json'), MAX_PLAIN_BYTES + 1);
+    // In a child with a time limit, so a read that does not stop fails this test rather than slowing the run.
+    const got = inChildWithLimit(`const { readPlainFile, readPlainBytes, readPlainJSON } = await import(${cliUrl('./lib.mjs')});
+const one = (f) => { try { f(); return 'read'; } catch (e) { return [e.code, e.message, e.size, e.limit]; } };
+const p = process.argv[1];
+process.stdout.write(JSON.stringify([one(() => readPlainFile(p)), one(() => readPlainBytes(p)), one(() => readPlainJSON(p))]));`, [p]);
+    for (const [code, message, size, limit] of got) {
+      assert.equal(code, 'YAD_FILE_TOO_BIG');
+      assert.match(message, /repos\.json is larger than 64 MiB, the most yad reads, so yad did not read it/);
+      assert.equal(size, MAX_PLAIN_BYTES + 1);
+      assert.equal(limit, MAX_PLAIN_BYTES);
+    }
+    // readJSON: the caller's fallback, with the file named once on stderr and a fix that is not "restore from git".
+    let value;
+    const said = grabErr(() => { value = readJSONPlain(p, { repos: [] }); });
+    assert.deepEqual(value, { repos: [] });
+    assert.match(said, /repos\.json is larger than 64 MiB/);
+    assert.match(said, /replace it with a file of the right size/);
+    assert.equal(grabErr(() => readJSONPlain(p, null)), '', 'named once per run');
+    // readJSONStrict: the ledger error, named like a link is.
+    assert.throws(() => readJSONStrictPlain(p, []), (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001'
+      && /repos\.json is larger than 64 MiB/.test(e.message) && !/cannot read/.test(e.message) && /git log/.test(e.hint));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#215: a file of exactly the limit is still read', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-edge-'));
+  try {
+    const p = sparseFile(path.join(T, 'big.md'), MAX_PLAIN_BYTES, '# title');
+    const bytes = readPlainBytes(p);
+    assert.equal(bytes.length, MAX_PLAIN_BYTES);
+    assert.equal(bytes.subarray(0, 7).toString(), '# title');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// The size `fstat` gives can be out of date by the read (a file that grows, or one that was empty then): the read
+// stops one byte past the limit instead of running to the end of the file.
+test('#215: a file that grew past the limit after fstat is refused, not read to its end', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-grow-'));
+  const orig = fs.fstatSync;
+  try {
+    const p = sparseFile(path.join(T, 'repos.json'), MAX_PLAIN_BYTES + 4096);
+    const small = sparseFile(path.join(T, 'small.json'), 0, '');
+    // fstat says what it said before the file grew: empty.
+    fs.fstatSync = (fd, ...rest) => Object.assign(orig.call(fs, fd, ...rest), { size: 0 });
+    for (const read of [() => readPlainBytes(p), () => readPlainFile(p), () => readPlainJSON(p)]) {
+      assert.throws(read, (e) => e.code === FILE_TOO_BIG && e.size === MAX_PLAIN_BYTES + 1 && e.limit === MAX_PLAIN_BYTES);
+    }
+    fs.writeFileSync(small, '{"a":1}');
+    assert.deepEqual(readPlainJSON(small), { a: 1 }, 'a file that grew within the limit is read whole');
+    // A limit of its own, for a caller that names one.
+    fs.fstatSync = orig;
+    assert.equal(readPlainBytes(p, { max: MAX_PLAIN_BYTES * 2 }).length, MAX_PLAIN_BYTES + 4096);
+    assert.throws(() => readPlainFile(small, { max: 3 }), (e) => e.code === FILE_TOO_BIG && e.limit === 3);
+  } finally { fs.fstatSync = orig; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// mirrorDrift runs on every command and every hook: a pair whose sizes differ, or a name past the limit, is
+// different without a read of either file.
+test('#215 mirrorDrift: a 100 MiB product.json is drift without being read', async () => {
+  const { mirrorDrift, MAX_PLAIN_BYTES: manifestMax } = await import('./manifest.mjs');
+  assert.equal(manifestMax, MAX_PLAIN_BYTES, 'one limit, kept in manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-mirror-'));
+  const orig = fs.readFileSync;
+  try {
+    const product = sparseFile(path.join(T, '.sdlc/product.json'), 100 * 1024 * 1024);
+    const legacy = sparseFile(path.join(T, '.sdlc/hub.json'), 100 * 1024 * 1024);
+    const reads = [];
+    // manifest.mjs imports `readFileSync` by name: the named export follows the patch only once synced.
+    const { syncBuiltinESMExports } = await import('node:module');
+    fs.readFileSync = (f, ...rest) => { reads.push(f); return orig.call(fs, f, ...rest); };
+    syncBuiltinESMExports();
+    assert.equal(mirrorDrift(product, legacy), true, 'two equal names past the limit are drift');
+    fs.truncateSync(legacy, 10);
+    assert.equal(mirrorDrift(product, legacy), true, 'sizes that differ are drift');
+    assert.deepEqual(reads.filter((f) => String(f).startsWith(T)), [], 'neither file was read');
+  } finally {
+    fs.readFileSync = orig;
+    (await import('node:module')).syncBuiltinESMExports();
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('#215: yad repo list names a 100 MiB .sdlc/repos.json as too big instead of reading it', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-cli-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{"platform":"github"}\n');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github"}\n');
+    sparseFile(path.join(T, '.sdlc/repos.json'), 100 * 1024 * 1024);
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'repo', 'list', '--json'], { cwd: T, encoding: 'utf8', timeout: 20000, env: { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1', YAD_NO_REPORT: '1' } });
+    assert.equal(r.signal, null, `yad repo list did not end: ${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.ok, false);
+    assert.match(out.error, /\.sdlc\/repos\.json is larger than 64 MiB, the most yad reads, so yad did not read it/);
+    assert.ok(!out.error.includes(T), 'no absolute path in the answer');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------------------------
 // lib.mjs — schemaVersion, the file-shape stamp (roadmap Part 2, rules 1 and 2)
 // ---------------------------------------------------------------------------------------------
 const { readJSON: readJSONShape, readJSONStrict: readJSONStrictShape } = await import('./lib.mjs');
@@ -28815,6 +28940,59 @@ const [root, file] = process.argv.slice(1);
 process.stdout.write(JSON.stringify([o.readOwnerFile(file, 'architecture'), o.readState(root, 'EP-x')]));`, [T, path.join(sdlc, 'owners', 'architecture.json')]);
     assert.deepEqual(got, [{ error: 'is a link or not a plain file, so it was not read' }, null]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #215: each reader that names why a file was not read names a file too big to read in words, never by the
+// bare error code, and gives the answer it gives for a broken file.
+const tooBigFile = (f) => sparseFile(f, MAX_PLAIN_BYTES + 1);
+test('#215: history and usage name a file over 64 MiB as too big', () => {
+  const why = `it ${TOO_BIG_SAID}`;
+  {
+    const T = historyProduct();
+    try {
+      tooBigFile(path.join(T, 'epics/EP-old/.sdlc/state.json'));
+      assert.deepEqual(readState(T, 'EP-old'), { why });
+      assert.equal(itemHistory(T, { id: 'EP-old' }).stepsWhy, why);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-usage-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+      tooBigFile(path.join(T, 'epics/EP-x/.sdlc/approvals.json'));
+      let model;
+      const said = grabErr(() => { model = buildModel(T, {}); });
+      assert.deepEqual(model.members.map((m) => m.name), []);
+      assert.match(said, new RegExp(`skipped unreadable ledger EP-x/approvals\\.json: ${why}`));
+      assert.ok(!said.includes(T), 'no absolute path in the warning');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('#215: the index and the owner files name a file over 64 MiB as too big', async () => {
+  const { readInput } = await import('./product-index.mjs');
+  const why = `it ${TOO_BIG_SAID}`;
+  {
+    const T = indexFixture();
+    try {
+      assert.deepEqual(readInput(tooBigFile(path.join(T, 'big.md'))), { error: why });
+      fs.mkdirSync(path.join(T, 'epics', 'EP-a', '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics', 'EP-a', '.sdlc', 'state.json'), JSON.stringify(E19_STATE()));
+      writeIndex(T);
+      tooBigFile(indexPath(T));
+      assert.deepEqual(indexFreshness(T), { state: 'unreadable', why: `.sdlc/index.json ${TOO_BIG_SAID}` });
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-toobig-owners-'));
+    try {
+      const owner = tooBigFile(path.join(T, 'epics', 'EP-x', '.sdlc', 'owners', 'architecture.json'));
+      assert.deepEqual(ownersMod.readOwnerFile(owner, 'architecture'), { error: TOO_BIG_SAID });
+      tooBigFile(path.join(T, 'epics', 'EP-x', '.sdlc', 'state.json'));
+      assert.equal(ownersMod.readState(T, 'EP-x'), null, 'a broken state reads as none');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
 });
 
 test('E47 stepOpen: live while the step or its review is open; a passed pair, or a step off the chain, is not', () => {

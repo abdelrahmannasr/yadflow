@@ -27,7 +27,7 @@ process.env.YAD_PLATFORM_LOGIN = '0';
 process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 
-const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS, runLocalSetupDone, runLocalSetupSkip, runLocalSetupRemove } = await import('./local-setup.mjs');
+const { localSetupActions, localSetupDocLines, localSetupState, localSetupSection, readSteps, mergeLocalSetup, LOCAL_SETUP_MARKERS, runLocalSetupDone, runLocalSetupSkip, runLocalSetupRemove, localSetupFixHint } = await import('./local-setup.mjs');
 const { localSetupRecordPath, readLocalSetupRecord } = await import('./local-setup-record.mjs');
 const { yadflowSteps, stepHash, LOCAL_SETUP_FILE, LOCAL_SETUP_DOC } = await import('./local-setup-steps.mjs');
 const { applyMarkedBlock } = await import('./marked-block.mjs');
@@ -1275,6 +1275,62 @@ process.stdout.write('\\n' + JSON.stringify([actions.map((a) => a.status), m.loc
     assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), [['modified'], NOT_PLAIN]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// #215: a script larger than any real one is the team's file all the same: refused like one that does not
+// parse, never rebuilt as a missing one (that would drop every team step), and never "no file" in the list.
+test('#215: a script over 64 MiB is named as too big, never read, never rebuilt and never rewritten', async () => {
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  const TOO_BIG = 'is larger than 64 MiB, the most yad reads, so yad did not read it';
+  const dir = product();
+  try {
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    put(file, JSON.stringify({ team: [] }));
+    fs.truncateSync(file, MAX_PLAIN_BYTES + 1);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    let actions;
+    try { actions = localSetupActions(dir); actions[0].apply(); } finally { console.log = orig; }
+    assert.deepEqual(actions.map((a) => [a.status, a.writesNothing]), [['modified', true]], 'not "new": the file is there');
+    assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE}: it ${TOO_BIG} — the local setup script was left as it is`));
+    assert.equal(fs.statSync(file).size, MAX_PLAIN_BYTES + 1, 'the file is left as it is');
+    const st = localSetupState(dir, { items: [] });
+    assert.deepEqual([st.exists, st.error], [true, TOO_BIG], 'the list says why, never "no file"');
+    // Every hint says what fixes it: git holds no smaller copy when the big file is what is committed.
+    assert.match(said.join('\n'), /left as it is; replace it with a file of the right size, then re-run/);
+    assert.equal(localSetupFixHint(TOO_BIG), 'replace it with a file of the right size');
+    const { localSetupChecks } = await import('./doctor.mjs');
+    const rows = [];
+    localSetupChecks(rows, dir);
+    assert.equal(rows.find((r) => r.id === 'local-setup')?.hint, 'replace it with a file of the right size; `yad local-setup` says more');
+    const out = [];
+    console.log = (...a) => { out.push(a.join(' ')); };
+    try { runLocalSetupRemove(dir, { ids: ['docker'], json: true }); } finally { console.log = orig; }
+    process.exitCode = 0;
+    assert.match(out.join('\n'), /larger than 64 MiB/);
+    assert.match(out.join('\n'), /"hint": "replace it with a file of the right size, then run this again"/);
+    assert.doesNotMatch(out.join('\n'), /restore it from git|cannot be read/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('#215: a script made too big after the plan is left untouched, named as too big', async () => {
+  const { MAX_PLAIN_BYTES } = await import('./lib.mjs');
+  const dir = product();
+  try {
+    const file = path.join(dir, LOCAL_SETUP_FILE);
+    put(file, JSON.stringify({ team: [] }));
+    const [json] = localSetupActions(dir);
+    assert.equal(json.status, 'outdated');
+    fs.truncateSync(file, MAX_PLAIN_BYTES + 1);
+    const said = [];
+    const orig = console.log;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try { json.apply(); } finally { console.log = orig; }
+    assert.match(said.join('\n'), new RegExp(`${LOCAL_SETUP_FILE} is larger than 64 MiB, the most yad reads, so yad did not read it — left untouched`));
+    assert.doesNotMatch(said.join('\n'), /does not parse/);
+    assert.equal(fs.statSync(file).size, MAX_PLAIN_BYTES + 1);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
