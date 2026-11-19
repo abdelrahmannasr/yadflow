@@ -29,7 +29,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal, inJSON, setProductRoot } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON, readJSONStrict, forTerminal, inJSON, setProductRoot, refuseLinkedSettings } from './lib.mjs';
 import { err } from './errors.mjs';
 import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { runSetup, insideWorkspace, throughGitDir, selectIdeTargets, assertSetupAnswered, ideTargetsQuestion, checkSetupFlags } from './setup.mjs';
@@ -509,6 +509,7 @@ export async function runInit(cwd, opts = {}) {
   if (found.length) info(`found ${found.length} repo(s) beside it: ${shown(found.join(', '))}`);
   else info('found no repos beside it — connect them later with `yad setup`');
   setProductRoot(product); // #214
+  refuseLinkedSettings(product); // a Product folder already there whose `.sdlc` is a link stops here
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
   noteWorkspaceFile(product);
@@ -576,6 +577,7 @@ export async function runJoin(cwd, url, folder, opts = {}) {
   if (!exists(productConfigPath(product))) return refuse(`${path.join(wsName, PRODUCT_DIR)}/ has no .sdlc/product.json — that repo is not a yad Product`);
   // #214: a cloned Product is someone else's commits — its files are read and written only in its own folders.
   setProductRoot(product);
+  refuseLinkedSettings(product);
 
   const { registry, problem } = readRegistry(product);
   if (problem) warn(`${problem} — nothing to clone; fix it in the Product and re-run`);

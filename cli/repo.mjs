@@ -64,7 +64,8 @@ function defaultBranch(cwd, repo) {
 
 export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false, include, logs = false, out } = {}) {
   const { regPath, registry, problem } = load(root);
-  if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [] }; }
+  // A refresh that stops here published nothing, and says so as every refused refresh does (`published: null`).
+  if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [], ...(action === 'refresh' ? { refreshed: 0, published: null } : {}) }; }
   if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
   // An entry that is not an object (`null`, `5`) is named where it would be acted on, never dereferenced.
   const isEntry = (r) => !!r && typeof r === 'object' && !Array.isArray(r);
