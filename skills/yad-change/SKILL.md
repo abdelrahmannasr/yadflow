@@ -87,7 +87,9 @@ human-confirm). The depth decides which Shape steps are **re-authored** vs **inh
 | **new-capability** — not a change to this feature, a new one | full chain (`epic`…`test-cases`) | lineage/context only | `epic` |
 
 Print the chosen depth and the **re-author vs inherit** split; **get explicit confirmation** before
-seeding. A `new-capability` is usually a *new genesis epic* (`yad-epic`) — only thread it when it truly
+seeding. For a **defect-fix** (type `defect` or `hotfix`) off a **stub** parent, also offer the
+**short lane** (Step 5, "Short lane off a stub"): ask the person which route they want, and record their
+answer. A `new-capability` is usually a *new genesis epic* (`yad-epic`) — only thread it when it truly
 extends this feature's evolution.
 
 ### Step 3 — Derive the change-epic id + open the authoring branch
@@ -167,7 +169,9 @@ yad epic new EP-<slug> --type <change|defect|hotfix> --parent <EP-parent> --inhe
 `epic,architecture,contract,ui-design`. It must be the same list as `inherits:` in `epic.md`: the command
 reads that header, takes its answer when a flag is left off, and refuses a flag that contradicts it. Leave
 `--profile` off. The child takes the **parent's** route — a 4-step `chore` parent gives a 4-step child —
-and the command refuses a route that differs.
+and the command refuses a route that differs ("takes its parent's route"). The one exception is a
+defect or hotfix off a stub that the person chose to put on the short lane (see "Short lane off a stub"
+below).
 
 The engine writes everything this step used to spell out by hand (E42):
 
@@ -220,6 +224,26 @@ stub. Prefer the `defect-fix` / `behavioral-no-surface` depth against a stub —
 change against an undocumented feature should wait until the stub is promoted (backfilled + a real
 contract locked).
 
+**Short lane off a stub (defect or hotfix only, the person's choice).** A small fix to code that was
+built before yadflow tracked it does not need every Shape gate of the stub's `classic` route. When the
+parent is an un-promoted stub (`stub: backfill-pending`) and the type is `defect` or `hotfix`, offer the
+short lane — the `chore` route: the epic, then `stories` and `stories-review`, then Build. Say what it
+leaves out: there is no `architecture`, `ui-design` or `test-cases` step, so the regression test is
+written with the code in Build. Run it only on the person's yes:
+
+```bash
+yad epic new EP-<slug> --type <defect|hotfix> --parent <EP-stub> --profile chore --inherits epic
+```
+
+- `--inherits epic` carries the stub's epic by reference (`boundHash: null`, as for any stub base), and
+  `stories` is the first step. Leave `--inherits` off (and write `inherits: []` in `epic.md`) to write
+  this epic's own brief first. `inherits:` in `epic.md` (Step 4) must name the same list.
+- The command refuses `architecture`, `contract` or `ui-design` in `inherits` here: the short lane has no
+  such steps. If the fix needs them carried, drop `--profile` and take the stub's `classic` route.
+- It refuses `--profile chore` for any other parent or type with "takes its parent's route": a tracked
+  (non-stub) feature keeps its route, its contract and its review rules.
+- Record the choice in `change.json` (Step 6): `"route": "chore"` beside `"parentStub": true`.
+
 **Short-lane parent (no architecture step ever existed).** When the parent records `profile: "chore"`
 or `"spike"`, it has no `architecture.md`, no `contract.md`, no `ui-design.md` and no lock — not
 because they are undocumented, as with a stub, but because **its route never had those steps**. The
@@ -242,7 +266,10 @@ names, as in `epic.md`), `depth`, `intakeBy`, `intakeDate`, `title`,
 `description`, `affectedArtifacts`, `reauthors`, `inherits`, and for a defect/hotfix the `defect` block
 (`origin`, `severity`, `escape_stage`, `root_cause`). This is what `yad-defects` reads to attribute the
 defect to the gate that should have caught it. Add `"parentStub": true` when the parent is an
-un-promoted stub (Step 5) — omit it (or `false`) otherwise.
+un-promoted stub (Step 5) — omit it (or `false`) otherwise. When the epic took the short lane off a stub
+(Step 5), add `"route": "chore"`: with `parent` (the stub), `parentStub: true` and the `defect` block's
+`escape_stage` and `root_cause`, that records why this fix skipped the stub's full route. Omit `route`
+otherwise — the epic took its parent's route.
 
 ### Step 7 — Hotfix only: record the ship-first exception + open reconcile debt
 If the type is `hotfix`, Build MAY run before these Shape gates approve (severity demands it). Record

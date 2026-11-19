@@ -15,6 +15,14 @@ describes the change — a deeper depth re-authors (and re-reviews) more than ne
 | **contract-surface** | the shared API/event/data-model surface itself changes | **architecture + contract (re-author + RE-LOCK)**, `stories`, `test-cases`; `epic`/`ui-design` as needed | only what is genuinely untouched | `architecture` |
 | **new-capability** | this is not a change to the feature — it is a new feature | the full chain | lineage/context only | `epic` |
 
+**A defect-fix off a stub may take the short lane.** When the parent is an un-promoted stub and the
+type is `defect` or `hotfix`, the person may choose the `chore` route instead of the stub's `classic`
+one (`yad epic new … --profile chore`, see "Short lane off a stub" in `../SKILL.md` Step 5). The chain is
+then `epic` (carried from the stub with `--inherits epic`, or written here with no inherits) →
+`stories` → `stories-review` → ready for Build. It has no `test-cases` step: the regression test is written
+with the code in Build. It inherits only `epic` or nothing; `architecture`, `contract` and `ui-design`
+are refused. `change.json` records `"route": "chore"` beside `"parentStub": true`.
+
 **Heuristics for the surface question** (defect-fix / behavioral-no-surface vs contract-surface): does
 the change alter an endpoint's path/method, a request/response field, an event name/payload, or a shared
 enum/identifier in the genesis (or current-truth) `contract.md` `CONTRACT-SURFACE` block? If yes →
@@ -24,9 +32,10 @@ surface.
 ## What `yad epic new --parent` writes (worked shape)
 
 The engine writes this (E42); it is shown so the author and the reviewers know what to expect, and a
-test keeps it equal to what the engine really writes. The child's chain is always the PARENT's chain and
+test keeps it equal to what the engine really writes. The child's chain is the PARENT's chain and
 `profile`: 10 steps under a `classic` parent, 4 under a `chore` one (no `architecture`/`ui-design` rows to
-inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5).
+inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5). The one exception is a
+defect or hotfix off a stub on the short lane: 4 `chore` steps under a `classic` stub (see above).
 
 For a **defect-fix** off a `classic` parent, inheriting epic/architecture/contract/ui-design and re-authoring
 stories+test-cases:

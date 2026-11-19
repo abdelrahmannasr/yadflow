@@ -1027,7 +1027,9 @@ A stub is a normal genesis (type `feature` under both names, `thread == id`, no 
 `nextAction` routes a stub to a `backfill-pending` action (`yad-backfill` → `yad-backfill promote`), never
 to authoring. A change threaded off a stub inherits only what exists — the undocumented surface bases are
 marked `inherited: true` with `boundHash: null` (the gate predicate reads `null` as "nothing locked → no
-drift → pass"), no pointer-lock is written, and `change.json` records `parentStub: true`.
+drift → pass"), no pointer-lock is written, and `change.json` records `parentStub: true`. A `defect`
+or `hotfix` off a stub may take the short `chore` lane (`--profile chore`, inheriting `epic` or nothing)
+instead of the stub's `classic` route; every other child of a stub takes `classic`.
 
 **The stub invariant (two files, kept in lockstep).** A stub is encoded in *both* `epic.md`
 (`stub: backfill-pending`) *and* `state.json` (top-level `kind: "stub"` + `currentStep:
@@ -1139,6 +1141,11 @@ Intake + triage record, one per change/defect/hotfix epic (sibling of `approvals
 `change.depths`). `defect` is `null` for a plain `change`; `hotfix` is `{ "shipFirst": true }` only for
 a `hotfix`. `parentStub: true` is added when the epic threads off an un-promoted stub genesis
 (`yad-stub`) — a brownfield feature not yet documented, so no contract surface is inherited yet.
+`route: "chore"` is added when a defect or hotfix off such a stub took the short lane (`yad epic new
+--parent <stub> --profile chore`, #578): its chain is the `chore` route (epic → stories →
+stories-review), not the stub's `classic` one. With `parent`, `parentStub` and the `defect` block's
+`escape_stage` and `root_cause`, it records why the fix skipped the full route. It is absent when the
+epic took its parent's route.
 Thread-level rollups (`yad-timeline` / `yad-defects`) are **derived** — walk every epic
 sharing `thread` and read each `change.json`; there is no duplicated thread registry.
 
