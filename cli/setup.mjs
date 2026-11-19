@@ -277,7 +277,9 @@ function applyActions(actions, { force = false } = {}) {
   for (const a of actions) {
     // An action that cannot write (a settings file that does not parse, rules-block markers yad cannot trust)
     // said why when it was planned, and `--overwrite-local` would not help it.
-    if (a.writesNothing) continue;
+    // A file yad may not write (#222: a folder or a device in its place, a file under a linked folder) is named,
+    // and the run goes on with the others.
+    if (a.writesNothing) { if (a.refused) warn(`left ${forTerminal(`${a.scope}/${a.item}`)} alone: it ${forTerminal(a.refused)}`); continue; }
     // A managed file the team edited is left alone here too — setup re-runs with force:true, so
     // without this the wizard would be a second silent-clobber path for the same edits (#164).
     if (a.status === 'modified') {
@@ -287,7 +289,7 @@ function applyActions(actions, { force = false } = {}) {
     if (a.status === 'ok' && !force) continue;
     a.apply();
     changed++;
-    info(`${a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${forTerminal(`${a.scope}/${a.item}`)}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
+    info(`${a.replacesLink ? 'replaced the link at' : a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${forTerminal(`${a.scope}/${a.item}`)}${a.replacesLink ? ' with yad\'s file (the link was not followed)' : ''}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
   }
   if (!changed) info('already up to date');
   return changed;

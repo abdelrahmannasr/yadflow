@@ -2897,6 +2897,25 @@ script and entry back beside them.
 **A CI check failed on a pull request?** Every gate's rules, exemptions and failure messages, with what
 to change for each, are in [CI gates](GATES.md).
 
+**A committed CI or gate file that is a link** (#222). `yad doctor`, `yad check`, `yad update` and setup read
+the CI workflows, `.gitlab-ci.yml` and its fragments, the gate scripts under `checks/`, the git hooks and the
+old `_bmad/sdlc/config.yaml` only as plain files. A link (to `/dev/zero`, or out of the Product), a dangling
+link, a folder or a device in one of those places is never read: each check answers as it does for a missing
+file, so a link never hangs a command and never makes yad read a file it does not own. Nothing is ever written
+through a link:
+
+- A file yad installs that is a link is replaced by yad's file (a new file renamed into the link's place), and
+  setup and `yad check --fix` say so ("it was a link"). Its `.yad-orig` backup is read only from a plain file and
+  written the same way, so a backup name that is a link is replaced too.
+- A file yad installs that has a folder or a device in its place, is larger than 64 MiB, or sits under a linked
+  folder of the Product (`.github/` as a link, say) is not written. `yad check` and setup name it, with the fix,
+  and still write every other file.
+- A git hook that is a link (some tools install theirs so), or that sits in a linked hooks folder, is not read and
+  not written. `yad doctor`'s `git-hook` row says "`<hook>` is a link, so yad did not read it" (or "sits in the
+  linked folder `<folder>`") and asks you to make sure the file it points to runs yad's line. A hook that changed
+  between the check and the write is left alone; the new hook is written through a new file and a rename, with its
+  mode set on that file.
+
 ### The `shape` section — is this project on the right file shape?
 
 `yad doctor` reports what shape your state files are in, against the shape this release writes, one

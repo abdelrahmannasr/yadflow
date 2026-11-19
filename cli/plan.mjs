@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
+  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -40,16 +40,40 @@ const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 const isExecutable = (dest) => {
   try { return process.platform === 'win32' || !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
 };
-const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
-  scope,
-  item,
-  status: !exists(dest) ? 'missing'
-    : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
-      : 'outdated',
-  root,
-  paths: root ? [rel(root, dest)] : [],
-  apply: () => copyFile(src, dest, { exec }),
-});
+// What stands at a file yad writes (#222), read only as a plain file: 'plain', 'missing' (nothing there), 'link'
+// (a link at the file's own name, dangling or not), or 'refused' with the words that say why yad writes nothing:
+// a folder or a device there, a file larger than yad reads, or a file under a linked folder of the Product.
+function destState(dest) {
+  try { readPlainBytes(dest); return { state: 'plain' }; } catch (e) {
+    if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return { state: 'missing' };
+    if (e?.code === NOT_PLAIN_FILE && e.folder) return { state: 'refused', refused: `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\`` };
+    if (e?.code === NOT_PLAIN_FILE && e.kind === 'link') return { state: 'link' };
+    if (e?.code === NOT_PLAIN_FILE) return { state: 'refused', refused: `is ${e.kind === 'dir' ? 'a folder' : 'a device, a pipe or a socket'}, not a file, so yad did not write it — remove it (\`git rm -r\` when it is committed), then re-run \`yad check --fix\`` };
+    if (e?.code === FILE_TOO_BIG) return { state: 'refused', refused: `${TOO_BIG_SAID}, nor replaced it (there would be no copy of it) — replace it with a file of the right size or delete it, then re-run \`yad check --fix\`` };
+    throw e;
+  }
+}
+// A file yad installs from its template. What stands at `dest` decides (#222), never read through:
+//   nothing there      'missing'
+//   a link             'missing', with `replacesLink`: `copyFile` puts the real file in the link's place (a rename
+//                      replaces the link itself, never writes through it), and setup and `yad check --fix` say so
+//   a folder, a device, a file too big, or one under a linked folder of the Product
+//                      'modified' with `writesNothing` and `refused` (the words setup and check print): nothing is
+//                      written, so the other files of the same run are still written
+//   a plain file       'ok' or 'outdated', as its bytes and execute bit say
+const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => {
+  const at = destState(dest);
+  const base = { scope, item, root, paths: root ? [rel(root, dest)] : [] };
+  if (at.state === 'refused') return { ...base, status: 'modified', writesNothing: true, refused: at.refused, apply: () => {} };
+  return {
+    ...base,
+    status: at.state !== 'plain' ? 'missing'
+      : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
+        : 'outdated',
+    ...(at.state === 'link' ? { replacesLink: true } : {}),
+    apply: () => copyFile(src, dest, { exec }),
+  };
+};
 const dirAction = (scope, item, src, dest, { root } = {}) => ({
   scope,
   item,
@@ -142,7 +166,8 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
     managed,
     backup,
     apply: () => {
-      if (backup) fs.copyFileSync(dest, backup);
+      // The copy reads only a plain file and never writes through a link at `<dest>.yad-orig` (#222).
+      if (backup) backupPlain(dest, backup);
       copyFile(src, dest, { exec });
     },
   };
@@ -558,8 +583,9 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
 // True only for a file WE installed: its first line starts with the ownership marker its rename entry
 // names (`# sdlc-managed` for the pre-2.0 files, `# yad-managed: yad-checks` for E123's). A same-named
 // user-authored file is never ours.
+// A link or a device there is not ours: it is read as no file (#222).
 function ownedByOldInstall(p, marker) {
-  try { return fs.readFileSync(p, 'utf8').startsWith(marker); } catch { return false; }
+  return readPlainText(p)?.startsWith(marker) ?? false;
 }
 
 // old-dest -> new-dest migrations for wired CI files: remove the marker-owned old file and
@@ -593,8 +619,8 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
     // Only claim the root .gitlab-ci.yml when apply() will actually rewrite it (it references the old
     // fragment) — else a --push would sweep the user's unrelated edits to that shared-ownership file
     // into the chore(yad-update) commit. The old (deletion) + new (add) paths are always ours.
-    let rewritesRootCi = false;
-    try { rewritesRootCi = fs.readFileSync(path.join(baseRoot, '.gitlab-ci.yml'), 'utf8').includes(oldDest); } catch { /* no root ci */ }
+    // A root .gitlab-ci.yml that is a link is read as none (#222), so it is neither claimed nor rewritten.
+    const rewritesRootCi = readPlainText(path.join(baseRoot, '.gitlab-ci.yml'))?.includes(oldDest) ?? false;
     actions.push({
       scope,
       item: `${oldDest} → ${newDest}`,
@@ -608,16 +634,16 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
       // left the new file unrecorded, and the next update replaced the edits a person copied into it (review 2).
       managed: { src: asset(w.src), dest: path.join(baseRoot, newDest), root: baseRoot },
       apply: () => {
-        if (backup) fs.copyFileSync(oldPath, backup);
+        if (backup) backupPlain(oldPath, backup);
         fs.rmSync(oldPath, { force: true });
         // Only into an empty path. A file already at the new name is the new name's own wired-file action's
         // to judge — with its provenance and its backup — and may hold the team's edits (review 1).
         if (!exists(path.join(baseRoot, newDest))) copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec });
+        // No root .gitlab-ci.yml (a GitHub repo, or fragment-only GitLab), or one that is a link (#222): nothing
+        // to rewrite. The rewrite goes through a new file and a rename, so it never writes through a link.
         const rootCi = path.join(baseRoot, '.gitlab-ci.yml');
-        try {
-          const txt = fs.readFileSync(rootCi, 'utf8');
-          if (txt.includes(oldDest)) fs.writeFileSync(rootCi, txt.split(oldDest).join(newDest));
-        } catch { /* no root .gitlab-ci.yml (github repo, or fragment-only gitlab) — nothing to rewrite */ }
+        const txt = readPlainText(rootCi);
+        if (txt?.includes(oldDest)) writeFileAtomic(rootCi, txt.split(oldDest).join(newDest));
         const current = readManagedLedger(baseRoot);
         if (Object.hasOwn(current, oldDest)) {
           delete current[oldDest];
@@ -668,7 +694,8 @@ function renamedNameFiles(root) {
     } catch { return []; }
   };
   const notOurs = (rel) => {
-    try { return !fs.readFileSync(path.join(root, rel), 'utf8').split('\n', 1)[0].startsWith('# yad-managed'); } catch { return false; }
+    const text = readPlainText(path.join(root, rel));
+    return text !== null && !text.split('\n', 1)[0].startsWith('# yad-managed');
   };
   return [
     '.gitlab-ci.yml',
@@ -690,11 +717,9 @@ export function renamedNameHits(root) {
   } catch { /* an unreadable provenance record: nothing is promised, so every hit reads as the team's to change */ }
   const hits = [];
   for (const file of renamedNameFiles(root)) {
-    let text;
-    try {
-      if (!fs.lstatSync(path.join(root, file)).isFile()) continue;
-      text = fs.readFileSync(path.join(root, file), 'utf8');
-    } catch { continue; }
+    // A link, a folder or a device is not read (#222).
+    const text = readPlainText(path.join(root, file));
+    if (text === null) continue;
     const ci = /\.ya?ml$/.test(file);
     text.split(/\r?\n/).forEach((line, i) => {
       if (ci) {
@@ -740,8 +765,8 @@ export function renamedNameHits(root) {
 // workflow is a `renamed:` one. A value passed through a variable is not seen.
 export const PRODUCT_PROFILE_GATES = Object.freeze(['checks/commit-message.sh', 'checks/pr-title.sh', 'checks/pr-template.sh']);
 export function productProfileGap(file) {
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const text = readPlainText(file);
+  if (text === null) return null;
   const list = text.match(/^\s*case\s+"\$PROFILE"\s+in\s+([^)]*)\)/m);
   if (!list) return null;
   if (!list[1].split('|').map((x) => x.trim()).includes('product')) return 'rejects';
@@ -773,7 +798,8 @@ export const PRODUCT_CHECK_WORKFLOWS = Object.freeze([
 // its `--profile hub` to `product` must then hear from `profile:` if an edited gate still rejects it.
 export const workflowsPassingProduct = (root) => [...new Set([...PRODUCT_CHECK_WORKFLOWS,
   ...renamedNameFiles(root).filter((rel) => /\.ya?ml$/.test(rel))])].filter((rel) => {
-  try { return /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(fs.readFileSync(path.join(root, rel), 'utf8')); } catch { return false; }
+  const text = readPlainText(path.join(root, rel));
+  return text !== null && /--profile(?:=|[ \t]+)(["']?)product\1(?![\w.-])/.test(text);
 });
 // The Product gates that would mishandle `--profile product` (E124 reviews 2–4): refuse it ('rejects'), or take it
 // and skip the Product's rules ('unmapped'). Each gate's state decides what to do first, and is read from the
@@ -985,7 +1011,12 @@ function productLinkAction(root, repo, repoRoot) {
     const backup = backupPathFor(dest);
     return {
       ...base, status: 'modified', backup,
-      apply: () => { fs.copyFileSync(dest, backup); writeJSON(dest, want); },
+      // Only a plain file is saved (#222): a link, a folder or a device is never read or copied through, and
+      // `writeJSON` replaces it.
+      apply: () => {
+        try { backupPlain(dest, backup); } catch (e) { if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG && e?.code !== 'ENOENT') throw e; }
+        writeJSON(dest, want);
+      },
     };
   }
   const same = current && ['git_url', 'path', 'default_branch'].every((k) => current[k] === want[k]);
@@ -1324,7 +1355,8 @@ function blockState(dest, opts) {
   let raw = null;
   try {
     const st = lstatIfPresent(dest);
-    if (st) raw = st.isFile() ? fs.readFileSync(dest, 'utf8') : undefined;
+    // A plain read (#222): a link put in the file's place after the `lstat` is refused, not followed.
+    if (st) raw = st.isFile() ? readPlainFile(dest) : undefined;
   } catch { raw = undefined; }
   // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission).
   if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
@@ -1357,8 +1389,10 @@ export function markedBlockAction(root, relDest, lines, { scope = 'product', mar
       if (now.refused) { warn(`${scope}/${relDest}: ${now.refused} — left untouched`); return; }
       if (now.state === 'ok') return;
       const next = applyMarkedBlock(now.raw, opts);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, next.text);
+      // Through a new file and a rename (#222): a link put at `dest` since the check is replaced, never written
+      // through. The file keeps its mode.
+      const st = lstatIfPresent(dest);
+      writeFileAtomic(dest, next.text, st?.isFile() ? { mode: st.mode & 0o777 } : undefined);
     },
   };
 }
@@ -1549,7 +1583,10 @@ export const gitHookLine = (prefix = '') => {
 // Where the hook is, and whose it is. `{ applies: false }` when there is nothing to install (the spec says no,
 // or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with `state` one of: 'missing' | 'ok'
 // | 'outdated' (ours, different bytes) | 'foreign' (a hook that is not ours) | 'hooks-path' (core.hooksPath is
-// set). The last two carry `line`, the one to add by hand.
+// set). The last two carry `line`, the one to add by hand. A hook that is a link (some tools install theirs so),
+// a folder, a device or a file too big, or one in a linked hooks folder, is not read (#222): it is 'linked', with
+// `kind` ('link', 'dir', 'other', 'big', or 'unreadable' for one yad may not open) and `folder` (the linked folder, or null), and `line`. yad writes no
+// hook through it and never replaces it; the advice asks the person to make sure the file git runs has the line.
 function hookStateFor(spec, root) {
   if (!spec.applies(root)) return { applies: false };
   const where = run('git', ['-C', root, 'rev-parse', '--git-path', `hooks/${spec.name}`, '--show-prefix']);
@@ -1581,16 +1618,20 @@ function hookStateFor(spec, root) {
     if (spec.wired) {
       const husky = /(^|[\\/])_$/.test(dir);
       const read = husky ? path.join(path.dirname(path.dirname(file)), spec.name) : file;
-      let edited = null;
-      try { edited = fs.readFileSync(read, 'utf8'); } catch { /* none */ }
+      const edited = readPlainText(read);
       let canRun = true;
       if (!husky && process.platform !== 'win32') { try { canRun = (fs.statSync(read).mode & 0o111) !== 0; } catch { canRun = false; } }
       if (edited !== null && canRun && spec.wired(edited, prefix)) return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hand-wired' };
     }
     return { applies: true, file, expected, prefix, line, hooksPath: hooksPath.stdout, editFile: edit, state: 'hooks-path' };
   }
-  let text = null;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
+  let text;
+  try { text = readPlainFile(file); } catch (e) {
+    // One it may not open (no permission) too: the hook is replaced through a rename now, so a hook yad cannot
+    // read would be replaced unseen.
+    const kind = e?.code === FILE_TOO_BIG ? 'big' : e?.code === NOT_PLAIN_FILE ? e.kind : 'unreadable';
+    return { applies: true, file, expected, prefix, line, state: 'linked', kind, folder: e?.folder ?? null };
+  }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
   // A hook of the team's own that already runs ours by the line yad gave (`spec.wired`), and that git can run (its
   // execute bit, everywhere but Windows): nothing to say (reviews 2, 3).
@@ -1609,11 +1650,21 @@ function hookStateFor(spec, root) {
   return { applies: true, file, expected, prefix, state: 'outdated', why };
 }
 
-// The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
+// Why yad did not read a 'linked' hook, and what the person makes sure of (#222), for doctor and the advice.
+// `where` names the hook. Both are for a terminal: the folder's name comes from the Product.
+export function linkedHookSaid(st, where = st.file) {
+  const folder = st.folder ? forTerminal(st.folder) : null;
+  if (folder) return { why: `${where} sits in the linked folder ${folder}, so yad did not read it`, fix: `make sure the hook git runs there runs this line: ${st.line}` };
+  if (st.kind === 'link') return { why: `${where} is a link, so yad did not read it`, fix: `make sure the file it points to runs this line: ${st.line}` };
+  if (st.kind === 'unreadable') return { why: `${where} cannot be read (no permission), so yad left it alone`, fix: `make sure it runs this line: ${st.line}` };
+  return { why: `${where} is not a plain file (${st.kind === 'big' ? 'it is larger than yad reads' : st.kind === 'dir' ? 'it is a folder' : 'it is a device or a pipe'}), so yad did not read it`, fix: `replace it with a hook that runs this line: ${st.line}` };
+}
+
+// The install action. 'foreign', 'linked' and 'hooks-path' build no action — there is nothing yad may write —
 // and are reported by the spec's advice instead.
 function hookActionsFor(spec, root) {
   const st = hookStateFor(spec, root);
-  if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path' || st.state === 'hand-wired') return [];
+  if (!st.applies || st.state === 'foreign' || st.state === 'linked' || st.state === 'hooks-path' || st.state === 'hand-wired') return [];
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
@@ -1626,11 +1677,17 @@ function hookActionsFor(spec, root) {
     root,
     paths: [],
     backup,
+    // The hook is looked at again first (#222): one that changed since the plan (a link put in its place, a
+    // person's edit) is left alone. The new hook goes through a new file and a rename, with its mode set on that
+    // new file, so a link at the hook's name is replaced, never written or chmod-ed through.
     apply: () => {
-      if (backup) fs.copyFileSync(st.file, backup);
-      fs.mkdirSync(path.dirname(st.file), { recursive: true });
-      fs.writeFileSync(st.file, st.expected, { mode: 0o755 });
-      fs.chmodSync(st.file, 0o755);
+      const now = hookStateFor(spec, root);
+      if (now.state !== st.state || now.file !== st.file || now.why !== st.why) {
+        warn(`${spec.item} changed since yad looked at it (${now.state ?? 'gone'}), so yad left it alone — run \`yad check --fix\` again`);
+        return;
+      }
+      if (backup) backupPlain(st.file, backup);
+      writeFileAtomic(st.file, st.expected, { mode: 0o755 });
     },
   }];
 }
@@ -1643,9 +1700,9 @@ function orphanHookActionsFor(spec, root) {
   if (!where.ok) return [];
   const [hookRel, prefix = ''] = where.stdout.split('\n');
   const file = path.resolve(root, hookRel);
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  if (!spec.scripts(prefix).includes(text)) return [];
+  // A link is never ours to remove (#222).
+  const text = readPlainText(file);
+  if (text === null || !spec.scripts(prefix).includes(text)) return [];
   return [{ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
 }
 
@@ -1659,7 +1716,8 @@ const PRE_COMMIT_HOOK = Object.freeze({
   // A tool that owns the hook (the pre-commit framework, husky v4) may rewrite it on reinstall, which drops
   // an added line, so the advice says to check after one.
   advice: (st) => (st?.state === 'hooks-path' ? `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to ${st.editFile}: ${st.line}`
-    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}` : null),
+    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}`
+      : st?.state === 'linked' ? `${linkedHookSaid(st).why}; to refuse a hand commit to the CI-owned ledger, ${linkedHookSaid(st).fix}` : null),
 });
 
 // The pre-commit hook (E48), as it always was.
@@ -1734,12 +1792,19 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
   advice: () => null,
 })));
 
-// The copy's state: { file, state: 'ok' | 'missing' | 'outdated' } | null outside git.
+// The copy's state: { file, state: 'ok' | 'missing' | 'outdated' } | null outside git. A copy that is a link,
+// a folder or a device is not read (#222): it is 'outdated', and the write replaces it with a rename, never
+// through it. So is a copy larger than yad reads, and one yad may not open (no permission): yad's own file,
+// written again whole. In a linked folder of the Product there is nothing yad may write: null, as outside git.
 export function noticeCopyState(root) {
   const file = noticeCopyPath(root);
   if (!file) return null;
-  let text = null;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
+  let text;
+  try { text = readPlainFile(file); } catch (e) {
+    if (e?.folder) return null;
+    text = undefined;
+  }
+  // yad's own script, shipped in its package: not a Product file.
   const want = fs.readFileSync(asset(NOTICE_ASSET), 'utf8');
   return { file, want, state: text === null ? 'missing' : text === want ? 'ok' : 'outdated' };
 }
@@ -1751,7 +1816,7 @@ export function localSetupNoticeActions(root) {
   const out = [];
   if (copy && copy.state !== 'ok') {
     out.push({ scope: 'product', item: 'local setup notice script (this clone, in git\'s folder)', status: copy.state === 'missing' ? 'new' : 'outdated', root, paths: [],
-      apply: () => { fs.mkdirSync(path.dirname(copy.file), { recursive: true }); fs.writeFileSync(copy.file, copy.want); } });
+      apply: () => writeFileAtomic(copy.file, copy.want) });
   }
   return [...out, ...NOTICE_HOOKS.flatMap((spec) => hookActionsFor(spec, root))];
 }
@@ -1770,11 +1835,19 @@ export const localSetupNoticeStates = (root) => NOTICE_HOOKS.map((spec) => ({ na
 // ONE sentence for the hooks yad may not write here (a team's own, or core.hooksPath), or null. A convenience,
 // not a guard: said by check --fix, update, setup and doctor, never on a plain `yad check` (review 1).
 export function localSetupNoticeAdvice(root) {
-  const blocked = localSetupNoticeStates(root).filter((st) => st.applies && (st.state === 'foreign' || st.state === 'hooks-path'));
+  const blocked = localSetupNoticeStates(root).filter((st) => st.applies && (st.state === 'foreign' || st.state === 'hooks-path' || st.state === 'linked'));
   if (!blocked.length) return null;
-  const where = blocked.map((st) => (st.state === 'hooks-path' ? st.editFile : st.file));
-  const lines = blocked.map((st) => `${st.name}: ${st.line}`).join('  ·  ');
-  return `yad left ${blocked.map((st) => st.name).join(' and ')} alone (${blocked[0].state === 'hooks-path' ? `core.hooksPath is ${blocked[0].hooksPath}` : 'not yad\'s'}); for the local setup notice after a pull, add to ${where.join(' and ')} — ${lines}`;
+  // A linked hook (#222) is not read, so the person makes sure the file git runs has the line.
+  const linked = blocked.filter((st) => st.state === 'linked');
+  const plain = blocked.filter((st) => st.state !== 'linked');
+  const said = [];
+  if (plain.length) {
+    const where = plain.map((st) => (st.state === 'hooks-path' ? st.editFile : st.file));
+    const lines = plain.map((st) => `${st.name}: ${st.line}`).join('  ·  ');
+    said.push(`yad left ${plain.map((st) => st.name).join(' and ')} alone (${plain[0].state === 'hooks-path' ? `core.hooksPath is ${plain[0].hooksPath}` : 'not yad\'s'}); for the local setup notice after a pull, add to ${where.join(' and ')} — ${lines}`);
+  }
+  for (const st of linked) said.push(`${linkedHookSaid(st).why}; for the local setup notice after a pull, ${linkedHookSaid(st).fix}`);
+  return said.join('; ');
 }
 
 // ---- background capture wiring (E43) -----------------------------------------------------------

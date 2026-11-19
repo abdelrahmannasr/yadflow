@@ -2,13 +2,13 @@
 // as a thin alias (--scope=changed). Inspects actual project state against the
 // manifest: missing setup, drifted files, stale code-context.
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, readPlainText, NOT_PLAIN_FILE, FILE_TOO_BIG,
 } from './lib.mjs';
 
-const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+// A committed file, read only as a plain file (#222): a link, a folder or a device reads as empty.
+const readFileSafe = (p) => readPlainText(p) ?? '';
 
 import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
@@ -206,6 +206,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // cannot trust) has said why at plan time, and `--overwrite-local` cannot fix it either: it is left out here
   // and from what --fix applies, so no run says it was fixed.
   const modified = actions.filter((a) => a.status === 'modified' && !a.writesNothing);
+  // A file yad may not write (#222: a folder or a device in its place, a file under a linked folder of the
+  // Product) is named on every run, and writes nothing, so the other files are still fixed.
+  for (const a of actions.filter((x) => x.writesNothing && x.refused)) warn(forTerminal(`${shown(a)}/${a.item} ${a.refused}`));
   for (const m of modified) {
     // The product-link record has no template: it is `modified` only when it is not a JSON object (E120).
     warn(m.item === PRODUCT_LINK
@@ -217,17 +220,16 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // re-written below whatever happens to the fragment. So an edited fragment left on an older major
   // rejects the stamp this update writes, and CI silently floats on that older engine against a project
   // on a newer file shape. The generic "locally modified" line does not say that; this does.
-  const pinMajorOf = (file) => {
-    try {
-      const text = fs.readFileSync(file, 'utf8');
-      // `YAD_MAJOR=<n>` from this release on; before it, the major was written into the check itself.
-      const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
-      return found ? Number(found[1]) : null;
-    } catch { return null; }
+  const pinMajorOf = (text) => {
+    if (text === null) return null;
+    // `YAD_MAJOR=<n>` from this release on; before it, the major was written into the check itself.
+    const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
+    return found ? Number(found[1]) : null;
   };
+  // Both copies read only as plain files (#222): yad's own shipped fragment is one, and the team's may not be.
   for (const m of modified.filter((a) => a.managed && !a.rename && /yad-gate-sync\.ya?ml$/.test(a.item))) {
-    const kept = pinMajorOf(m.managed.dest);
-    const ships = pinMajorOf(m.managed.src);
+    const kept = pinMajorOf(readPlainText(m.managed.dest));
+    const ships = pinMajorOf(readPlainText(m.managed.src));
     if (kept === null || ships === null || kept === ships) continue;
     warn(`${shown(m)}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
@@ -390,7 +392,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     applied++;
     // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
     // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
-    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
+    info(`${a.status} → fixed: ${shown(a)}/${a.item}${a.replacesLink ? ' (it was a link: yad\'s file replaces it, the link was not followed)' : ''}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
   }
   if (force) {
     // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
