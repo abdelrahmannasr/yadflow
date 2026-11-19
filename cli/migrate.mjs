@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, MAX_PLAIN_BYTES, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, MAX_PLAIN_BYTES, notPlainSaid, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
     const raw = readRaw(ledgerOf(from, name));
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
-      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? NOT_PLAIN_SAID : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : raw.tooBig ? TOO_BIG_FIX : 'fix or restore it first'}`);
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? raw.error : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : raw.tooBig ? TOO_BIG_FIX : 'fix or restore it first'}`);
     }
     read[name] = raw.value;
   }
@@ -440,7 +440,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
     const raw = readRaw(path.join(from, f));
-    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${NOT_PLAIN_SAID} — ${NOT_PLAIN_FIX}` : raw.tooBig ? `${TOO_BIG_SAID} — ${TOO_BIG_FIX}` : 'does not parse — fix or restore it first'}`);
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${raw.error} — ${NOT_PLAIN_FIX}` : raw.tooBig ? `${TOO_BIG_SAID} — ${TOO_BIG_FIX}` : 'does not parse — fix or restore it first'}`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
     const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
@@ -494,7 +494,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
         const rel = path.relative(root, file).split(path.sep).join('/');
         if (e?.code === FILE_TOO_BIG) throw Object.assign(new Error(`${rel} ${TOO_BIG_SAID}`), { code: FILE_TOO_BIG, size: e.size, limit: e.limit });
         if (e?.code !== NOT_PLAIN_FILE) throw e;
-        throw Object.assign(new Error(`${rel} ${NOT_PLAIN_SAID}`), { code: NOT_PLAIN_FILE, kind: e.kind });
+        throw Object.assign(new Error(`${rel} ${notPlainSaid(e, NOT_PLAIN_SAID)}`), { code: NOT_PLAIN_FILE, kind: e.kind, folder: e.folder });
       }
     };
     writeState(f.state, convertDiscoveryState(plainJSON(f.state)));
@@ -574,7 +574,8 @@ function readRaw(file) {
   try {
     text = readPlainFile(file);
   } catch (e) {
-    if (e?.code === NOT_PLAIN_FILE) return { ok: false, notPlain: true, error: NOT_PLAIN_SAID };
+    // Under a linked folder (#214), the row names the folder.
+    if (e?.code === NOT_PLAIN_FILE) return { ok: false, notPlain: true, error: notPlainSaid(e, NOT_PLAIN_SAID), ...(e.folder ? { folder: e.folder } : {}) };
     if (e?.code === FILE_TOO_BIG) return { ok: false, tooBig: true, error: TOO_BIG_SAID };
     return { ok: false, error: e.message };
   }
@@ -664,7 +665,7 @@ export function ensureBackupsIgnored(root) {
   try { text = readPlainFile(gi); } catch (e) {
     // A file too big to read (#215) is left as it is too: rewriting it would mean reading it whole.
     if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG) throw e;
-    warn(`.gitignore ${e.code === FILE_TOO_BIG ? TOO_BIG_SAID : NOT_PLAIN_SAID}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
+    warn(`.gitignore ${e.code === FILE_TOO_BIG ? TOO_BIG_SAID : notPlainSaid(e, NOT_PLAIN_SAID)}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
     return false;
   }
   const lines = text === null ? [] : text.split('\n');
@@ -782,7 +783,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     if (moving && rel.startsWith(moving)) continue;
     const raw = readRaw(file);
     if (!raw.ok) {
-      rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error });
+      rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error, ...(raw.folder ? { folder: raw.folder } : {}) });
       continue;
     }
     const from = shapeOf(raw.value);
@@ -920,7 +921,7 @@ export const KEEP_CHOICES = ['product', 'hub'];
 export function describeDrift(aPath, bPath) {
   let a; let b;
   // Plain reads (E125 b): a link or a folder is named as such, never followed.
-  const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? NOT_PLAIN_SAID : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'does not parse'}`];
+  const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? notPlainSaid(e, NOT_PLAIN_SAID) : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'does not parse'}`];
   try { a = readPlainJSON(aPath); } catch (e) { return said(aPath, e); }
   try { b = readPlainJSON(bPath); } catch (e) { return said(bPath, e); }
   const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
