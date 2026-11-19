@@ -218,7 +218,7 @@ sees the anchor and carries those bases as `"inherited": true, "inheritedFrom": 
 (a `null` boundHash is treated as "nothing locked upstream → no drift" by the gate predicate, so the step
 passes and never blocks), and it writes **NO** `contract-lock.json` (there is no surface to point at — the
 child never touches `specs/*/contracts/**`, so `contract-check` passes trivially). Contract protection on
-this thread begins only after `yad-backfill promote` documents and locks the feature. Record
+this thread begins only after `yad backfill promote --full` and the Shape steps after it lock the feature. Record
 `"parentStub": true` in `change.json` so it is auditable that the change threaded off an undocumented
 stub. Prefer the `defect-fix` / `behavioral-no-surface` depth against a stub — a `contract-surface`
 change against an undocumented feature should wait until the stub is promoted (backfilled + a real
@@ -243,7 +243,7 @@ yes. `inherits:` in `epic.md` (Step 4) must name the same list as the flag.
   such steps. If the fix needs them carried, drop `--profile` and take the stub's `classic` route.
 - It refuses `--profile chore` for any other parent or type with "takes its parent's route": a tracked
   (non-stub) feature keeps its route, its contract and its review rules. A stub that is part-way through
-  `yad-backfill promote`, or whose `epic.md` has lost its `stub:` marker, counts as not a stub here.
+  `yad backfill promote`, or whose `epic.md` has lost its `stub:` marker, counts as not a stub here.
 - Record the choice in `change.json` (Step 6): `"route": "chore"` beside `"parentStub": true`.
 
 **Short-lane parent (no architecture step ever existed).** When the parent records `profile: "chore"`

@@ -122,7 +122,7 @@ Notes:
 - **`kind` and `type` are different things and a stub carries both.** `kind: "stub"` is the lifecycle
   marker the engine keys off; `type: "feature"` is the work-item type, copied from `epic.md`. A stub is
   always a `feature` and always `classic` — `--type` and `--profile` are refused here, because
-  `yad-backfill promote` wakes the chain at its `epic` step and upkeep leaves nothing to backfill.
+  `yad backfill promote --full` wakes the chain at its `epic` step and upkeep leaves nothing to backfill.
 - The blocked chain is what makes the state valid (`validateState` needs a non-empty `steps` and a
   string `currentStep`) and what lets `promote` **wake** it into normal authoring with zero re-seeding.
 - Nothing in the chain is runnable until then: `preconditionsMet` refuses every step of an anchor, and
@@ -153,7 +153,7 @@ Shape steps do not auto-advance. Suggest `yad next EP-<slug>` (prints the backfi
   feature exists so a change can thread off it.
 - **Only for a feature with NO epic.** If any epic already owns the feature, use `yad-change` instead.
 - **Never `verified: true` here.** A stub is `verified: false` / `stub: backfill-pending` until
-  `yad-backfill promote` flips it — approval is earned by documenting the real code, not by minting.
+  `yad backfill promote` flips it — approval is earned by documenting the real code, not by minting.
 - **You never implement directly against a stub.** It owns no `stories/`, so there is nothing to
   implement against directly — real work threads off it as a change/defect epic (which has its own
   stories). (This is a convention of the empty stub, not a hard gate: `lineage-check` passes a
