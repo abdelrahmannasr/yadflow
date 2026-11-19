@@ -28114,7 +28114,7 @@ const DIRECT_TEXT_READ_FILES = ['cli/doctor.mjs', 'cli/plan.mjs', 'cli/reconcile
 const DIRECT_TEXT_READ_ALLOWED = [
   { file: 'cli/doctor.mjs', count: 0, reason: 'every file it reads is the Product\'s, a code repo\'s or this clone\'s' },
   { file: 'cli/plan.mjs', count: 1, reason: 'the local setup notice script yad ships (`asset(NOTICE_ASSET)`), compared with the clone\'s copy' },
-  { file: 'cli/reconcile.mjs', count: 1, reason: 'the gate-sync fragment yad ships (`m.managed.src`, an `asset(…)` path), to read the major it trusts' },
+  { file: 'cli/reconcile.mjs', count: 0, reason: 'every file it reads goes through readPlainText, yad\'s own shipped fragment too' },
 ];
 
 test('#222 the text-read matcher sees each direct shape, and none of the plain reads', () => {
@@ -32177,8 +32177,8 @@ test('#222 setup: a wired file that is a link is missing, and its copy replaces 
     fs.symlinkSync(path.join(T, 'made-orig.txt'), path.join(app, `${c}.yad-orig`));
     const actions = repoActions(T, { name: 'app', path: 'app', platform: 'github' });
     const of = (d) => actions.find((x) => x.item === d);
-    assert.ok(['missing', 'new'].includes(of(a).status), `a link is no file: ${of(a).status}`);
-    assert.ok(['missing', 'new'].includes(of(b).status), `a dangling link is no file: ${of(b).status}`);
+    assert.deepEqual([of(a).status, of(a).replacesLink], ['new', true], 'a link is no file: a template yad never wrote in a wired repo');
+    assert.deepEqual([of(b).status, of(b).replacesLink], ['new', true], 'a dangling link is no file');
     assert.equal(of(a).backup, undefined, 'nothing to back up through the link');
     assert.equal(of(c).status, 'outdated');
     for (const d of [a, b, c]) of(d).apply();
@@ -32186,6 +32186,30 @@ test('#222 setup: a wired file that is a link is missing, and its copy replaces 
     assert.ok(!fs.existsSync(path.join(T, 'made.txt')) && !fs.existsSync(path.join(T, 'made-orig.txt')), 'no dangling link\'s target is made');
     for (const d of [a, b, c]) assert.ok(fs.lstatSync(path.join(app, d)).isFile(), `${d} is a plain file now`);
     assert.equal(fs.readFileSync(path.join(app, `${c}.yad-orig`), 'utf8'), 'edited\n', 'the backup replaces its link');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 setup: a wired file turned into a link after the plan is not backed up through the link', { skip: E125B_SKIP }, async () => {
+  const { repoActions } = await import('./plan.mjs');
+  const { wiringFor } = await import('./manifest.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-wired-swap-')));
+  try {
+    const app = path.join(T, 'app');
+    const dest = wiringFor('github')[0].dest;
+    fs.mkdirSync(path.dirname(path.join(app, dest)), { recursive: true });
+    fs.writeFileSync(path.join(app, dest), 'edited\n');
+    const [act] = repoActions(T, { name: 'app', path: 'app', platform: 'github' }).filter((a) => a.item === dest);
+    assert.equal(act.status, 'outdated');
+    assert.ok(act.backup, 'an edit with no record is saved first');
+    // Between the plan and the apply, the file becomes a link to a file outside.
+    const outside = path.join(T, 'secret.txt');
+    fs.writeFileSync(outside, 'secret\n');
+    fs.rmSync(path.join(app, dest));
+    fs.symlinkSync(outside, path.join(app, dest));
+    assert.throws(() => act.apply(), (e) => e.code === NOT_PLAIN_FILE);
+    assert.ok(!fs.existsSync(act.backup), 'the outside file is not copied into the backup');
+    assert.ok(fs.lstatSync(path.join(app, dest)).isSymbolicLink(), 'nothing is replaced without its backup');
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'secret\n');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -32241,6 +32265,38 @@ test('#222 the gate and workflow readers setup shares with doctor read no link, 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #222 review: a wired file yad may not write — under a linked folder of the Product, or a folder in its place —
+// writes nothing and is named, and the rest of the run goes on; a link at a wired file is replaced, and said so.
+test('#222 yad check --fix: a wired file under a linked folder or with a folder in its place is named and skipped, the others are written', { skip: E125B_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const product = path.join(T, 'product');
+    fs.mkdirSync(path.join(product, '.sdlc'), { recursive: true });
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(product, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', ledger: 'verified', git_url: 'https://github.com/o/p.git' }));
+    fs.writeFileSync(path.join(product, '.sdlc/repos.json'), '{"repos":[]}');
+    // `.github` links to a folder outside the Product; nothing may be written there.
+    const away = path.join(T, 'away');
+    fs.mkdirSync(path.join(away, 'workflows'), { recursive: true });
+    fs.symlinkSync(away, path.join(product, '.github'));
+    fs.mkdirSync(path.join(product, 'checks/pr-title.sh'), { recursive: true });
+    const outside = path.join(T, 'outside.sh');
+    fs.writeFileSync(outside, 'mine\n');
+    fs.symlinkSync(outside, path.join(product, 'checks/commit-message.sh'));
+    const r = e79Yad(T, product, ['check', '--fix']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = r.stdout + r.stderr;
+    assert.deepEqual(fs.readdirSync(path.join(away, 'workflows')), [], 'nothing written through the linked folder');
+    assert.match(out, /\.github\/workflows\/yad-gate-sync\.yml is under \.github, a linked folder, so yad did not write it/);
+    assert.match(out, /checks\/pr-title\.sh is a folder, not a file, so yad did not write it/);
+    assert.match(out, /checks\/commit-message\.sh \(it was a link: yad's file replaces it, the link was not followed\)/);
+    assert.ok(fs.lstatSync(path.join(product, 'checks/pr-title.sh')).isDirectory(), 'the folder is left as it was');
+    assert.ok(fs.lstatSync(path.join(product, 'checks/commit-message.sh')).isFile(), 'the link is replaced');
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n');
+    for (const g of ['verified-commits.sh', 'ledger-guard.sh', 'pr-template.sh']) assert.ok(fs.lstatSync(path.join(product, 'checks', g)).isFile(), `${g}: the other files are written`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#222 setup and update: CI files and gate scripts that link to /dev/zero are answered at once', { skip: DEV_ZERO_SKIP }, () => {
   const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plan-zero-')));
   try {
@@ -32270,7 +32326,7 @@ process.stdout.write(JSON.stringify({
     assert.equal(got.gap, null);
     assert.deepEqual(got.passing, []);
     assert.deepEqual(got.hits, []);
-    assert.ok(['missing', 'new'].includes(got.wired), got.wired);
+    assert.equal(got.wired, 'missing', 'a repo whose only wired file is a link carries none of its wiring');
     assert.equal(got.legacy, 0);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

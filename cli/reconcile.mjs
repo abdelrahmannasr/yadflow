@@ -2,7 +2,6 @@
 // as a thin alias (--scope=changed). Inspects actual project state against the
 // manifest: missing setup, drifted files, stale code-context.
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import {
   c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, readPlainText, NOT_PLAIN_FILE, FILE_TOO_BIG,
@@ -227,11 +226,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
     return found ? Number(found[1]) : null;
   };
-  // yad's own fragment, shipped in its package, is read as it is; the team's copy only as a plain file (#222).
-  const shippedText = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
+  // Both copies read only as plain files (#222): yad's own shipped fragment is one, and the team's may not be.
   for (const m of modified.filter((a) => a.managed && !a.rename && /yad-gate-sync\.ya?ml$/.test(a.item))) {
     const kept = pinMajorOf(readPlainText(m.managed.dest));
-    const ships = pinMajorOf(shippedText(m.managed.src));
+    const ships = pinMajorOf(readPlainText(m.managed.src));
     if (kept === null || ships === null || kept === ships) continue;
     warn(`${shown(m)}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
