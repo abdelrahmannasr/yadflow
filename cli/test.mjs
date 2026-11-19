@@ -1871,7 +1871,7 @@ test('#214: a linked .sdlc, epics/ or Build folder is refused for every read and
         let got;
         const said = grabErr(() => { got = readJSONPlain(p, 'fallback'); });
         assert.equal(got, 'fallback', `${linked}: readJSON gives the fallback`);
-        assert.match(said, new RegExp(`${linked.replace(/[./]/g, '\\$&')} is a link, so yad did not read .* replace the link with the real folder`));
+        assert.match(said, new RegExp(`${linked.replace(/[./]/g, '\\$&')} is a link, so yad did not read .* remove the link \\(\`git rm <folder>\`\\), then restore the real folder from a commit where it was a folder`));
         assert.throws(() => readJSONStrictPlain(p, []), (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.message.startsWith(`${linked} is a link`) && /real folder/.test(e.hint));
         // Writes: over the file, beside it, and in a folder not made yet below the link.
         const wrote = (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.kind === 'link' && e.folder === linked && new RegExp(`^${linked.replace(/[./]/g, '\\$&')} is a link, so yad did not write `).test(e.message);
@@ -1948,6 +1948,137 @@ test('#214: yad epic new under a linked epics/ stops with YAD-STATE-001 and writ
     assert.ok(!out.error.includes(T), 'named by its Product path');
     assert.deepEqual(fs.readdirSync(outside), [], 'nothing is written through the link');
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+// #214 review: a verified Product whose `.sdlc` is a link must not run as an unverified one. A lenient read of
+// its settings through the link would warn and fall back to "local", and `epic new` would seed an epic on a
+// ledger only CI may write. So the command stops before it reads anything, with YAD-STATE-001.
+test('#214: a verified Product whose .sdlc is a link stops yad epic new and yad doctor with YAD-STATE-001, writing nothing', { skip: E125B_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214e-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214e-outside-'));
+  try {
+    const verified = '{"platform":"github","git_url":"https://github.com/acme/product","ledger":"verified"}\n';
+    for (const f of ['product.json', 'hub.json']) fs.writeFileSync(path.join(outside, f), verified);
+    fs.symlinkSync(outside, path.join(T, '.sdlc'));
+    const before = treeOf(outside);
+    const env = { ...process.env, YAD_NO_UPDATE_NOTIFIER: '1', YAD_NO_REPORT: '1' };
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'epic', 'new', 'checkout', '--type', 'chore', '--json'], { cwd: T, encoding: 'utf8', timeout: 60000, env });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.code, 'YAD-STATE-001');
+    assert.match(out.error, /^\.sdlc is a link, so yad did not read the Product's settings/);
+    assert.match(out.hint, /git rm <folder>/);
+    assert.ok(!fs.existsSync(path.join(T, 'epics')), 'no epic is seeded');
+    assert.deepEqual(treeOf(outside), before, 'nothing is written through the link');
+    const d = spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), 'doctor', '--json'], { cwd: T, encoding: 'utf8', timeout: 60000, env });
+    assert.equal(d.status, 1);
+    assert.equal(JSON.parse(d.stdout).code, 'YAD-STATE-001', 'named as a link, never as a file that does not parse');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+// #214 review: macOS and Windows disks ignore case, so `.SDLC` is the Product's `.sdlc`: a path spelled in
+// another case is checked all the same, and so is a Product folder spelled in another case.
+const CASE_SKIP = E125B_SKIP || (!['darwin', 'win32'].includes(process.platform) && 'case is told apart on this disk');
+test('#214: a path or a Product folder spelled in another case is still checked', { skip: CASE_SKIP }, () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214f-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(P);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'repos.json'), '{"secret":true}');
+    fs.symlinkSync(outside, path.join(P, '.sdlc'));
+    if (!fs.existsSync(path.join(P, '.SDLC', 'repos.json'))) return; // a disk that tells case apart
+    for (const [root, file] of [
+      [P, path.join(P, '.SDLC', 'repos.json')],
+      [P, path.join(T, 'PRODUCT', '.sdlc', 'repos.json')],
+      [path.join(T, 'PRODUCT'), path.join(P, '.sdlc', 'repos.json')],
+    ]) {
+      setProductRoot(root);
+      try {
+        assert.throws(() => readPlainFile214(file), (e) => e.code === NOT_PLAIN_214 && e.folder.toLowerCase() === '.sdlc', `${root} / ${file}`);
+        assert.throws(() => writeJSON(path.join(path.dirname(file), 'new.json'), { a: 1 }), (e) => e.code === 'YAD-STATE-001');
+      } finally { setProductRoot(null); }
+    }
+    assert.deepEqual(fs.readdirSync(outside), ['repos.json'], 'nothing is written through the link');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #214 review: the skill and hook copies go through `copyFile` and `copyDir`. `copyDir` removes the old copy
+// first, and through a linked `.claude/` it would delete inside the folder the link points at.
+test('#214: copyFile and copyDir refuse a destination under a linked folder of the Product, and leave its target as it is', { skip: E125B_SKIP }, async () => {
+  const { copyFile, copyDir } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214g-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(P);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'skills', 'yad-x'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'skills', 'yad-x', 'SKILL.md'), 'theirs');
+    fs.symlinkSync(outside, path.join(P, '.claude'));
+    const src = path.join(T, 'src');
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, 'SKILL.md'), 'ours');
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const refused = (e) => e.code === 'YAD-STATE-001' && e.folder === '.claude' && /^\.claude is a link, so yad did not write /.test(e.message);
+      assert.throws(() => copyDir(src, path.join(P, '.claude', 'skills', 'yad-x')), refused);
+      assert.throws(() => copyFile(path.join(src, 'SKILL.md'), path.join(P, '.claude', 'settings.json')), refused);
+      assert.deepEqual(treeOf(outside), before, 'nothing deleted or written in the folder the link points at');
+      // A real folder: copied as before.
+      fs.rmSync(path.join(P, '.claude'));
+      copyDir(src, path.join(P, '.claude', 'skills', 'yad-x'));
+      assert.equal(fs.readFileSync(path.join(P, '.claude', 'skills', 'yad-x', 'SKILL.md'), 'utf8'), 'ours');
+    } finally { setProductRoot(null); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #214 review: a caller that names the file itself names the linked folder too.
+test('#214: migrate and the local setup script name the linked folder a file is under', { skip: E125B_SKIP }, async () => {
+  const { describeDrift } = await import('./migrate.mjs');
+  const { readCommittedLocalSetup, localSetupFixHint } = await import('./local-setup.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214h-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(P);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    for (const f of ['product.json', 'hub.json', 'local-setup.json']) fs.writeFileSync(path.join(outside, f), '{}');
+    fs.symlinkSync(outside, path.join(P, '.sdlc'));
+    setProductRoot(P);
+    try {
+      assert.deepEqual(describeDrift(path.join(P, '.sdlc', 'product.json'), path.join(P, '.sdlc', 'hub.json')), ['product.json is under .sdlc, a linked folder, so it was not read']);
+      const got = readCommittedLocalSetup(P);
+      assert.equal(got.error, 'is under .sdlc, a linked folder, so it was not read');
+      assert.match(localSetupFixHint(got.error), /^remove the link \(`git rm <folder>`\)/);
+    } finally { setProductRoot(null); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #214 review: `{ within }` adds the caller's folder to the Product's, never replaces it: a code repo kept
+// inside the Product's folder and reached through a link there is refused, as any linked folder in it is.
+test('#214: a code repo inside the Product reached through a link is refused even with { within } naming it', { skip: E125B_SKIP }, async () => {
+  const { readRiskMap } = await import('./riskmap-command.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-214i-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(P);
+    const repo = path.join(T, 'real-backend');
+    fs.mkdirSync(path.join(repo, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.sdlc', 'risk-map'), '# yad-risk-map v1\n');
+    fs.symlinkSync(repo, path.join(P, 'backend'));
+    const map = path.join(P, 'backend', '.sdlc', 'risk-map');
+    // Without the Product's folder known, the repo's own folders are all real: read as before.
+    assert.equal(readPlainFile214(map, { within: path.join(P, 'backend') }), '# yad-risk-map v1\n');
+    setProductRoot(P);
+    try {
+      assert.throws(() => readPlainFile214(map, { within: path.join(P, 'backend') }), (e) => e.code === NOT_PLAIN_214 && e.folder === 'backend' && e.message.startsWith('backend is a link, so yad did not read backend/.sdlc/risk-map'));
+      assert.match(readRiskMap(path.join(P, 'backend')).refused, /^backend is a link/);
+      assert.throws(() => writeFileAtomic214(map, 'x', { within: path.join(P, 'backend') }), (e) => e.code === 'YAD-STATE-001' && e.folder === 'backend');
+      assert.equal(fs.readFileSync(path.join(repo, '.sdlc', 'risk-map'), 'utf8'), '# yad-risk-map v1\n');
+    } finally { setProductRoot(null); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
@@ -30073,7 +30204,7 @@ test('#214: yad init refuses to set up a Product through a linked .sdlc, and wri
     const before = treeOf(outside);
     const r = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
     assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not (read|write) \.sdlc\//);
+    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not read the Product's settings/);
     assert.ok(!(r.stdout + r.stderr).includes(outside), 'named by its path in the Product');
     assert.deepEqual(treeOf(outside), before, 'nothing is written through the link');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -31898,14 +32029,21 @@ test('E81 review 17: writeJSON never writes through a link at its temp name, and
     const before = fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8');
     const r = e79Yad(T, product, ['repo', 'refresh']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
-    // #214: the registry is not even read through the link, so refresh stops there, naming the folder.
-    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not read \.sdlc\/repos\.json/);
+    // #214: a Product whose `.sdlc` is a link stops before any of its files is read, naming the folder.
+    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not read the Product's settings/);
     const pushed = e79Yad(T, product, ['repo', 'refresh', '--push', '--json']);
     assert.equal(pushed.status, 1);
-    // Refused at the read now, before any `published` is worked out: none is given, and none happened.
-    assert.equal(JSON.parse(pushed.stdout).published ?? null, null, 'nothing is published after the refusal');
-    assert.equal(JSON.parse(pushed.stdout).ok, false);
+    assert.equal(JSON.parse(pushed.stdout).code, 'YAD-STATE-001');
     assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
+    // A registry yad may not read (here a link at the file): refresh stops at the read and publishes nothing.
+    fs.rmSync(path.join(product, '.sdlc'));
+    fs.mkdirSync(path.join(product, '.sdlc'));
+    for (const f of ['hub.json']) fs.copyFileSync(path.join(elsewhere, f), path.join(product, '.sdlc', f));
+    fs.symlinkSync(path.join(elsewhere, 'repos.json'), path.join(product, '.sdlc', 'repos.json'));
+    const linkedFile = e79Yad(T, product, ['repo', 'refresh', '--push', '--json']);
+    assert.equal(linkedFile.status, 1, linkedFile.stdout + linkedFile.stderr);
+    assert.equal(JSON.parse(linkedFile.stdout).published, null, 'nothing is published after the refusal');
+    assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

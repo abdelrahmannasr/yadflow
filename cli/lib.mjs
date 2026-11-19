@@ -218,12 +218,16 @@ export function sameContent(src, dest) {
   return a !== null && a === b;
 }
 
+// Both refuse a destination under a linked folder of the Product (#214): `copyDir` removes the old copy
+// first, and through a linked `.claude/` that would delete inside the folder the link points at.
 export function copyFile(src, dest, { exec = false } = {}) {
+  refuseLinkedWrite(dest);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
   if (exec) fs.chmodSync(dest, 0o755);
 }
 export function copyDir(src, dest) {
+  refuseLinkedWrite(dest);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
 }
@@ -366,56 +370,87 @@ export const NOT_PLAIN_FILE = 'YAD_NOT_PLAIN_FILE';
 // Each folder is looked at with `lstat` on every read and write, never cached: it costs a few microseconds a
 // folder, and yad itself can swap a folder mid-command (a `git checkout` of a branch that commits a link).
 let productRoot = null;
+// `realpathSync.native` gives the disk's own spelling (its case too, on macOS), which `realpathSync` does not.
 const rootOf = (dir) => {
   const at = path.resolve(dir);
   let real = at;
-  try { real = fs.realpathSync(at); } catch { /* not made yet: its own spelling only */ }
+  try { real = fs.realpathSync.native(at); } catch { /* not made yet: its own spelling only */ }
   return { at, real };
 };
 // `null` ends it (between tests, or a command that leaves the Product).
 export function setProductRoot(dir) { productRoot = dir ? rootOf(dir) : null; }
+// macOS and Windows disks ignore case by default: `/Users/x/Product/.SDLC` is the Product's `.sdlc`, so the
+// spelling is compared with case folded there. The walk then looks at the caller's own spelling of each
+// folder, which the disk finds the same way.
+const FOLD_CASE = process.platform === 'darwin' || process.platform === 'win32';
+const fold = (s) => (FOLD_CASE ? s.toLowerCase() : s);
 // The path of `abs` inside `root` ('' for the root itself), or null when it is not inside. Both spellings of
 // the root count: on macOS the temp folder is `/var/…` and `/private/var/…`, and some callers resolve first.
 function insideRoot(root, abs) {
   for (const base of root.real === root.at ? [root.at] : [root.at, root.real]) {
-    const rel = path.relative(base, abs);
-    if (rel === '') return { base, rel };
-    if (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return { base, rel };
+    if (fold(abs) === fold(base)) return { base, rel: '' };
+    const head = base.endsWith(path.sep) ? base : base + path.sep;
+    if (fold(abs).startsWith(fold(head))) return { base, rel: abs.slice(head.length) };
   }
   return null;
 }
-// The first folder between the root and `p`'s folder that is a link, or null. A folder that is not there
-// ends the walk: nothing below it exists, and a write makes real folders from there down.
-function linkedFolderOf(p, within) {
-  const root = within ? rootOf(within) : productRoot;
-  if (!root) return null;
-  const hit = insideRoot(root, path.dirname(path.resolve(p)));
-  if (!hit || hit.rel === '') return null;
-  let at = hit.base;
-  for (const part of hit.rel.split(path.sep)) {
-    at = path.join(at, part);
-    let st;
-    try { st = fs.lstatSync(at); } catch { return null; }
-    if (st.isSymbolicLink()) return at;
-    if (!st.isDirectory()) return null;
+// The roots a path is checked against: the Product's, and the caller's own (`within`) on top of it, so a
+// code repo kept inside the Product's folder is checked from the Product down too.
+const rootsFor = (within) => [productRoot, within ? rootOf(within) : null].filter(Boolean);
+// The first folder between a root and `abs`'s folder that is a link, with that root, or null. A folder that
+// is not there ends the walk: nothing below it exists, and a write makes real folders from there down.
+function linkedFolderOf(abs, within) {
+  for (const root of rootsFor(within)) {
+    const hit = insideRoot(root, path.dirname(abs));
+    if (!hit || hit.rel === '') continue;
+    let at = hit.base;
+    for (const part of hit.rel.split(path.sep)) {
+      at = path.join(at, part);
+      let st;
+      try { st = fs.lstatSync(at); } catch { break; }
+      if (st.isSymbolicLink()) return { folder: at, root };
+      if (!st.isDirectory()) break;
+    }
   }
   return null;
 }
-// A path as yad names it: inside the Product, by its path there (never the absolute path, which would land
-// in a `--json` run's warnings); outside it, as the caller gave it.
-function productShown(p, within) {
-  const root = within ? rootOf(within) : productRoot;
-  const hit = root && insideRoot(root, path.resolve(p));
-  return hit && hit.rel !== '' ? hit.rel : p;
+// A path as yad names it: inside the caller's folder (`within`) or the Product, by its path there with `/`
+// (never the absolute path, which would land in a `--json` run's warnings); outside both, as given.
+function productShown(p, within, only) {
+  const abs = path.resolve(p);
+  for (const root of only ? [only] : rootsFor(within).reverse()) {
+    const hit = insideRoot(root, abs);
+    if (hit && hit.rel !== '') return hit.rel.split(path.sep).join('/');
+  }
+  return p;
 }
 // "<folder> is a link, so yad did not read <file> (…)": the folder first, as it is the one to replace.
-const linkedFolder = (p, folder, within, verb) => Object.assign(
-  new Error(`${productShown(folder, within)} is a link, so yad did not ${verb} ${productShown(p, within)} (it ${verb}s a file there only through real folders)`),
-  { code: NOT_PLAIN_FILE, kind: 'link', folder: productShown(folder, within) },
+const linkedFolder = (p, { folder, root }, verb) => Object.assign(
+  new Error(`${productShown(folder, null, root)} is a link, so yad did not ${verb} ${productShown(p, null, root)} (it ${verb}s a file there only through real folders)`),
+  { code: NOT_PLAIN_FILE, kind: 'link', folder: productShown(folder, null, root) },
 );
 function refuseLinkedFolder(p, within, verb) {
-  const folder = linkedFolderOf(p, within);
-  if (folder) throw linkedFolder(p, folder, within, verb);
+  const hit = linkedFolderOf(path.resolve(p), within);
+  if (hit) throw linkedFolder(p, hit, verb);
+}
+// How a linked folder is undone: `git checkout -- <folder>` would bring the committed link back.
+export const LINKED_FOLDER_FIX = 'remove the link (`git rm <folder>`), then restore the real folder from a commit where it was a folder (`git checkout <good-commit> -- <folder>`)';
+// What a caller that names the file itself says of a refused read: the linked folder when there is one.
+export const notPlainSaid = (e, said) => (e?.folder ? `is under ${e.folder}, a linked folder, so it was not read` : said);
+// A write under a linked folder: a YAD-STATE-001 with the way out, so a command stops with a clear answer.
+// It keeps the plain read's `kind` and `folder`.
+function refuseLinkedWrite(p, within) {
+  try { refuseLinkedFolder(p, within, 'write'); } catch (e) {
+    throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX}, then run the command again`), { kind: e.kind, folder: e.folder });
+  }
+}
+// A Product whose `.sdlc` is a link is refused as a whole (#214): its settings decide whether the Product is
+// verified, and a lenient read of them through the link would run a verified Product as an unverified one.
+// Called where yad settles a Product folder that already exists.
+export function refuseLinkedSettings(dir) {
+  let st;
+  try { st = fs.lstatSync(path.join(dir, '.sdlc')); } catch { return; }
+  if (st.isSymbolicLink()) throw Object.assign(err('YAD-STATE-001', '.sdlc is a link, so yad did not read the Product\'s settings or files in it (it reads them only through real folders)', `${LINKED_FOLDER_FIX}, then run the command again`), { kind: 'link', folder: '.sdlc' });
 }
 const OPEN_PLAIN = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
 // `kind` says what was there instead: 'dir', 'link' or 'other' (a device, a pipe, a socket).
@@ -459,11 +494,13 @@ function readPlainOrThrow(p, encoding = 'utf8', opts = {}) {
   refuseLinkedFolder(p, opts?.within, 'read');
   return readPlainAt(p, encoding, opts);
 }
+// The file is looked at and opened by the same normalised path the folder walk checked; it is named as given.
 function readPlainAt(p, encoding = 'utf8', { max = MAX_PLAIN_BYTES, within } = {}) {
-  const st = fs.lstatSync(p);
+  const at = path.resolve(p);
+  const st = fs.lstatSync(at);
   if (!st.isFile()) throw notPlain(p, kindOf(st), within);
   let fd;
-  try { fd = fs.openSync(p, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p, 'link', within); throw e; }
+  try { fd = fs.openSync(at, OPEN_PLAIN); } catch (e) { if (e.code === 'ELOOP') throw notPlain(p, 'link', within); throw e; }
   try {
     const now = fs.fstatSync(fd);
     if (!now.isFile()) throw notPlain(p, kindOf(now), within);
@@ -478,7 +515,7 @@ export function readPlainFile(p, opts) {
   // Before the first look: a linked folder whose target has no such file must not read as "no file", which
   // a caller would then write.
   refuseLinkedFolder(p, opts?.within, 'read');
-  try { fs.lstatSync(p); } catch { return null; }
+  try { fs.lstatSync(path.resolve(p)); } catch { return null; }
   // A file removed between the two looks is no file, as it would have been a moment earlier.
   try { return readPlainAt(p, 'utf8', opts); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
@@ -501,7 +538,7 @@ function sayRefused(p, e) {
   refusedOnce.add(key);
   // A file too big to read is most often the committed file itself, so git has no other copy to restore.
   const fix = e.code === FILE_TOO_BIG ? 'replace it with a file of the right size'
-    : e.folder ? 'replace the link with the real folder (from git)' : 'replace it with the real file (from git)';
+    : e.folder ? LINKED_FOLDER_FIX : 'replace it with the real file (from git)';
   const s = `${e.message} — ${fix}, then run the command again`;
   if (jsonRun) warn(s); else note(`${c.yellow('!')} ${forTerminal(s)}`);
 }
@@ -531,7 +568,7 @@ export function readJSON(p, def = null) {
 export function readJSONStrict(p, def = null) {
   let text;
   try { text = readPlainFile(p); } catch (e) {
-    if (e?.code === NOT_PLAIN_FILE && e.folder) throw err('YAD-STATE-001', e.message, 'replace the link with the real folder from git (`git checkout -- <folder>`) — never delete a ledger blindly');
+    if (e?.code === NOT_PLAIN_FILE && e.folder) throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX} — never delete a ledger blindly`), { kind: e.kind, folder: e.folder });
     if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
     if (e?.code === FILE_TOO_BIG) throw err('YAD-STATE-001', e.message, 'restore the file from a commit where it had its real size (`git log -- <file>`) — never delete a ledger blindly');
     throw err('YAD-STATE-001', `cannot read ${productShown(p)}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
@@ -566,10 +603,10 @@ export function writeJSON(p, obj, opts) {
 // A linked folder on the way is refused before any folder is made (#214): `mkdirSync` and the rename would
 // follow it. The refusal is a YAD-STATE-001 with a hint, so a command stops with a clear answer; it keeps
 // the plain read's `kind` and `folder`.
-export function writeFileAtomic(p, data, opts) {
-  try { refuseLinkedFolder(p, opts?.within, 'write'); } catch (e) {
-    throw Object.assign(err('YAD-STATE-001', e.message, 'replace the link with the real folder from git (`git checkout -- <folder>`), then run the command again'), { kind: e.kind, folder: e.folder });
-  }
+export function writeFileAtomic(given, data, opts) {
+  refuseLinkedWrite(given, opts?.within);
+  // The same normalised path the walk checked.
+  const p = path.resolve(given);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
