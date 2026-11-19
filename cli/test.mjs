@@ -30056,6 +30056,29 @@ function e80Workspace(T, { file = true } = {}) {
   return { ws, product, backend };
 }
 
+// #214: `yad init` (and `new`, `join`) settle the Product's folder inside the command, so they set it there:
+// a Product folder whose `.sdlc` links elsewhere is never set up through the link.
+test('#214: yad init refuses to set up a Product through a linked .sdlc, and writes nothing through it', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    const product = path.join(ws, 'product');
+    fs.mkdirSync(product, { recursive: true });
+    e79Git(T, product, 'init', '-q', '-b', 'main');
+    // The linked folder holds a Product's settings, so init takes the folder for a Product it already set up.
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    for (const f of ['product.json', 'hub.json']) fs.writeFileSync(path.join(outside, f), '{"platform":null}\n');
+    fs.symlinkSync(outside, path.join(product, '.sdlc'));
+    const before = treeOf(outside);
+    const r = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not (read|write) \.sdlc\//);
+    assert.ok(!(r.stdout + r.stderr).includes(outside), 'named by its path in the Product');
+    assert.deepEqual(treeOf(outside), before, 'nothing is written through the link');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E80: findProduct walks up to a Product or a workspace file, and ignores one inside a git repo', async () => {
   const { findProduct, readWorkspace } = await import('./find-product.mjs');
   const T = e79Tmp();
@@ -31825,10 +31848,13 @@ test('E81 review 17: writeJSON never writes through a link at its temp name, and
     const before = fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8');
     const r = e79Yad(T, product, ['repo', 'refresh']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
-    assert.match(r.stdout + r.stderr, /\.sdlc in the Product is a link/);
+    // #214: the registry is not even read through the link, so refresh stops there, naming the folder.
+    assert.match(r.stdout + r.stderr, /\.sdlc is a link, so yad did not read \.sdlc\/repos\.json/);
     const pushed = e79Yad(T, product, ['repo', 'refresh', '--push', '--json']);
     assert.equal(pushed.status, 1);
-    assert.equal(JSON.parse(pushed.stdout).published, null, 'nothing is published after the refusal');
+    // Refused at the read now, before any `published` is worked out: none is given, and none happened.
+    assert.equal(JSON.parse(pushed.stdout).published ?? null, null, 'nothing is published after the refusal');
+    assert.equal(JSON.parse(pushed.stdout).ok, false);
     assert.equal(fs.readFileSync(path.join(elsewhere, 'repos.json'), 'utf8'), before, 'the folder it names is untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
