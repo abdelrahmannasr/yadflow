@@ -31103,6 +31103,56 @@ test('E125 (c): yad risk-map check prints a folder name holding an escape cleane
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #214: the risk map is read and written through the plain helpers, in the code repo's own folders: a linked
+// `.sdlc` in the repo, or a link at the map itself, is refused — never read through, never drafted over.
+test('#214: yad risk-map draft refuses a linked .sdlc or a linked map in the code repo and writes nothing through it', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, () => {
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    fs.mkdirSync(path.join(backend, 'src'));
+    fs.writeFileSync(path.join(backend, 'src', 'f.js'), 'x');
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(backend, '.sdlc'));
+    const r = e79Yad(T, product, ['risk-map', 'draft']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout + r.stderr, /\.sdlc\/risk-map is not read: \.sdlc is a link, so yad did not read \.sdlc\/risk-map .* nothing was written over it/);
+    assert.deepEqual(fs.readdirSync(outside), [], 'no map is written through the linked folder');
+    const j = JSON.parse(e79Yad(T, product, ['risk-map', 'draft', '--json']).stdout);
+    assert.equal(j.ok, false);
+    assert.ok(!j.repos[0].refused.includes(T), 'named by its path in the repo');
+    // `check` names it as a map it could not read, never as "no map yet".
+    const c = JSON.parse(e79Yad(T, product, ['risk-map', 'check', '--json']).stdout);
+    assert.equal(c.repos[0].map, true);
+    assert.equal(c.repos[0].findings[0].code, 'unreadable');
+    assert.deepEqual(fs.readdirSync(outside), []);
+
+    // A link at the map itself, to a map outside the repo: not read, and not drafted over.
+    fs.rmSync(path.join(backend, '.sdlc'));
+    fs.mkdirSync(path.join(backend, '.sdlc'));
+    fs.writeFileSync(path.join(outside, 'map'), '# yad-risk-map v1\nsrc/ high confirmed\n');
+    fs.symlinkSync(path.join(outside, 'map'), path.join(backend, '.sdlc', 'risk-map'));
+    const r2 = e79Yad(T, product, ['risk-map', 'draft']);
+    assert.equal(r2.status, 1, r2.stdout + r2.stderr);
+    assert.match(r2.stdout + r2.stderr, /\.sdlc\/risk-map is not read: \.sdlc\/risk-map is not a plain file/);
+    assert.ok(!(r2.stdout + r2.stderr).includes(T), 'named by its path in the repo');
+    const j2 = e79Yad(T, product, ['risk-map', 'draft', '--json']).stdout;
+    const c2 = e79Yad(T, product, ['risk-map', 'check', '--json']).stdout;
+    assert.equal(JSON.parse(c2).repos[0].findings[0].code, 'unreadable');
+    assert.ok(!j2.includes(T) && !c2.includes(T), `no absolute path in either --json answer:\n${j2}\n${c2}`);
+    assert.ok(fs.lstatSync(path.join(backend, '.sdlc', 'risk-map')).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(fs.readFileSync(path.join(outside, 'map'), 'utf8'), '# yad-risk-map v1\nsrc/ high confirmed\n');
+
+    // A real folder: drafted as before.
+    fs.rmSync(path.join(backend, '.sdlc', 'risk-map'));
+    const r3 = e79Yad(T, product, ['risk-map', 'draft']);
+    assert.equal(r3.status, 0, r3.stdout + r3.stderr);
+    assert.match(fs.readFileSync(path.join(backend, '.sdlc', 'risk-map'), 'utf8'), /^src\/ +unset$/m);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // S04 (Product #216): `yad risk-map draft` lists a folder whose name holds an escape as one it could not
 // write, cleaned; the map stays free of it; `--json` keeps the raw name. A repo name the person typed is
 // echoed cleaned too.
