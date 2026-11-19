@@ -1680,9 +1680,12 @@ test('yad epic new --parent: off a brownfield anchor, bases carry no hash and no
 });
 
 // A stub anchor, as `yad epic new --stub` writes it: the classic chain behind the backfill sentinel.
-function stubEpic(T, id) {
-  const dir = writeEpic(T, id, { kind: 'feature', type: 'feature', thread: id, stub: 'backfill-pending', verified: false });
-  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(seedState({ epic: id, profile: 'classic', type: 'feature', today: '2026-01-01', stub: true })));
+// `fm` replaces the stub marker lines of epic.md; `edit` changes the ledger after it is seeded.
+function stubEpic(T, id, { fm = { stub: 'backfill-pending', verified: false }, edit = null } = {}) {
+  const dir = writeEpic(T, id, { kind: 'feature', type: 'feature', thread: id, ...fm });
+  const state = seedState({ epic: id, profile: 'classic', type: 'feature', today: '2026-01-01', stub: true });
+  if (edit) edit(state);
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(state));
   fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), '[]');
   return dir;
 }
@@ -1711,6 +1714,13 @@ test('yad epic new --parent: a defect or hotfix off a stub takes the chore lane 
       assert.deepEqual(carried.map((s) => s.id), ['epic', 'epic-review']);
       assert.ok(carried.every((s) => s.status === 'satisfied' && s.boundHash === null && s.inheritedFrom === 'EP-legacy'));
       assert.equal(fs.existsSync(path.join(epicRoot(T, `EP-${slug}`), '.sdlc/contract-lock.json')), false);
+      // One provenance record, for the carried gate, with nothing locked upstream to bind to.
+      const approvals = sdlcOf(T, `EP-${slug}`, 'approvals.json');
+      assert.equal(approvals.length, 1);
+      assert.equal(approvals[0].step, 'epic-review');
+      assert.equal(approvals[0].status, 'inherited');
+      assert.equal(approvals[0].from, 'EP-legacy');
+      assert.equal(approvals[0].boundHash, null);
       // Inheriting nothing: the child writes its own epic first.
       const own = await seedOn(T, { slug: `${type}-own`, type, parent: 'EP-legacy', profile: 'chore' });
       assert.equal(own.failed, false, own.out);
@@ -1723,7 +1733,7 @@ test('yad epic new --parent: a defect or hotfix off a stub takes the chore lane 
     // The children's ledgers are what doctor expects of a chore-route epic, and the lineage holds.
     for (const type of ['defect', 'hotfix']) assert.equal(resolveThread(T, `EP-${type}-carried`).broken, null);
     const checks = [];
-    for (const run of ['epicChecks', 'typeChecks', 'catalogueChecks', 'profileChecks', 'skipChecks', 'stepStateChecks']) doctor[run](checks, T);
+    for (const run of ['epicChecks', 'typeChecks', 'catalogueChecks', 'profileChecks', 'skipChecks', 'stepStateChecks', 'threadChecks', 'phaseChecks', 'laneChecks', 'ownerChecks']) doctor[run](checks, T);
     const bad = checks.filter((c) => c.status !== 'ok' && /EP-(defect|hotfix)-/.test(`${c.id} ${c.message} ${c.hint || ''}`));
     assert.deepEqual(bad, []);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1733,11 +1743,11 @@ test('yad epic new --parent: the chore lane off a stub carries the epic or nothi
   const T = productConfig();
   stubEpic(T, 'EP-legacy');
   // A light-promoted anchor is a tracked feature again: it keeps its route.
-  const doc = stubEpic(T, 'EP-documented');
-  const f = path.join(doc, '.sdlc/state.json');
-  const st = JSON.parse(fs.readFileSync(f, 'utf8'));
-  delete st.kind; st.currentStep = 'backfill-done';
-  fs.writeFileSync(f, JSON.stringify(st));
+  stubEpic(T, 'EP-documented', { fm: { verified: true }, edit: (st) => { delete st.kind; st.currentStep = 'backfill-done'; } });
+  // Every stub signal must agree before Shape gates are skipped. A promote cut short (`kind: stub` left
+  // beside `backfill-done`), and a ledger stub whose epic.md lost its marker, keep the classic route.
+  stubEpic(T, 'EP-half', { edit: (st) => { st.currentStep = 'backfill-done'; } });
+  stubEpic(T, 'EP-nomark', { fm: { verified: false } });
   try {
     for (const [opts, message] of [
       [{ type: 'defect', inherits: 'architecture,contract' }, /the chore lane off EP-legacy has no architecture, contract step[\s\S]*carries only the epic, or nothing/],
@@ -1746,11 +1756,17 @@ test('yad epic new --parent: the chore lane off a stub carries the epic or nothi
       [{ type: 'hotfix', inherits: 'epic,ui-design' }, /the chore lane off EP-legacy has no ui-design step[\s\S]*drop --profile to take EP-legacy's classic route/],
       [{ type: 'change', inherits: 'epic' }, /takes its parent's route — EP-legacy is on 'classic', --profile says 'chore'[\s\S]*Only a defect or hotfix off a stub takes the chore lane/],
       [{ type: 'defect', inherits: 'epic', profile: 'spike' }, /takes its parent's route — EP-legacy is on 'classic', --profile says 'spike'/],
-      [{ type: 'defect', inherits: 'epic', parent: 'EP-documented' }, /takes its parent's route — EP-documented is on 'classic', --profile says 'chore'/],
+      // A change asking for the lane hears the route rule first, not an inherits rule.
+      [{ type: 'change', inherits: 'architecture' }, /takes its parent's route — EP-legacy is on 'classic', --profile says 'chore'[\s\S]*Only a defect or hotfix off a stub takes the chore lane/],
+      [{ type: 'defect', inherits: 'epic', parent: 'EP-documented' }, /takes its parent's route — EP-documented is on 'classic', --profile says 'chore'[\s\S]*start a new epic instead of threading one/],
+      [{ type: 'defect', inherits: 'epic', parent: 'EP-half' }, /takes its parent's route — EP-half is on 'classic', --profile says 'chore'[\s\S]*start a new epic instead of threading one/],
+      [{ type: 'hotfix', parent: 'EP-nomark' }, /takes its parent's route — EP-nomark is on 'classic', --profile says 'chore'[\s\S]*start a new epic instead of threading one/],
     ]) {
       const r = await seedOn(T, { slug: 'r', parent: 'EP-legacy', profile: 'chore', ...opts });
       assert.equal(r.failed, true, JSON.stringify(opts));
       assert.match(r.out, message, JSON.stringify(opts));
+      // A parent that is not a stub gets the general hint, never the stub one.
+      if (opts.parent) assert.doesNotMatch(r.out, /Only a defect or hotfix off a stub/, JSON.stringify(opts));
       assert.equal(seeded(T, 'EP-r'), false, JSON.stringify(opts));
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }

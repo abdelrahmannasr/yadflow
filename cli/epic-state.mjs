@@ -4489,8 +4489,7 @@ const SHORT_LANE_TYPES = ['defect', 'hotfix'];
 const SHORT_LANE_PROFILE = 'chore';
 
 // Plan the ledger of a change-epic threaded off `parent`. Reads the Product; writes nothing. `profile` is
-// the route asked for, if any: it is taken only for the short lane above, and otherwise left to the
-// caller to compare with the parent's route.
+// the route asked for, if any: the parent's own route, or the short lane above. Any other is refused.
 // Returns `{ ok: false, message, hint }` or
 // `{ ok: true, state, approvals, lock, profile, parentProfile, parentStub, shortLane, owners, anchor, thread }`.
 export function planThreadedSeed(root, { epic, parent, inherits = [], type, today, profile: wanted = null }) {
@@ -4533,12 +4532,25 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
     return refuse(`${parent}: its chain is on no route this command can seed${parentProfile ? ` ('${parentProfile}')` : ''}`,
       'run `yad doctor` on the parent — its recorded profile and its chain must agree');
   }
-  // The one exception: a defect or hotfix off a stub that asks for the chore lane. Strictly an
-  // un-promoted stub — a light-promoted anchor (`documented`) is a tracked feature again.
-  const parentStub = backfillAnchorKind(parentState) === 'stub';
-  const shortLane = wanted === SHORT_LANE_PROFILE && wanted !== parentProfile
-    && parentStub && SHORT_LANE_TYPES.includes(type);
-  if (shortLane) {
+  // THE ONE EXCEPTION: a defect or hotfix off a stub that asks for the chore lane. Skipping Shape gates
+  // is the unsafe side, so every stub signal must agree — the ledger's `kind` AND its sentinel step, and
+  // the `stub:` marker in epic.md. A half-promoted anchor (`kind: stub` left beside `backfill-done`) or a
+  // ledger stub whose epic.md lost its marker keeps its route; `backfillAnchorKind` deliberately leans
+  // the other way, because there "still a stub" is the cautious answer.
+  const parentStub = parentState.kind === 'stub' && parentState.currentStep === 'backfill-pending'
+    && isStubEpic(root, parent);
+  // The route is the parent's. A flag naming the same one is harmless; a different one is refused here,
+  // before any inherits check, so a person asking for another route hears that first. (A stub is always
+  // on classic, so asking for `chore` off one always differs.)
+  let shortLane = false;
+  if (wanted && wanted !== parentProfile) {
+    shortLane = wanted === SHORT_LANE_PROFILE && parentStub && SHORT_LANE_TYPES.includes(type);
+    if (!shortLane) {
+      return refuse(`a change takes its parent's route — ${parent} is on '${parentProfile}', --profile says '${wanted}'`,
+        parentStub && wanted === SHORT_LANE_PROFILE
+          ? `drop --profile. Only a defect or hotfix off a stub takes the chore lane — a ${type} keeps ${parent}'s route`
+          : 'drop --profile. To change the route, start a new epic instead of threading one');
+    }
     const extra = bases.filter((b) => b !== 'epic');
     if (extra.length) {
       return refuse(`the ${SHORT_LANE_PROFILE} lane off ${parent} has no ${extra.join(', ')} step — it is the epic, then stories and their review, then Build`,

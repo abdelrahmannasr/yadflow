@@ -274,15 +274,8 @@ const listOf = (v) => (Array.isArray(v) ? v : String(v ?? '').replace(/^\s*\[|\]
 function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profile, inherits, headerLists, today, json, bail, answer }) {
   const plan = planThreadedSeed(root, { epic, parent, inherits, type, today, profile });
   if (!plan.ok) return bail(plan.message, plan.hint);
-  // The route is the parent's. A flag naming the same one is harmless; a different one is refused
-  // rather than obeyed, because a child on another route would inherit steps its route does not have.
-  // The one exception is the planner's to grant (#578): a defect or hotfix off a stub on the chore lane.
-  if (profile && profile !== plan.profile) {
-    return bail(`a change takes its parent's route — ${parent} is on '${plan.profile}', --profile says '${profile}'`,
-      plan.parentStub && profile === 'chore'
-        ? `drop --profile. Only a defect or hotfix off a stub takes the chore lane — a ${type} keeps ${parent}'s route`
-        : 'drop --profile. To change the route, start a new epic instead of threading one');
-  }
+  // The route is the parent's, except a defect or hotfix off a stub on the chore lane (#578). The
+  // planner decides both, and refuses any other `--profile`, before it reads the inherits.
   const declaredThread = typeof fm.thread === 'string' && fm.thread.trim() ? fm.thread.trim() : null;
   // A header that EXISTS must carry the lineage too. `resolveThread` reads only epic.md, so a header with
   // no `parent:` reads as a genesis of its own, and one with no `thread:` is a broken lineage the moment
