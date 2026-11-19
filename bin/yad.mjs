@@ -223,7 +223,7 @@ ${c.bold('Where am I / what next')}
                                        --stub seeds a brownfield anchor instead: the same chain
                                        with every step blocked behind backfill-pending, so a
                                        defect can thread off a feature that shipped before the
-                                       Product existed (yad-backfill promote wakes it).
+                                       Product existed (yad backfill promote --full wakes it).
                                        Writes no epic.md, no branch and no commit: run the skill
                                        the chain names next. Refuses an epic that already has one
   yad backfill promote <epic> --repo <name> --feature <feature> [--full] [--json]
