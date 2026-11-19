@@ -1148,6 +1148,10 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   const WRITE = new RegExp(`${VERB_FIRST}${FILE}|${FILE}[^.\n]{0,20}${VERB_AFTER}`, 'i');
   for (const d of CHANGED) {
     const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    // Which lines sit inside a ``` code fence: a command to copy, not prose.
+    let fence = false;
+    const fenced = new Set();
+    src.split('\n').forEach((l) => { if (/^\s*```/.test(l)) fence = !fence; else if (fence) fenced.add(l); });
     const offenders = src.split('\n')
       // A prohibition is not a write, and neither is a conditional that forbids one.
       .filter((l) => !/never|read-only|do \*\*not\*\*|do not|don't|refus|exempt|rejects/i.test(l))
@@ -1155,7 +1159,10 @@ test('the skills E17b changed instruct no ledger write at all', () => {
       // chain" describes what `yad epic new` does; it is the opposite of an instruction to the author,
       // and it is the sentence this whole task exists to put there. A line naming an engine command,
       // or opening with "That"/"It", is describing one.
-      .filter((l) => !/yad (epic new|gate open|migrate|backfill promote)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
+      .filter((l) => !/yad (epic new|gate open|migrate)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
+      // `yad backfill promote` (E17b) is exempt more narrowly: only a line that IS the command (in a code fence,
+      // or opening with it), so a prose line that merely names it beside a hand edit of the ledger still counts.
+      .filter((l) => !(/yad backfill promote/.test(l) && (fenced.has(l) || /^[-*\s`]*yad backfill promote\b/.test(l.trim()))))
       // A heading is a label for the step, not an imperative inside it. The instruction lives in the
       // body underneath, which this still reads.
       .filter((l) => !l.trimStart().startsWith('#'))
