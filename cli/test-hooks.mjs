@@ -826,6 +826,40 @@ test('E48: the pre-commit hook yad installs refuses a real `git commit`, `git co
   }
 });
 
+// #222: a hook that is a link (some tools install theirs so), a dangling one, a folder or a device is not read:
+// it is not yad's, so yad writes no hook through it and never replaces it.
+test('#222: a pre-commit hook that is a link, a dangling link or a folder is foreign — never read, written through or replaced', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { gitHookActions, gitHookState } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    const hook = path.join(repo, '.git/hooks/pre-commit');
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    const outside = path.join(T, 'team-hook.sh');
+    fs.writeFileSync(outside, '#!/bin/sh\nnpx lint-staged\n');
+    const made = path.join(T, 'made-hook.sh');
+    for (const [what, make] of [
+      ['a link', () => fs.symlinkSync(outside, hook)],
+      ['a dangling link', () => fs.symlinkSync(made, hook)],
+      ['a folder', () => fs.mkdirSync(hook)],
+    ]) {
+      fs.rmSync(hook, { recursive: true, force: true });
+      make();
+      assert.equal(gitHookState(product).state, 'foreign', what);
+      assert.deepEqual(gitHookActions(product), [], `${what}: no action`);
+    }
+    assert.equal(fs.readFileSync(outside, 'utf8'), '#!/bin/sh\nnpx lint-staged\n');
+    assert.ok(!fs.existsSync(made), 'a dangling link\'s target is not made');
+    if (process.platform !== 'win32') {
+      fs.rmSync(hook, { recursive: true, force: true });
+      fs.symlinkSync('/dev/zero', hook);
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { gitHookState } = await import(${JSON.stringify(new URL('./plan.mjs', import.meta.url).href)});
+process.stdout.write(gitHookState(process.argv[1]).state);`, product], { encoding: 'utf8', timeout: 20000, env: gitEnv() });
+      assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
+      assert.equal(r.stdout, 'foreign', r.stderr);
+    }
+  } finally { cleanup(T); }
+});
+
 test('E48: yad never writes over a hook that is not its own, and says which line to add', async () => {
   const { gitHookActions, gitHookState, gitHookAdvice, GIT_HOOK_MARKER } = await import('./plan.mjs');
   const { T, repo, product } = verifiedRepo();

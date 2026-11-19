@@ -32021,6 +32021,121 @@ test('E125 b: the guide, yad brand and yad doctor never read a Product file that
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#222 setup: a wired file that is a link is missing, and its copy replaces the link — never writes through it, nor through a linked backup', { skip: E125B_SKIP }, async () => {
+  const { repoActions } = await import('./plan.mjs');
+  const { wiringFor } = await import('./manifest.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-wired-link-')));
+  try {
+    const app = path.join(T, 'app');
+    const [a, b, c] = wiringFor('github').map((w) => w.dest);
+    for (const d of [a, b, c]) fs.mkdirSync(path.dirname(path.join(app, d)), { recursive: true });
+    const outside = path.join(T, 'outside.txt');
+    fs.writeFileSync(outside, 'mine\n');
+    fs.symlinkSync(outside, path.join(app, a));
+    fs.symlinkSync(path.join(T, 'made.txt'), path.join(app, b));
+    // An edited copy with no record is backed up first; its backup's name is a committed dangling link.
+    fs.writeFileSync(path.join(app, c), 'edited\n');
+    fs.symlinkSync(path.join(T, 'made-orig.txt'), path.join(app, `${c}.yad-orig`));
+    const actions = repoActions(T, { name: 'app', path: 'app', platform: 'github' });
+    const of = (d) => actions.find((x) => x.item === d);
+    assert.ok(['missing', 'new'].includes(of(a).status), `a link is no file: ${of(a).status}`);
+    assert.ok(['missing', 'new'].includes(of(b).status), `a dangling link is no file: ${of(b).status}`);
+    assert.equal(of(a).backup, undefined, 'nothing to back up through the link');
+    assert.equal(of(c).status, 'outdated');
+    for (const d of [a, b, c]) of(d).apply();
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n', 'the link\'s target is untouched');
+    assert.ok(!fs.existsSync(path.join(T, 'made.txt')) && !fs.existsSync(path.join(T, 'made-orig.txt')), 'no dangling link\'s target is made');
+    for (const d of [a, b, c]) assert.ok(fs.lstatSync(path.join(app, d)).isFile(), `${d} is a plain file now`);
+    assert.equal(fs.readFileSync(path.join(app, `${c}.yad-orig`), 'utf8'), 'edited\n', 'the backup replaces its link');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 update: a GitLab root .gitlab-ci.yml or an old fragment that is a link is neither read, claimed nor rewritten', { skip: E125B_SKIP }, async () => {
+  const { legacyRepoActions } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-legacy-link-')));
+  try {
+    const app = path.join(T, 'app');
+    fs.mkdirSync(path.join(app, '.gitlab/ci'), { recursive: true });
+    fs.writeFileSync(path.join(app, '.gitlab/ci/sdlc-checks.yml'), '# sdlc-managed-include: sdlc-checks\nsdlc-spec-link: {}\n');
+    const outsideCi = path.join(T, 'outside-ci.yml');
+    fs.writeFileSync(outsideCi, "include:\n  - local: '.gitlab/ci/sdlc-checks.yml'\n");
+    fs.symlinkSync(outsideCi, path.join(app, '.gitlab-ci.yml'));
+    const repo = { name: 'app', path: 'app', platform: 'gitlab' };
+    const [act] = legacyRepoActions(T, repo);
+    assert.ok(!act.paths.includes('.gitlab-ci.yml'), 'the linked root CI file is not claimed');
+    act.apply();
+    assert.equal(fs.readFileSync(outsideCi, 'utf8'), "include:\n  - local: '.gitlab/ci/sdlc-checks.yml'\n", 'nothing is written through the link');
+    assert.ok(fs.lstatSync(path.join(app, '.gitlab-ci.yml')).isSymbolicLink());
+    // An old fragment that is itself a link (to a file with yad's marker) is not yad's: no action removes it.
+    const outsideFragment = path.join(T, 'outside-fragment.yml');
+    fs.writeFileSync(outsideFragment, '# sdlc-managed-include: sdlc-checks\n');
+    fs.rmSync(path.join(app, '.gitlab/ci/yad-checks.yml'), { force: true });
+    fs.symlinkSync(outsideFragment, path.join(app, '.gitlab/ci/sdlc-checks.yml'));
+    assert.deepEqual(legacyRepoActions(T, repo), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 the gate and workflow readers setup shares with doctor read no link, folder or device', { skip: E125B_SKIP }, async () => {
+  const { productProfileGap, workflowsPassingProduct, renamedNameHits } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-profile-link-')));
+  try {
+    fs.mkdirSync(path.join(T, 'checks'));
+    fs.mkdirSync(path.join(T, '.github/workflows'), { recursive: true });
+    // Each target says what would change the answer: a gate that rejects `product`, a workflow passing it,
+    // a CI file naming an old name.
+    fs.writeFileSync(path.join(T, 'o-gate.sh'), 'case "$PROFILE" in code|hub) ;; esac\n');
+    fs.writeFileSync(path.join(T, 'o-flow.yml'), 'run: bash checks/pr-title.sh --profile product\n');
+    fs.writeFileSync(path.join(T, 'o-ci.yml'), 'include: .gitlab/ci/yad-hub-checks.yml\n');
+    fs.symlinkSync(path.join(T, 'o-gate.sh'), path.join(T, 'checks/pr-title.sh'));
+    fs.symlinkSync(path.join(T, 'o-flow.yml'), path.join(T, '.github/workflows/yad-product-checks.yml'));
+    fs.symlinkSync(path.join(T, 'o-flow.yml'), path.join(T, '.github/workflows/team.yml'));
+    fs.symlinkSync(path.join(T, 'o-ci.yml'), path.join(T, '.gitlab-ci.yml'));
+    fs.mkdirSync(path.join(T, 'checks/pr-template.sh'));
+    fs.symlinkSync(path.join(T, 'gone.sh'), path.join(T, 'checks/commit-message.sh'));
+    for (const g of ['pr-title.sh', 'pr-template.sh', 'commit-message.sh', 'absent.sh']) assert.equal(productProfileGap(path.join(T, 'checks', g)), null, g);
+    assert.deepEqual(workflowsPassingProduct(T), []);
+    assert.deepEqual(renamedNameHits(T), []);
+    // The same files as plain files are read, so the links above are what made the difference.
+    fs.rmSync(path.join(T, 'checks/pr-title.sh'));
+    fs.copyFileSync(path.join(T, 'o-gate.sh'), path.join(T, 'checks/pr-title.sh'));
+    assert.equal(productProfileGap(path.join(T, 'checks/pr-title.sh')), 'rejects');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 setup and update: CI files and gate scripts that link to /dev/zero are answered at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plan-zero-')));
+  try {
+    const app = path.join(T, 'app');
+    fs.mkdirSync(path.join(app, 'checks'), { recursive: true });
+    fs.mkdirSync(path.join(app, '.github/workflows'), { recursive: true });
+    fs.mkdirSync(path.join(app, '.gitlab/ci'), { recursive: true });
+    for (const rel of ['checks/pr-title.sh', '.github/workflows/yad-product-checks.yml', '.github/workflows/team.yml', '.gitlab-ci.yml', '.gitlab/ci/sdlc-checks.yml']) {
+      fs.symlinkSync('/dev/zero', path.join(app, rel));
+    }
+    const got = inChildWithLimit(`const { productProfileGap, workflowsPassingProduct, renamedNameHits, repoActions, legacyRepoActions } = await import(${cliUrl('./plan.mjs')});
+const { wiringFor } = await import(${cliUrl('./manifest.mjs')});
+const fs = await import('node:fs');
+const path = await import('node:path');
+const [T, app] = process.argv.slice(1);
+// The first wired file of a repo, as a link to the device too.
+const first = wiringFor('github')[0].dest;
+fs.mkdirSync(path.dirname(path.join(app, first)), { recursive: true });
+fs.symlinkSync('/dev/zero', path.join(app, first));
+process.stdout.write(JSON.stringify({
+  gap: productProfileGap(path.join(app, 'checks/pr-title.sh')),
+  passing: workflowsPassingProduct(app),
+  hits: renamedNameHits(app),
+  wired: repoActions(T, { name: 'app', path: 'app', platform: 'github' }).find((a) => a.item === first).status,
+  legacy: legacyRepoActions(T, { name: 'app', path: 'app', platform: 'gitlab' }).length,
+}));`, [T, app]);
+    assert.equal(got.gap, null);
+    assert.deepEqual(got.passing, []);
+    assert.deepEqual(got.hits, []);
+    assert.ok(['missing', 'new'].includes(got.wired), got.wired);
+    assert.equal(got.legacy, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E125 review: a connected repo\'s folder is judged again right before yad update commits or opens a PR/MR in it', { skip: E125_SKIP }, async () => {
   const { commitAndPush, openUpdatePr } = await import('./update-commit.mjs');
   const T = e79Tmp();
