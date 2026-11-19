@@ -19877,6 +19877,10 @@ test('yad epic new --stub: an anchor for a feature that shipped before the Produ
     // no step of an anchor is runnable, so pointing at `yad-epic` would be guidance nobody can follow.
     assert.match(out, /yad-backfill/);
     assert.doesNotMatch(out, /run the yad-epic skill/);
+    // The command that makes it real is named as it is typed (review: no `yad-backfill promote` left).
+    assert.match(out, /then `yad backfill promote` to make it a real anchor \(`--full` wakes the chain\)/);
+    const { nextAction, loadLedger: ll } = await import('./epic-state.mjs');
+    assert.match(nextAction(ll(path.join(T, 'epics/EP-legacy-cart'))).why, /then `yad backfill promote` to make it real/);
   } finally { cleanTmp(T); }
 });
 
@@ -19898,6 +19902,422 @@ test('yad epic new --stub: refuses the two things a stub can never be', async ()
   // …and `--stub --type feature` is not a contradiction, it is the default said out loud.
   const ok2 = await epicNewOn({ slug: 'x', stub: true, type: 'feature' });
   try { assert.equal(ok2.failed, false, ok2.out); } finally { cleanTmp(ok2.T); }
+});
+
+// ---- `yad backfill promote` (Product #1, roadmap E17b) --------------------------------------------
+// A Product with a stub, and a code repo beside it holding the stub's backfill spec. `spec` is the spec's
+// text (null: no spec at all); `product` is merged into .sdlc/product.json; `md` replaces the stub's
+// epic.md; `edit` changes the stub's ledger after it is seeded. The code repo is a real git repo, with the spec
+// committed unless `commit` is false.
+const gitIn = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
+const STUB_MD = (id) => `---\nid: ${id}\ntitle: Legacy cart\nstatus: draft\nkind: feature\ntype: feature\nthread: ${id}\ntheme:\nverified: false\nstub: backfill-pending\norigin: brownfield\nowner:\nrepos: [shop]\ncreated: 2026-01-01\n---\n\n## Feature (stub)\nThe cart.\n`;
+const APPROVED_SPEC = '---\nfeature: cart\nrepo: shop\nartifact: backfill-spec\nstatus: approved\nverified: true\nsource: repomix\n---\n\n# Cart\n';
+async function promoteFixture({ spec = APPROVED_SPEC, product = {}, md = null, edit = null, stub = true, commit = true } = {}) {
+  const { runEpicNew } = await import('./epic.mjs');
+  const W = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-promote-'));
+  const T = path.join(W, 'product');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc', 'product.json'), JSON.stringify({ platform: null, ...product }));
+  fs.writeFileSync(path.join(T, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'shop', path: '../shop' }] }));
+  fs.mkdirSync(path.join(W, 'shop'));
+  gitIn(path.join(W, 'shop'), 'init', '-q', '-b', 'main');
+  gitIn(path.join(W, 'shop'), 'commit', '-q', '--allow-empty', '-m', 'start');
+  if (spec !== null) {
+    fs.mkdirSync(path.join(W, 'shop', 'specs', 'backfill', 'cart'), { recursive: true });
+    fs.writeFileSync(path.join(W, 'shop', 'specs', 'backfill', 'cart', 'spec.md'), spec);
+    if (commit) { gitIn(path.join(W, 'shop'), 'add', '-A'); gitIn(path.join(W, 'shop'), 'commit', '-q', '-m', 'spec'); }
+  }
+  const code = process.exitCode;
+  await grab(() => runEpicNew(T, { slug: 'legacy-cart', stub, today: '2026-01-01' }));
+  process.exitCode = code;
+  const dir = path.join(T, 'epics', 'EP-legacy-cart');
+  fs.writeFileSync(path.join(dir, 'epic.md'), md ?? STUB_MD('EP-legacy-cart'));
+  if (edit) {
+    const st = JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'state.json'), 'utf8'));
+    edit(st);
+    fs.writeFileSync(path.join(dir, '.sdlc', 'state.json'), JSON.stringify(st, null, 2) + '\n');
+  }
+  return { W, T, dir };
+}
+// One promote, in-process: the words it printed, whether it failed, and the two files after it.
+async function promoteOn(fx, opts = {}) {
+  const { runBackfillPromote } = await import('./backfill.mjs');
+  const code = process.exitCode;
+  process.exitCode = undefined;
+  const out = await grab(() => runBackfillPromote(fx.T, { epic: 'EP-legacy-cart', repo: 'shop', feature: 'cart', today: '2026-11-19', ...opts }));
+  const failed = process.exitCode === 1;
+  process.exitCode = code;
+  return {
+    out, failed,
+    md: fs.readFileSync(path.join(fx.dir, 'epic.md'), 'utf8'),
+    stateText: fs.readFileSync(path.join(fx.dir, '.sdlc', 'state.json'), 'utf8'),
+    get state() { return JSON.parse(this.stateText); },
+  };
+}
+const filesOf = (fx) => [path.join(fx.dir, 'epic.md'), path.join(fx.dir, '.sdlc', 'state.json')].map((f) => fs.readFileSync(f, 'utf8'));
+
+test('yad backfill promote: a light promote writes epic.md and state.json together, and the stub is an anchor', async () => {
+  const fx = await promoteFixture();
+  try {
+    const r = await promoteOn(fx);
+    assert.equal(r.failed, false, r.out);
+    assert.match(r.out, /EP-legacy-cart promoted — a light promote/);
+    // epic.md: verified, no stub marker, the backfill line naming the repo, the spec and the date.
+    assert.match(r.md, /^verified: true$/m);
+    assert.doesNotMatch(r.md, /^stub:/m);
+    assert.match(r.md, /^backfill: \{ repo: shop, spec: specs\/backfill\/cart\/spec\.md, promoted: 2026-11-19 \}$/m);
+    assert.match(r.md, /^title: Legacy cart$/m, 'the rest of the header is kept');
+    assert.match(r.md, /## Feature \(stub\)\nThe cart\.\n$/, 'and the body');
+    // state.json: no stub kind, the terminal sentinel, the type kept, the chain left asleep.
+    assert.equal(r.state.kind, undefined);
+    assert.equal(r.state.type, 'feature');
+    assert.equal(r.state.currentStep, 'backfill-done');
+    assert.deepEqual([...new Set(r.state.steps.map((s) => s.status))], ['todo']);
+    // Every reader agrees: a documented anchor, not a stub.
+    const { backfillAnchorKind, isStubEpic, nextAction, loadLedger: ll, resolveThread } = await import('./epic-state.mjs');
+    assert.equal(backfillAnchorKind(r.state), 'documented');
+    assert.equal(isStubEpic(fx.T, 'EP-legacy-cart'), false);
+    assert.equal(nextAction(ll(fx.dir)).kind, 'backfill-done');
+    assert.equal(resolveThread(fx.T, 'EP-legacy-cart').broken, null);
+    // The doctor's epic checks find nothing wrong with it.
+    const doctor = await import('./doctor.mjs');
+    const checks = [];
+    for (const run of ['epicChecks', 'typeChecks', 'catalogueChecks', 'profileChecks', 'skipChecks', 'stepStateChecks', 'threadChecks', 'phaseChecks', 'laneChecks', 'ownerChecks']) doctor[run](checks, fx.T);
+    assert.deepEqual(checks.filter((ch) => ch.status !== 'ok' && /EP-legacy-cart/.test(`${ch.id} ${ch.message} ${ch.hint || ''}`)), []);
+    // A defect off the promoted anchor no longer gets the stub's chore lane (S01): it keeps the classic route.
+    const { runEpicNew } = await import('./epic.mjs');
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(() => runEpicNew(fx.T, { slug: 'cart-bug', type: 'defect', parent: 'EP-legacy-cart', profile: 'chore', today: '2026-11-19' }));
+    const refused = process.exitCode === 1;
+    process.exitCode = code;
+    assert.equal(refused, true, out);
+    assert.match(out, /takes its parent's route — EP-legacy-cart is on 'classic', --profile says 'chore'/);
+    // A second promote is refused: nothing is a stub any more.
+    const again = await promoteOn(fx);
+    assert.equal(again.failed, true);
+    assert.match(again.out, /EP-legacy-cart is not a stub — it was promoted already/);
+  } finally { cleanTmp(fx.W); }
+});
+
+test('yad backfill promote --full: wakes the epic step instead', async () => {
+  const fx = await promoteFixture();
+  try {
+    const r = await promoteOn(fx, { full: true });
+    assert.equal(r.failed, false, r.out);
+    assert.match(r.out, /a full promote/);
+    assert.equal(r.state.kind, undefined);
+    assert.equal(r.state.currentStep, 'epic');
+    assert.equal(r.state.steps.find((s) => s.id === 'epic').status, 'in_progress');
+    assert.ok(r.state.steps.filter((s) => s.id !== 'epic').every((s) => s.status === 'todo'));
+    assert.match(r.md, /^verified: true$/m);
+    assert.doesNotMatch(r.md, /^stub:/m);
+    const { preconditionsMet, backfillAnchorKind } = await import('./epic-state.mjs');
+    assert.equal(backfillAnchorKind(r.state), null);
+    assert.equal(preconditionsMet(r.state, 'epic').ok, true, 'the epic step is runnable now');
+  } finally { cleanTmp(fx.W); }
+});
+
+test('yad backfill promote: the spec must say exactly `verified: true`, read as the backfill gate reads it', async () => {
+  const { specApproved } = await import('./backfill.mjs');
+  for (const [text, want] of [
+    [APPROVED_SPEC, true],
+    ['---\nverified: True  \n---\n', true],
+    ['---\r\nverified: TRUE\r\n---\r\n', true],
+    ['---\nverified: false\n---\n', false],
+    ['---\nverified: true   # approved\n---\n', false],
+    ['---\nverified: yes\n---\n', false],
+    ['---\nVerified: true\n---\n', false],
+    ['---\n"verified": true\n---\n', false],
+    ['---\nverified: true\nverified: false\n---\n', false],
+    ['---\nverified: true\n"Verified" : false\n---\n', false],
+    // The gate's space is ASCII: a no-break space is not one.
+    ['---\nverified:\u00a0true\n---\n', false],
+    // A NUL in the frontmatter: the shell gate cannot hold one, so the two would read different text.
+    ['---\nverified: true\nx: a\u0000b\n---\n', false],
+    ['---\nstatus: draft\n---\nverified: true\n', false],
+    ['---\nverified: true\n', false],
+    ['verified: true\n', false],
+    ['', false],
+  ]) assert.equal(specApproved(text), want, JSON.stringify(text));
+
+  // Each refusal's hint answers its own problem.
+  for (const [spec, message, hint] of [
+    ['---\nverified: false\n---\n', /specs\/backfill\/cart\/spec\.md in shop has no exact `verified: true` line in its frontmatter/, /approve the backfill spec first/],
+    ['---\nverified: true # ok\n---\n', /has no exact `verified: true` line/, /approve the backfill spec first/],
+    [null, /there is no specs\/backfill\/cart\/spec\.md in shop/, /draft and approve the spec first \(the yad-backfill skill\), or check --repo and --feature/],
+  ]) {
+    const fx = await promoteFixture({ spec });
+    try {
+      const before = filesOf(fx);
+      const r = await promoteOn(fx);
+      assert.equal(r.failed, true, String(spec));
+      assert.match(r.out, message);
+      assert.match(r.out, hint);
+      assert.deepEqual(filesOf(fx), before, 'nothing is written');
+    } finally { cleanTmp(fx.W); }
+  }
+  // A repo not in the registry, or not cloned here, is named too.
+  const fx = await promoteFixture();
+  try {
+    assert.match((await promoteOn(fx, { repo: 'web' })).out, /no repo named web in \.sdlc\/repos\.json/);
+    fs.rmSync(path.join(fx.W, 'shop'), { recursive: true, force: true });
+    assert.match((await promoteOn(fx)).out, /shop cannot be read here \(/);
+  } finally { cleanTmp(fx.W); }
+});
+
+test('yad backfill promote: refuses an epic that is not a stub, naming every condition that is missing', async () => {
+  const fx = await promoteFixture({ stub: false, md: '---\nid: EP-legacy-cart\nkind: feature\ntype: feature\nthread: EP-legacy-cart\n---\n' });
+  try {
+    const before = filesOf(fx);
+    const r = await promoteOn(fx);
+    assert.equal(r.failed, true);
+    assert.match(r.out, /EP-legacy-cart is not a stub — it has no stub marker in epic\.md or state\.json/);
+    assert.deepEqual(filesOf(fx), before);
+    // Not a stub AND no approved spec: both are said, and --json lists both.
+    fs.rmSync(path.join(fx.W, 'shop', 'specs'), { recursive: true });
+    const { runBackfillPromote } = await import('./backfill.mjs');
+    const code = process.exitCode;
+    const out = await grab(() => runBackfillPromote(fx.T, { epic: 'EP-legacy-cart', repo: 'shop', feature: 'cart', today: '2026-11-19', json: true }));
+    process.exitCode = code;
+    const j = JSON.parse(out);
+    assert.equal(j.ok, false);
+    assert.deepEqual(j.missing, ['stub', 'verified-spec']);
+    assert.match(j.error, /not a stub[\s\S]*there is no specs\/backfill\/cart\/spec\.md in shop/);
+  } finally { cleanTmp(fx.W); }
+  // Usage, and a feature that is a path rather than one folder name.
+  const fx2 = await promoteFixture();
+  try {
+    assert.match((await promoteOn(fx2, { feature: undefined })).out, /usage: yad backfill promote <epic> --repo <name> --feature <feature>/);
+    assert.match((await promoteOn(fx2, { feature: '../cart' })).out, /--feature takes one folder name/);
+    assert.match((await promoteOn(fx2, { epic: 'EP-foundation' })).out, /EP-foundation is the Product level, not a stub/);
+  } finally { cleanTmp(fx2.W); }
+});
+
+test('yad backfill promote: a promote cut short is finished when the flavour matches, and refused when it does not', async () => {
+  // `kind: stub` left beside `backfill-done` (a light promote that stopped after moving the step).
+  const half = await promoteFixture({ edit: (st) => { st.currentStep = 'backfill-done'; } });
+  try {
+    const full = await promoteOn(half, { full: true });
+    assert.equal(full.failed, true);
+    assert.match(full.out, /EP-legacy-cart is half promoted: stub markers are left, but its ledger is on backfill-done, which a full promote does not write/);
+    assert.match(full.out, /a light promote was started — run this again without --full to finish it/);
+    const r = await promoteOn(half);
+    assert.equal(r.failed, false, r.out);
+    assert.match(r.out, /a promote cut short, now finished/);
+    assert.equal(r.state.kind, undefined);
+    assert.equal(r.state.currentStep, 'backfill-done');
+    assert.doesNotMatch(r.md, /^stub:/m);
+  } finally { cleanTmp(half.W); }
+  // epic.md already promoted, the ledger still a stub: finished from the ledger's side.
+  const mdDone = await promoteFixture({ md: STUB_MD('EP-legacy-cart').replace('verified: false\nstub: backfill-pending\n', 'verified: true\n') });
+  try {
+    const r = await promoteOn(mdDone);
+    assert.equal(r.failed, false, r.out);
+    assert.equal(r.state.kind, undefined);
+    assert.equal(r.state.currentStep, 'backfill-done');
+    assert.equal((r.md.match(/^verified:/gm) || []).length, 1);
+    assert.match(r.md, /^backfill: /m);
+  } finally { cleanTmp(mdDone.W); }
+  // A full promote that woke the epic step and left `kind: stub`: only --full finishes it.
+  const woke = await promoteFixture({ edit: (st) => { st.currentStep = 'epic'; st.steps[0].status = 'in_progress'; } });
+  try {
+    const light = await promoteOn(woke);
+    assert.equal(light.failed, true);
+    assert.match(light.out, /a full promote was started — run this again with --full to finish it/);
+    const r = await promoteOn(woke, { full: true });
+    assert.equal(r.failed, false, r.out);
+    assert.equal(r.state.kind, undefined);
+    assert.equal(r.state.currentStep, 'epic');
+  } finally { cleanTmp(woke.W); }
+  // Only epic.md's marker left, on a ledger promoted in full that has moved on since: epic.md alone is
+  // finished, and the gate progress in the ledger is kept.
+  const mdLeft = await promoteFixture({ edit: (st) => {
+    delete st.kind;
+    st.currentStep = 'architecture';
+    for (const s of st.steps) if (s.id === 'epic' || s.id === 'epic-review') s.status = 'done';
+    st.steps.find((s) => s.id === 'architecture').status = 'in_progress';
+  } });
+  try {
+    const stateBefore = filesOf(mdLeft)[1];
+    const light = await promoteOn(mdLeft);
+    assert.equal(light.failed, true);
+    assert.match(light.out, /only the stub: line in epic\.md is left, and its ledger shows a full promote \(currentStep: architecture\)/);
+    assert.match(light.out, /run this again with --full to finish epic\.md — the ledger is left as it is/);
+    const r = await promoteOn(mdLeft, { full: true });
+    assert.equal(r.failed, false, r.out);
+    assert.match(r.out, /state\.json: already promoted, left as it is \(currentStep: architecture\)/);
+    assert.doesNotMatch(r.md, /^stub:/m);
+    assert.match(r.md, /^verified: true$/m);
+    assert.equal(r.stateText, stateBefore, 'the ledger is not written');
+  } finally { cleanTmp(mdLeft.W); }
+  // Only epic.md's marker left beside a light promote: --full is refused, and the light promote finishes it.
+  const lightLeft = await promoteFixture({ edit: (st) => { delete st.kind; st.currentStep = 'backfill-done'; } });
+  try {
+    const full = await promoteOn(lightLeft, { full: true });
+    assert.equal(full.failed, true);
+    assert.match(full.out, /its ledger shows a light promote \(currentStep: backfill-done\)[\s\S]*run this again without --full to finish it/);
+    assert.equal((await promoteOn(lightLeft)).failed, false);
+  } finally { cleanTmp(lightLeft.W); }
+  // `kind: stub` left on a chain that moved on (no step runs past a ledger marker): nobody can tell which
+  // promote was meant.
+  const moved = await promoteFixture({ edit: (st) => { st.currentStep = 'stories'; } });
+  try {
+    const before = filesOf(moved);
+    const r = await promoteOn(moved);
+    assert.equal(r.failed, true);
+    assert.match(r.out, /its ledger is on stories/);
+    assert.match(r.out, /restore epic\.md and \.sdlc\/state\.json of EP-legacy-cart from git/);
+    assert.deepEqual(filesOf(moved), before);
+  } finally { cleanTmp(moved.W); }
+});
+
+test('yad backfill promote: the spec must be approved as committed, in a folder spelled as --feature says (review)', async () => {
+  // Approved only in the working tree: committed unapproved, then edited.
+  const edited = await promoteFixture({ spec: '---\nverified: false\n---\n' });
+  try {
+    fs.writeFileSync(path.join(edited.W, 'shop', 'specs', 'backfill', 'cart', 'spec.md'), APPROVED_SPEC);
+    const before = filesOf(edited);
+    const r = await promoteOn(edited);
+    assert.equal(r.failed, true);
+    assert.match(r.out, /specs\/backfill\/cart\/spec\.md in shop is approved in the checkout, but not as committed at HEAD/);
+    assert.match(r.out, /commit the approved spec first/);
+    assert.deepEqual(filesOf(edited), before);
+  } finally { cleanTmp(edited.W); }
+  // Approved, but never committed (untracked).
+  const untracked = await promoteFixture({ commit: false });
+  try {
+    const r = await promoteOn(untracked);
+    assert.equal(r.failed, true);
+    assert.match(r.out, /is approved in the checkout but not committed \(it is not in HEAD\)[\s\S]*commit the approved spec first/);
+  } finally { cleanTmp(untracked.W); }
+  // `--feature Cart` beside a folder named `cart`: a disk that ignores case would open it, git would not.
+  const cased = await promoteFixture();
+  try {
+    const r = await promoteOn(cased, { feature: 'Cart' });
+    assert.equal(r.failed, true);
+    assert.match(r.out, /there is no specs\/backfill\/Cart\/spec\.md in shop — the folder is spelled cart/);
+    assert.match(r.out, /run this again with --feature cart/);
+  } finally { cleanTmp(cased.W); }
+});
+
+test('yad backfill promote: a link at epic.md or state.json is refused with a code and a hint, never read (review)', { skip: process.platform === 'win32' }, async () => {
+  for (const which of ['epic.md', '.sdlc/state.json']) {
+    const fx = await promoteFixture();
+    try {
+      const file = path.join(fx.dir, which);
+      const real = path.join(fx.W, 'elsewhere');
+      fs.copyFileSync(file, real);
+      fs.rmSync(file);
+      fs.symlinkSync(real, file);
+      const { runBackfillPromote } = await import('./backfill.mjs');
+      const code = process.exitCode;
+      const out = await grab(() => runBackfillPromote(fx.T, { epic: 'EP-legacy-cart', repo: 'shop', feature: 'cart', today: '2026-11-19', json: true }));
+      process.exitCode = code;
+      const j = JSON.parse(out);
+      assert.equal(j.ok, false, which);
+      assert.equal(j.code, 'YAD-STATE-001', which);
+      assert.match(j.error, new RegExp(`epics/EP-legacy-cart/${which.replace('.', '\\.')} is not a plain file`), which);
+      assert.match(j.hint, /replace it with the real file from git/, which);
+      assert.equal(fs.lstatSync(file).isSymbolicLink(), true, 'nothing written over the link');
+    } finally { cleanTmp(fx.W); }
+  }
+});
+
+test('yad backfill promote: epic.md is rewritten whole — an empty header, block-style and quoted keys, CRLF (review)', async () => {
+  const { promotedEpicMd } = await import('./backfill.mjs');
+  const line = 'backfill: { repo: shop, spec: specs/backfill/cart/spec.md, promoted: 2026-11-19 }';
+  // An empty frontmatter block: the lines go inside it, not in front of the opening ---.
+  assert.equal(promotedEpicMd('---\n\n---\nbody\n', line), `---\nverified: true\n${line}\n---\nbody\n`);
+  // Block-style keys this command owns take their children with them; quoted spellings are the same keys.
+  const block = '---\nid: EP-x\n"stub": backfill-pending\nbackfill:\n  spec: old\n  promoted: 2020-01-01\n\'verified\' : false\nrepos:\n  - shop\nstub:\n- a\n- b\ntitle: X\n---\nbody\n';
+  assert.equal(promotedEpicMd(block, line), `---\nid: EP-x\nverified: true\n${line}\nrepos:\n  - shop\ntitle: X\n---\nbody\n`);
+  // CRLF in, CRLF out.
+  assert.equal(promotedEpicMd('---\r\nid: EP-x\r\nverified: false\r\nstub: backfill-pending\r\n---\r\nbody\r\n', line),
+    `---\r\nid: EP-x\r\nverified: true\r\n${line}\r\n---\r\nbody\r\n`);
+  // And through the command, on a CRLF stub.
+  const fx = await promoteFixture({ md: STUB_MD('EP-legacy-cart').replace(/\n/g, '\r\n') });
+  try {
+    const r = await promoteOn(fx);
+    assert.equal(r.failed, false, r.out);
+    assert.match(r.md, /\r\nverified: true\r\nbackfill: /);
+    assert.doesNotMatch(r.md, /stub:/);
+  } finally { cleanTmp(fx.W); }
+});
+
+test('yad backfill promote: a stray stub: line on an epic that never was a stub is refused; a light promote is not made full later (review)', async () => {
+  // A normal epic on its epic step, with a `stub:` line someone pasted and no brownfield origin.
+  const stray = await promoteFixture({ stub: false, md: '---\nid: EP-legacy-cart\nkind: feature\ntype: feature\nthread: EP-legacy-cart\nstub: backfill-pending\n---\n' });
+  try {
+    const before = filesOf(stray);
+    for (const full of [false, true]) {
+      const r = await promoteOn(stray, { full });
+      assert.equal(r.failed, true);
+      assert.match(r.out, /EP-legacy-cart has a stub: line in epic\.md, but its ledger was never a stub that this command promoted \(currentStep: epic, and epic\.md has no origin: brownfield\)/);
+      assert.match(r.out, /remove the stray stub: line from epic\.md/);
+    }
+    assert.deepEqual(filesOf(stray), before);
+  } finally { cleanTmp(stray.W); }
+  const fx = await promoteFixture();
+  try {
+    assert.equal((await promoteOn(fx)).failed, false);
+    const r = await promoteOn(fx, { full: true });
+    assert.equal(r.failed, true);
+    assert.match(r.out, /it was promoted already \(currentStep: backfill-done\)/);
+    assert.match(r.out, /a light promote cannot be made full later[\s\S]*thread a change off it with the yad-change skill/);
+  } finally { cleanTmp(fx.W); }
+});
+
+test('yad backfill promote: refuses on a verified ledger, as `yad gate approve` does', async () => {
+  const fx = await promoteFixture({ product: { platform: 'github', ledger: 'verified' } });
+  try {
+    const before = filesOf(fx);
+    const r = await promoteOn(fx);
+    assert.equal(r.failed, true);
+    assert.match(r.out, /this Product's ledger is verified — CI is its only writer, so nothing is written/);
+    assert.match(r.out, /Leave EP-legacy-cart a stub: defects and changes still thread off it/);
+    assert.deepEqual(filesOf(fx), before);
+  } finally { cleanTmp(fx.W); }
+  // A platform with a local ledger is not refused: the ledger is the clone's to write.
+  const local = await promoteFixture({ product: { platform: 'github' } });
+  try { assert.equal((await promoteOn(local)).failed, false); } finally { cleanTmp(local.W); }
+});
+
+test('yad backfill promote: when either write fails, both files are left as they were', async () => {
+  const { writeState: realWriteState } = await import('./epic-state.mjs');
+  for (const io of [
+    // The ledger is written, then epic.md fails: the ledger is put back.
+    { writeFile: () => { throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); } },
+    // The ledger write fails half way (the file changed, then the throw).
+    { writeState: (f, s) => { realWriteState(f, s); throw Object.assign(new Error('no'), { code: 'EIO' }); } },
+  ]) {
+    const fx = await promoteFixture();
+    try {
+      const before = filesOf(fx);
+      const r = await promoteOn(fx, { io });
+      assert.equal(r.failed, true);
+      // The reason is said in words, with its code.
+      assert.match(r.out, /EP-legacy-cart was not promoted — a write failed: (disk full \(ENOSPC\)|no \(EIO\)); both files are as they were/);
+      assert.deepEqual(filesOf(fx), before);
+    } finally { cleanTmp(fx.W); }
+  }
+});
+
+test('yad backfill promote --json: one answer naming what was written', async () => {
+  const fx = await promoteFixture();
+  try {
+    const { runBackfillPromote } = await import('./backfill.mjs');
+    const out = await grab(() => runBackfillPromote(fx.T, { epic: 'legacy-cart', repo: 'shop', feature: 'cart', today: '2026-11-19', json: true }));
+    const j = JSON.parse(out);
+    assert.equal(j.ok, true);
+    assert.equal(j.epic, 'EP-legacy-cart');
+    assert.equal(j.promote, 'light');
+    assert.equal(j.currentStep, 'backfill-done');
+    assert.equal(j.repo, 'shop');
+    assert.equal(j.spec, 'specs/backfill/cart/spec.md');
+    assert.equal(j.promoted, '2026-11-19');
+    assert.equal(j.finished, false);
+  } finally { cleanTmp(fx.W); }
 });
 
 test('CLI: `yad roster` was removed, and says where the people model went instead of "unknown command" (E62)', () => {
@@ -19926,6 +20346,30 @@ test('CLI: `--stub` reaches the command through the arg parser', () => {
     assert.equal(j.currentStep, 'backfill-pending');
     assert.equal(j.next, 'yad-backfill');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('CLI: `yad backfill promote` reaches the command, with --repo, --feature and --full', async () => {
+  const fx = await promoteFixture();
+  try {
+    const r = yadRun(fx.T, 'backfill', 'promote', 'EP-legacy-cart', '--repo', 'shop', '--feature', 'cart', '--full', '--json');
+    assert.equal(r.code, 0, r.out);
+    const j = JSON.parse(r.out);
+    assert.equal(j.command, 'backfill promote');
+    assert.equal(j.ok, true);
+    assert.equal(j.promote, 'full');
+    assert.equal(j.currentStep, 'epic');
+    assert.equal(j.spec, 'specs/backfill/cart/spec.md');
+    // Refused the CLI way: an unknown action, a stray word, and the usage line.
+    for (const [args, message] of [
+      [['backfill', 'demote', 'EP-legacy-cart'], /unknown backfill action: demote \(promote\)/],
+      [['backfill', 'promote', 'EP-legacy-cart', 'cart', '--repo', 'shop', '--feature', 'cart'], /unexpected argument\(s\): cart/],
+      [['backfill', 'promote', 'EP-legacy-cart'], /usage: yad backfill promote <epic> --repo <name> --feature <feature>/],
+    ]) {
+      const bad = yadRun(fx.T, ...args);
+      assert.equal(bad.code, 1, args.join(' '));
+      assert.match(bad.out, message);
+    }
+  } finally { cleanTmp(fx.W); }
 });
 
 // ---- skill binding — which skill runs a step is the project's choice (E6) -------------------------
@@ -20205,7 +20649,7 @@ test('`yad epic new` hands the first step to the skill the project bound, not th
     assert.equal('nextSkills' in j, false);
   } finally { fs.rmSync(U, { recursive: true, force: true }); }
 
-  // A stub is woken by `yad-backfill promote`, which is an engine verb and not a step on any chain —
+  // A stub is woken by `yad backfill promote --full`, which is an engine verb and not a step on any chain —
   // so it is named even when the project has bound `epic` to something else.
   const S = skillProject({ '.sdlc/skills.json': { steps: { epic: ['shape-it'] } } });
   try {

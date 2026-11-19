@@ -232,7 +232,7 @@ export function actionLine(a, { solo, bindings = null, verified = false } = {}) 
     case 'discovery-done':
       return `invoke the ${c.bold(runs('epic', 'yad-epic'))} skill ${c.dim('(seed the next feature from roadmap.md — `yad foundation status` shows which are started)')}`;
     case 'backfill-pending':
-      return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad-backfill promote` — or thread bugs now with yad-change)')}`;
+      return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad backfill promote` — or thread bugs now with yad-change)')}`;
     case 'backfill-done':
       return `invoke the ${c.bold('yad-change')} skill ${c.dim('(documented anchor — evolve it by threading a change/defect off it)')}`;
     // A blocked step (E38) has no command to run, and that is the point: the thing in the way is not in

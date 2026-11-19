@@ -3159,7 +3159,7 @@ export const seedableProfiles = (profiles = LIFECYCLE_PROFILES) =>
 // A STUB is the one variation, and it is a variation of the STATUSES, not of the chain. `yad-stub`
 // mints an anchor for a feature that was built before the Product existed, so a defect can thread off
 // it today: the same `classic` chain, every step `blocked`, a top-level `kind: "stub"` marker and the
-// `backfill-pending` sentinel as `currentStep`. Nothing is runnable until `yad-backfill promote` wakes
+// `backfill-pending` sentinel as `currentStep`. Nothing is runnable until `yad backfill promote --full` wakes
 // it — `preconditionsMet` refuses every step of an anchor, and `nextAction` routes it to the backfill
 // skill rather than to authoring. Modelled here rather than in a second function because it differs
 // from a plain seed in three fields, and two functions sharing a chain is how the five skill copies
@@ -3730,7 +3730,7 @@ export function preconditionsMet(state, stepId) {
   }
   // A stub anchor (backfill-pending) or a light-promoted anchor (backfill-done) has NO runnable Shape
   // step: its Shape chain is intentionally left un-started — `todo` since shape 7, `blocked` in every
-  // file written before it, which reads as the same thing. It evolves via `yad-backfill promote` / a
+  // file written before it, which reads as the same thing. It evolves via `yad backfill promote` / a
   // threaded `yad-change`, never by authoring `epic` against the anchor itself — so the precondition
   // guard must not green-light one (its un-started steps would otherwise read as "entry step ready").
   const anchorKind = backfillAnchorKind(state);
@@ -3915,17 +3915,17 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
   // A STUB genesis epic (yad-stub) or a light-promoted anchor: classified by the SHARED
   // `backfillAnchorKind` helper (the same one `preconditionsMet` uses), so the two readers can never
   // disagree — even on a partially-applied `promote`. A stub is (epic.md `stub:backfill-pending`) ⟺
-  // (state.kind:stub + currentStep:backfill-pending); `yad-backfill promote` clears ALL of these
-  // atomically (see state-schema.md), keeping this sentinel in step with `isStubEpic` (frontmatter).
+  // (state.kind:stub + currentStep:backfill-pending); `yad backfill promote` (cli/backfill.mjs) clears ALL
+  // of these together (see state-schema.md), keeping this sentinel in step with `isStubEpic` (frontmatter).
   const anchorKind = backfillAnchorKind(state);
   if (anchorKind === 'stub') {
     // No Build until backfilled + promoted — route to yad-backfill (not to authoring the epic),
     // and remind that bugs can thread off it now with yad-change.
     return { epicId, kind: 'backfill-pending', step: 'backfill-pending', status: 'stub',
-      why: 'stub epic (backfill pending) — document the code with yad-backfill then `yad-backfill promote` to make it real; thread bugs now with yad-change' };
+      why: 'stub epic (backfill pending) — document the code with yad-backfill then `yad backfill promote` to make it real; thread bugs now with yad-change' };
   }
   if (anchorKind === 'documented') {
-    // `yad-backfill promote` documented the feature (verified) but did NOT wake the Shape chain (its docs
+    // `yad backfill promote` documented the feature (verified) but did NOT wake the Shape chain (its docs
     // live in the backfill spec). Terminal like `discovery-done` — Build never runs directly; the
     // feature evolves by threading a change/defect off it.
     return { epicId, kind: 'backfill-done', step: 'backfill-done', status: 'documented',
@@ -4212,12 +4212,27 @@ export function lineageFrom(fm = {}) {
 }
 
 // Is this a STUB genesis epic (minted by yad-stub as a brownfield thread anchor)? A stub is type feature
-// but carries `stub: backfill-pending` in epic.md frontmatter until `yad-backfill promote` flips it to a
+// but carries `stub: backfill-pending` in epic.md frontmatter until `yad backfill promote` flips it to a
 // real, verified epic (which clears the marker). Missing/greenfield-safe. Read by yad thread / yad-status
 // / the reconciler to render "stub (backfill pending)" and never treat it as a fully-specced feature.
 export function isStubEpic(root, epic) {
   return readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).stub === 'backfill-pending';
 }
+
+// The three places a stub is marked, read one by one: the ledger's `kind: "stub"`, its `backfill-pending`
+// sentinel, and the `stub:` marker in epic.md. Two callers need them apart, and both keep to this one
+// reading so they cannot drift (#578, Product #1): the chore lane off a stub (`planThreadedSeed`) asks for
+// all three, because skipping Shape gates is the unsafe side; `yad backfill promote` promotes a stub with
+// all three, and finishes a promote cut short when only some are left.
+export function stubSignals(root, epic, state) {
+  return {
+    ledger: state?.kind === 'stub',
+    sentinel: state?.currentStep === 'backfill-pending',
+    marker: isStubEpic(root, epic),
+  };
+}
+export const isWholeStub = (s) => s.ledger && s.sentinel && s.marker;
+export const hasStubSignal = (s) => s.ledger || s.sentinel || s.marker;
 
 // Walk `parent` to the thread root. Cycle- and missing-safe. Returns the genesis-first `chain`, the
 // computed `rootId`, and a `broken` reason (missing parent dir, a cycle, or a denormalized `thread`
@@ -4537,8 +4552,7 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
   // the `stub:` marker in epic.md. A half-promoted anchor (`kind: stub` left beside `backfill-done`) or a
   // ledger stub whose epic.md lost its marker keeps its route; `backfillAnchorKind` deliberately leans
   // the other way, because there "still a stub" is the cautious answer.
-  const parentStub = parentState.kind === 'stub' && parentState.currentStep === 'backfill-pending'
-    && isStubEpic(root, parent);
+  const parentStub = isWholeStub(stubSignals(root, parent, parentState));
   // The route is the parent's. A flag naming the same one is harmless; a different one is refused here,
   // before any inherits check, so a person asking for another route hears that first. (A stub is always
   // on classic, so asking for `chore` off one always differs.)

@@ -283,11 +283,11 @@ If the predicate **fails**, report exactly which approvals are still missing and
 writes nothing, exits 1 and lists them, and `currentStep` does not move.
 A step already `done` is never advanced again; a `deferred` step is put back with `yad undefer` first.
 
-One other skill still writes a chain by hand, and it is not an oversight: `yad-backfill promote` rewrites
-one, and needs its own verb. (`yad-discovery` used to be one; since E75 it runs `yad foundation new`.
+No skill writes a chain by hand any more. `yad-discovery` used to; since E75 it runs `yad foundation new`.
 `yad-change` used to seed a threaded chain by hand; since E42 it runs `yad epic new --parent`. This skill
 used to be one too, transcribing `advanceState` for a Product with no platform; since E112 it runs
-`yad gate advance`.)
+`yad gate advance`. `yad-backfill` was the last: its `promote` step rewrote a stub's chain by hand, and
+since E17b it runs `yad backfill promote`.
 
 Report the advance and what the next authored artifact is (or that the epic is now `ready-for-build`, with
 `test-cases` running in parallel).

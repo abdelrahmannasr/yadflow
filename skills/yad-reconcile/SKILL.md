@@ -91,7 +91,7 @@ human, triaged act (`yad-change` Step 2).
 feature with **no owning epic in any thread**, there is nothing to thread a change off yet. Point the
 human at **`yad-stub`** first — mint a stub genesis epic (a minimal `feature`-type thread anchor) for
 that feature — then thread the reconcile change off that stub (and run `yad-backfill` +
-`yad-backfill promote` to make the anchor real). The reconciler never mints the stub itself.
+`yad backfill promote` to make the anchor real). The reconciler never mints the stub itself.
 
 ### Step 3 — `wire` (advisory CI, no block)
 Commit an advisory CI job that runs `yad reconcile --check` on push, carrying `[skip ci]` on any commit

@@ -223,9 +223,16 @@ ${c.bold('Where am I / what next')}
                                        --stub seeds a brownfield anchor instead: the same chain
                                        with every step blocked behind backfill-pending, so a
                                        defect can thread off a feature that shipped before the
-                                       Product existed (yad-backfill promote wakes it).
+                                       Product existed (yad backfill promote --full wakes it).
                                        Writes no epic.md, no branch and no commit: run the skill
                                        the chain names next. Refuses an epic that already has one
+  yad backfill promote <epic> --repo <name> --feature <feature> [--full] [--json]
+                                       Turn a stub into a real anchor once its backfill spec
+                                       (specs/backfill/<feature>/spec.md in that repo) says exactly
+                                       verified: true. Writes epic.md (verified: true, no stub:, a
+                                       backfill: line) and state.json (no kind: stub; backfill-done,
+                                       or with --full the epic step opened) together, or neither.
+                                       Says which is missing when it refuses; refuses a verified ledger
   yad foundation new [--json]          Seed the Product level (E75): the Foundation's two-step chain
                                        in foundation/.sdlc/, plus empty ledgers and reviews/. Run once
                                        per product, before any epic — then the yad-discovery skill
@@ -653,6 +660,7 @@ function parseArgs(argv) {
     else if (a === '--hook') o.hook = true;
     else if (a === '--staged') o.staged = true;
     else if (a === '--stub') o.stub = true;
+    else if (a === '--full') o.full = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
     else if (a === '--greenfield') o.greenfield = true;
@@ -731,6 +739,7 @@ let runningCmd = null;
 // refusal of `yad gate frobnicate` names `gate`, not a command that does not exist.
 const ACTIONS = {
   epic: { known: ['new'] },
+  backfill: { known: ['promote'] },
   foundation: { known: ['new', 'status', 'publish'] },
   skill: { known: ['list', 'bind', 'unbind', 'recommend'], default: 'list' },
   gate: { known: ['open', 'sync', 'comments', 'status', 'repair', 'reopen', 'review', 'walkthrough', 'trailer', 'ci', 'approve', 'comment', 'advance'] },
@@ -762,7 +771,7 @@ const ACTIONS = {
 // on the code repo it runs in and reads the Product beside it. The rest take their folder as given:
 // `setup` and `new`/`init`/`join` make one, `report` and `hook` read what is there.
 const PRODUCT_CMDS = new Set([
-  'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'foundation', 'skill', 'next',
+  'check', 'update', 'doctor', 'migrate', 'usage', 'sync-status', 'epic', 'backfill', 'foundation', 'skill', 'next',
   'skip', 'unskip', 'defer', 'undefer', 'dial', 'mode', 'kill', 'unkill', 'unblock', 'gate', 'checkpoint',
   'capture', 'claims', 'assign', 'unassign', 'owners', 'fold', 'tidy', 'index', 'history', 'repo',
   'risk-map', 'codeowners', 'docs', 'thread', 'reconcile', 'member', 'standup', 'issues', 'scan', 'build', 'worktree', 'ci',
@@ -783,6 +792,7 @@ function writesProduct(cmd, o) {
   // Product's local reports folder (E180), so it needs the Product found too: else the shared refusal.
   if (cmd === 'brain') return action === 'build' || (action === 'view' && !!o.html);
   if (cmd === 'epic' || cmd === 'foundation') return action === 'new';
+  if (cmd === 'backfill') return action === 'promote';
   if (cmd === 'skill') return action === 'bind' || action === 'unbind';
   // `local-setup add|remove` write the Product's committed script (E185 part 3).
   if (cmd === 'local-setup') return action === 'add' || action === 'remove';
@@ -1158,6 +1168,17 @@ async function main() {
         break;
       }
       result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
+      break;
+    }
+    case 'backfill': {
+      // Product #1 (E17b): a stub becomes a real anchor once its backfill spec is approved — epic.md and
+      // state.json written together, in this clone only.
+      const { runBackfillPromote, PROMOTE_USAGE } = await import('../cli/backfill.mjs');
+      const [, action, epic, ...extra] = o._;
+      if (action !== 'promote') { refuse(`unknown backfill action: ${forTerminal(action ?? '(none)')} (promote)`, PROMOTE_USAGE); break; }
+      if (extra.length) { refuse(`unexpected argument(s): ${forTerminal(extra.join(' '))}`, PROMOTE_USAGE); break; }
+      if (noProduct()) break;
+      result = await runBackfillPromote(o.dir, { epic, repo: o.repo, feature: o.feature, full: !!o.full, today, json: o.json });
       break;
     }
     case 'foundation': {

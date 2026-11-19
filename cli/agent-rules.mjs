@@ -112,6 +112,9 @@ export const COMMAND_CLASS = {
   // E170: --issue also comments on and labels the item on the platform.
   'epic new': { class: 'local-write', flags: { issue: 'on-request' } },
   'foundation new': { class: 'local-write' },
+  // Product #1 (E17b): promotes a stub — its epic.md and state.json in this clone, nothing pushed. On a verified
+  // ledger it refuses, as `gate approve` does.
+  'backfill promote': { class: 'local-write' },
   'foundation status': { class: 'read' },
   // E174: creates items on the platform; `--dry-run` only reads.
   'foundation publish': { class: 'on-request' },

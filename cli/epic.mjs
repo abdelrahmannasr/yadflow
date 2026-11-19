@@ -182,14 +182,14 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // A STUB anchors a feature that was built before the Product existed, so a defect can thread off it
   // today. Two restrictions, both from what a stub IS rather than from anything technical:
   //   * always `classic`. A stub's whole chain is blocked behind the `backfill-pending` sentinel and
-  //     `yad-backfill promote` wakes it at `epic`, so a route that starts somewhere else has nothing
+  //     `yad backfill promote --full` wakes it at `epic`, so a route that starts somewhere else has nothing
   //     to wake into.
   //   * always `feature`. A stub is an anchor for shipped behaviour; upkeep leaves nothing to backfill
   //     and nothing to thread a defect off, so a `chore` stub would be an anchor for no feature.
   if (stub) {
     if (profile !== 'classic') {
       return bail(`a stub is always on the classic route, not '${profile}'`,
-        '`yad-backfill promote` wakes a stub at its `epic` step, so a route starting anywhere else has nothing to wake into. Drop --profile');
+        '`yad backfill promote --full` wakes a stub at its `epic` step, so a route starting anywhere else has nothing to wake into. Drop --profile');
     }
     if (type !== 'feature') {
       return bail(`a stub is always a feature, not a ${type}`,
@@ -244,7 +244,7 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   ok(`${epic} seeded — ${stub ? 'stub anchor' : typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
   info(`chain: ${state.steps.map((s) => (!stub && s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
   hand(stub
-    ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad-backfill promote\` to wake the chain. Defects can thread off it now`
+    ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad backfill promote\` to make it a real anchor (\`--full\` wakes the chain). Defects can thread off it now`
     : `${first.id} is open${skill ? ` — run the ${skills.join(' skill, then the ')} skill to author ${first.artifact}` : ''}`);
   // Closed decision 7: every surface that prints a chain of more than one says what the extra runs
   // cost. This one prints a chain too.
