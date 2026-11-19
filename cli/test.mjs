@@ -32021,6 +32021,69 @@ test('E125 b: the guide, yad brand and yad doctor never read a Product file that
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #222: setup, `yad update` and `yad check` compare and write the committed CI files and gate scripts. A link
+// there is read as no file, and the file yad writes replaces the link: nothing is read or written through it.
+// #222: yad doctor reads the Product's gate scripts, CI workflows and the old module config to name what is out
+// of date. A link there is read as no file: each target below holds what would raise a warning if followed.
+function doctorLinkedProduct(T, target) {
+  const product = path.join(T, 'product');
+  for (const d of ['.sdlc', 'checks', '_bmad/sdlc', '.github/workflows']) fs.mkdirSync(path.join(product, d), { recursive: true });
+  fs.writeFileSync(path.join(product, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+  const files = {
+    'checks/verified-commits.sh': 'ALLOWLIST=x\n',
+    'checks/contract-check.sh': 'git diff --name-only\n',
+    'checks/pr-title.sh': "echo '\\.sdlc/owners/[^/]+\\.json$'\n",
+    '_bmad/sdlc/config.yaml': 'kill_switch: true\n',
+    '.github/workflows/team.yml': 'on: push\njobs: {}\n',
+    '.github/workflows/yad-product-checks.yml': 'run: git diff --name-only\n',
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    const to = target ?? path.join(T, `outside-${rel.replace(/\//g, '-')}`);
+    if (!target) fs.writeFileSync(to, body);
+    fs.symlinkSync(to, path.join(product, rel));
+  }
+  return product;
+}
+const DOCTOR_LINK_IDS = ['people:allowlist-gate-stale', 'checks:rename-blind', 'checks:symlink-blind', 'checks:product-path-blind', 'checks:product-record-blind', 'automation:legacy-kill', 'owners:rename-blind'];
+
+test('#222 yad doctor reads no gate script, CI workflow or old module config through a link', { skip: E125B_SKIP }, async () => {
+  const { projectChecks, automationChecks, ownerGuardChecks, pushOnEveryBranch, renameBlindGate, editRunWorkflow } = await import('./doctor.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-doctor-link-')));
+  try {
+    const product = doctorLinkedProduct(T);
+    const checks = [];
+    projectChecks(checks, product);
+    automationChecks(checks, product);
+    ownerGuardChecks(checks, product);
+    assert.deepEqual(checks.filter((c) => DOCTOR_LINK_IDS.includes(c.id)).map((c) => c.id), []);
+    assert.deepEqual(pushOnEveryBranch(product), []);
+    assert.equal(renameBlindGate(path.join(product, 'checks/contract-check.sh')), false);
+    // A dangling link and a folder read as no file too.
+    fs.symlinkSync(path.join(T, 'gone.yml'), path.join(product, '.github/workflows/yad-checks.yml'));
+    fs.mkdirSync(path.join(product, '.github/workflows/folder.yml'));
+    assert.equal(editRunWorkflow(path.join(product, '.github/workflows/yad-checks.yml')), false);
+    assert.equal(editRunWorkflow(path.join(product, '.github/workflows/folder.yml')), false);
+    assert.deepEqual(pushOnEveryBranch(product), []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 yad doctor answers at once for gate scripts, CI workflows and an old module config that link to /dev/zero', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-doctor-zero-')));
+  try {
+    const product = doctorLinkedProduct(T, '/dev/zero');
+    const got = inChildWithLimit(`const { projectChecks, automationChecks, ownerGuardChecks, pushOnEveryBranch, docsWorkflowChecks } = await import(${cliUrl('./doctor.mjs')});
+const root = process.argv[1];
+const checks = [];
+projectChecks(checks, root);
+automationChecks(checks, root);
+ownerGuardChecks(checks, root);
+docsWorkflowChecks(root, checks);
+process.stdout.write(JSON.stringify({ ids: checks.map((c) => c.id), push: pushOnEveryBranch(root) }));`, [product]);
+    assert.deepEqual(got.ids.filter((id) => DOCTOR_LINK_IDS.includes(id)), []);
+    assert.deepEqual(got.push, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#222 setup: a wired file that is a link is missing, and its copy replaces the link — never writes through it, nor through a linked backup', { skip: E125B_SKIP }, async () => {
   const { repoActions } = await import('./plan.mjs');
   const { wiringFor } = await import('./manifest.mjs');

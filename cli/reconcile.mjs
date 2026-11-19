@@ -5,10 +5,11 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG,
+  c, log, ok, info, warn, fail, hand, readJSON, writeJSON, exists, forTerminal, run, samePath, readPlainFile, readPlainText, NOT_PLAIN_FILE, FILE_TOO_BIG,
 } from './lib.mjs';
 
-const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+// A committed file, read only as a plain file (#222): a link, a folder or a device reads as empty.
+const readFileSafe = (p) => readPlainText(p) ?? '';
 
 import { preflightGuardReadiness } from './productcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath, PRODUCT_LINK } from './manifest.mjs';
@@ -217,17 +218,17 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // re-written below whatever happens to the fragment. So an edited fragment left on an older major
   // rejects the stamp this update writes, and CI silently floats on that older engine against a project
   // on a newer file shape. The generic "locally modified" line does not say that; this does.
-  const pinMajorOf = (file) => {
-    try {
-      const text = fs.readFileSync(file, 'utf8');
-      // `YAD_MAJOR=<n>` from this release on; before it, the major was written into the check itself.
-      const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
-      return found ? Number(found[1]) : null;
-    } catch { return null; }
+  const pinMajorOf = (text) => {
+    if (text === null) return null;
+    // `YAD_MAJOR=<n>` from this release on; before it, the major was written into the check itself.
+    const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
+    return found ? Number(found[1]) : null;
   };
+  // yad's own fragment, shipped in its package, is read as it is; the team's copy only as a plain file (#222).
+  const shippedText = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
   for (const m of modified.filter((a) => a.managed && !a.rename && /yad-gate-sync\.ya?ml$/.test(a.item))) {
-    const kept = pinMajorOf(m.managed.dest);
-    const ships = pinMajorOf(m.managed.src);
+    const kept = pinMajorOf(readPlainText(m.managed.dest));
+    const ships = pinMajorOf(shippedText(m.managed.src));
     if (kept === null || ships === null || kept === ships) continue;
     warn(`${shown(m)}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
     hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);

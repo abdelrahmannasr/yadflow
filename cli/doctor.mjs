@@ -6,7 +6,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, readPlainText, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
@@ -664,7 +664,7 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     const oldGates = [
       { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
       ...checkouts.map((r) => ({ where: forTerminal(r.name), file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
-    ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
+    ].filter((x) => /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(readPlainText(x.file) ?? '')).map((x) => x.where);
     if (oldGates.length) {
       check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
         `checks/verified-commits.sh in ${oldGates.join(', ')} is an older copy that still enforces the author list`,
@@ -724,8 +724,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
     // workflow runs the base branch's copy, `"$YAD_CHECKS/product-checkout.sh"`; an older one, `checks/…`.
     const blindFlows = gateRoots.filter((x) => x.where !== 'the Product').flatMap((x) => CHECK_WORKFLOWS.map((rel) => ({ ...x, rel })))
       .filter((x) => {
-        let src;
-        try { src = fs.readFileSync(path.join(x.root, x.rel), 'utf8'); } catch { return false; }
+        const src = readPlainText(path.join(x.root, x.rel));
+        if (src === null) return false;
         return !src.split('\n').some((l) => !/^\s*#/.test(l) && /(?:\bchecks|\$\{?YAD_CHECKS\}?)\/product-checkout\.sh/.test(l));
       })
       .map((x) => `${x.rel} in ${x.where}`);
@@ -899,7 +899,8 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
 // before that (#364), whose Node line can only be changed by editing a file `yad` rewrites. Pure local
 // read — no API calls, so neither the variables' values nor the runner's executor are known here.
 export function ciTagsChecks(checks, root, productConfig, registry) {
-  const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } }; // absent: not this check's concern
+  // Absent, or a link, a folder or a device (#222): not this check's concern.
+  const read = (p) => readPlainText(p);
   // A plain update replaces an outdated copy but leaves a hand-edited (`modified`) one alone — and a copy
   // edited to fit a runner is the case #364 is about, so the hint names both (review 1).
   const UPDATE = 'run `yad update` (if `yad check` lists the file as `modified`, move your change into the `YAD_RUNNER_TAGS` / `YAD_NODE_VERSION` CI/CD variables, then run `yad update --overwrite-local` — it replaces every hand-edited managed file, keeping a `.yad-orig` copy of each)';
@@ -1556,10 +1557,8 @@ export function automationChecks(checks, root) {
   // Nothing reads that key now, so a team that set it by hand has a kill switch that silently turned OFF —
   // the one change this row must never make quietly.
   const legacy = path.join(root, '_bmad', 'sdlc', 'config.yaml');
-  let text = '';
-  try {
-    if (exists(legacy)) text = fs.readFileSync(legacy, 'utf8');
-  } catch { /* an unreadable module config has nothing to say about the switch */ }
+  // An unreadable module config (or a link, a folder, a device: #222) has nothing to say about the switch.
+  const text = readPlainText(legacy) ?? '';
   // Every spelling YAML reads as true, and the old skill (a model reading the file) would have honoured.
   if (/^\s*kill_switch:\s*(?:true|yes|on)\b/im.test(text) && !killSwitchOn(a)) {
     check(checks, 'automation:legacy-kill', 'project', 'fail',
@@ -2147,8 +2146,8 @@ const renameBlindCommand = (c) => /\bgit\b.*\bdiff\b.*(--name-only|--raw)/.test(
 export const renameBlindText = (src) => src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
   .replace(/\\\r?\n/g, ' ').split('\n').some((l) => l.split(/&&|\|\||;|\|/).some(renameBlindCommand));
 export function renameBlindGate(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return renameBlindText(src);
 }
 // E115: a contract-check that never reads the tree for links under specs/. Read like the one above — a
@@ -2158,8 +2157,8 @@ export function renameBlindGate(file) {
 export const symlinkBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
   .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*\bls-tree\b.*\bHEAD\b/.test(l));
 export function symlinkBlindGate(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return symlinkBlindText(src);
 }
 // E116: a backfill-check that reads the spec from the PR's working tree, or never reads the tree at HEAD
@@ -2173,8 +2172,8 @@ export const backfillBlindText = (src) => {
     || lines.some((l) => /\bgit\b.*\bdiff\b.*--raw\b.*\|\s*tr\b/.test(l));
 };
 export function backfillBlindGate(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return backfillBlindText(src);
 }
 // E120: a Product-reading gate that never reads `.sdlc/product-link.json` (no non-comment command naming
@@ -2182,8 +2181,8 @@ export function backfillBlindGate(file) {
 export const productRecordBlindText = (src) => !src.split('\n').map((l) => (/^\s*#/.test(l) ? '' : l)).join('\n')
   .replace(/\\\r?\n/g, ' ').split('\n').some((l) => /\bgit\b.*product-link\.json/.test(l));
 export function productRecordBlindGate(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return productRecordBlindText(src);
 }
 // #425. The GitHub gate workflows that must never start on `edited` (the Product's under the old name too).
@@ -2192,8 +2191,8 @@ export const EDIT_RUN_WORKFLOWS = Object.freeze(['.github/workflows/yad-checks.y
 export const editRunText = (src) => src.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).some((l) =>
   /^\s*types:.*(?:^|[\s[,'"])edited(?:$|[\s\],'"])/.test(l) || /^\s*-\s*(['"]?)edited\1\s*$/.test(l));
 export function editRunWorkflow(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return editRunText(src);
 }
 // The checks workflows a connected repo may carry (one per platform).
@@ -2207,8 +2206,8 @@ export const productPathBlindText = (src) => {
   return !lines.some((l) => /\bgit\s+show\s/.test(l)) || !lines.some((l) => /\bgit\s+checkout-index\s/.test(l));
 };
 export function productPathBlindGate(file) {
-  let src;
-  try { src = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const src = readPlainText(file);
+  if (src === null) return false;
   return productPathBlindText(src);
 }
 
@@ -2219,7 +2218,7 @@ export function productPathBlindGate(file) {
 // workflow — and then `git mv epic.md .sdlc/owners/epic.json` on a non-review branch passes. Say so.
 // The old names too (E123): an edited `yad-hub-checks.yml` is kept by `yad update`, and still runs.
 export function ownerGuardChecks(checks, root) {
-  const read = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } };
+  const read = (rel) => readPlainText(path.join(root, rel));
   // The exemption's own pattern, not any mention of the folder: a comment is not a rule.
   const exempting = ['checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => read(rel)?.includes('\\.sdlc/owners/[^/]+\\.json$'));
   if (!exempting.length) return;
@@ -3147,8 +3146,8 @@ function activityLogState(root) {
 // without our header is the team's own.
 export function docsWorkflowChecks(root, checks) {
   const rel = pagesWorkflowPath(wiredPagesPlatform(readJSON(path.join(root, PROJECT_FILES.docsConfig), null)));
-  let text;
-  try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return; }
+  const text = readPlainText(path.join(root, rel));
+  if (text === null) return;
   if (!text.startsWith('# yad-managed — built by `yad docs sync --wire`')) return;
   if (pagesWorkflowFailsOnBuild(text)) check(checks, 'docs-workflow', 'project', 'ok', `${rel} fails the deploy when a site fails to build`);
   else check(checks, 'docs-workflow', 'project', 'warn', `${rel} still deploys when a site fails to build — the site then goes out with a page missing`,
@@ -3204,9 +3203,8 @@ export function pushOnEveryBranch(root) {
   try { names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort(); } catch { return []; }
   const out = [];
   for (const n of names) {
-    let text;
-    try { text = fs.readFileSync(path.join(dir, n), 'utf8'); } catch { continue; }
-    if (/^#\s*yad-managed/m.test(text)) continue;
+    const text = readPlainText(path.join(dir, n));
+    if (text === null || /^#\s*yad-managed/m.test(text)) continue;
     const lines = text.split(/\r?\n/);
     const onAt = lines.findIndex((l) => /^(on|"on"|'on'):/.test(l));
     if (onAt < 0) continue;
