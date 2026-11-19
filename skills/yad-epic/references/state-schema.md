@@ -1024,7 +1024,7 @@ A stub is a normal genesis (type `feature` under both names, `thread == id`, no 
   passes and `promote` can "wake" the chain into normal authoring with no re-seed);
 - empty `approvals.json` / `comments.json`; **no** `contract-lock.json` (no surface locked yet).
 
-`nextAction` routes a stub to a `backfill-pending` action (`yad-backfill` → `yad-backfill promote`), never
+`nextAction` routes a stub to a `backfill-pending` action (`yad-backfill` → `yad backfill promote`), never
 to authoring. A change threaded off a stub inherits only what exists — the undocumented surface bases are
 marked `inherited: true` with `boundHash: null` (the gate predicate reads `null` as "nothing locked → no
 drift → pass"), no pointer-lock is written, and `change.json` records `parentStub: true`. A `defect`
@@ -1041,7 +1041,8 @@ read the frontmatter, while `nextAction` / `yad next` is pure-ledger and reads `
 
 `yad backfill promote EP-<slug> --repo <repo> --feature <feature> [--full]` (the `yad-backfill` skill's
 `promote` step runs it, E17b) enforces this. It refuses unless the epic is a stub and its backfill spec
-(`specs/backfill/<feature>/spec.md` in that repo) says exactly `verified: true`, and on a verified ledger.
+(`specs/backfill/<feature>/spec.md` in that repo) says exactly `verified: true` both in the checkout and
+as committed at that repo's HEAD, and it refuses on a verified ledger.
 Then it writes both files, or neither: `epic.md` gets `verified: true`, loses `stub:`, and gains
 `backfill: { repo: <repo>, spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`; the
 ledger loses `kind: "stub"` and `currentStep` moves off the sentinel:
@@ -1050,12 +1051,15 @@ ledger loses `kind: "stub"` and `currentStep` moves off the sentinel:
   reports "documented anchor — evolve it by threading a change/defect", never a pending stub, and Build
   never runs directly against it;
 - **full promote (opt-in)** → `currentStep: "epic"`, `epic.status: "in_progress"`, to run the normal Shape
-  part and lock a real contract.
+  part and lock a real contract. A light promote is not made full later by this command: a documented
+  anchor goes under Shape through a change threaded off it (`yad-change`).
 
 A promote cut short (some of the three markers left, from a hand edit before the command existed) is
 finished by the same command when the ledger is still on `backfill-pending` or already on the step its
 flavour writes. When only `epic.md`'s `stub:` line is left, `epic.md` alone is finished and the ledger,
-which may have moved on since, is kept. Anything else is refused, naming the step.
+which may have moved on since, is kept — only when the ledger shows a stub this command promoted: on
+`backfill-done` for a light promote, or, for a full one, an `epic.md` that says `origin: brownfield`. A
+stray `stub:` line on an epic that never was a stub is refused. Anything else is refused, naming the step.
 
 From promotion on, the thread's contract protection is live.
 

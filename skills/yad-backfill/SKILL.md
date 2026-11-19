@@ -141,8 +141,11 @@ on this machine.
 
 - **What it checks first.** The epic must be a stub, and the spec's frontmatter must say exactly
   `verified: true` — read the way the backfill gate reads it (Step 5). If either is missing it writes
-  nothing and says which; approve the spec first (Step 4). It reads the spec in the checkout, while the
-  gate reads it on the base branch: an approval that is not merged yet passes here and still fails the gate.
+  nothing and says which; approve the spec first (Step 4). The approval must be **committed**: the spec
+  must say `verified: true` in the checkout and as committed at the repo's HEAD, so an edit nobody
+  committed promotes nothing. CI's gate still reads the spec on the base branch: an approval committed on
+  a branch but not merged yet passes here and still fails the gate. `--feature` is the folder's exact
+  name, in the same case.
 - **What it writes, together or not at all.** A stub is marked in two files at once, and `yad next`
   (reads `state.json`) and `yad thread` / `yad-status` (read `epic.md`) must agree, so it writes both:
   - **`epic.md`:** `verified: true`, no `stub:` marker, and a `backfill:` line naming the approved
@@ -160,11 +163,14 @@ on this machine.
   `yad-change`. `yad next` then reports it as a documented anchor, not a pending stub.
 - **Full promote (`--full`, opt-in):** to bring the feature fully under Shape and lock a real contract.
   `currentStep` becomes `epic` and the `epic` step opens; then run `yad-epic` → `yad-architecture` → …
-  the normal way. This re-locks a contract that later thread changes will inherit.
+  the normal way. This re-locks a contract that later thread changes will inherit. Choose before you
+  run it: a light promote is not made full later by this command. A documented anchor goes under Shape
+  through a change threaded off it, with `yad-change`.
 - **A promote cut short** (some stub markers left from an older hand edit) is finished by the same
   command, when the ledger is still on `backfill-pending` or already on the step the flavour writes.
   When only the `stub:` line in `epic.md` is left, it finishes `epic.md` alone and keeps the ledger as it
-  is. When it refuses, show the person its message and stop.
+  is — but a stray `stub:` line on an epic that never was a stub is refused. When it refuses, show the
+  person its message and stop.
 - **verified mode.** On a verified ledger CI is the only writer of the ledger, so the command refuses
   and writes nothing, as `yad gate approve` does. Tell the person what it says: the stub keeps working as
   an anchor, and the promotion has no CI path yet. Never push a ledger edit around the guard.
