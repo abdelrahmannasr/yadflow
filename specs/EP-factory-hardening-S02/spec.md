@@ -20,13 +20,19 @@ by the path its caller passed, which can be absolute and lands in the `warnings`
   `NOT_PLAIN_FILE` error (`kind: 'link'`, `folder`), whose message names the linked folder and the file by
   their paths in the Product. A read checks before its first look, so a linked folder never reads as "no
   file". A write checks before any folder is made, and refuses with `YAD-STATE-001` and a hint, keeping
-  `kind` and `folder`.
+  `kind` and `folder`; `copyFile` and `copyDir` check their destination the same way. The hint says to
+  remove the link (`git rm <folder>`) and restore the real folder from a commit where it was one: a plain
+  `git checkout -- <folder>` brings the committed link back. Callers that name the file themselves (migrate,
+  doctor, the local setup script, setup's IDE settings) name the linked folder too.
 - R2. The Product's folder is set once per command (`setProductRoot`), where yad settles it: every Product
   and repo command in `bin/yad.mjs` (the Product found, never a `--dir` subfolder), `yad setup`,
   `yad toolbox`, and inside `yad new`, `init` and `join` (`cli/workspace.mjs`). Both spellings of the
-  folder count (`/var/…` and `/private/var/…` on macOS). A path outside the Product is read as before.
+  folder count (`/var/…` and `/private/var/…` on macOS), and on macOS and Windows a spelling in another case
+  is the same folder. A path outside the Product is read as before. Where the folder of a Product that
+  already exists is set, a `.sdlc` that is itself a link stops the command with `YAD-STATE-001`: the
+  settings in it say whether the Product is verified, and a lenient read would run it as an unverified one.
   `join`'s registry problem keeps its words when the lib names the file by its Product path.
-- R3. Each read and write takes `{ within }`, a folder to check instead of the Product's. `yad risk-map`
+- R3. Each read and write takes `{ within }`, a folder checked as well as the Product's. `yad risk-map`
   reads and writes `.sdlc/risk-map` through the helpers, within the code repo: a map that is a link, too
   big, or in a linked `.sdlc` is not read, `draft` exits 1 with nothing written, and `check` and
   `yad doctor` name it as `unreadable`. The map is written through a new file and a rename.
@@ -49,7 +55,8 @@ the check and the open (the file's own name keeps its O_NOFOLLOW check).
 
 ### Session 2026-11-18
 - Q: Light spec — one `spec.md` holding the spec, the plan and the tasks? → A: yes (chore route, no contract surface)
-- Q: A code repo kept inside the Product's folder, reached through a link? → A (proposed by the agent, for the reviewer to confirm): refused like any linked folder in the Product: `.sdlc/repos.json` is committed, so an exemption by it could be claimed by anyone.
+- Q: A code repo kept inside the Product's folder, reached through a link? → A: refused like any linked folder in the Product, with no exemption from `.sdlc/repos.json` (it is committed, so anyone could claim one); `{ within }` adds the repo's folder to the Product's, never replaces it.
+- Q: A linked `.claude/` or `.cursor/` folder in the Product? → A: refused like any linked folder in the Product.
 
 ## Plan
 
@@ -83,4 +90,20 @@ that `yad risk-map draft` refuses a linked `.sdlc` and a linked map in the code 
 ## T04 — Name a linked folder in the error table and the risk map's draft
 **Files:**
 - docs/CLI.md
+
+## T05 — Stop a command on a linked .sdlc, and keep published in a refused refresh
+**Files:**
+- bin/yad.mjs
+- cli/workspace.mjs
+- cli/repo.mjs
+
+## T06 — Name the linked folder in migrate, doctor and setup's messages
+**Files:**
+- cli/migrate.mjs
+- cli/doctor.mjs
+- cli/plan.mjs
+
+## T07 — Name the linked folder in local-setup's messages and hint
+**Files:**
+- cli/local-setup.mjs
 <!-- /yad:tasks -->
