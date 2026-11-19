@@ -19877,6 +19877,10 @@ test('yad epic new --stub: an anchor for a feature that shipped before the Produ
     // no step of an anchor is runnable, so pointing at `yad-epic` would be guidance nobody can follow.
     assert.match(out, /yad-backfill/);
     assert.doesNotMatch(out, /run the yad-epic skill/);
+    // The command that makes it real is named as it is typed (review: no `yad-backfill promote` left).
+    assert.match(out, /then `yad backfill promote` to make it a real anchor \(`--full` wakes the chain\)/);
+    const { nextAction, loadLedger: ll } = await import('./epic-state.mjs');
+    assert.match(nextAction(ll(path.join(T, 'epics/EP-legacy-cart'))).why, /then `yad backfill promote` to make it real/);
   } finally { cleanTmp(T); }
 });
 
@@ -20645,7 +20649,7 @@ test('`yad epic new` hands the first step to the skill the project bound, not th
     assert.equal('nextSkills' in j, false);
   } finally { fs.rmSync(U, { recursive: true, force: true }); }
 
-  // A stub is woken by `yad-backfill promote`, which is an engine verb and not a step on any chain —
+  // A stub is woken by `yad backfill promote --full`, which is an engine verb and not a step on any chain —
   // so it is named even when the project has bound `epic` to something else.
   const S = skillProject({ '.sdlc/skills.json': { steps: { epic: ['shape-it'] } } });
   try {
