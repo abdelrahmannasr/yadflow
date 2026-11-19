@@ -28067,6 +28067,48 @@ test('E125 b only the listed files parse a direct readFileSync, each as often as
   }
 });
 
+// ---- #222: doctor, setup and check read the committed text files only as plain files (EP-factory-hardening-S03) --
+
+// `yad doctor`, setup (`cli/plan.mjs`) and `yad check` / `yad update` (`cli/reconcile.mjs`) read the CI workflows,
+// GitLab fragments, gate scripts and git hooks a Product commits. Those reads go through `readPlainText` (or
+// `readPlainFile` where a refused file must be told from a missing one) in cli/lib.mjs, so a link is never followed
+// and a link to /dev/zero never hangs. A direct `readFileSync(` in these files is only for yad's own files, shipped
+// in its package; `count` pins how many each file has, so a NEW direct read fails this test. A comment line is
+// prose and is not counted.
+const DIRECT_TEXT_READ = /\b(?:readFileSync|readFile|createReadStream)\(/;
+const DIRECT_TEXT_READ_FILES = ['cli/doctor.mjs', 'cli/plan.mjs', 'cli/reconcile.mjs'];
+const DIRECT_TEXT_READ_ALLOWED = [
+  { file: 'cli/doctor.mjs', count: 0, reason: 'every file it reads is the Product\'s, a code repo\'s or this clone\'s' },
+  { file: 'cli/plan.mjs', count: 1, reason: 'the local setup notice script yad ships (`asset(NOTICE_ASSET)`), compared with the clone\'s copy' },
+  { file: 'cli/reconcile.mjs', count: 1, reason: 'the gate-sync fragment yad ships (`m.managed.src`, an `asset(…)` path), to read the major it trusts' },
+];
+
+test('#222 the text-read matcher sees each direct shape, and none of the plain reads', () => {
+  for (const line of ["fs.readFileSync(p, 'utf8')", "readFileSync(p, 'utf8')", "nodeFs.readFileSync(p)", "await fs.promises.readFile(p, 'utf8')", 'fs.createReadStream(p)', "x = String(fs.readFileSync( p ))"]) {
+    assert.ok(DIRECT_TEXT_READ.test(line), line);
+  }
+  for (const line of ['readPlainText(p)', 'readPlainFile(p)', 'readPlainBytes(p)', 'readPlainJSON(p)', 'contentSha(p)', 'fs.readdirSync(dir)', 'readFileSafe(ci)']) {
+    assert.ok(!DIRECT_TEXT_READ.test(line), line);
+  }
+});
+
+test('#222 doctor, setup and check read a file with readFileSync only where listed, each as often as listed', () => {
+  const allowed = new Map(DIRECT_TEXT_READ_ALLOWED.map((a) => [a.file, a]));
+  assert.deepEqual([...allowed.keys()].sort(), [...DIRECT_TEXT_READ_FILES].sort(), 'one entry for each file the rule covers');
+  const sources = new Set(engineSources());
+  for (const rel of DIRECT_TEXT_READ_FILES) {
+    assert.ok(sources.has(rel), `${rel} is an engine source`);
+    const a = allowed.get(rel);
+    assert.ok(a.reason, `${rel}: the entry says why`);
+    const hits = [];
+    fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+      if (/^\s*\/\//.test(line) || !DIRECT_TEXT_READ.test(line)) return;
+      hits.push(`${rel}:${i + 1}: ${line.trim()}`);
+    });
+    assert.equal(hits.length, a.count, `${rel}: ${hits.length} direct reads, ${a.count} listed — read a committed file with readPlainText / readPlainFile (cli/lib.mjs), or, for one of yad's own files, update the entry with its reason:\n${hits.join('\n')}`);
+  }
+});
+
 test('E1 bin/yad.mjs: every refusal and odd case is one envelope on stdout, prose on stderr', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-'));
   const yad = (...args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {

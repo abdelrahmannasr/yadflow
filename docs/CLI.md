@@ -2897,6 +2897,16 @@ script and entry back beside them.
 **A CI check failed on a pull request?** Every gate's rules, exemptions and failure messages, with what
 to change for each, are in [CI gates](GATES.md).
 
+**A committed CI or gate file that is a link** (#222). `yad doctor`, `yad check`, `yad update` and setup read
+the CI workflows, `.gitlab-ci.yml` and its fragments, the gate scripts under `checks/`, the git hooks and the
+old `_bmad/sdlc/config.yaml` only as plain files. A link (to `/dev/zero`, or out of the Product), a dangling
+link, a folder or a device in one of those places is never read: each check answers as it does for a missing
+file, so a link never hangs a command and never makes yad read a file it does not own. When yad writes one of
+its own files there (`yad check --fix`, `yad update`, setup), the new file replaces the link; nothing is ever
+written through it, its `.yad-orig` backup included. A git hook that is a link (some tools install theirs so)
+or that sits in a linked hooks folder is treated as the team's own hook: yad leaves it alone and names the line
+to add.
+
 ### The `shape` section — is this project on the right file shape?
 
 `yad doctor` reports what shape your state files are in, against the shape this release writes, one
