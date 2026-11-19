@@ -299,6 +299,8 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
   defect/change can thread off it today (`yad-change` needs a real parent). The stub is the smallest real
   thread anchor — type `feature`, `stub: backfill-pending`, `verified: false` — never inventing
   behaviour; `yad-backfill promote` flips it to a real, verified feature epic once its spec is approved.
+  A small defect or hotfix off a stub may take the short `chore` lane (`--profile chore`: the epic, then
+  stories and their review, then Build) instead of the stub's full route — `yad-change` offers it (#578).
 
 Three CI gates (in `yad-checks`) enforce it: **lineage-check** (a change links a real threaded epic),
 **epic-open** (a *sealed* epic — all stories shipped — refuses new behaviour, forcing a change-epic so the

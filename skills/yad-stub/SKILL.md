@@ -137,7 +137,10 @@ Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the tw
 - **File bugs now:** `yad-change` (`--parent EP-<slug>`, type `defect|change`) — the defect threads off
   the stub, its gates pass, and `yad thread EP-<slug>` lists it. A defect off a stub inherits only what
   exists (the stub `epic.md`), re-authors its own stories/test-cases, and locks no contract (there is no
-  surface yet — see `../yad-change/SKILL.md`).
+  surface yet — see `../yad-change/SKILL.md`). A small `defect` or `hotfix` off the stub may take the
+  **short lane** instead of the stub's full `classic` route, if the person chooses it: `--profile chore`
+  on `yad epic new` gives the epic, then stories and their review, then Build (`yad-change` Step 5,
+  "Short lane off a stub").
 - **Make it real later:** `yad-backfill` for the code repo, then `yad-backfill promote EP-<slug>` to flip
   the stub to `verified: true`.
 
