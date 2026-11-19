@@ -482,7 +482,7 @@ export async function runInit(cwd, opts = {}) {
   if (productName !== undefined && !validFolderName(productName)) return refuse(`--path must be one folder name (got ${JSON.stringify(shown(productName))})`);
   if (productName === undefined) {
     const products = children.filter((n) => exists(productConfigPath(path.join(cwd, n))));
-    if (products.length > 1) return refuse(`more than one Product here (${products.join(', ')}) — name the one to use with --path <folder>`);
+    if (products.length > 1) return refuse(`more than one Product here (${shown(products.join(', '))}) — name the one to use with --path <folder>`);
     productName = products[0] || PRODUCT_DIR;
   }
   const product = path.join(cwd, productName);
@@ -490,7 +490,7 @@ export async function runInit(cwd, opts = {}) {
   // fresh clone of an empty remote holds just `.git`). Anything else is someone's code: setup would
   // write the Product's files into it.
   if (exists(product) && !exists(productConfigPath(product)) && !isBareStart(product)) {
-    return refuse(`${productName}/ already holds files and is not a Product — name a new folder for the Product with --path <folder>`);
+    return refuse(`${shown(productName)}/ already holds files and is not a Product — name a new folder for the Product with --path <folder>`);
   }
 
   const { found, odd, discovered } = reposBeside(cwd, productName);
@@ -500,17 +500,18 @@ export async function runInit(cwd, opts = {}) {
   if (!exists(product)) {
     fs.mkdirSync(product);
     if (!gitInit(product)) return refuse(`git init failed in ${product}`);
-    ok(`created ${productName}/ (git, branch main)`);
-  } else info(`Product folder: ${productName}/`);
+    ok(`created ${shown(productName)}/ (git, branch main)`);
+  } else info(`Product folder: ${shown(productName)}/`);
 
   if (odd.length) warn(`not offered (a repo name must be letters, digits, ".", "_" or "-"): ${odd.map(shown).join(', ')} — connect them with \`yad setup\` under another name`);
-  if (found.length) info(`found ${found.length} repo(s) beside it: ${found.join(', ')}`);
+  if (found.length) info(`found ${found.length} repo(s) beside it: ${shown(found.join(', '))}`);
   else info('found no repos beside it — connect them later with `yad setup`');
   const setup = await runSetup(product, { ...opts, brownfield: !opts.greenfield, ...layout, discovered });
   if (process.exitCode) return null;
   noteWorkspaceFile(product);
-  // Setup's own "yad next" is said from the Product; the person is still in the workspace folder.
-  hand(`start with: cd ${fromShell(product)} && yad next`);
+  // Setup's own "yad next" is said from the Product; the person is still in the workspace folder. A
+  // folder name that is not a plain one is never put in a command to copy (S04): a placeholder instead.
+  hand(`start with: cd ${validFolderName(path.basename(product)) ? fromShell(product) : '<the Product folder>'} && yad next`);
   return { workspace: cwd, product, found, setup };
 }
 

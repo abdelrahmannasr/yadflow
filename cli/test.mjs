@@ -21895,6 +21895,29 @@ test('risk map: draft never writes a line the map cannot read — a parent line 
   assert.match(left.find((f) => f.target === 'my docs/').message, /rename it/);
 });
 
+// S04 (Product #216): a directory name holding a control character (C0, DEL, C1) or an invisible one
+// `forTerminal` replaces (a bidi control, a line separator) is never written into the committed map.
+test('risk map: draft never writes a directory whose name holds a control or invisible character', async () => {
+  const { draftRiskMap, parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  const { changedForTerminal, forTerminal } = await import('./lib.mjs');
+  // `src/in…ner/` sits under `src/x/`, which has a line, so draft asks for that folder itself — it must not
+  // write it, and adds its clean parent `src/` instead, which covers it. `lib/a/b\u009b/` gets `lib/a/`.
+  const odd = ['ev\u001b]0;x/', 'bel\u0007/', 'del\u007f/', 'c1\u009b/', 'rtl\u202e/', 'ls\u2028/', 'src/in\u001bner/', 'lib/a/b\u009b/'];
+  const files = ['plain/a.js', 'src/x/a.js', 'lib/a/c/a.js', ...odd.map((d) => `${d}f.js`), '.sdlc/risk-map'];
+  const d = draftRiskMap('# yad-risk-map v1\nsrc/x/ low confirmed\nlib/a/c/ low confirmed\n', files);
+  assert.deepEqual(d.added, ['.sdlc/', 'lib/a/', 'plain/', 'src/']);
+  // Every file is covered now except those in the odd top-level folders: they have no parent line to take.
+  const left = riskMapFindings(parseRiskMap(d.text), { files }).filter((f) => f.code === 'uncovered').map((f) => f.target);
+  assert.deepEqual([...left].sort(), odd.filter((x) => x.split('/').length === 2).sort());
+  assert.deepEqual([...d.unwritable].sort(), [...odd].sort(), 'each such directory is listed as one draft could not write');
+  assert.ok(d.text.split('\n').every((l) => !changedForTerminal(l)), `no line of the map holds such a character:\n${JSON.stringify(d.text)}`);
+  assert.deepEqual(parseRiskMap(d.text).problems, []);
+  assert.equal(draftRiskMap(d.text, files).text, d.text, 'a second draft adds nothing');
+  // The shared predicate says exactly what `forTerminal` changes.
+  for (const t of ['plain', 'é ü 字', '@types', 'a-b_c.d']) assert.equal(changedForTerminal(t), false, t);
+  for (const t of odd) assert.ok(changedForTerminal(t) && forTerminal(t) !== t, JSON.stringify(t));
+});
+
 test('risk map: `@types/` is a directory, `@org/team` is a name; only spaces and tabs are whitespace', async () => {
   const { parseRiskMap } = await import('./riskmap.mjs');
   const p = parseRiskMap('# yad-risk-map v1\n@types/ low confirmed\nsrc/ high confirmed # @org/payments-team\nlib/ low confirmed \n');
@@ -30693,6 +30716,45 @@ test('E125 (c): yad doctor prints a step id, a reconcile-debt reason and a workf
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// S04 (Product #216): the repo names and paths `yad setup` / `yad init` print — a found folder, its
+// prompt, a registered repo, a path refused — go through `forTerminal`; the registry keeps the raw name.
+test('S04: yad setup prints a found folder name, a registered repo and a refused path cleaned; the registry keeps them raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, async () => {
+  const { registerRepo } = await import('./setup.mjs');
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const odd = 'ap\u001b]0;pwned\u0007i';
+  const { T } = scaffold();
+  const prior = process.env.SDLC_NONINTERACTIVE;
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const repo = path.join(T, 'demo', odd);
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q');
+    git(repo, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
+    const { out } = await captureConsole(() => runSetup(T, {
+      solo: true, greenfield: true, separate: true, ideTargets: ['.claude'], connect: 'all',
+      discovered: [{ name: odd, rpath: `demo/${odd}` }],
+    }));
+    assert.ok(!hasRaw(out), `setup prints no raw control character:\n${out}`);
+    assert.match(out, /registered ap ]0;pwned i/, 'the found folder, cleaned');
+    assert.match(out, /ap ]0;pwned i: greenfield — skipped repomix pack \(run `yad repo refresh <name>`/, 'and a name that is not one plain word is never put in a command');
+    const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    assert.ok(reg.repos.some((r) => r.name === odd && r.path === `demo/${odd}`), 'the registry keeps the raw name and path');
+
+    // A path refused before any git runs is printed cleaned too.
+    const refused = await captureConsole(() => {
+      registerRepo(T, { repos: [] }, { name: 'x', rpath: `../../out\u001b[2Jside` });
+      registerRepo(T, { repos: [] }, { name: 'y', rpath: `.git/in\u001b[2Jside` });
+    });
+    assert.ok(!hasRaw(refused.out), `no raw control character:\n${refused.out}`);
+    assert.match(refused.out, /\.\.\/\.\.\/out \[2Jside resolves outside the workspace/);
+    assert.match(refused.out, /\.git\/in \[2Jside runs through a \.git folder/);
+  } finally {
+    if (prior === undefined) delete process.env.SDLC_NONINTERACTIVE;
+    else process.env.SDLC_NONINTERACTIVE = prior;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 // E125 part (c): `yad risk-map check` prints a finding's folder name cleaned, before its colour; `--json`
 // keeps the raw name.
 test('E125 (c): yad risk-map check prints a folder name holding an escape cleaned; --json keeps it raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
@@ -30718,6 +30780,79 @@ test('E125 (c): yad risk-map check prints a folder name holding an escape cleane
 
     const json = JSON.parse(e79Yad(T, product, ['risk-map', 'check', '--json']).stdout);
     assert.ok(json.repos[0].findings.some((f) => f.target === `${odd}/`), '--json keeps the raw folder name');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// S04 (Product #216): `yad risk-map draft` lists a folder whose name holds an escape as one it could not
+// write, cleaned; the map stays free of it; `--json` keeps the raw name. A repo name the person typed is
+// echoed cleaned too.
+test('S04: yad risk-map draft never writes a folder name holding an escape, and prints it cleaned; --json keeps it raw', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const odd = 'ev\u001b]0;pwned\u0007il';
+  const T = e79Tmp();
+  try {
+    const { product, backend } = e80Workspace(T);
+    for (const d of [odd, 'plain']) {
+      fs.mkdirSync(path.join(backend, d));
+      fs.writeFileSync(path.join(backend, d, 'f.js'), 'x');
+    }
+    e79Git(T, backend, 'add', '-A');
+    e79Git(T, backend, 'commit', '-qm', 'tree');
+
+    const json = JSON.parse(e79Yad(T, product, ['risk-map', 'draft', '--dry-run', '--json']).stdout);
+    assert.deepEqual(json.repos[0].unwritable, [`${odd}/`], '--json keeps the raw folder name');
+    const r = e79Yad(T, product, ['risk-map', 'draft']);
+    const out = r.stdout + r.stderr;
+    assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
+    assert.match(out, /not added — .*control or invisible character\): ev ]0;pwned il\//, 'the folder, cleaned, as one it could not write');
+    const map = fs.readFileSync(path.join(backend, '.sdlc', 'risk-map'), 'utf8');
+    assert.ok(!hasRaw(map) && !map.includes('pwned'), `the map never holds it:\n${map}`);
+    assert.match(map, /^plain\/ +unset$/m);
+
+    const u = e79Yad(T, product, ['risk-map', 'check', `no\u001b[2Jpe`]);
+    const uo = u.stdout + u.stderr;
+    assert.ok(!hasRaw(uo), `the unknown repo is echoed cleaned:\n${uo}`);
+    assert.match(uo, /unknown repo: no \[2Jpe/);
+    // The message is cleaned in --json too, as the refusal beside it and `yad sync --repo` already are.
+    assert.equal(JSON.parse(e79Yad(T, product, ['risk-map', 'check', `no\u001b[2Jpe`, '--json']).stdout).error, 'unknown repo: no [2Jpe');
+
+    // A registered repo with no map yet: the command to copy never carries a name that is not one plain word.
+    fs.rmSync(path.join(backend, '.sdlc', 'risk-map'));
+    fs.writeFileSync(path.join(product, '.sdlc', 'repos.json'), JSON.stringify({ repos: [{ name: 'ba\u001bck end', path: '../backend' }] }));
+    const h = e79Yad(T, product, ['risk-map', 'check']);
+    const ho = h.stdout + h.stderr;
+    assert.ok(!hasRaw(ho), `no raw control character:\n${ho}`);
+    assert.match(ho, /risk map — ba ck end/);
+    assert.match(ho, /draft one with `yad risk-map draft <name>`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// S04 (Product #216): `yad init` names a Product folder it found beside the repos cleaned.
+test('S04: yad init prints a found Product folder name holding an escape cleaned, and never puts it in a cd to copy', { skip: process.platform === 'win32' && 'a control character in a file name' }, () => {
+  const hasRaw = (t) => ['\u001b', '\u0007'].some((ch) => t.includes(ch));
+  const T = e79Tmp();
+  try {
+    const ws = path.join(T, 'ws');
+    for (const p of ['pr\u001b]0;pwned\u0007od', 'second']) {
+      fs.mkdirSync(path.join(ws, p, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(ws, p, '.sdlc', 'hub.json'), '{}');
+    }
+    const two = e79Yad(T, ws, ['init']);
+    const out = two.stdout + two.stderr;
+    assert.equal(two.status, 1);
+    assert.ok(!hasRaw(out), `no raw control character:\n${out}`);
+    assert.match(out, /more than one Product here \(pr ]0;pwned od, second\)/);
+
+    // One Product, so init sets it up: every line it prints — the target, the workspace-file note, the
+    // `cd` to copy — holds no raw control character, and the `cd` never names a folder that is not plain.
+    fs.rmSync(path.join(ws, 'second'), { recursive: true, force: true });
+    const one = e79Yad(T, ws, ['init', '--solo', '--greenfield', '--ide-targets', '.claude']);
+    const all = one.stdout + one.stderr;
+    assert.equal(one.status, 0, all);
+    assert.ok(!hasRaw(all), `no raw control character:\n${all}`);
+    assert.match(all, /Product folder: pr ]0;pwned od\//);
+    assert.match(all, /not written \(the Product folder's name \(pr ]0;pwned od\)/);
+    assert.match(all, /start with: cd <the Product folder> && yad next/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
