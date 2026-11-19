@@ -2177,6 +2177,40 @@ process.stdout.write(JSON.stringify([readPlainText(process.argv[1]), contentSha(
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#222 backupPlain and writeFileAtomic: a backup reads only a plain file and never writes through a link; a mode is set on the new file', { skip: E125B_SKIP }, async () => {
+  const { backupPlain, writeFileAtomic } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-backup-plain-')));
+  try {
+    const outside = path.join(T, 'outside.txt');
+    fs.writeFileSync(outside, 'mine\n', { mode: 0o644 });
+    const src = path.join(T, 'gate.sh');
+    fs.writeFileSync(src, 'edited\n', { mode: 0o755 });
+    // The source is a link: refused, and no backup is written.
+    const linkedSrc = path.join(T, 'linked.sh');
+    fs.symlinkSync(outside, linkedSrc);
+    assert.throws(() => backupPlain(linkedSrc, `${linkedSrc}.yad-orig`), (e) => e.code === NOT_PLAIN_FILE);
+    assert.ok(!fs.existsSync(`${linkedSrc}.yad-orig`));
+    // The backup's name is a dangling link: replaced by the copy, its target never made.
+    const backup = `${src}.yad-orig`;
+    fs.symlinkSync(path.join(T, 'made.txt'), backup);
+    backupPlain(src, backup);
+    assert.ok(fs.lstatSync(backup).isFile());
+    assert.equal(fs.readFileSync(backup, 'utf8'), 'edited\n');
+    assert.ok(!fs.existsSync(path.join(T, 'made.txt')));
+    if (process.platform !== 'win32') assert.equal(fs.statSync(backup).mode & 0o777, 0o755, 'the copy keeps the mode');
+    // A mode is set on the new file, never through a link standing at the name.
+    const hook = path.join(T, 'pre-commit');
+    fs.symlinkSync(outside, hook);
+    writeFileAtomic(hook, '#!/bin/sh\n', { mode: 0o755 });
+    assert.ok(fs.lstatSync(hook).isFile());
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n');
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(hook).mode & 0o777, 0o755);
+      assert.equal(fs.statSync(outside).mode & 0o777, 0o644, 'the link\'s target keeps its mode');
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#222 copyFile and contentSha: a link at the destination has no sha, and the copy replaces it — never writes through it', { skip: E125B_SKIP }, async () => {
   const { copyFile, contentSha } = await import('./lib.mjs');
   const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-copyfile-')));

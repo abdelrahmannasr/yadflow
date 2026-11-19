@@ -237,12 +237,15 @@ export function copyFile(src, dest, { exec = false } = {}) {
   refuseLinkedWrite(dest);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = `${path.resolve(dest)}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  let made = false;
   try {
     fs.copyFileSync(src, tmp, fs.constants.COPYFILE_EXCL);
+    made = true;
     if (exec) fs.chmodSync(tmp, 0o755);
     fs.renameSync(tmp, dest);
   } catch (e) {
-    try { fs.rmSync(tmp, { force: true }); } catch { /* keep the copy's own error */ }
+    // Only our own new file is removed: an entry already there under that name (EEXIST) is not ours.
+    if (made) { try { fs.rmSync(tmp, { force: true }); } catch { /* keep the copy's own error */ } }
     throw e;
   }
 }
@@ -632,6 +635,8 @@ export function writeJSON(p, obj, opts) {
 // A linked folder on the way is refused before any folder is made (#214): `mkdirSync` and the rename would
 // follow it. The refusal is a YAD-STATE-001 with a hint, so a command stops with a clear answer; it keeps
 // the plain read's `kind` and `folder`.
+// `opts.mode`: the new file's mode, set on the new file before the rename — never on whatever stands at `p`, which
+// a chmod there would follow if it were a link.
 export function writeFileAtomic(given, data, opts) {
   refuseLinkedWrite(given, opts?.within);
   // The same normalised path the walk checked.
@@ -641,8 +646,10 @@ export function writeFileAtomic(given, data, opts) {
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link
   // points (`~/.zshenv`; E81 review 17). `wx` refuses any entry already there, links included.
   const tmp = `${p}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  try { fs.writeFileSync(tmp, data, { flag: 'wx' }); }
-  catch (e) {
+  try {
+    fs.writeFileSync(tmp, data, { flag: 'wx' });
+    if (opts?.mode !== undefined) fs.chmodSync(tmp, opts.mode);
+  } catch (e) {
     // A half-written file of our own (a full disk) is removed; an entry that was already there (EEXIST)
     // is not ours to delete.
     if (e.code !== 'EEXIST') { try { fs.rmSync(tmp, { force: true }); } catch { /* keep the write's own error */ } }
@@ -654,6 +661,18 @@ export function writeFileAtomic(given, data, opts) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* keep the rename's own error */ }
     throw e;
   }
+}
+
+// The `.yad-orig` copy of a file yad is about to replace (#222). The file is read only as a plain file, so a
+// link put in its place is never read through (nor a device waited on), and the copy is written through a new
+// file and a rename, so a `.yad-orig` that is a link is replaced, never written through. A file that is not
+// plain (a link, a folder, a device, one too big, or one under a linked folder) is refused with its error
+// (NOT_PLAIN_FILE, FILE_TOO_BIG, or ENOENT when it is gone): the caller then replaces nothing.
+export function backupPlain(src, backup) {
+  const bytes = readPlainBytes(src);
+  let mode;
+  try { mode = fs.lstatSync(src).mode & 0o777; } catch { /* gone since the read: the copy keeps the default */ }
+  writeFileAtomic(backup, bytes, mode === undefined ? undefined : { mode });
 }
 
 // ---- subprocess ---------------------------------------------------------

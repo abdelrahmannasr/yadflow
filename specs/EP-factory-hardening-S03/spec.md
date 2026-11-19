@@ -45,7 +45,8 @@ atomic.
 ### Session 2026-11-19
 - Q: Light spec — one `spec.md` holding the spec, the plan and the tasks? → A: yes (chore route, no contract surface)
 - Q: A wired file that is a link: missing (written fresh) or left alone? → A: missing, as a file yad cannot read is; the new file replaces the link, never writes through it.
-- Q: A git hook that is a link? → A: foreign — tools such as hook managers install links; yad leaves it alone and names the line to add.
+- Q: A git hook that is a link? → A: ~~foreign~~ — superseded by the review below: 'linked'.
+- Q: Code review of T01–T04 (2026-11-19)? → A: no blockers; fixed in T05–T08: the hook and rules-block writes look again and write through a rename (mode set on the new file); every `.yad-orig` backup reads only a plain file (`backupPlain`); a hook that is a link, or in a linked folder, has its own state ('linked') and honest advice in doctor; a wired file tells a link (replaced, and said so) from a folder, a device, a file too big or one under a linked folder (named, nothing written, the run goes on). yad's own shipped gate-sync fragment is read through `readPlainText` too.
 
 ## Plan
 
@@ -77,5 +78,28 @@ file is unchanged and no dangling target is made. A guard test counts the direct
 ## T04 — Fail a new direct read in doctor, setup or check, and say what a linked CI file does
 **Files:**
 - cli/test.mjs
+- docs/CLI.md
+
+## T05 — Back up only a plain file, and set a new file's mode before its rename
+**Files:**
+- cli/lib.mjs
+- cli/test.mjs
+
+## T06 — Tell a link at a wired file from one yad may not write, and go on with the others
+**Files:**
+- cli/plan.mjs
+- cli/setup.mjs
+- cli/reconcile.mjs
+
+## T07 — Give a linked git hook its own state and advice, and write hooks only through a rename
+**Files:**
+- cli/plan.mjs
+- cli/doctor.mjs
+- cli/test-hooks.mjs
+
+## T08 — Test the wired-file cases end to end, read yad's own fragment plainly, and say what is written in the docs
+**Files:**
+- cli/test.mjs
+- cli/reconcile.mjs
 - docs/CLI.md
 <!-- /yad:tasks -->
