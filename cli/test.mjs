@@ -1861,6 +1861,7 @@ test('#214: a linked .sdlc, epics/ or Build folder is refused for every read and
       setProductRoot(P);
       try {
         const p = path.join(P, file);
+        const escRe214 = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const named = (e) => e.code === NOT_PLAIN_214 && e.kind === 'link' && e.folder === linked
           && e.message === `${linked} is a link, so yad did not read ${file} (it reads a file there only through real folders)`;
         assert.throws(() => readPlainFile214(p), named, `${linked}: readPlainFile`);
@@ -1871,10 +1872,10 @@ test('#214: a linked .sdlc, epics/ or Build folder is refused for every read and
         let got;
         const said = grabErr(() => { got = readJSONPlain(p, 'fallback'); });
         assert.equal(got, 'fallback', `${linked}: readJSON gives the fallback`);
-        assert.match(said, new RegExp(`${linked.replace(/[./]/g, '\\$&')} is a link, so yad did not read .* remove the link \\(\`git rm <folder>\`\\), then restore the real folder from a commit where it was a folder`));
+        assert.match(said, new RegExp(`${escRe214(linked)} is a link, so yad did not read .* remove the link \\(\`git rm <folder>\`\\), then restore the real folder from a commit where it was a folder`));
         assert.throws(() => readJSONStrictPlain(p, []), (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.message.startsWith(`${linked} is a link`) && /real folder/.test(e.hint));
         // Writes: over the file, beside it, and in a folder not made yet below the link.
-        const wrote = (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.kind === 'link' && e.folder === linked && new RegExp(`^${linked.replace(/[./]/g, '\\$&')} is a link, so yad did not write `).test(e.message);
+        const wrote = (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.kind === 'link' && e.folder === linked && new RegExp(`^${escRe214(linked)} is a link, so yad did not write `).test(e.message);
         assert.throws(() => writeJSON(p, { a: 1 }), wrote, `${linked}: writeJSON over the file`);
         assert.throws(() => writeJSON(path.join(path.dirname(p), 'new.json'), { a: 1 }), wrote);
         assert.throws(() => writeFileAtomic214(path.join(path.dirname(p), 'deep', 'er', 'x.md'), 'x'), wrote, `${linked}: no folder is made through the link`);
