@@ -272,13 +272,16 @@ const listOf = (v) => (Array.isArray(v) ? v : String(v ?? '').replace(/^\s*\[|\]
 // engine plans the chain from the parent (`planThreadedSeed`) and this writes it — the ledger, one
 // provenance record per inherited gate, and the pointer-lock when the contract is carried.
 function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profile, inherits, headerLists, today, json, bail, answer }) {
-  const plan = planThreadedSeed(root, { epic, parent, inherits, type, today });
+  const plan = planThreadedSeed(root, { epic, parent, inherits, type, today, profile });
   if (!plan.ok) return bail(plan.message, plan.hint);
   // The route is the parent's. A flag naming the same one is harmless; a different one is refused
   // rather than obeyed, because a child on another route would inherit steps its route does not have.
+  // The one exception is the planner's to grant (#578): a defect or hotfix off a stub on the chore lane.
   if (profile && profile !== plan.profile) {
     return bail(`a change takes its parent's route — ${parent} is on '${plan.profile}', --profile says '${profile}'`,
-      'drop --profile. To change the route, start a new epic instead of threading one');
+      plan.parentStub && profile === 'chore'
+        ? `drop --profile. Only a defect or hotfix off a stub takes the chore lane — a ${type} keeps ${parent}'s route`
+        : 'drop --profile. To change the route, start a new epic instead of threading one');
   }
   const declaredThread = typeof fm.thread === 'string' && fm.thread.trim() ? fm.thread.trim() : null;
   // A header that EXISTS must carry the lineage too. `resolveThread` reads only epic.md, so a header with
@@ -331,7 +334,9 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
     });
   }
-  ok(`${epic} seeded — ${typeNoun(type)} threaded off ${parent}, on its ${c.bold(plan.profile)} route (${state.steps.length} steps, ${carried.length} carried by reference)`);
+  ok(plan.shortLane
+    ? `${epic} seeded — ${typeNoun(type)} threaded off the stub ${parent}, on the short ${c.bold(plan.profile)} lane (${state.steps.length} steps, ${carried.length} carried by reference)`
+    : `${epic} seeded — ${typeNoun(type)} threaded off ${parent}, on its ${c.bold(plan.profile)} route (${state.steps.length} steps, ${carried.length} carried by reference)`);
   info(`chain: ${state.steps.map((s) => (s.inherited ? c.dim(`${s.id}←${s.inheritedFrom}`) : s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
   if (plan.lock) {
     info(`contract-lock.json points at ${plan.lock.inheritedFrom}'s lock (${plan.lock.hash.slice(0, 19)}…) — there is no contract.md here, so the surface cannot drift`);

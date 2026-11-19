@@ -4481,9 +4481,19 @@ export function describeLockBreak(w) {
   }
 }
 
-// Plan the ledger of a change-epic threaded off `parent`. Reads the Product; writes nothing.
-// Returns `{ ok: false, message, hint }` or `{ ok: true, state, approvals, lock, profile, owners, anchor, thread }`.
-export function planThreadedSeed(root, { epic, parent, inherits = [], type, today }) {
+// THE SHORT LANE OFF A STUB (#578). A defect or hotfix off an un-promoted stub may ask for the chore
+// lane: the carried epic (or its own), then stories and their review, then Build. Only these types, and
+// only off a stub: a stub has no surface to protect yet, so a one-line fix to code yadflow never tracked
+// need not walk every Shape gate. A tracked parent keeps its route, its contract and its review rules.
+const SHORT_LANE_TYPES = ['defect', 'hotfix'];
+const SHORT_LANE_PROFILE = 'chore';
+
+// Plan the ledger of a change-epic threaded off `parent`. Reads the Product; writes nothing. `profile` is
+// the route asked for, if any: it is taken only for the short lane above, and otherwise left to the
+// caller to compare with the parent's route.
+// Returns `{ ok: false, message, hint }` or
+// `{ ok: true, state, approvals, lock, profile, parentProfile, parentStub, shortLane, owners, anchor, thread }`.
+export function planThreadedSeed(root, { epic, parent, inherits = [], type, today, profile: wanted = null }) {
   const refuse = (message, hint) => ({ ok: false, message, hint });
   const bases = [...new Set(inherits.map((b) => String(b).trim()).filter(Boolean))];
 
@@ -4496,10 +4506,6 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
   if (additive.length) {
     return refuse(`${additive.join(' and ')} cannot be inherited`,
       'every change writes its own stories and test cases: the thread\'s set is the union of every epic that wrote some, and `stories-review` is what hands an epic to Build. Leave them out of inherits');
-  }
-  if (bases.includes('architecture') !== bases.includes('contract')) {
-    return refuse('architecture and contract are inherited together, or not at all',
-      'the architecture step writes contract.md, so they are one step. To change the surface, inherit neither — the change re-authors architecture and re-locks');
   }
 
   if (!isValidEpicId(parent)) return refuse(`invalid parent id: ${parent} (expected EP-<slug>)`);
@@ -4522,11 +4528,30 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
 
   // THE ROUTE IS THE PARENT'S. A short-lane parent gives a short child; writing `classic` over it would
   // mint inherited architecture steps for a review that never happened anywhere.
-  const profile = epicProfileId(parentState);
-  if (!profile || !seedableProfiles().includes(profile)) {
-    return refuse(`${parent}: its chain is on no route this command can seed${profile ? ` ('${profile}')` : ''}`,
+  const parentProfile = epicProfileId(parentState);
+  if (!parentProfile || !seedableProfiles().includes(parentProfile)) {
+    return refuse(`${parent}: its chain is on no route this command can seed${parentProfile ? ` ('${parentProfile}')` : ''}`,
       'run `yad doctor` on the parent — its recorded profile and its chain must agree');
   }
+  // The one exception: a defect or hotfix off a stub that asks for the chore lane. Strictly an
+  // un-promoted stub — a light-promoted anchor (`documented`) is a tracked feature again.
+  const parentStub = backfillAnchorKind(parentState) === 'stub';
+  const shortLane = wanted === SHORT_LANE_PROFILE && wanted !== parentProfile
+    && parentStub && SHORT_LANE_TYPES.includes(type);
+  if (shortLane) {
+    const extra = bases.filter((b) => b !== 'epic');
+    if (extra.length) {
+      return refuse(`the ${SHORT_LANE_PROFILE} lane off ${parent} has no ${extra.join(', ')} step — it is the epic, then stories and their review, then Build`,
+        `on this lane a ${type} carries only the epic, or nothing. Leave ${extra.join(', ')} out of inherits, or drop --profile to take ${parent}'s ${parentProfile} route`);
+    }
+  }
+  // Checked once the lane is known, so a lone `architecture` on the short lane is told the lane has no
+  // such step rather than to add `contract` beside it.
+  if (bases.includes('architecture') !== bases.includes('contract')) {
+    return refuse('architecture and contract are inherited together, or not at all',
+      'the architecture step writes contract.md, so they are one step. To change the surface, inherit neither — the change re-authors architecture and re-locks');
+  }
+  const profile = shortLane ? SHORT_LANE_PROFILE : parentProfile;
   const steps = seedChain(lifecycleProfile(profile));
   const onChain = new Set(steps.map((s) => s.id));
 
@@ -4679,6 +4704,9 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
   return {
     ok: true,
     profile,
+    parentProfile,
+    parentStub,
+    shortLane,
     thread: line.rootId,
     owners: ownerOf,
     anchor,

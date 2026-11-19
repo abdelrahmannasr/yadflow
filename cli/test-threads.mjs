@@ -1679,6 +1679,83 @@ test('yad epic new --parent: off a brownfield anchor, bases carry no hash and no
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// A stub anchor, as `yad epic new --stub` writes it: the classic chain behind the backfill sentinel.
+function stubEpic(T, id) {
+  const dir = writeEpic(T, id, { kind: 'feature', type: 'feature', thread: id, stub: 'backfill-pending', verified: false });
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(seedState({ epic: id, profile: 'classic', type: 'feature', today: '2026-01-01', stub: true })));
+  fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), '[]');
+  return dir;
+}
+
+test('yad epic new --parent: a defect or hotfix off a stub takes the chore lane on --profile chore (#578)', async () => {
+  const doctor = await import('./doctor.mjs');
+  const T = productConfig();
+  stubEpic(T, 'EP-legacy');
+  try {
+    for (const type of ['defect', 'hotfix']) {
+      // Carrying the stub's epic: the carried epic, then stories and their review, then Build. Its
+      // epic.md is written first, as the yad-change skill does, so the lineage readers see it too.
+      const slug = `${type}-carried`;
+      writeEpic(T, `EP-${slug}`, { kind: type, type, parent: 'EP-legacy', thread: 'EP-legacy', inherits: ['epic'] });
+      const { out, failed } = await seedOn(T, { slug, type, parent: 'EP-legacy', inherits: 'epic', profile: 'chore', json: true });
+      assert.equal(failed, false, out);
+      const res = JSON.parse(out);
+      assert.equal(res.profile, 'chore');
+      assert.equal(res.anchor, true);
+      const state = sdlcOf(T, `EP-${slug}`, 'state.json');
+      assert.equal(state.profile, 'chore');
+      assert.equal(state.type, type);
+      assert.deepEqual(state.steps.map((s) => s.id), ['epic', 'epic-review', 'stories', 'stories-review']);
+      assert.equal(state.currentStep, 'stories');
+      const carried = state.steps.filter((s) => s.inherited);
+      assert.deepEqual(carried.map((s) => s.id), ['epic', 'epic-review']);
+      assert.ok(carried.every((s) => s.status === 'satisfied' && s.boundHash === null && s.inheritedFrom === 'EP-legacy'));
+      assert.equal(fs.existsSync(path.join(epicRoot(T, `EP-${slug}`), '.sdlc/contract-lock.json')), false);
+      // Inheriting nothing: the child writes its own epic first.
+      const own = await seedOn(T, { slug: `${type}-own`, type, parent: 'EP-legacy', profile: 'chore' });
+      assert.equal(own.failed, false, own.out);
+      assert.match(own.out, /threaded off the stub EP-legacy, on the short .*chore.* lane/);
+      const ownState = sdlcOf(T, `EP-${type}-own`, 'state.json');
+      assert.equal(ownState.profile, 'chore');
+      assert.equal(ownState.currentStep, 'epic');
+      assert.equal(ownState.steps.some((s) => s.inherited), false);
+    }
+    // The children's ledgers are what doctor expects of a chore-route epic, and the lineage holds.
+    for (const type of ['defect', 'hotfix']) assert.equal(resolveThread(T, `EP-${type}-carried`).broken, null);
+    const checks = [];
+    for (const run of ['epicChecks', 'typeChecks', 'catalogueChecks', 'profileChecks', 'skipChecks', 'stepStateChecks']) doctor[run](checks, T);
+    const bad = checks.filter((c) => c.status !== 'ok' && /EP-(defect|hotfix)-/.test(`${c.id} ${c.message} ${c.hint || ''}`));
+    assert.deepEqual(bad, []);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: the chore lane off a stub carries the epic or nothing, and only for a defect or hotfix (#578)', async () => {
+  const T = productConfig();
+  stubEpic(T, 'EP-legacy');
+  // A light-promoted anchor is a tracked feature again: it keeps its route.
+  const doc = stubEpic(T, 'EP-documented');
+  const f = path.join(doc, '.sdlc/state.json');
+  const st = JSON.parse(fs.readFileSync(f, 'utf8'));
+  delete st.kind; st.currentStep = 'backfill-done';
+  fs.writeFileSync(f, JSON.stringify(st));
+  try {
+    for (const [opts, message] of [
+      [{ type: 'defect', inherits: 'architecture,contract' }, /the chore lane off EP-legacy has no architecture, contract step[\s\S]*carries only the epic, or nothing/],
+      [{ type: 'defect', inherits: 'architecture' }, /the chore lane off EP-legacy has no architecture step/],
+      [{ type: 'hotfix', inherits: 'contract' }, /the chore lane off EP-legacy has no contract step/],
+      [{ type: 'hotfix', inherits: 'epic,ui-design' }, /the chore lane off EP-legacy has no ui-design step[\s\S]*drop --profile to take EP-legacy's classic route/],
+      [{ type: 'change', inherits: 'epic' }, /takes its parent's route — EP-legacy is on 'classic', --profile says 'chore'[\s\S]*Only a defect or hotfix off a stub takes the chore lane/],
+      [{ type: 'defect', inherits: 'epic', profile: 'spike' }, /takes its parent's route — EP-legacy is on 'classic', --profile says 'spike'/],
+      [{ type: 'defect', inherits: 'epic', parent: 'EP-documented' }, /takes its parent's route — EP-documented is on 'classic', --profile says 'chore'/],
+    ]) {
+      const r = await seedOn(T, { slug: 'r', parent: 'EP-legacy', profile: 'chore', ...opts });
+      assert.equal(r.failed, true, JSON.stringify(opts));
+      assert.match(r.out, message, JSON.stringify(opts));
+      assert.equal(seeded(T, 'EP-r'), false, JSON.stringify(opts));
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad epic new --parent: only work written AND approved upstream is carried (the E37/E41 limit)', async () => {
   // The thread's owner map names the epic that DECIDED about a base, which is right for a skip — and a
   // skip is not an artifact. Carrying one would seed an inherited UI nobody wrote; carrying a deferral
