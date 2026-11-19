@@ -1102,6 +1102,8 @@ const ENGINE_SEEDED = [
   ['yad-discovery/SKILL.md', 'yad foundation new'],
   // E42: the threaded chain — inherited steps, provenance records and the pointer-lock.
   ['yad-change/SKILL.md', 'yad epic new EP-<slug> --type <change|defect|hotfix> --parent <EP-parent> --inherits <bases>'],
+  // E17b (Product #1): the stub's promote — epic.md and the ledger, written together by the engine.
+  ['yad-backfill/SKILL.md', 'yad backfill promote EP-<slug> --repo <repo> --feature <feature>'],
 ];
 
 test('the skills that call the engine carry no chain of their own to drift', () => {
@@ -1127,7 +1129,7 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
   // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
   const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
-    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery', 'yad-change'];
+    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery', 'yad-change', 'yad-backfill'];
   // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
   // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
   // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
@@ -1153,7 +1155,7 @@ test('the skills E17b changed instruct no ledger write at all', () => {
       // chain" describes what `yad epic new` does; it is the opposite of an instruction to the author,
       // and it is the sentence this whole task exists to put there. A line naming an engine command,
       // or opening with "That"/"It", is describing one.
-      .filter((l) => !/yad (epic new|gate open|migrate)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
+      .filter((l) => !/yad (epic new|gate open|migrate|backfill promote)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
       // A heading is a label for the step, not an imperative inside it. The instruction lives in the
       // body underneath, which this still reads.
       .filter((l) => !l.trimStart().startsWith('#'))
@@ -1168,28 +1170,23 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   }
 });
 
-test('the skills that still write a chain by hand are named, with the reason', () => {
+test('no skill writes a chain by hand any more, and the banner says where each former writer went', () => {
   // Not "only yad-review-gate", which is what this used to claim and was false. The review gate itself left
-  // the list in E112 (`yad gate advance`); the one writer left is named in its banner, with the reason, and
-  // so is where each former writer went — a reader who remembers one as a writer would otherwise go
-  // looking for the JSON block.
+  // the list in E112 (`yad gate advance`), and `yad-backfill` was the last one, until E17b gave its promote
+  // a verb. The banner still says where each former writer went: a reader who remembers one as a writer
+  // would otherwise go looking for the JSON block.
   const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
   assert.ok(!/TRANSCRIPTION of `advanceState`/.test(gate), 'the review gate no longer transcribes advanceState (E112)');
   assert.match(gate, /since E112 it runs\s+`yad gate advance`/);
-  for (const [skill, why] of [
-    ['yad-backfill', /promote/],
-  ]) {
-    assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
-    assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
-  }
-  assert.match(gate, /`yad-discovery` used to be one; since E75 it runs `yad foundation new`/);
+  assert.match(gate, /No skill writes a chain by hand any more/);
+  assert.doesNotMatch(gate, /still writes a chain by hand/);
+  assert.match(gate, /`yad-discovery` used to; since E75 it runs `yad foundation new`/);
   assert.match(gate, /`yad-change` used to seed a threaded chain by hand; since E42 it runs `yad epic new --parent`/);
-  // …and each of those really does still seed or rewrite a chain, so the banner is not naming skills
-  // that have already been converted.
-  for (const d of ['yad-backfill']) {
-    const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
-    assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
-  }
+  assert.match(gate, /`yad-backfill` was the last: its `promote` step rewrote a stub's chain by hand, and\s+since E17b it runs `yad backfill promote`/);
+  // …and the skill really does run the command now, with no hand edit of the ledger left in it.
+  const backfill = fs.readFileSync(new URL('../skills/yad-backfill/SKILL.md', import.meta.url), 'utf8');
+  assert.match(backfill, /yad backfill promote EP-<slug> --repo <repo> --feature <feature> --full/);
+  assert.doesNotMatch(backfill, /\*\*`state\.json`:\*\* \*\*remove\*\*|there is no `yad backfill`\s+CLI/);
 });
 
 test('the review gate opens a gate with the ENGINE, not by hand', () => {

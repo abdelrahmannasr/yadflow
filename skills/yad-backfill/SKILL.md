@@ -126,36 +126,49 @@ PR removes one of them.
 When a brownfield feature was anchored with a **stub genesis epic** (`yad-stub`) so that defects could
 thread off it, `promote` is what makes that anchor real — run it once the feature's backfill spec is
 `verified: true`. Given `epic EP-<slug>` (a stub: `stub: backfill-pending` / `verified: false`):
-- **Verify readiness:** the matching `specs/backfill/<feature>/spec.md` must exist and be
-  `verified: true`. If not, STOP — approve the spec first (Step 4).
-- **Clear the stub markers ATOMICALLY.** A stub is marked in two files at once — `epic.md`
-  (`stub: backfill-pending`) **and** `state.json` (top-level `kind: "stub"` + `currentStep:
-  "backfill-pending"`). Promote must clear **all** of them together, or `yad next` (reads `state.json`)
-  and `yad thread` / `yad-status` (read `epic.md`) will disagree about whether the epic is still a stub.
-  - **`epic.md`:** set `verified: true`, **remove** the `stub:` marker, and add a `backfill:` block linking
-    the approved spec, e.g. `backfill: { spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`.
-    Keep the stub's `title:`; set one now if it has none (the one-line name of the feature), by the
-    rules in the `title` row of the `epic.md` frontmatter table in `../yad-epic/references/state-schema.md`.
-  - **`state.json`:** **remove** the top-level `kind: "stub"`, and move `currentStep` off the
-    `backfill-pending` sentinel (per the promote flavour below). **Leave the top-level `type` exactly
-    as it is.** `kind` and `type` are two different things in this file: `kind: "stub"` is the
-    lifecycle marker you are clearing, and `type: "feature"` is the work-item type, which a promoted
-    stub still has. Nothing would report its loss — `yad doctor` only compares a `type` that is
-    there — so the ledger would quietly stop saying what kind of work it holds.
-- **Light promote (default):** the feature's documentation lives in the approved backfill spec — do NOT
-  wake the Shape chain. Set `state.json` `currentStep: "backfill-done"` (a terminal sentinel, like
-  `discovery-done`): the epic is now a real, verified anchor and its later evolution threads normally with
+
+**Run the engine. Do not edit `epic.md` or the ledger yourself.** Ask the person which flavour they want
+(below), then run:
+
+```bash
+yad backfill promote EP-<slug> --repo <repo> --feature <feature>          # light (the default)
+yad backfill promote EP-<slug> --repo <repo> --feature <feature> --full   # full
+```
+
+`<repo>` is the code repo's name in `.sdlc/repos.json` and `<feature>` the folder under
+`specs/backfill/`, so the spec it reads is `specs/backfill/<feature>/spec.md` in that repo's checkout
+on this machine.
+
+- **What it checks first.** The epic must be a stub, and the spec's frontmatter must say exactly
+  `verified: true` — read the way the backfill gate reads it (Step 5). If either is missing it writes
+  nothing and says which; approve the spec first (Step 4). It reads the spec in the checkout, while the
+  gate reads it on the base branch: an approval that is not merged yet passes here and still fails the gate.
+- **What it writes, together or not at all.** A stub is marked in two files at once, and `yad next`
+  (reads `state.json`) and `yad thread` / `yad-status` (read `epic.md`) must agree, so it writes both:
+  - **`epic.md`:** `verified: true`, no `stub:` marker, and a `backfill:` line naming the approved
+    spec, such as `backfill: { repo: <repo>, spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`.
+    The rest of the file is kept. If the stub has no `title:`, set one after the promote (the one-line
+    name of the feature), by the rules in the `title` row of the `epic.md` frontmatter table in
+    `../yad-epic/references/state-schema.md`.
+  - **the ledger:** it drops `kind: "stub"` and moves `currentStep` off the `backfill-pending`
+    sentinel (per the flavour below). It keeps `type: "feature"`: `kind` is the lifecycle marker,
+    `type` the work item, which a promoted stub still is.
+  If either write fails, it puts both files back as they were.
+- **Light promote (default):** the feature's documentation lives in the approved backfill spec — the
+  Shape chain stays asleep, and `currentStep` becomes `backfill-done` (a terminal sentinel, like
+  `discovery-done`): the epic is a real, verified anchor and its later evolution threads normally with
   `yad-change`. `yad next` then reports it as a documented anchor, not a pending stub.
-- **Full promote (opt-in):** to bring the feature fully under Shape and lock a real contract,
-  "wake" the state chain — set `currentStep: "epic"`, `epic` step `status: "in_progress"` — then run
-  `yad-epic` → `yad-architecture` → … the normal way. This re-locks a contract that subsequent thread
-  changes will inherit.
-- **verified mode — promote is not wired.** The `state.json` edits above mutate an epic whose ledger is
-  already on the base ref, so the `#162` seed exemption does not apply and `ledger-guard` rejects the
-  commit; unlike the authoring steps there is no `yad backfill` CLI and no `gate ci` path that performs
-  the promotion instead. On a verified Product, STOP and report this — the promotion needs the gate bot (or a
-  maintainer landing it out of band). Only the `epic.md` half is safe to commit. Tracked as a gap; do
-  **not** push the ledger edit around the guard.
+- **Full promote (`--full`, opt-in):** to bring the feature fully under Shape and lock a real contract.
+  `currentStep` becomes `epic` and the `epic` step opens; then run `yad-epic` → `yad-architecture` → …
+  the normal way. This re-locks a contract that later thread changes will inherit.
+- **A promote cut short** (some stub markers left from an older hand edit) is finished by the same
+  command, when the ledger is still on `backfill-pending` or already on the step the flavour writes.
+  When only the `stub:` line in `epic.md` is left, it finishes `epic.md` alone and keeps the ledger as it
+  is. When it refuses, show the person its message and stop.
+- **verified mode.** On a verified ledger CI is the only writer of the ledger, so the command refuses
+  and writes nothing, as `yad gate approve` does. Tell the person what it says: the stub keeps working as
+  an anchor, and the promotion has no CI path yet. Never push a ledger edit around the guard.
+- Commit the two files together, in one commit, so no commit holds half a promote.
 - Never auto-advances; a human confirms the promotion.
 
 ### Step 7 — Stop (no auto-advance)
