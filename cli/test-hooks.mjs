@@ -827,8 +827,8 @@ test('E48: the pre-commit hook yad installs refuses a real `git commit`, `git co
 });
 
 // #222: a hook that is a link (some tools install theirs so), a dangling one, a folder or a device is not read:
-// it is not yad's, so yad writes no hook through it and never replaces it.
-test('#222: a pre-commit hook that is a link, a dangling link or a folder is foreign — never read, written through or replaced', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+// it is 'linked', so yad writes no hook through it and never replaces it.
+test('#222: a pre-commit hook that is a link, a dangling link or a folder is linked — never read, written through or replaced', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
   const { gitHookActions, gitHookState } = await import('./plan.mjs');
   const { T, repo, product } = verifiedRepo();
   try {
@@ -837,14 +837,14 @@ test('#222: a pre-commit hook that is a link, a dangling link or a folder is for
     const outside = path.join(T, 'team-hook.sh');
     fs.writeFileSync(outside, '#!/bin/sh\nnpx lint-staged\n');
     const made = path.join(T, 'made-hook.sh');
-    for (const [what, make] of [
-      ['a link', () => fs.symlinkSync(outside, hook)],
-      ['a dangling link', () => fs.symlinkSync(made, hook)],
-      ['a folder', () => fs.mkdirSync(hook)],
+    for (const [what, make, kind] of [
+      ['a link', () => fs.symlinkSync(outside, hook), 'link'],
+      ['a dangling link', () => fs.symlinkSync(made, hook), 'link'],
+      ['a folder', () => fs.mkdirSync(hook), 'dir'],
     ]) {
       fs.rmSync(hook, { recursive: true, force: true });
       make();
-      assert.equal(gitHookState(product).state, 'foreign', what);
+      assert.deepEqual([gitHookState(product).state, gitHookState(product).kind], ['linked', kind], what);
       assert.deepEqual(gitHookActions(product), [], `${what}: no action`);
     }
     assert.equal(fs.readFileSync(outside, 'utf8'), '#!/bin/sh\nnpx lint-staged\n');
@@ -855,8 +855,69 @@ test('#222: a pre-commit hook that is a link, a dangling link or a folder is for
       const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const { gitHookState } = await import(${JSON.stringify(new URL('./plan.mjs', import.meta.url).href)});
 process.stdout.write(gitHookState(process.argv[1]).state);`, product], { encoding: 'utf8', timeout: 20000, env: gitEnv() });
       assert.equal(r.signal, null, `the read did not end: ${r.stderr}`);
-      assert.equal(r.stdout, 'foreign', r.stderr);
+      assert.equal(r.stdout, 'linked', r.stderr);
     }
+  } finally { cleanup(T); }
+});
+
+test('#222: a pre-commit hook that changed after the plan is left alone — never written or chmod-ed through a link', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { gitHookActions, GIT_HOOK_MARKER } = await import('./plan.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    const hook = path.join(repo, '.git/hooks/pre-commit');
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    const outside = path.join(T, 'outside.sh');
+    fs.writeFileSync(outside, 'mine\n', { mode: 0o644 });
+    // Planned while there is no hook; a link put there before the apply is not written through.
+    const [a] = gitHookActions(product);
+    assert.equal(a.status, 'new');
+    fs.symlinkSync(outside, hook);
+    a.apply();
+    assert.ok(fs.lstatSync(hook).isSymbolicLink(), 'left alone');
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n');
+    assert.equal(fs.statSync(outside).mode & 0o777, 0o644, 'not chmod-ed through the link');
+    // Planned as ours and edited; the edit swapped for a link before the apply: no backup through it.
+    fs.rmSync(hook);
+    fs.writeFileSync(hook, `#!/bin/sh\n${GIT_HOOK_MARKER}\necho mine\n`, { mode: 0o755 });
+    const [b] = gitHookActions(product);
+    assert.equal(b.status, 'outdated');
+    fs.rmSync(hook);
+    fs.symlinkSync(outside, hook);
+    b.apply();
+    assert.ok(!fs.existsSync(`${hook}.yad-orig`), 'no backup is read through the link');
+    assert.ok(fs.lstatSync(hook).isSymbolicLink());
+    // Unchanged since the plan: written, executable.
+    fs.rmSync(hook);
+    const [c] = gitHookActions(product);
+    c.apply();
+    assert.ok(fs.lstatSync(hook).isFile());
+    assert.ok(fs.statSync(hook).mode & 0o100);
+  } finally { cleanup(T); }
+});
+
+test('#222: a pre-commit hook linked to a file that already runs yad\'s line is not read — doctor and the advice say to make sure the file it points to runs it', { skip: process.platform === 'win32' && 'making a link needs admin rights on Windows' }, async () => {
+  const { gitHookActions, gitHookState, gitHookAdvice, gitPreCommitScript } = await import('./plan.mjs');
+  const { projectChecks } = await import('./doctor.mjs');
+  const { T, repo, product } = verifiedRepo();
+  try {
+    const hook = path.join(repo, '.git/hooks/pre-commit');
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    // A hook manager keeps the real hook elsewhere and links it in; the real one already holds yad's script.
+    const real = path.join(T, 'managed-pre-commit');
+    fs.writeFileSync(real, gitPreCommitScript(''), { mode: 0o755 });
+    fs.symlinkSync(real, hook);
+    const st = gitHookState(product);
+    assert.deepEqual([st.state, st.kind, st.folder], ['linked', 'link', null]);
+    assert.deepEqual(gitHookActions(product), [], 'yad writes nothing there');
+    assert.match(gitHookAdvice(st), /pre-commit is a link, so yad did not read it; to refuse a hand commit to the CI-owned ledger, make sure the file it points to runs this line: /);
+    const checks = [];
+    projectChecks(checks, product);
+    const row = checks.find((c) => c.id === 'git-hook');
+    assert.equal(row.status, 'warn');
+    assert.equal(row.message, 'git pre-commit ledger guard not checked: .git/hooks/pre-commit is a link, so yad did not read it');
+    assert.match(row.hint, /^make sure the file it points to runs this line: /);
+    assert.doesNotMatch(`${row.message} ${row.hint}`, /not yad's|add this line to/, 'not the advice for a hook of the team\'s own');
+    assert.equal(fs.readFileSync(real, 'utf8'), gitPreCommitScript(''), 'the real hook is untouched');
   } finally { cleanup(T); }
 });
 

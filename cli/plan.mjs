@@ -1584,8 +1584,9 @@ export const gitHookLine = (prefix = '') => {
 // or no git). Otherwise `{ applies: true, file, expected, prefix, state }` with `state` one of: 'missing' | 'ok'
 // | 'outdated' (ours, different bytes) | 'foreign' (a hook that is not ours) | 'hooks-path' (core.hooksPath is
 // set). The last two carry `line`, the one to add by hand. A hook that is a link (some tools install theirs so),
-// a folder or a device, or one in a linked hooks folder, is not read (#222) and is 'foreign': yad writes no hook
-// through a link, and never replaces one it could not read.
+// a folder, a device or a file too big, or one in a linked hooks folder, is not read (#222): it is 'linked', with
+// `kind` ('link', 'dir', 'other', 'big', or 'unreadable' for one yad may not open) and `folder` (the linked folder, or null), and `line`. yad writes no
+// hook through it and never replaces it; the advice asks the person to make sure the file git runs has the line.
 function hookStateFor(spec, root) {
   if (!spec.applies(root)) return { applies: false };
   const where = run('git', ['-C', root, 'rev-parse', '--git-path', `hooks/${spec.name}`, '--show-prefix']);
@@ -1626,8 +1627,10 @@ function hookStateFor(spec, root) {
   }
   let text;
   try { text = readPlainFile(file); } catch (e) {
-    if (e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG) return { applies: true, file, expected, prefix, line, state: 'foreign' };
-    text = null; // one it may not open: as before, written over (and the write says why it cannot)
+    // One it may not open (no permission) too: the hook is replaced through a rename now, so a hook yad cannot
+    // read would be replaced unseen.
+    const kind = e?.code === FILE_TOO_BIG ? 'big' : e?.code === NOT_PLAIN_FILE ? e.kind : 'unreadable';
+    return { applies: true, file, expected, prefix, line, state: 'linked', kind, folder: e?.folder ?? null };
   }
   if (text === null) return { applies: true, file, expected, prefix, state: 'missing' };
   // A hook of the team's own that already runs ours by the line yad gave (`spec.wired`), and that git can run (its
@@ -1647,11 +1650,21 @@ function hookStateFor(spec, root) {
   return { applies: true, file, expected, prefix, state: 'outdated', why };
 }
 
-// The install action. 'foreign' and 'hooks-path' build no action — there is nothing yad may write —
+// Why yad did not read a 'linked' hook, and what the person makes sure of (#222), for doctor and the advice.
+// `where` names the hook. Both are for a terminal: the folder's name comes from the Product.
+export function linkedHookSaid(st, where = st.file) {
+  const folder = st.folder ? forTerminal(st.folder) : null;
+  if (folder) return { why: `${where} sits in the linked folder ${folder}, so yad did not read it`, fix: `make sure the hook git runs there runs this line: ${st.line}` };
+  if (st.kind === 'link') return { why: `${where} is a link, so yad did not read it`, fix: `make sure the file it points to runs this line: ${st.line}` };
+  if (st.kind === 'unreadable') return { why: `${where} cannot be read (no permission), so yad left it alone`, fix: `make sure it runs this line: ${st.line}` };
+  return { why: `${where} is not a plain file (${st.kind === 'big' ? 'it is larger than yad reads' : st.kind === 'dir' ? 'it is a folder' : 'it is a device or a pipe'}), so yad did not read it`, fix: `replace it with a hook that runs this line: ${st.line}` };
+}
+
+// The install action. 'foreign', 'linked' and 'hooks-path' build no action — there is nothing yad may write —
 // and are reported by the spec's advice instead.
 function hookActionsFor(spec, root) {
   const st = hookStateFor(spec, root);
-  if (!st.applies || st.state === 'foreign' || st.state === 'hooks-path' || st.state === 'hand-wired') return [];
+  if (!st.applies || st.state === 'foreign' || st.state === 'linked' || st.state === 'hooks-path' || st.state === 'hand-wired') return [];
   const status = st.state === 'missing' ? 'new' : st.state;
   // An outdated copy may carry a person's edit below our marker, so it is saved beside itself first —
   // the same rule `wiredFileAction` keeps for content it cannot prove it wrote. Not when only the execute
@@ -1664,11 +1677,17 @@ function hookActionsFor(spec, root) {
     root,
     paths: [],
     backup,
+    // The hook is looked at again first (#222): one that changed since the plan (a link put in its place, a
+    // person's edit) is left alone. The new hook goes through a new file and a rename, with its mode set on that
+    // new file, so a link at the hook's name is replaced, never written or chmod-ed through.
     apply: () => {
-      if (backup) copyFile(st.file, backup);
-      fs.mkdirSync(path.dirname(st.file), { recursive: true });
-      fs.writeFileSync(st.file, st.expected, { mode: 0o755 });
-      fs.chmodSync(st.file, 0o755);
+      const now = hookStateFor(spec, root);
+      if (now.state !== st.state || now.file !== st.file || now.why !== st.why) {
+        warn(`${spec.item} changed since yad looked at it (${now.state ?? 'gone'}), so yad left it alone — run \`yad check --fix\` again`);
+        return;
+      }
+      if (backup) backupPlain(st.file, backup);
+      writeFileAtomic(st.file, st.expected, { mode: 0o755 });
     },
   }];
 }
@@ -1697,7 +1716,8 @@ const PRE_COMMIT_HOOK = Object.freeze({
   // A tool that owns the hook (the pre-commit framework, husky v4) may rewrite it on reinstall, which drops
   // an added line, so the advice says to check after one.
   advice: (st) => (st?.state === 'hooks-path' ? `git's core.hooksPath is set (${st.hooksPath}), so yad did not install its pre-commit ledger guard; add this line to ${st.editFile}: ${st.line}`
-    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}` : null),
+    : st?.state === 'foreign' ? `${st.file} is not yad's, so yad left it alone; add this line to it to refuse a hand commit to the CI-owned ledger (and again if a tool rewrites the hook): ${st.line}`
+      : st?.state === 'linked' ? `${linkedHookSaid(st).why}; to refuse a hand commit to the CI-owned ledger, ${linkedHookSaid(st).fix}` : null),
 });
 
 // The pre-commit hook (E48), as it always was.
@@ -1774,7 +1794,8 @@ const NOTICE_HOOKS = Object.freeze(['post-merge', 'post-rewrite'].map((name) => 
 
 // The copy's state: { file, state: 'ok' | 'missing' | 'outdated' } | null outside git. A copy that is a link,
 // a folder or a device is not read (#222): it is 'outdated', and the write replaces it with a rename, never
-// through it. In a linked folder of the Product there is nothing yad may write: null, as outside git.
+// through it. So is a copy larger than yad reads, and one yad may not open (no permission): yad's own file,
+// written again whole. In a linked folder of the Product there is nothing yad may write: null, as outside git.
 export function noticeCopyState(root) {
   const file = noticeCopyPath(root);
   if (!file) return null;
@@ -1814,11 +1835,19 @@ export const localSetupNoticeStates = (root) => NOTICE_HOOKS.map((spec) => ({ na
 // ONE sentence for the hooks yad may not write here (a team's own, or core.hooksPath), or null. A convenience,
 // not a guard: said by check --fix, update, setup and doctor, never on a plain `yad check` (review 1).
 export function localSetupNoticeAdvice(root) {
-  const blocked = localSetupNoticeStates(root).filter((st) => st.applies && (st.state === 'foreign' || st.state === 'hooks-path'));
+  const blocked = localSetupNoticeStates(root).filter((st) => st.applies && (st.state === 'foreign' || st.state === 'hooks-path' || st.state === 'linked'));
   if (!blocked.length) return null;
-  const where = blocked.map((st) => (st.state === 'hooks-path' ? st.editFile : st.file));
-  const lines = blocked.map((st) => `${st.name}: ${st.line}`).join('  ·  ');
-  return `yad left ${blocked.map((st) => st.name).join(' and ')} alone (${blocked[0].state === 'hooks-path' ? `core.hooksPath is ${blocked[0].hooksPath}` : 'not yad\'s'}); for the local setup notice after a pull, add to ${where.join(' and ')} — ${lines}`;
+  // A linked hook (#222) is not read, so the person makes sure the file git runs has the line.
+  const linked = blocked.filter((st) => st.state === 'linked');
+  const plain = blocked.filter((st) => st.state !== 'linked');
+  const said = [];
+  if (plain.length) {
+    const where = plain.map((st) => (st.state === 'hooks-path' ? st.editFile : st.file));
+    const lines = plain.map((st) => `${st.name}: ${st.line}`).join('  ·  ');
+    said.push(`yad left ${plain.map((st) => st.name).join(' and ')} alone (${plain[0].state === 'hooks-path' ? `core.hooksPath is ${plain[0].hooksPath}` : 'not yad\'s'}); for the local setup notice after a pull, add to ${where.join(' and ')} — ${lines}`);
+  }
+  for (const st of linked) said.push(`${linkedHookSaid(st).why}; for the local setup notice after a pull, ${linkedHookSaid(st).fix}`);
+  return said.join('; ');
 }
 
 // ---- background capture wiring (E43) -----------------------------------------------------------

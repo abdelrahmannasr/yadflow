@@ -8,7 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict, readPlainJSON, readPlainFile, readPlainText, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid, emitJSON, asArg, nodeSupport, nodeEndOfLife, NODE_FLOOR, NODE_SUPPORTED } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, CAPTURE_ADAPTERS, HOOK_WIRING, CAPTURE_WIRING, ACTIVITY_WIRING, ACTIVITY_ADAPTERS, PROTECTION_GUIDE_URL, isVerifiedLedger , productConfigPath, settingsEditHint, PRODUCT_LINK, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix, linkedHookSaid } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
 import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
@@ -3256,7 +3256,12 @@ function gitHookCheck(root, checks) {
   const st = gitHookState(root);
   if (!st.applies) return;
   const where = path.relative(root, st.file).split(path.sep).join('/');
-  if (st.state === 'hooks-path' || st.state === 'foreign') {
+  if (st.state === 'linked') {
+    // A hook that is a link, or in a linked hooks folder (#222): yad did not read it, so it cannot say whether it
+    // already runs the guard, and writes nothing there.
+    const said = linkedHookSaid(st, where);
+    check(checks, 'git-hook', 'project', 'warn', `git pre-commit ledger guard not checked: ${said.why}`, said.fix);
+  } else if (st.state === 'hooks-path' || st.state === 'foreign') {
     // yad writes neither: a folder core.hooksPath names is usually committed and owned by a tool, and a
     // hook without yad's marker line is the team's. The person adds one line instead.
     const why = st.state === 'hooks-path' ? `core.hooksPath is set (${st.hooksPath}), so hooks are run from there` : `${where} is not yad's, so yad left it alone`;
@@ -3288,7 +3293,7 @@ export function localSetupNoticeCheck(root, checks) {
   if (!states.length) return;
   const copy = noticeCopyState(root);
   // Every part that is not right is said, the hooks yad left alone and the ones it would install alike (review 1).
-  const blocked = states.filter((s) => s.state === 'foreign' || s.state === 'hooks-path');
+  const blocked = states.filter((s) => s.state === 'foreign' || s.state === 'hooks-path' || s.state === 'linked');
   const todo = states.filter((s) => s.state === 'missing' || s.state === 'outdated').map((s) => s.name);
   if (copy && copy.state !== 'ok') todo.push(`its script in git's folder (${copy.state})`);
   const byHand = states.filter((s) => s.state === 'hand-wired').map((s) => s.name);
