@@ -20,13 +20,22 @@ found such a half-promoted anchor: `kind: stub` beside `backfill-done`).
   It refuses unless the epic is a stub and that spec's frontmatter says `verified: true`, read as
   `checks/backfill-check.sh` reads it: only a frontmatter block that opens on line 1 and closes; the last
   line that could set the key (any case, quoted or not, a space before the colon) wins; it must be
-  exactly `verified: true` (value `true`, `True` or `TRUE`, nothing after it). The refusal names every
+  exactly `verified: true` (value `true`, `True` or `TRUE`, nothing after it; ASCII spaces only; no NUL in
+  the frontmatter). The spec must pass both in the checkout and as committed at that repo's HEAD; an
+  approval only in the working tree, or an untracked spec, is refused with "commit the approved spec
+  first". `--feature` must name the folder by its exact name (a folder differing only in case is named in
+  the refusal). Each refusal's hint answers its own problem. The refusal names every
   condition that is missing (`--json`: `missing` holds `stub` and/or `verified-spec`), and writes nothing.
 - R2. On success it writes `epic.md` (`verified: true`, no `stub:` line, and
   `backfill: { repo: <name>, spec: specs/backfill/<feature>/spec.md, promoted: <date> }`; the rest of the
   file kept) and `state.json` (no `kind: "stub"`, `type` kept; `currentStep: "backfill-done"`) together.
   `--full` instead sets `currentStep: "epic"` and opens the `epic` step (`in_progress`) when nobody has
-  started it. If either write fails, both files are put back to their old bytes.
+  started it. Only frontmatter changes: the owned keys (`stub`, `verified`, `backfill`, quoted or not) are
+  dropped with their block-style children, an empty block is filled in place, and CRLF line ends are kept.
+  If a write fails, every file this run touched is put back to its old bytes, and the reason is said in
+  words with its code. A link (or anything not a plain file) at `epic.md` or `state.json` is refused with
+  `YAD-STATE-001` and a hint, never read through. A light promote is not made full later by this command;
+  the refusal says to thread a change off the documented anchor (`yad-change`) instead.
 - R3. A promote cut short (some of the three stub markers left) is finished, not refused:
   - with a ledger marker left (`kind: stub` or the sentinel), when the ledger is on `backfill-pending` or
     already on the step the flavour writes (`backfill-done` for light, `epic` for full). On
@@ -34,8 +43,11 @@ found such a half-promoted anchor: `kind: stub` beside `backfill-done`).
     On any other step it refuses, names the step, and says to restore the two files from git (no step can
     run past a ledger marker, so no gate progress is lost);
   - with only `epic.md`'s `stub:` line left, the ledger was promoted and may have moved on, so `epic.md`
-    alone is finished and the ledger is not written. The flavour must match the ledger (`--full` unless
-    it is on `backfill-done`); otherwise it refuses and names the flag.
+    alone is finished and the ledger is not written — only when the ledger shows a stub this command
+    promoted: on `backfill-done` (only a light promote writes it) for light, or, for full, an `epic.md`
+    that says `origin: brownfield` (every stub's does). The flavour must match the ledger (`--full` unless
+    it is on `backfill-done`); otherwise it refuses and names the flag. A stray `stub:` line on an epic
+    that never was a stub is refused: finishing it would mark an unreviewed epic verified.
 - R4. On a verified ledger it refuses and writes nothing, as `yad gate approve` does, and says what to do
   instead: leave the stub as an anchor (defects and changes still thread off it); CI has no promote yet.
   A platform with a local ledger is not refused.
@@ -43,7 +55,10 @@ found such a half-promoted anchor: `kind: stub` beside `backfill-done`).
   list carry it. `yad help` and `docs/CLI.md` list it.
 - R6. The `yad-backfill` skill's `promote` step runs the command, and no `yad-*` skill tells the agent to
   edit `state.json`. The `yad-review-gate` banner that named `yad-backfill` as the remaining hand writer
-  says no skill writes a chain by hand any more. `state-schema.md` and `yad-stub` name the command.
+  says no skill writes a chain by hand any more. `state-schema.md` and `yad-stub` name the command. Every
+  runtime message, help line and skill that said `yad-backfill promote` names `yad backfill promote`
+  (with `--full` where it says the chain wakes). The skill-guard exemption for the command covers only a
+  line that is the command (in a code fence, or opening with it).
 - R7. After a promote the doctor's epic checks are clean, the lineage resolves, and a defect off the
   promoted anchor no longer gets the S01 chore lane.
 
@@ -52,8 +67,8 @@ found such a half-promoted anchor: `kind: stub` beside `backfill-done`).
 A CI path that promotes on a verified ledger (the gate bot has no promote verb; that stays a gap). Reading
 the spec from the base branch, as the gate does. Setting `title:` on a stub that has none (prose; the skill
 says to set it after the promote). Checking that `--repo` is in the stub's `repos:` list. The
-`yad-backfill promote` wording in `yad next` and `nextAction` messages, which name the skill action and
-stay true. `checks/yad-activity.mjs`, this repo's own installed copy of the hook, which is already behind
+`yad-backfill promote` wording left in TEAM-GUIDE.md, RESEARCH-NOTES.md, docs/phase-6-build-plan.md, the
+diagrams and the docs site (history and prose, not runtime or skill text). `checks/yad-activity.mjs`, this repo's own installed copy of the hook, which is already behind
 its template and is refreshed by `yad update`.
 
 ## Clarifications
@@ -63,7 +78,9 @@ its template and is refreshed by `yad update`.
 - Q: How does the command find the spec? Nothing in a stub records its repo or feature. → A: two more flags, `--repo <name>` and `--feature <feature>`, which the decided signature did not have; the spec is never guessed from the slug or from "the only spec in the repo". **Needs the person's yes.**
 - Q: The story names a `backfill:` block "with the spec and the date". → A: it also carries `repo:`, since a spec path alone is ambiguous when a stub lists several repos. **Needs the person's yes.**
 - Q: "Exact `verified: true`" — only lower-case `true`? → A: the gate's reading (`true`, `True`, `TRUE`), so what the gate passes this passes, and nothing else.
-- Q: The working tree or the base branch? → A: the repo's checkout on this machine. The gate reads the base, so an approval not merged yet passes here and still fails the gate; the skill and the docs say so.
+- Q: The working tree or the base branch? → A: both the checkout on this machine and the spec as committed at that repo's HEAD (review): an uncommitted approval promotes nothing. CI's gate still reads the base branch, so an approval committed on a branch but not merged passes here and still fails the gate; the skill and the docs say so.
+- Q: A `stub:` line left on an epic whose ledger is clean — finish, or refuse? → A (review): finish only when the ledger shows this command promoted a stub (`backfill-done`, or for a full promote an `epic.md` with `origin: brownfield`); refuse any other stray marker, and say it may be removed by hand (epic.md is not under `.sdlc/`).
+- Q: Light, then full later? → A: not by this command. The refusal says to thread a change off the documented anchor with `yad-change`.
 - Q: A half-promoted epic — refuse, or finish? → A: finish it when the ledger is on the sentinel or on the step the flavour writes; a refusal there would leave only a hand edit of `.sdlc/`, which the rules forbid. When only `epic.md`'s marker is left, finish `epic.md` alone and keep the ledger, whose gate progress is real. Refuse anything else.
 - Q: Which signals make "a stub"? → A: one helper, `stubSignals` (ledger `kind`, sentinel, `epic.md` marker), with `isWholeStub` (all three: a normal promote, and S01's chore lane) and `hasStubSignal` (any: a promote to finish). S01's inline check now calls it.
 - Q: Verified ledger: refuse on any platform, as `gate approve` does? → A: no — only on a verified ledger. A platform with a local ledger lets the clone write its ledger, as `yad epic new` does.
@@ -100,8 +117,21 @@ the docs list it.
   instruct no ledger write at all"); "the skills that still write a chain by hand are named, with the
   reason" becomes "no skill writes a chain by hand any more, and the banner says where each former writer went".
 - T05, T06: documentation; no test.
+- T07 (cli/test.mjs, fixes to T01's command; the promote fixture now makes the code repo a real git repo
+  and commits the spec): "the spec must be approved as committed, in a folder spelled as --feature says
+  (review)" [should-fix 4, 5]; "a link at epic.md or state.json is refused with a code and a hint, never
+  read (review)" [1]; "epic.md is rewritten whole — an empty header, block-style and quoted keys, CRLF
+  (review)" [2, 3]; "a stray stub: line on an epic that never was a stub is refused; a light promote is
+  not made full later (review)". Changed: "the spec must say exactly `verified: true`…" (a NUL row, and
+  each refusal's own hint) and "when either write fails…" (the reason in words, with its code) [6].
+- T08 (cli/test.mjs): "yad epic new --stub: an anchor for a feature that shipped…" asserts the seed's
+  hand-off line and `nextAction`'s `why` name `yad backfill promote`.
+- T09, T10, T11: wording; held by the existing suite.
+- T12 (cli/test-threads.mjs): "the skills E17b changed instruct no ledger write at all" exempts
+  `yad backfill promote` only on a line that is the command.
 
-Commit order: T01, T02, T03, T04, T05, T06. T02 lands before T03, so the class exists when `bin/yad.mjs`
+Commit order: T01, T02, T03, T04, T05, T06, then the review fixes T07 to T12. T07 is a fix to T01's
+command, T08 to T01's helper file and the stub seed, T11 to T04 and T05's text, T12 to T04's guard. T02 lands before T03, so the class exists when `bin/yad.mjs`
 names the command (the class test reads `bin/yad.mjs`).
 
 ## Tasks
@@ -141,4 +171,37 @@ names the command (the class test reads `bin/yad.mjs`).
 **Files:**
 - docs/YADFLOW-EXPLAINED.md
 - docs/SKILLS.md
+
+## T07 — Harden the promote: committed spec, exact feature case, links, the epic.md rewrite, stray markers
+**Files:**
+- cli/backfill.mjs
+- cli/test.mjs
+
+## T08 — Name `yad backfill promote` in the stub seed and the next action
+**Files:**
+- cli/epic.mjs
+- cli/epic-state.mjs
+- cli/test.mjs
+
+## T09 — Name `yad backfill promote` in yad next, the help and the module config
+**Files:**
+- cli/next.mjs
+- bin/yad.mjs
+- skills/sdlc/config.yaml
+
+## T10 — Name `yad backfill promote` in yad-change, yad-stub and yad-reconcile
+**Files:**
+- skills/yad-change/SKILL.md
+- skills/yad-stub/SKILL.md
+- skills/yad-reconcile/SKILL.md
+
+## T11 — Say the spec must be committed, and that light is not made full later
+**Files:**
+- skills/yad-backfill/SKILL.md
+- skills/yad-epic/references/state-schema.md
+- docs/CLI.md
+
+## T12 — Exempt only lines that are the promote command in the skill ledger-write guard
+**Files:**
+- cli/test-threads.mjs
 <!-- /yad:tasks -->
