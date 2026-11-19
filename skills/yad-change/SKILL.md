@@ -226,22 +226,24 @@ contract locked).
 
 **Short lane off a stub (defect or hotfix only, the person's choice).** A small fix to code that was
 built before yadflow tracked it does not need every Shape gate of the stub's `classic` route. When the
-parent is an un-promoted stub (`stub: backfill-pending`) and the type is `defect` or `hotfix`, offer the
-short lane — the `chore` route: the epic, then `stories` and `stories-review`, then Build. Say what it
-leaves out: there is no `architecture`, `ui-design` or `test-cases` step, so the regression test is
-written with the code in Build. Run it only on the person's yes:
+parent is an un-promoted stub (`stub: backfill-pending` in its `epic.md`, and its ledger still at
+`backfill-pending`) and the type is `defect` or `hotfix`, offer the short lane — the `chore` route: the
+epic, then `stories` and `stories-review`, then Build. Say what it leaves out: there is no
+`architecture`, `ui-design` or `test-cases` step, so the regression test is written with the code in
+Build. Then offer two equal choices for the epic step, and say what each one means for review:
 
-```bash
-yad epic new EP-<slug> --type <defect|hotfix> --parent <EP-stub> --profile chore --inherits epic
-```
+| Choice | Command | What is reviewed before Build |
+|---|---|---|
+| **Write and review this epic's own brief** | `yad epic new EP-<slug> --type <defect\|hotfix> --parent <EP-stub> --profile chore` (write `inherits: []` in `epic.md`) | this epic's `epic.md` — the change, its root cause and escape stage — at `epic-review`, then the stories at `stories-review` |
+| **Carry the stub's epic** | `yad epic new EP-<slug> --type <defect\|hotfix> --parent <EP-stub> --profile chore --inherits epic` (write `inherits: [epic]` in `epic.md`) | only the stories, at `stories-review`. The stub's `epic.md` is a placeholder nobody reviewed, carried with `boundHash: null`, so this epic's own brief (its root cause and escape stage) gets **no** Shape review |
 
-- `--inherits epic` carries the stub's epic by reference (`boundHash: null`, as for any stub base), and
-  `stories` is the first step. Leave `--inherits` off (and write `inherits: []` in `epic.md`) to write
-  this epic's own brief first. `inherits:` in `epic.md` (Step 4) must name the same list.
+Tell the person that difference in those words before they choose, and run the command only on their
+yes. `inherits:` in `epic.md` (Step 4) must name the same list as the flag.
 - The command refuses `architecture`, `contract` or `ui-design` in `inherits` here: the short lane has no
   such steps. If the fix needs them carried, drop `--profile` and take the stub's `classic` route.
 - It refuses `--profile chore` for any other parent or type with "takes its parent's route": a tracked
-  (non-stub) feature keeps its route, its contract and its review rules.
+  (non-stub) feature keeps its route, its contract and its review rules. A stub that is part-way through
+  `yad-backfill promote`, or whose `epic.md` has lost its `stub:` marker, counts as not a stub here.
 - Record the choice in `change.json` (Step 6): `"route": "chore"` beside `"parentStub": true`.
 
 **Short-lane parent (no architecture step ever existed).** When the parent records `profile: "chore"`
@@ -277,6 +279,12 @@ If the type is `hotfix`, Build MAY run before these Shape gates approve (severit
 `{ "thread": "<…>", "epicId": "<…>", "openedDate": "<today>", "reason": "<why>", "requires": ["artifacts-updated","regression-test"], "status": "open", "paidDate": null, "paidBy": null, "evidence": { "artifacts": [], "regressionTest": "" } }`.
 Tell the user the debt **freezes the next normal change** on this thread (`reconcile-debt` gate) until it
 is paid (Shape artifacts updated **and** a regression test added, then `status: "paid"`).
+
+On the short lane off a stub (Step 5) there is no `test-cases` step, so the debt is paid by what that
+lane has: `artifacts-updated` is this epic's approved stories (`stories-review` done, and its own
+`epic.md` approved at `epic-review` when it wrote one), and `regression-test` is the test written with
+the code in Build. List those story files in `evidence.artifacts` and the test in
+`evidence.regressionTest`.
 
 ### Step 8 — Stop; hand off (NO auto-advance)
 Report: the new `EP-<slug>`, its thread + parent, the re-author-vs-inherit split, the seeded
