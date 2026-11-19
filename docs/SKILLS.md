@@ -238,8 +238,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
   before it counts. A change is blocked only until the features it touches have approved specs. Its
-  `promote` action flips a brownfield stub epic (`yad-stub`) to a real, verified feature epic once the
-  feature's backfill spec is approved.
+  `promote` action runs `yad backfill promote`, which flips a brownfield stub epic (`yad-stub`) to a
+  real, verified feature epic once the feature's backfill spec is approved.
 
 ## Automation & status
 

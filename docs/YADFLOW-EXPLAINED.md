@@ -1288,6 +1288,7 @@ table is here so you can look one up.
 | `yad guide [<epic>]` | The step brief for an AI agent. | No | A |
 | `yad status --brief` | Where the work stands, in about 20 lines. | No | P, A |
 | `yad epic new <slug>` | Lays out an epic's steps (`--type`, `--profile`, `--parent`, `--inherits`, `--issue`). | Yes | A, P |
+| `yad backfill promote <epic>` | Turns a stub into a real anchor once its backfill spec is approved (`--repo`, `--feature`, `--full`). Writes epic.md and the ledger together. | Yes | A, P |
 | `yad foundation new` / `status` / `publish` | The product-level plan; its progress; one issue per roadmap feature. | new/publish: yes | A, P (publish: A?) |
 | `yad gate open` / `sync` / `status` / `comments` | Open a review; copy approvals in after merge; show approvals; export open comments. | open/sync: yes | A, P |
 | `yad gate approve` / `comment` / `advance` | The local gate, with no platform. | Yes | **P!** |
