@@ -96,7 +96,7 @@ created: <YYYY-MM-DD>
 
 ## Backfill
 <!-- To make this real: run `yad-backfill` for <repo> (globs for this feature), get the spec approved
-     (verified: true), then `yad-backfill promote EP-<slug>`. -->
+     (verified: true), then `yad backfill promote EP-<slug> --repo <repo> --feature <feature>`. -->
 ```
 
 Leave `owner` for the human to set. Set `repos` to the code repo(s) the feature lives in.
@@ -141,7 +141,7 @@ Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the tw
   **short lane** instead of the stub's full `classic` route, if the person chooses it: `--profile chore`
   on `yad epic new` gives the epic, then stories and their review, then Build (`yad-change` Step 5,
   "Short lane off a stub").
-- **Make it real later:** `yad-backfill` for the code repo, then `yad-backfill promote EP-<slug>` to flip
+- **Make it real later:** `yad-backfill` for the code repo, then `yad backfill promote EP-<slug>` to flip
   the stub to `verified: true`.
 
 Shape steps do not auto-advance. Suggest `yad next EP-<slug>` (prints the backfill-pending guidance) and

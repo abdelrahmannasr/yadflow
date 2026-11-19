@@ -1007,8 +1007,8 @@ stops requiring the `parent:` those three must have. `yad doctor` fails on it (`
 | `severity` | `sev1` … `sev4` | **defect/hotfix only.** |
 | `escape_stage` | an SDLC stage id (`stories`, `test-cases`, `architecture`, …) | **defect/hotfix only.** The gate that *should* have caught it — feeds the `yad-defects` quality report. |
 | `root_cause` | short tag | **defect/hotfix only.** e.g. `missing-negative-test`. |
-| `stub` | `backfill-pending` | **stub genesis only** (`yad-stub`). A brownfield feature anchored so a change can thread off it before it is documented. Cleared by `yad-backfill promote`. |
-| `verified` | `true` \| `false` | `false` on a stub genesis (not yet documented/human-authored); `yad-backfill promote` sets it `true`. Absent ⇒ treated as a normal (verified) epic. |
+| `stub` | `backfill-pending` | **stub genesis only** (`yad-stub`). A brownfield feature anchored so a change can thread off it before it is documented. Cleared by `yad backfill promote`. |
+| `verified` | `true` \| `false` | `false` on a stub genesis (not yet documented/human-authored); `yad backfill promote` sets it `true`. Absent ⇒ treated as a normal (verified) epic. |
 
 ## Stub genesis epics (brownfield anchors — `yad-stub`)
 
@@ -1039,15 +1039,23 @@ read the frontmatter, while `nextAction` / `yad next` is pure-ledger and reads `
 > **A stub ⟺ `epic.md stub:backfill-pending` AND `state.kind:stub` AND `currentStep:backfill-pending`.**
 > Any promote MUST clear all three atomically, or the two readers disagree.
 
-`yad-backfill promote` enforces this: it sets `epic.md` `verified: true`, removes `stub:`, links the
-approved backfill spec, **and** rewrites `state.json` — removing `kind: "stub"` and moving `currentStep`
-off the sentinel:
+`yad backfill promote EP-<slug> --repo <repo> --feature <feature> [--full]` (the `yad-backfill` skill's
+`promote` step runs it, E17b) enforces this. It refuses unless the epic is a stub and its backfill spec
+(`specs/backfill/<feature>/spec.md` in that repo) says exactly `verified: true`, and on a verified ledger.
+Then it writes both files, or neither: `epic.md` gets `verified: true`, loses `stub:`, and gains
+`backfill: { repo: <repo>, spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`; the
+ledger loses `kind: "stub"` and `currentStep` moves off the sentinel:
 - **light promote (default)** → `currentStep: "backfill-done"`, a **terminal sentinel** (like
   `discovery-done`): the feature is a real, verified anchor documented by its backfill spec; `nextAction`
   reports "documented anchor — evolve it by threading a change/defect", never a pending stub, and Build
   never runs directly against it;
 - **full promote (opt-in)** → `currentStep: "epic"`, `epic.status: "in_progress"`, to run the normal Shape
   part and lock a real contract.
+
+A promote cut short (some of the three markers left, from a hand edit before the command existed) is
+finished by the same command when the ledger is still on `backfill-pending` or already on the step its
+flavour writes. When only `epic.md`'s `stub:` line is left, `epic.md` alone is finished and the ledger,
+which may have moved on since, is kept. Anything else is refused, naming the step.
 
 From promotion on, the thread's contract protection is live.
 
