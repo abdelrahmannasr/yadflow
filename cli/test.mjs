@@ -20239,6 +20239,30 @@ test('CLI: `--stub` reaches the command through the arg parser', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('CLI: `yad backfill promote` reaches the command, with --repo, --feature and --full', async () => {
+  const fx = await promoteFixture();
+  try {
+    const r = yadRun(fx.T, 'backfill', 'promote', 'EP-legacy-cart', '--repo', 'shop', '--feature', 'cart', '--full', '--json');
+    assert.equal(r.code, 0, r.out);
+    const j = JSON.parse(r.out);
+    assert.equal(j.command, 'backfill promote');
+    assert.equal(j.ok, true);
+    assert.equal(j.promote, 'full');
+    assert.equal(j.currentStep, 'epic');
+    assert.equal(j.spec, 'specs/backfill/cart/spec.md');
+    // Refused the CLI way: an unknown action, a stray word, and the usage line.
+    for (const [args, message] of [
+      [['backfill', 'demote', 'EP-legacy-cart'], /unknown backfill action: demote \(promote\)/],
+      [['backfill', 'promote', 'EP-legacy-cart', 'cart', '--repo', 'shop', '--feature', 'cart'], /unexpected argument\(s\): cart/],
+      [['backfill', 'promote', 'EP-legacy-cart'], /usage: yad backfill promote <epic> --repo <name> --feature <feature>/],
+    ]) {
+      const bad = yadRun(fx.T, ...args);
+      assert.equal(bad.code, 1, args.join(' '));
+      assert.match(bad.out, message);
+    }
+  } finally { cleanTmp(fx.W); }
+});
+
 // ---- skill binding — which skill runs a step is the project's choice (E6) -------------------------
 //
 // The engine still ships a default for every step. What is new is that the default is no longer the
