@@ -2139,6 +2139,80 @@ process.stdout.write(JSON.stringify([code(() => readPlainJSON(process.argv[1])),
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// ---- #222: the committed text files yad reads are read only as plain files (EP-factory-hardening-S03) -------
+
+test('#222 readPlainText: the text, or null for no file, a link, a dangling link, a folder and a file under a linked folder', { skip: E125B_SKIP }, async () => {
+  const { readPlainText, setProductRoot } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plaintext-')));
+  try {
+    const checks = path.join(T, 'checks');
+    fs.mkdirSync(checks);
+    // The link's target holds what an old gate holds: a read that followed it would see it.
+    fs.writeFileSync(path.join(T, 'outside.sh'), 'ALLOWLIST=x\n');
+    fs.writeFileSync(path.join(checks, 'plain.sh'), 'echo hi\n');
+    fs.symlinkSync(path.join(T, 'outside.sh'), path.join(checks, 'linked.sh'));
+    fs.symlinkSync(path.join(T, 'gone.sh'), path.join(checks, 'dangling.sh'));
+    fs.mkdirSync(path.join(checks, 'folder.sh'));
+    assert.equal(readPlainText(path.join(checks, 'plain.sh')), 'echo hi\n');
+    for (const n of ['absent.sh', 'linked.sh', 'dangling.sh', 'folder.sh']) assert.equal(readPlainText(path.join(checks, n)), null, n);
+    // A file under a linked folder of the Product: read as before with no Product folder set, refused with one.
+    fs.mkdirSync(path.join(T, 'away'));
+    fs.writeFileSync(path.join(T, 'away', 'x.yml'), 'on: push\n');
+    fs.symlinkSync(path.join(T, 'away'), path.join(T, 'ci'));
+    assert.equal(readPlainText(path.join(T, 'ci', 'x.yml')), 'on: push\n');
+    setProductRoot(T);
+    try { assert.equal(readPlainText(path.join(T, 'ci', 'x.yml')), null); } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(path.join(T, 'outside.sh'), 'utf8'), 'ALLOWLIST=x\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 readPlainText and contentSha: a link to /dev/zero answers at once', { skip: DEV_ZERO_SKIP }, () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-plaintext-zero-'));
+  try {
+    const p = path.join(T, 'yad-checks.yml');
+    fs.symlinkSync('/dev/zero', p);
+    const got = inChildWithLimit(`const { readPlainText, contentSha } = await import(${cliUrl('./lib.mjs')});
+process.stdout.write(JSON.stringify([readPlainText(process.argv[1]), contentSha(process.argv[1])]));`, [p]);
+    assert.deepEqual(got, [null, null]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#222 copyFile and contentSha: a link at the destination has no sha, and the copy replaces it — never writes through it', { skip: E125B_SKIP }, async () => {
+  const { copyFile, contentSha } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-copyfile-')));
+  try {
+    const src = path.join(T, 'template.sh');
+    fs.writeFileSync(src, '#!/bin/sh\necho gate\n');
+    const outside = path.join(T, 'outside.txt');
+    fs.writeFileSync(outside, 'mine\n');
+    const dir = path.join(T, 'checks');
+    fs.mkdirSync(dir);
+    const linked = path.join(dir, 'linked.sh');
+    const dangling = path.join(dir, 'dangling.sh');
+    fs.symlinkSync(outside, linked);
+    fs.symlinkSync(path.join(T, 'made.txt'), dangling);
+    assert.equal(contentSha(linked), null, 'a link has no sha, as a missing file has none');
+    assert.equal(contentSha(dangling), null);
+    assert.equal(contentSha(path.join(dir, 'absent.sh')), null);
+    assert.equal(contentSha(path.join(src, 'child')), null, 'a path under a file is no file, as before');
+    assert.match(contentSha(src), /^sha256:/);
+    copyFile(src, linked);
+    copyFile(src, dangling, { exec: true });
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'mine\n', 'the link\'s target is untouched');
+    assert.ok(!fs.existsSync(path.join(T, 'made.txt')), 'a dangling link\'s target is not made');
+    for (const f of [linked, dangling]) {
+      assert.ok(fs.lstatSync(f).isFile(), `${f} is a plain file now`);
+      assert.equal(fs.readFileSync(f, 'utf8'), '#!/bin/sh\necho gate\n');
+    }
+    if (process.platform !== 'win32') assert.ok(fs.statSync(dangling).mode & 0o100, 'exec is kept');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['dangling.sh', 'linked.sh'], 'no temporary file is left');
+    // A plain file is replaced as before.
+    fs.writeFileSync(linked, 'old\n');
+    copyFile(src, linked);
+    assert.equal(fs.readFileSync(linked, 'utf8'), '#!/bin/sh\necho gate\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------------------------------------
 // lib.mjs — a Product file larger than any real one is refused before it is read (#215)
 // ---------------------------------------------------------------------------------------------

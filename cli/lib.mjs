@@ -205,9 +205,18 @@ export function fileSha(p) {
 // one of them outdated, or edited, for ever. A file with no CR in it hashes exactly as `fileSha` does, so
 // every sha already recorded in `.sdlc/managed.json` still matches. Not for artifact hashes: those are
 // `fileSha`, and an approval is bound to them.
+// A link, a folder, a device, a file under a linked folder of the Product or one too big to read has no
+// sha, as a missing file has none (#222): a committed CI file that links to /dev/zero made `yad check` and
+// setup wait for ever here, and one that links out of the Product made yad compare a file it does not own.
+// A file it may not read (no permission) still throws, as before. A path nothing is at — its folder missing or a
+// file, a link loop — has no sha either, as `existsSync` said before.
 export function contentSha(p) {
-  if (!fs.existsSync(p)) return null;
-  const bytes = fs.readFileSync(p);
+  try { fs.lstatSync(path.resolve(p)); } catch { return null; }
+  let bytes;
+  try { bytes = readPlainBytes(p); } catch (e) {
+    if (e?.code === 'ENOENT' || e?.code === NOT_PLAIN_FILE || e?.code === FILE_TOO_BIG) return null;
+    throw e;
+  }
   const text = bytes.includes(13) ? Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1') : bytes;
   return 'sha256:' + createHash('sha256').update(text).digest('hex');
 }
@@ -220,11 +229,22 @@ export function sameContent(src, dest) {
 
 // Both refuse a destination under a linked folder of the Product (#214): `copyDir` removes the old copy
 // first, and through a linked `.claude/` that would delete inside the folder the link points at.
+// The copy goes to a new file beside `dest`, made only when nothing is there (COPYFILE_EXCL), then is renamed
+// over it (#222): `copyFileSync` straight onto `dest` writes through a link standing there (a dangling one too,
+// making its target), so a committed `checks/x.sh` that links to `~/.zshenv` would get the gate's text. A
+// rename replaces the link itself.
 export function copyFile(src, dest, { exec = false } = {}) {
   refuseLinkedWrite(dest);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-  if (exec) fs.chmodSync(dest, 0o755);
+  const tmp = `${path.resolve(dest)}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  try {
+    fs.copyFileSync(src, tmp, fs.constants.COPYFILE_EXCL);
+    if (exec) fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* keep the copy's own error */ }
+    throw e;
+  }
 }
 export function copyDir(src, dest) {
   refuseLinkedWrite(dest);
@@ -521,6 +541,15 @@ export function readPlainFile(p, opts) {
 }
 // The raw bytes, for a caller that hashes them. Every failure is thrown, a missing file as ENOENT.
 export const readPlainBytes = (p, opts) => readPlainOrThrow(p, null, opts);
+// A committed text file read as plain text (#222): a CI workflow, a GitLab fragment, a gate script, a git hook.
+// The text, or `null` for anything yad will not or cannot read: no file, a link (dangling or not), a folder, a
+// device or a pipe, a file under a linked folder of the Product, a file too big, one it may not open. So it
+// never follows a link and never waits on a device, and a caller keeps its one answer for "no file". A caller
+// that must tell a refused file from a missing one (to leave it alone rather than write it) uses
+// `readPlainFile`, which throws NOT_PLAIN_FILE or FILE_TOO_BIG for those.
+export function readPlainText(p, opts) {
+  try { return readPlainFile(p, opts); } catch { return null; }
+}
 // One JSON file as it is on disk: no shape stamp, and nothing caught. A missing file throws ENOENT, a link
 // or a folder throws NOT_PLAIN_FILE, a file larger than MAX_PLAIN_BYTES throws FILE_TOO_BIG, and a file that
 // does not parse throws a SyntaxError. So each caller keeps its own answer for each of them, which `readJSON`
