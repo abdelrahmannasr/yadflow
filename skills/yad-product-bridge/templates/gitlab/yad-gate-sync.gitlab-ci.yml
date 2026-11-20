@@ -6,7 +6,8 @@
 # so wiring never edits the foreign root pipeline beyond that one include line. The job carries
 # `needs: []` and no `stage:` (same merge-safety as the yad-checks fragment).
 #
-# CI is the SOLE writer of the ledger, and it writes ONLY at merge, ONLY to the default branch.
+# CI is the SOLE writer of the ledger, and it writes ONLY at merge, ONLY to the default branch (or to
+# the trunk YAD_TRUNK names — see below).
 # During review there is NO CI write: the MR itself is the source of truth (native approvals +
 # threads). CI never pushes to the MR source (review) branch, so an in-flight approval is never
 # dismissed by a CI commit. Because nothing is pushed to the source branch, you can safely enable
@@ -28,6 +29,14 @@
 #         -f description='yad gate sync' -f ref=main -f cron='*/15 * * * *'
 #       glab api "projects/:id/pipeline_schedules/<id>/variables" -X POST \
 #         -f key=SDLC_GATE_SYNC -f value=true
+#
+# A trunk that is not GitLab's default branch (#232): a team whose trunk (the branch named in the
+# Product's .sdlc/product.json) is another branch sets a project or group CI/CD variable YAD_TRUNK to
+# it — in the settings, never in this file, which `yad update` rewrites. The merge path then also runs
+# on a push to that branch, and the sweep checks out and pushes it instead of the default branch. Put the
+# schedule on that branch too. A protected variable reaches only the pipelines of protected branches, so
+# keep the trunk protected or untick "Protect variable". Unset or empty, the job acts as before: only
+# the default branch.
 #
 # Token: CI_JOB_TOKEN can neither read the approvals API nor push to a protected branch. Create a
 # PROJECT ACCESS TOKEN with `read_api` + `write_repository` (role Developer+, allowed to push to the
@@ -76,7 +85,8 @@ yad-gate-sync:
   # Keyed on every current pin source (YAD_VERSION, and the two pin files), so a new pin starts a new
   # cache. Only the downloads (_cacache; npm checks each one's integrity hash), never npx's installed tree
   # (_npx), which it runs as it is. (A Product with only the older hub.json shares the key until that file
-  # goes.) Set the pipeline schedule on the default branch, and keep that branch protected (bridge.md).
+  # goes.) Set the pipeline schedule on the default branch (or the YAD_TRUNK branch), and keep that branch
+  # protected (bridge.md).
   cache:
     key:
       prefix: yad-npx-$YAD_VERSION
@@ -86,6 +96,8 @@ yad-gate-sync:
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\/EP-/
+    # The same on the trunk YAD_TRUNK names (#232). Unset or empty, this rule never matches.
+    - if: $CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /review\/EP-/
     # Scheduled sweep: the only path that picks up bare approvals (advances merged reviews it finds).
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"
   script:
@@ -131,8 +143,19 @@ yad-gate-sync:
     - git config user.name "yad-gate-sync" && git config user.email "yad-gate-sync@noreply.${CI_SERVER_HOST}"
     - git remote set-url origin "https://oauth2:${SDLC_GATE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     - export GITLAB_TOKEN="$SDLC_GATE_TOKEN" GITLAB_HOST="$CI_SERVER_URL"
-    - git fetch origin "$CI_DEFAULT_BRANCH"
-    - git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+    # The branch the advance is written to (#232). The merge path: the branch the merge was pushed to
+    # (the default branch, or the YAD_TRUNK branch by the rules above). The sweep: the YAD_TRUNK branch,
+    # or the default branch when it is unset or empty. `gate ci` pushes the advance to the trunk the
+    # Product's .sdlc/product.json names, so YAD_TRUNK names that same branch. GitLab runs every `script`
+    # line in the same shell, so YAD_SYNC_BRANCH carries into the lines below.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        YAD_SYNC_BRANCH="${YAD_TRUNK:-$CI_DEFAULT_BRANCH}"
+      else
+        YAD_SYNC_BRANCH="$CI_COMMIT_BRANCH"
+      fi
+    - git fetch origin "$YAD_SYNC_BRANCH"
+    - git checkout -B "$YAD_SYNC_BRANCH" "origin/$YAD_SYNC_BRANCH"
     - |
       # >>> yad-pin
       # Which yadflow this job runs, most explicit source first:
@@ -199,7 +222,7 @@ yad-gate-sync:
         jq -r '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' /tmp/yad-raw-mrs > /tmp/yad-merged-mrs || rc=1
         while read -r IID REF; do
           [ -n "$IID" ] || continue
-          git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+          git checkout -q -B "$YAD_SYNC_BRANCH" "origin/$YAD_SYNC_BRANCH"
           npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
         done < /tmp/yad-merged-mrs
       else

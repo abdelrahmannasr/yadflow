@@ -29131,6 +29131,48 @@ test('#599: the update guard also runs on a push to the YAD_TRUNK branch, and on
   assert.doesNotMatch(gitlab, /^\s+YAD_TRUNK:/m);
 });
 
+// #232: the gate sync follows the YAD_TRUNK trunk as the update guard does (#599). GitHub: the merge job
+// already checks out the branch the review merged into (and `pull_request: closed` has no branch filter, so
+// a merge into the trunk starts it); the reconcile job checks out YAD_TRUNK, else the default branch (an
+// unset variable reads as '', which `||` passes over). GitLab: a second merge rule for a push to YAD_TRUNK,
+// and every checkout goes to one branch the script picks, the default branch when YAD_TRUNK is unset.
+test('#232: the gate sync follows the YAD_TRUNK branch when it is set, and the default branch otherwise', () => {
+  const read = (f) => fs.readFileSync(path.join(ROOT, 'skills/yad-product-bridge/templates', f), 'utf8');
+  const code = (t) => t.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const github = code(read('github/yad-gate-sync.yml'));
+  assert.deepEqual([...github.matchAll(/^ {10}ref: (.+)$/gm)].map((m) => m[1]), [
+    '${{ github.event.pull_request.base.ref }}',
+    '${{ vars.YAD_TRUNK || github.event.repository.default_branch }}',
+  ]);
+  assert.match(github, /\non:\n {2}pull_request:\n {4}types: \[closed\]\n {2}schedule:\n/, 'no branch filter, no push trigger');
+  assert.equal((github.match(/YAD_TRUNK/g) || []).length, 1, 'read once, in the checkout, never in a run: block');
+
+  const gitlab = code(read('gitlab/yad-gate-sync.gitlab-ci.yml'));
+  const rules = gitlab.slice(gitlab.indexOf('\n  rules:\n'), gitlab.indexOf('\n  script:\n'));
+  assert.deepEqual([...rules.matchAll(/^ {4}- if: (.+)$/gm)].map((m) => m[1]), [
+    '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
+    '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
+    '$CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"',
+  ]);
+  assert.doesNotMatch(gitlab, /^\s+YAD_TRUNK:/m, 'the value is the team\'s, set in the settings');
+  // Every fetch and checkout goes to the one branch the script picks.
+  const moves = [...gitlab.matchAll(/git (?:fetch|checkout)\b.*$/gm)].map((m) => m[0]);
+  assert.equal(moves.length, 3);
+  for (const l of moves) assert.match(l, /"(?:origin\/)?\$YAD_SYNC_BRANCH"/, l);
+  assert.doesNotMatch(gitlab, /git (?:fetch|checkout)\b.*CI_DEFAULT_BRANCH/);
+  // Run the pick as the runner's `sh` would.
+  const pick = gitlab.match(/^ {6}if \[ "\$CI_PIPELINE_SOURCE" = "schedule" \]; then\n[\s\S]*?^ {6}fi$/m);
+  assert.ok(pick, 'the branch pick');
+  const branch = (env) => execFileSync('sh', ['-c', `${pick[0]}\nprintf '%s' "$YAD_SYNC_BRANCH"`], {
+    env: { PATH: process.env.PATH, CI_DEFAULT_BRANCH: 'main', ...env }, encoding: 'utf8',
+  });
+  assert.equal(branch({ CI_PIPELINE_SOURCE: 'schedule' }), 'main', 'unset: the default branch');
+  assert.equal(branch({ CI_PIPELINE_SOURCE: 'schedule', YAD_TRUNK: '' }), 'main', 'empty: the default branch');
+  assert.equal(branch({ CI_PIPELINE_SOURCE: 'schedule', YAD_TRUNK: 'testing' }), 'testing');
+  assert.equal(branch({ CI_PIPELINE_SOURCE: 'push', CI_COMMIT_BRANCH: 'main' }), 'main', 'the merge path: the pushed branch');
+  assert.equal(branch({ CI_PIPELINE_SOURCE: 'push', CI_COMMIT_BRANCH: 'testing', YAD_TRUNK: 'testing' }), 'testing');
+});
+
 test('E43: yadflow\'s update-guard workflow ignores the capture branches; the CLI runs capture and its hook path', () => {
   const guard = fs.readFileSync(new URL('../skills/yad-checks/templates/github/yad-update-guard.yml', import.meta.url), 'utf8');
   assert.match(guard, /on:\n {2}push:\n(?:\s*#.*\n)*\s+branches-ignore: \["yad\/wip\/\*\*"\]/);

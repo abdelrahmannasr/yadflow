@@ -1,6 +1,6 @@
 # yad-managed: yad-product-bridge
 # Merge-time gate sync for the PRODUCT (Path B). CI is the SOLE writer of the ledger, and it
-# writes ONLY at merge, ONLY to the default branch.
+# writes ONLY at merge, ONLY to the default branch (or to the trunk YAD_TRUNK names — see below).
 #
 # During review there is NO CI write: the platform PR is the source of truth (native approvals +
 # review threads). CI never pushes to the review branch, so an in-flight approval is never dismissed
@@ -27,6 +27,13 @@
 #   Product sitting on a pre-#163 yadflow keeps that behaviour until someone upgrades it — if the resolved
 #   pin is older than 3.15.3, run `yad update` or disable the schedule.
 #   On GitHub a scheduled workflow runs automatically once committed (no setup).
+#
+# A trunk that is not GitHub's default branch (#232): a team whose trunk (the branch named in the
+# Product's .sdlc/product.json) is another branch sets a repository variable YAD_TRUNK to it — in the
+# settings, never in this file, which `yad update` rewrites. The merge job needs nothing: it runs on every
+# merged review PR, whatever branch it merged into, and checks out that branch. The reconcile job then
+# checks out the YAD_TRUNK branch instead of the default branch, and `yad gate ci` pushes the advance to
+# the trunk the Product names. Unset, the variable is '', and the job checks out the default branch as before.
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
@@ -166,9 +173,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # The trunk the YAD_TRUNK repository variable names, else the default branch (#232).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ vars.YAD_TRUNK || github.event.repository.default_branch }}
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
