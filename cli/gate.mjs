@@ -1446,18 +1446,20 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // `ours` is what this run stages, and the commit takes exactly the files staged under it — never anything
   // a person had staged before (#231 review). Read with --no-renames: a move is its new names AND its old
   // ones, so the old folder's removal is in the same commit.
+  // Every pathspec here is literal (#245): a written file named `*.md` stages, reads and commits only itself.
+  const lit = (...a) => git('--literal-pathspecs', ...a);
   const ours = [];
   for (const e of touched) {
     ours.push(path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'), ...(statusFiles.get(e) || []));
-    git('add', '-A', '--', path.join(epicRel(e), '.sdlc'));
-    git('add', '-A', '--', path.join(epicRel(e), 'reviews'));
-    for (const f of statusFiles.get(e) || []) git('add', '--', f);
+    lit('add', '-A', '--', path.join(epicRel(e), '.sdlc'));
+    lit('add', '-A', '--', path.join(epicRel(e), 'reviews'));
+    for (const f of statusFiles.get(e) || []) lit('add', '--', f);
   }
   // The move: exactly the files it wrote, by name, and the old folder's removal — the same allowlist rule.
   if (moved) {
     ours.push(...moved, epicRel(DISCOVERY_EPIC));
-    for (const f of moved) git('add', '--', f);
-    git('add', '-A', '--', epicRel(DISCOVERY_EPIC));
+    for (const f of moved) lit('add', '--', f);
+    lit('add', '-A', '--', epicRel(DISCOVERY_EPIC));
   }
   // E19: the Product index, rebuilt from the ledger this run just staged and carried in the same commit —
   // the one writer, on the default branch, as the user's decision asks. Only here, past the read-only
@@ -1471,7 +1473,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
   if (indexStaged) ours.push(INDEX_FILE);
-  const stagedRead = ours.length ? git('diff', '--cached', '--name-only', '--no-renames', '-z', '--', ...ours) : { ok: true, stdout: '' };
+  const stagedRead = ours.length ? lit('diff', '--cached', '--name-only', '--no-renames', '-z', '--', ...ours) : { ok: true, stdout: '' };
   if (!stagedRead.ok) { fail(`could not read what this run staged — ${stagedRead.stderr.split('\n')[0] || stagedRead.code}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   const staged = stagedRead.stdout.split('\0').filter(Boolean);
   if (!staged.length) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
@@ -1495,11 +1497,11 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     : `chore(gate): ${sync} [skip ci]`;
   // The owning command's own ledger commit: the git pre-commit guard (E48) refuses HAND commits to these
   // files, so it is told this one is not. In CI no clone has that hook; a person re-running this locally does.
-  const cm = run('git', ['commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
+  const cm = run('git', ['--literal-pathspecs', 'commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
     ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []),
     '--', ...staged],
-  // Plain names, as git listed them: one holding a glob character can match only other files git knows, and
-  // the check before the push judges every file the commit holds.
+  // Literal names, as git listed them (#245): a name holding `*`, `?` or `[` matches only itself, never another
+  // file a person has edited or staged. The check before the push judges every file the commit holds.
   { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   ok(`committed gate update: ${c.dim(subject)}`);
@@ -1887,13 +1889,15 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
   const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate reopen', root })) return answer({ written });
   // Only the files this run wrote, and only those git sees (a legacy mirror never committed is left out).
-  const specs = written.filter((f) => git('add', '--', f).ok);
-  if (git('diff', '--cached', '--quiet', '--', ...specs).ok) { info('nothing changed on disk — nothing to commit'); return answer({ written }); }
+  // Every pathspec is literal (#245): a lowered story named `*.md` stages and commits only itself.
+  const lit = (...args) => git('--literal-pathspecs', ...args);
+  const specs = written.filter((f) => lit('add', '--', f).ok);
+  if (lit('diff', '--cached', '--quiet', '--', ...specs).ok) { info('nothing changed on disk — nothing to commit'); return answer({ written }); }
   const all = [...specs, ...(branch === defaultBranch && !verified && stageIndexIfClean(root, git, specs) ? [INDEX_FILE] : [])];
   const message = buildReopenMessage({ epic, step, reason: a.reason, walked: walkedBack, revoked: a.revokedApprovals.length, retired: retiredNos });
-  const cm = run('git', ['commit', '-m', message, '--', ...all], { cwd: root, env: OWNING_COMMIT_ENV() });
+  const cm = run('git', ['--literal-pathspecs', 'commit', '-m', message, '--', ...all], { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) {
-    git('reset', '-q', '--', ...all);
+    lit('reset', '-q', '--', ...all);
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
     return answer({ written });

@@ -1029,9 +1029,10 @@ test('E48: yad\'s own ledger commits (gate ci/sync, gate repair, gate reopen) te
   // Every commit gate.mjs makes writes the ledger, and each must pass the hook the refusal points at it.
   // The e2e drives `gate ci --merged` in a clone that has the hook; this pins that no commit was missed.
   const src = fs.readFileSync(path.join(ROOT, 'cli/gate.mjs'), 'utf8');
-  const commits = src.match(/\['commit',[^\n]*|git\('commit'/g) || [];
+  // gate ci's commit takes its files by literal name (#245), so a global flag may come before `commit`.
+  const commits = src.match(/\[(?:'--literal-pathspecs', )?'commit',[^\n]*|git\('commit'/g) || [];
   assert.equal(commits.length, 3, commits.join('\n'));
-  assert.ok(commits.every((c) => c.startsWith("['commit'")), 'no commit through the plain git helper');
+  assert.ok(commits.every((c) => c.startsWith('[')), 'no commit through the plain git helper');
   assert.equal((src.match(/env: OWNING_COMMIT_ENV\(\)/g) || []).length, 3);
 });
 
