@@ -15,6 +15,7 @@ import { registryEntryFor, findProduct } from './find-product.mjs';
 import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
 import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
+import { PACK_IGNORE_BLOCK } from './setup.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const YAD = path.join(ROOT, 'bin/yad.mjs');
@@ -321,6 +322,77 @@ test('default-branch commands: a plain detached Product worktree (no yad record)
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
     assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head, 'nothing reached origin/main');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('an amended yad commit that also carries a person\'s file is refused, names the file, and the hint moves it out; a plain checkpoint still pushes (#231)', () => {
+  const { W, P } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product', default_branch: 'main' } });
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const origin = path.join(W, 'product.git');
+    // A plain yad checkpoint commit is yad's own: it still counts, and pushes.
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T01', repo: 'api', mergeCommit: 'abc', date: '2026-10-25' }) });
+    assert.equal(yad(wt, 'checkpoint').code, 0);
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'main');
+    // The person amends it with an edit of their own: the subject is still yad's, the files are not.
+    write(wt, { 'notes.md': 'mine\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-q', '--amend', '--no-edit');
+    assert.match(git(wt, 'log', '-1', '--format=%s'), YAD_COMMIT_SUBJECT);
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD');
+    const head = git(origin, 'rev-parse', 'main');
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T02-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T02', repo: 'api', mergeCommit: 'def', date: '2026-10-25' }) });
+    let r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main, and it is not a file yad writes/);
+    assert.match(r.out, /git branch <branch>.*git restore --staged --worktree --source "\$\(git merge-base origin\/main HEAD\)" -- 'notes\.md'.*git commit --amend --no-edit/);
+    r = yad(wt, 'gate', 'ci');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    r = yad(wt, 'index');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    assert.equal(git(origin, 'rev-parse', 'main'), head, 'nothing reached origin/main');
+    // The hint, followed: the file is kept on a branch, taken out of yad's commit, and the push goes.
+    git(wt, 'branch', 'mine');
+    execFileSync('sh', ['-c', 'git restore --staged --worktree --source "$(git merge-base origin/main HEAD)" -- notes.md && git commit -q --amend --no-edit'], { cwd: wt, env: ENV });
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'main');
+    r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(git(origin, 'rev-parse', 'main'), git(wt, 'rev-parse', 'HEAD'));
+    assert.equal(git(origin, 'ls-tree', '--name-only', 'main', 'notes.md'), '', 'notes.md stayed off origin/main');
+    assert.equal(git(wt, 'ls-tree', '--name-only', 'mine', 'notes.md'), 'notes.md', 'and is kept on its branch');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the files yad writes ride a yad commit: a status-only artifact flip and the managed .gitignore block; any other edit of them does not (#231)', () => {
+  const { W, P } = workspace();
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const yadCommit = (files) => {
+      git(wt, 'reset', '-q', '--hard', 'origin/main');
+      write(wt, files);
+      git(wt, 'add', '-A');
+      git(wt, 'commit', '-qm', 'chore(gate): advance EP-x/epic on merge [skip ci]');
+      return branchToCommitOn(wt, g, 'main');
+    };
+    const ledgers = { 'epics/EP-x/.sdlc/state.json': '{}\n', '.sdlc/index.json': '{}\n', '.sdlc/repos.json': '{"repos":[]}\n', '.sdlc/code-context/api/code-map.md': '# api\n', 'epics/EP-x/reviews/epic.md': 'summary\n', 'foundation/.sdlc/state.json': '{}\n', 'foundation/reviews/foundation.md': 'summary\n' };
+    assert.equal(yadCommit(ledgers), 'main', 'the ledgers, the index, the registry, the code-context and the review summaries');
+    const epic = (status, title = 'EP-x') => ({ 'epics/EP-x/epic.md': `---\nid: EP-x\ntype: chore\nstatus: ${status}\nrepos: [api]\n---\n# ${title}\n` });
+    assert.equal(yadCommit({ ...ledgers, ...epic('approved') }), 'main', 'a status-only flip of the epic');
+    assert.equal(yadCommit(epic('approved', 'EP-x, edited')), 'HEAD', 'a flip with prose');
+    assert.equal(yadCommit({ 'epics/EP-x/stories/EP-x-S01.md': '---\nstatus: approved\n---\n' }), 'HEAD', 'a new story file');
+    assert.equal(yadCommit({ '.gitignore': `${PACK_IGNORE_BLOCK.join('\n')}\n` }), 'main', 'the managed ignore block');
+    assert.equal(yadCommit({ '.gitignore': `${PACK_IGNORE_BLOCK.join('\n')}\n.env\n` }), 'HEAD', 'an ignore line of the person\'s');
+    assert.equal(yadCommit({ 'epics/EP-x/notes.txt': 'x\n' }), 'HEAD', 'another file in the epic folder');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

@@ -20,7 +20,7 @@ import {
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, isProductWorktree } from './productcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, explainForeignFile, isProductWorktree } from './productcommit.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
@@ -1150,6 +1150,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const detachedWorktree = head === 'HEAD' && isProductWorktree(root) && !onlyYadCommitsAhead(git, wtTrunk);
     if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
       fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk || wtTrunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
+      if (detachedWorktree && explainForeignFile(git, wtTrunk)) { process.exitCode = 1; return { synced: 0, committed: false, pushed: false }; }
       hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in a worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
       process.exitCode = 1;
       return { synced: 0, committed: false, pushed: false };

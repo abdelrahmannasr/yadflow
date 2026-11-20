@@ -15,7 +15,7 @@ import { c, log, ok, info, warn, fail, hand, exists, emitJSON } from './lib.mjs'
 import path from 'node:path';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION, settingsEditHint } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { productGit, resolveDefaultBranch, branchToCommitOn } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, branchToCommitOn, explainForeignFile, isProductWorktree } from './productcommit.mjs';
 import { buildIndex, writeIndex, indexFreshness, INDEX_FILE } from './product-index.mjs';
 import { printable } from './epic-state.mjs';
 
@@ -62,6 +62,7 @@ export async function runIndex(root, { json = false } = {}) {
   const branch = branchToCommitOn(root, git, defaultBranch); // a Product worktree's detached trunk counts (#115, #597)
   if (branch !== defaultBranch) {
     fail(`on '${branch}', not the default branch '${defaultBranch}' — ${INDEX_FILE} is written on the default branch only, so a branch never carries it`);
+    if (branch === 'HEAD' && isProductWorktree(root) && explainForeignFile(git, defaultBranch)) { process.exitCode = 1; return; }
     hand(`switch to '${defaultBranch}' and re-run (if '${defaultBranch}' is wrong, set default_branch in ${settingsEditHint(root)}); \`yad index --json\` prints it here without writing`);
     process.exitCode = 1;
     return;
