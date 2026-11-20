@@ -3,7 +3,7 @@
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.
 import { warn, fail, hand, run, forTerminal } from './lib.mjs';
-import { SETTINGS_EDIT_HINT, settingsEditHint } from './manifest.mjs';
+import { SETTINGS_EDIT_HINT, settingsEditHint, PACK_IGNORE_BLOCK } from './manifest.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { worktreeAt, linkedGitDir, WORKTREE_RECORD } from './worktree-record.mjs';
@@ -63,13 +63,82 @@ export function branchToCommitOn(root, git, defaultBranch, { fetch = true } = {}
 
 // The subject every yad default-branch commit has (checkpoint, tidy, repo refresh, gate ci/repair/reopen).
 export const YAD_COMMIT_SUBJECT = /^chore\((product|gate)\): .* \[skip ci\]$/;
-// HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits. False when the fetch or the
-// read fails: unknown is not safe.
-export function onlyYadCommitsAhead(git, defaultBranch, { fetch = true } = {}) {
-  if (fetch && !git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return false;
+// The files yad's own default-branch commits write (#231), the allowlists the staging steps use: the
+// ledgers (`.sdlc/**` at the root — the index, the registry, the code-context — and in each epic and in
+// foundation/), the gate's generated review summaries (in an epic and in foundation/), an artifact whose change is its `status:` line
+// alone (checkpoint's story flip, gate ci's draft → approved), and the managed `.gitignore` block.
+const YAD_WRITTEN = [/^\.sdlc\//, /^epics\/[^/]+\/\.sdlc\//, /^foundation\/\.sdlc\//, /^(?:epics\/[^/]+|foundation)\/reviews\//];
+const STATUS_FLIP = /^(?:epics\/[^/]+|foundation)\/.+\.md$/;
+
+// PURE — true iff a `-U0` diff changes only frontmatter `status:` lines: every added or removed content line
+// is one. A new file (all lines added) or any other edit fails. Shared with checkpoint's staged-story check.
+export function diffIsStatusOnly(diff) {
+  let changes = 0;
+  for (const ln of String(diff ?? '').split('\n')) {
+    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue; // headers/hunks
+    if (ln.startsWith('+') || ln.startsWith('-')) {
+      if (!/^status:\s*\S/.test(ln.slice(1).trimStart())) return false; // a non-status change ⇒ not status-only
+      changes++;
+    }
+  }
+  return changes > 0;
+}
+
+// PURE — true iff a `-U0` diff of `.gitignore` only ADDS lines of the managed pack-ignore block (or blanks).
+function diffAddsManagedIgnoreOnly(diff) {
+  const managed = new Set(PACK_IGNORE_BLOCK.map((l) => l.trim()));
+  let added = 0;
+  for (const ln of String(diff ?? '').split('\n')) {
+    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue;
+    if (ln.startsWith('-')) return false; // yad only ever appends
+    if (ln.startsWith('+')) {
+      const body = ln.slice(1).trim();
+      if (body !== '' && !managed.has(body)) return false;
+      added++;
+    }
+  }
+  return added > 0;
+}
+
+// Why HEAD's commits ahead of origin/<default> are not all yad's own — null when they are. `{ subject }`: a
+// commit whose subject is not one yad writes; `{ file }`: a file the commits change (net, from where HEAD
+// left the default branch) that yad does not write — an amended yad commit that carries a person's edit
+// (#231); `{ unknown: true }`: the fetch or a read failed — unknown is not safe.
+export function notYadsOwnAhead(git, defaultBranch, { fetch = true } = {}) {
+  if (fetch && !git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return { unknown: true };
   const ahead = git('log', '--format=%s', `origin/${defaultBranch}..HEAD`);
-  if (!ahead.ok) return false;
-  return ahead.stdout.split('\n').filter(Boolean).every((s) => YAD_COMMIT_SUBJECT.test(s));
+  if (!ahead.ok) return { unknown: true };
+  const subjects = ahead.stdout.split('\n').filter(Boolean);
+  const subject = subjects.find((s) => !YAD_COMMIT_SUBJECT.test(s));
+  if (subject !== undefined) return { subject };
+  if (!subjects.length) return null;
+  const range = `origin/${defaultBranch}...HEAD`;
+  const names = git('diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', range);
+  if (!names.ok) return { unknown: true };
+  for (const file of names.stdout.split('\0').filter(Boolean)) {
+    if (YAD_WRITTEN.some((re) => re.test(file))) continue;
+    const check = file === '.gitignore' ? diffAddsManagedIgnoreOnly : STATUS_FLIP.test(file) ? diffIsStatusOnly : null;
+    const d = check && git('diff', '-U0', '--no-renames', '--no-ext-diff', '--no-color', range, '--', file);
+    if (!check || !d.ok || !check(d.stdout)) return { file };
+  }
+  return null;
+}
+
+// HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits, changing only the files yad
+// writes. False when the fetch or a read fails.
+export function onlyYadCommitsAhead(git, defaultBranch, opts = {}) {
+  return notYadsOwnAhead(git, defaultBranch, opts) === null;
+}
+
+// When a Product worktree is refused for a file yad does not write (#231), say which, and how to move it to a
+// branch of its own. Reads the local origin/<default> (the refusal just fetched it). True when it printed.
+export function explainForeignFile(git, defaultBranch) {
+  const why = notYadsOwnAhead(git, defaultBranch, { fetch: false });
+  if (!why?.file) return false;
+  const [f, d] = [forTerminal(why.file), forTerminal(defaultBranch)];
+  fail(`'${f}' is changed by the commits ahead of origin/${d}, and it is not a file yad writes — they are not pushed to '${d}'`);
+  hand(`move it to its own branch: \`git branch <branch>\` keeps the commits, with it, for review; then take it out of yad's commit here — \`git restore --staged --worktree --source "$(git merge-base origin/${d} HEAD)" -- '${f}'\` and \`git commit --amend --no-edit\` — and re-run`);
+  return true;
 }
 
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
@@ -87,6 +156,7 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     if (allowBranch) fail('--allow-branch cannot apply to a detached HEAD: it pushes to the branch it is on, and a detached HEAD is on none');
     // A Product worktree (#115, #597) refused here holds commits origin/<default> lacks, or could not fetch it.
     if (isProductWorktree(root)) {
+      if (explainForeignFile(productGit(root), defaultBranch)) { process.exitCode = 1; return false; }
       const which = worktreeAt(root) ? 'epic worktree' : 'worktree';
       hand(`this ${which}'s HEAD has commits origin/${d} does not that are not yad's own (or the fetch failed) — a step's work goes on its branch and through review: \`git switch -c <step>/<epic>\` keeps it, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
       process.exitCode = 1;

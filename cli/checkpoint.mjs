@@ -26,7 +26,7 @@ import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWit
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, diffIsStatusOnly } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
@@ -154,16 +154,7 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
 // left for a reviewed change (#112 review-bypass guard). `git` is a productGit-style accessor.
 export function stagedStoryIsStatusOnly(git, file) {
   const d = git('diff', '--cached', '-U0', '--', file);
-  if (!d.ok) return false;
-  let changes = 0;
-  for (const ln of d.stdout.split('\n')) {
-    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue; // headers/hunks
-    if (ln.startsWith('+') || ln.startsWith('-')) {
-      if (!/^status:\s*\S/.test(ln.slice(1).trimStart())) return false; // a non-status change ⇒ not status-only
-      changes++;
-    }
-  }
-  return changes > 0;
+  return d.ok && diffIsStatusOnly(d.stdout);
 }
 
 // --retro-ship orchestration (#142): validate the target, then write the retroactive ship shard so the
