@@ -56,14 +56,21 @@ function destState(dest, within) {
 }
 // The words of a refused row when any of `paths` is under a linked folder of the Product or of `within`, else
 // null (#235): a rename removes the old copy first, so it is checked at plan time, before anything is removed.
-function linkedOnTheWay(paths, within) {
+function linkedOnTheWay(paths, within, verb = 'write') {
   for (const p of paths) {
     try { refuseLinkedWrite(p, within); } catch (e) {
-      if (e?.folder) return `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\``;
+      if (e?.folder) return `is under ${e.folder}, a linked folder, so yad did not ${verb} it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\``;
       throw e;
     }
   }
   return null;
+}
+// A removal (#248): when `file` is under a linked folder, the row deletes nothing and says why, as a refused
+// rename does, so `yad check --fix` and `yad update` go on with the other files. `removeFile` / `removeDir`
+// refuse it again at apply, should a folder become a link in between.
+function removalRow(row, file, within) {
+  const refused = linkedOnTheWay([file], within, 'delete');
+  return refused ? { scope: row.scope, item: row.item, status: 'modified', root: row.root, paths: [], writesNothing: true, refused, apply: () => {} } : row;
 }
 // A file yad installs from its template. What stands at `dest` decides (#222), never read through:
 //   nothing there      'missing'
@@ -575,25 +582,25 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
       if (ide === '.opencode') {
         const dest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);
         if (!exists(dest)) continue;
-        actions.push({
+        actions.push(removalRow({
           scope: ide,
           item: `${skill}.md (removed)`,
           status: 'removed',
           root,
           paths: [rel(root, dest)],
           apply: () => removeFile(dest, { within: root }),
-        });
+        }, dest, root));
       } else {
         const dest = path.join(root, ide, 'skills', skill);
         if (!exists(dest)) continue;
-        actions.push({
+        actions.push(removalRow({
           scope: ide,
           item: `${skill} (removed)`,
           status: 'removed',
           root,
           paths: [rel(root, dest)],
           apply: () => removeDir(dest, { within: root }),
-        });
+        }, dest, root));
       }
     }
   }
@@ -1531,14 +1538,14 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
       if (stillNeeded.has(w.dest)) continue;
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
-      actions.push({
+      actions.push(removalRow({
         scope: 'product',
         item: `${w.dest} (removed)`,
         status: 'removed',
         root,
         paths: [w.dest],
         apply: () => removeFile(dest, { within: root }),
-      });
+      }, dest, root));
     }
   }
   return actions;
@@ -1730,7 +1737,7 @@ function orphanHookActionsFor(spec, root) {
   // A link is never ours to remove (#222).
   const text = readPlainText(file);
   if (text === null || !spec.scripts(prefix).includes(text)) return [];
-  return [{ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => removeFile(file, { within: root }) }];
+  return [removalRow({ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => removeFile(file, { within: root }) }, file, root)];
 }
 
 const PRE_COMMIT_HOOK = Object.freeze({
@@ -1940,7 +1947,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     for (const w of CAPTURE_WIRING) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
-      actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => removeFile(dest, { within: root }) });
+      actions.push(removalRow({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => removeFile(dest, { within: root }) }, dest, root));
     }
   }
   return actions;
@@ -2039,7 +2046,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
     const st = lstatIfPresent(file);
     const sha = st && st.isFile() ? contentSha(file) : null;
     const ours = sha && (readManagedLedger(root)[dest] === sha || sha === contentSha(asset(ACTIVITY_WIRING[0].src)));
-    if (ours) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => removeFile(file, { within: root }) });
+    if (ours) actions.push(removalRow({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => removeFile(file, { within: root }) }, file, root));
     else if (sha) sayKept(scope || 'the Product', dest);
   }
   return actions;
@@ -2390,7 +2397,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
       info(`${scriptRel} stays until ${inHead.join(' and ')} ${inHead.length > 1 ? 'are' : 'is'} committed as ${inHead.length > 1 ? 'they now stand' : 'it now stands'} — then \`yad check --fix\` removes it`);
       continue;
     }
-    actions.push({
+    actions.push(removalRow({
       scope: 'product',
       item: `${scriptRel} (removed)`,
       status: 'removed',
@@ -2414,7 +2421,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
           writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: current }, { within: root });
         }
       },
-    });
+    }, file, root));
   }
   return actions;
 }

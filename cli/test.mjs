@@ -2098,10 +2098,10 @@ test('#248 removeFile and removeDir refuse a path under a linked folder (Product
 });
 
 // #248: yad check --fix removes a hook script it no longer wires (capture turned off; the Cursor guard once Cursor
-// is no longer a target). Under a `hooks/` committed as a link, that
-// delete is refused, and the file where the link points stays — as the Product (setProductRoot) and as a
-// folder named only by { within } (the planner's own `root`).
-test('#248 a hook script yad unwires is not deleted through a linked hooks/ folder, and what the link points at stays', { skip: E125B_SKIP }, async () => {
+// is no longer a target). Under a `hooks/` committed as a link, that removal is a row that deletes nothing and
+// says why (as a refused rename is), so the run goes on, and the file where the link points stays — as the
+// Product (setProductRoot) and as a folder named only by { within } (the planner's own `root`).
+test('#248 a hook script yad unwires under a linked hooks/ folder is a refused row that deletes nothing, and what the link points at stays', { skip: E125B_SKIP }, async () => {
   const { orphanCaptureHookActions, orphanHookActions } = await import('./plan.mjs');
   const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248b-')));
   try {
@@ -2114,12 +2114,16 @@ test('#248 a hook script yad unwires is not deleted through a linked hooks/ fold
       fs.writeFileSync(path.join(P, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified', default_branch: 'main', capture: false }));
       fs.symlinkSync(outside, path.join(P, 'hooks'));
       const before = treeOf(outside);
-      const acts = [...orphanCaptureHookActions(P, ['.claude']), ...orphanHookActions(P, ['.claude'])].filter((a) => a.status === 'removed' && a.item.startsWith('hooks/'));
-      assert.deepEqual(acts.map((a) => a.item).sort(), ['hooks/ledger-guard-cursor.mjs (removed)', 'hooks/yad-capture.mjs (removed)'], `productRoot ${productRoot}`);
       if (productRoot) setProductRoot(P);
       try {
+        const acts = [...orphanCaptureHookActions(P, ['.claude']), ...orphanHookActions(P, ['.claude'])].filter((a) => a.item.startsWith('hooks/'));
+        assert.deepEqual(acts.map((a) => [a.item, a.status, a.writesNothing, a.paths]).sort(), [
+          ['hooks/ledger-guard-cursor.mjs (removed)', 'modified', true, []],
+          ['hooks/yad-capture.mjs (removed)', 'modified', true, []],
+        ], `productRoot ${productRoot}`);
         for (const a of acts) {
-          assert.throws(() => a.apply(), (e) => e.code === 'YAD-STATE-001' && e.folder === 'hooks' && /^hooks is a link, so yad did not delete hooks\//.test(e.message), a.item);
+          assert.match(a.refused, /^is under hooks, a linked folder, so yad did not delete it — remove the link/, a.item);
+          a.apply();
         }
       } finally { setProductRoot(null); }
       assert.deepEqual(treeOf(outside), before, `nothing deleted where the link points (productRoot ${productRoot})`);
@@ -2127,10 +2131,49 @@ test('#248 a hook script yad unwires is not deleted through a linked hooks/ fold
       fs.rmSync(path.join(P, 'hooks'));
       fs.mkdirSync(path.join(P, 'hooks'));
       fs.writeFileSync(path.join(P, 'hooks', 'yad-capture.mjs'), 'x');
-      for (const a of orphanCaptureHookActions(P, ['.claude']).filter((x) => x.item.startsWith('hooks/'))) a.apply();
+      const real = orphanCaptureHookActions(P, ['.claude']).filter((x) => x.item.startsWith('hooks/'));
+      assert.deepEqual(real.map((a) => [a.status, !!a.writesNothing]), [['removed', false]]);
+      for (const a of real) a.apply();
       assert.equal(fs.existsSync(path.join(P, 'hooks', 'yad-capture.mjs')), false);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #248: through the real runner. `yad check --fix` with capture turned off under a linked hooks/ names the
+// refused removal and goes on: the version stamp is written and the other fixes are applied.
+test('#248 yad check --fix goes on past a removal refused under a linked hooks/ folder, and deletes nothing there', { skip: E125B_SKIP }, async () => {
+  const { T } = scaffold();
+  // Everything the run prints, on stdout and stderr.
+  const said = async (fn) => {
+    const orig = [console.log, console.error];
+    const out = [];
+    console.log = console.error = (...a) => out.push(a.map(String).join(' '));
+    try { await fn(); } finally { [console.log, console.error] = orig; }
+    return out.join('\n');
+  };
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248c-out-'));
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    await said(() => reconcile(T, { fix: true }));
+    assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.mjs')), 'capture is wired first');
+    // hooks/ becomes a link to a folder outside, holding the same script; capture is then turned off.
+    fs.cpSync(path.join(T, 'hooks'), outside, { recursive: true });
+    fs.rmSync(path.join(T, 'hooks'), { recursive: true });
+    fs.symlinkSync(outside, path.join(T, 'hooks'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main', capture: false }));
+    const before = treeOf(outside);
+    fs.rmSync(path.join(T, '.sdlc/cli-version.json'));
+    fs.rmSync(path.join(T, '.claude/skills/yad-epic'), { recursive: true });
+    setProductRoot(T);
+    let r;
+    let out;
+    try { out = await said(async () => { r = await reconcile(T, { fix: true }); }); } finally { setProductRoot(null); }
+    assert.match(out, /hooks\/yad-capture\.mjs \(removed\) is under hooks, a linked folder, so yad did not delete it/);
+    assert.deepEqual(treeOf(outside), before, 'nothing deleted where the link points');
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/cli-version.json')), 'the run went on to write the version stamp');
+    assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')), 'and the other fixes');
+    assert.ok(r.applied > 0);
+  } finally { for (const d of [T, outside]) fs.rmSync(d, { recursive: true, force: true }); }
 });
 
 // #214 review: a caller that names the file itself names the linked folder too.
