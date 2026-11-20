@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, runLauncher, has,
-  exists, readJSON, readJSONStrict, writeJSON,
+  exists, readJSON, readJSONStrict, writeJSON, writeFileAtomic,
   writeProductConfig, forTerminal, asArg, inJSON,
 } from './lib.mjs';
 import { err } from './errors.mjs';
@@ -960,7 +960,8 @@ export async function runSetup(root, opts = {}) {
     const cr = path.join(target, '.coderabbit.yaml');
     if (exists(cr)) { info(`${j.name}: .coderabbit.yaml present`); continue; }
     if (connects(opts.coderabbit, repo.name) ?? await askYesNo(`Wire CodeRabbit (advisory) in ${j.name}?`, false)) {
-      fs.writeFileSync(cr, 'reviews:\n  high_level_summary: true\n  poem: false\n');
+      // In the code repo's own folder (#235): a link there is replaced, never written through.
+      writeFileAtomic(cr, 'reviews:\n  high_level_summary: true\n  poem: false\n', { within: target });
       ok(`${j.name}: wrote .coderabbit.yaml`);
     }
   }
@@ -1059,7 +1060,8 @@ export function ensurePackIgnored(root) {
   if (lines.some((l) => l.trim() === PACK_IGNORE_GLOB)) return false;
   const body = lines.join('\n').replace(/\n*$/, '');
   const prefix = body ? `${body}\n\n` : '';
-  fs.writeFileSync(gi, `${prefix}${PACK_IGNORE_BLOCK.join('\n')}\n`);
+  // Through a new file and a rename (#235), keeping the file's mode.
+  writeFileAtomic(gi, `${prefix}${PACK_IGNORE_BLOCK.join('\n')}\n`, { keepMode: true });
   return true;
 }
 

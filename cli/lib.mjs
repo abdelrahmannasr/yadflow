@@ -235,8 +235,9 @@ export function sameContent(src, dest) {
 // over it (#222): `copyFileSync` straight onto `dest` writes through a link standing there (a dangling one too,
 // making its target), so a committed `checks/x.sh` that links to `~/.zshenv` would get the gate's text. A
 // rename replaces the link itself.
-export function copyFile(src, dest, { exec = false } = {}) {
-  refuseLinkedWrite(dest);
+// `within`, as for the plain reads: a code repo's folder, whose own sub-folders must not be links either.
+export function copyFile(src, dest, { exec = false, within } = {}) {
+  refuseLinkedWrite(dest, within);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = `${path.resolve(dest)}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   let made = false;
@@ -251,8 +252,8 @@ export function copyFile(src, dest, { exec = false } = {}) {
     throw e;
   }
 }
-export function copyDir(src, dest) {
-  refuseLinkedWrite(dest);
+export function copyDir(src, dest, { within } = {}) {
+  refuseLinkedWrite(dest, within);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
 }
@@ -463,8 +464,9 @@ export const LINKED_FOLDER_FIX = 'remove the link (`git rm <folder>`), then rest
 // What a caller that names the file itself says of a refused read: the linked folder when there is one.
 export const notPlainSaid = (e, said) => (e?.folder ? `is under ${e.folder}, a linked folder, so it was not read` : said);
 // A write under a linked folder: a YAD-STATE-001 with the way out, so a command stops with a clear answer.
-// It keeps the plain read's `kind` and `folder`.
-function refuseLinkedWrite(p, within) {
+// It keeps the plain read's `kind` and `folder`. Exported for a writer that moves files itself (a rename), so
+// it stops before the first move.
+export function refuseLinkedWrite(p, within) {
   try { refuseLinkedFolder(p, within, 'write'); } catch (e) {
     throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX}, then run the command again`), { kind: e.kind, folder: e.folder });
   }
@@ -598,10 +600,11 @@ export function readJSON(p, def = null) {
 // returns `def`, but a file that exists and fails to parse must throw — silently defaulting a
 // corrupt approvals.json to [] would let the next sync rewrite it and permanently lose approvals.
 // A link or a folder in place of a ledger file is refused without reading it (E125 b): it may point at a
-// file outside the Product, or at a device whose read never ends.
-export function readJSONStrict(p, def = null) {
+// file outside the Product, or at a device whose read never ends. `opts.within`, as for the plain reads: a code
+// repo's folder, whose own sub-folders must not be links either (#235).
+export function readJSONStrict(p, def = null, opts) {
   let text;
-  try { text = readPlainFile(p); } catch (e) {
+  try { text = readPlainFile(p, opts); } catch (e) {
     if (e?.code === NOT_PLAIN_FILE && e.folder) throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX} — never delete a ledger blindly`), { kind: e.kind, folder: e.folder });
     if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
     if (e?.code === FILE_TOO_BIG) throw err('YAD-STATE-001', e.message, 'restore the file from a commit where it had its real size (`git log -- <file>`) — never delete a ledger blindly');
@@ -638,11 +641,17 @@ export function writeJSON(p, obj, opts) {
 // follow it. The refusal is a YAD-STATE-001 with a hint, so a command stops with a clear answer; it keeps
 // the plain read's `kind` and `folder`.
 // `opts.mode`: the new file's mode, set on the new file before the rename — never on whatever stands at `p`, which
-// a chmod there would follow if it were a link.
+// a chmod there would follow if it were a link. `opts.keepMode`: the mode of the plain file at `p` now, when there
+// is one (a rewrite in place keeps the file's mode, as a plain `writeFileSync` did).
 export function writeFileAtomic(given, data, opts) {
   refuseLinkedWrite(given, opts?.within);
   // The same normalised path the walk checked.
   const p = path.resolve(given);
+  if (opts?.keepMode && opts.mode === undefined) {
+    let st = null;
+    try { st = fs.lstatSync(p); } catch { /* none yet: the default mode */ }
+    if (st?.isFile()) opts = { ...opts, mode: st.mode & 0o777 };
+  }
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // A name nobody can guess, created exclusively (`wx`): a Product can commit `repos.json.<pid>.tmp` as a
   // link, and a plain write follows it — a dangling one too — putting this file's text wherever the link

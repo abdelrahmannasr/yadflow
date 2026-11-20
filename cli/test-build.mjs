@@ -446,7 +446,7 @@ test('yad build ship: an epic slug that reads like a task still matches its own 
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
-test('yad build done: a status write that fails puts the lanes back; another build-state file claiming the story is refused (#346 review 4)', { skip: (process.getuid && process.getuid() === 0) && 'root writes read-only files' }, () => {
+test('yad build done: a status write that fails puts the lanes back; another build-state file claiming the story is refused (#346 review 4)', { skip: (process.platform === 'win32' && 'a read-only folder does not stop a rename on Windows') || ((process.getuid && process.getuid() === 0) && 'root writes read-only files') }, () => {
   const { W, P, dir, sha } = workspace({ tasks: '- T01 one\n' });
   try {
     yad(P, 'skip', 'EP-l', 'EP-l-S01', '--repo', 'web', '--reason', 'no UI change');
@@ -459,12 +459,14 @@ test('yad build done: a status write that fails puts the lanes back; another bui
     assert.match(r.out, /build-state\/copy\.json also says story: EP-l-S01/);
     fs.rmSync(path.join(dir, '.sdlc/build-state/copy.json'));
     const before = fs.readFileSync(file, 'utf8');
-    fs.chmodSync(story(dir), 0o444);
+    // The story's folder, not the file, is made read-only: the status line is written through a new file and a
+    // rename (#235), which a read-only file does not stop.
+    fs.chmodSync(path.dirname(story(dir)), 0o555);
     try {
       r = yad(P, 'build', 'done', 'EP-l-S01');
       assert.notEqual(r.code, 0, r.out);
       assert.equal(fs.readFileSync(file, 'utf8'), before, 'the lanes are exactly as they were');
-    } finally { fs.chmodSync(story(dir), 0o644); }
+    } finally { fs.chmodSync(path.dirname(story(dir)), 0o755); }
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

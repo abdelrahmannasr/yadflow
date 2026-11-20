@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, isPlainObject, exists, forTerminal } from './lib.mjs';
+import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, refuseLinkedWrite, isPlainObject, exists, forTerminal } from './lib.mjs';
 import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
 import { DEFAULT_LIFECYCLE, laneOrder, laneAuthorSteps } from './lifecycle.mjs';
 import { epicFiles, PROJECT_FILES } from './manifest.mjs';
@@ -723,6 +723,9 @@ export async function buildShip(root, { story, task, repo, pr, mergeCommit = nul
     };
   }
   if (followUp) return addFollowUp(root, ctx, original, ship, { story, task, repo });
+  // The story's status line is written after the ship record: a story under a linked folder is refused first
+  // (#235), so no ship is recorded for a story whose status cannot follow.
+  refuseLinkedWrite(ctx.storyFile);
   const res = writeShip(ctx.epicDir, ship);
   if (!res.written) shipRefused(res, { story, task, repo });
   // The story is in Build now (the skill's rule); `build done` sets it shipped once every task is.
@@ -1269,8 +1272,9 @@ export async function buildDone(root, { story, today, fetch = true } = {}) {
   const laneText = fs.existsSync(ctx.file) ? fs.readFileSync(ctx.file, 'utf8') : null;
   // The lanes first: a story file that could not be written (the usual cause) cannot be written back either.
   const restore = () => {
-    if (laneText === null) fs.rmSync(ctx.file, { force: true }); else fs.writeFileSync(ctx.file, laneText);
-    try { if (fs.readFileSync(ctx.storyFile, 'utf8') !== storyText) fs.writeFileSync(ctx.storyFile, storyText); } catch { /* left as it was */ }
+    // Written back through a new file and a rename (#235), the bytes as they were read and the file's mode kept.
+    if (laneText === null) fs.rmSync(ctx.file, { force: true }); else writeFileAtomic(ctx.file, laneText, { keepMode: true });
+    try { if (fs.readFileSync(ctx.storyFile, 'utf8') !== storyText) writeFileAtomic(ctx.storyFile, storyText, { keepMode: true }); } catch { /* left as it was */ }
   };
   if (changedLanes || !ctx.buildState?.story) writeJSON(ctx.file, bs);
   let moved;

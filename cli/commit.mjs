@@ -11,8 +11,7 @@
 // nothing more: CI still fails the commit, because anyone can type a trailer.
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
+import { c, log, ok, info, warn, fail, run, exists, copyFile } from './lib.mjs';
 import {
   COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT, SPEC_LINK_EXEMPT_TYPES,
   TASK_TRAILER, CONTRACT_CHANGE_TRAILER, LEDGER_OVERRIDE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
@@ -148,7 +147,8 @@ export function ensureGitMessage(repoRoot, templateSrc) {
   const dest = path.join(repoRoot, '.gitmessage');
   if (exists(dest)) return false;
   if (!templateSrc || !exists(templateSrc)) return false;
-  fs.copyFileSync(templateSrc, dest);
+  // A new file and a rename (#235), in the repo's own folder: a link put there is replaced, never written through.
+  copyFile(templateSrc, dest, { within: repoRoot });
   run('git', ['config', 'commit.template', '.gitmessage'], { cwd: repoRoot });
   return true;
 }

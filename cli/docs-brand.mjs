@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readBrand, brandAssets, brandPath, contrast, DATA_IMAGE_RE, BRAND_FILE } from './brand.mjs';
-import { c, log, ok, warn, info, refuse, emitJSON, forTerminal } from './lib.mjs';
+import { c, log, ok, warn, info, refuse, emitJSON, forTerminal, writeFileAtomic, refuseLinkedWrite } from './lib.mjs';
 
 export const CSS_BEGIN = '/* yad-brand:begin */';
 export const CSS_END = '/* yad-brand:end */';
@@ -247,7 +247,10 @@ export function applyBrand(root, site) {
   }
   const nextTs = docsBrandTs(r.brand, assets, r.origin);
   const wrote = [];
-  const put = (full, rel, before, after) => { if (before !== after) { fs.writeFileSync(full, after); wrote.push(rel); } };
+  // All three are checked before the first is written (#235), so a linked folder never leaves the site half themed.
+  for (const full of [cssAt, htmlAt, tsAt]) refuseLinkedWrite(full, root);
+  // Through a new file and a rename (#235), each file keeping its mode.
+  const put = (full, rel, before, after) => { if (before !== after) { writeFileAtomic(full, after, { within: root, keepMode: true }); wrote.push(rel); } };
   put(cssAt, 'src/index.css', css, nextCss);
   put(htmlAt, 'index.html', html, nextHtml);
   put(tsAt, 'src/data/brand.ts', ts, nextTs);

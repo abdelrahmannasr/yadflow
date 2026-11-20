@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, quietly, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning, forTerminal,
+  c, log, ok, info, warn, hand, fail, note, quietly, readJSON, readJSONStrict, writeJSON, writeFileAtomic, refuseLinkedWrite, run, pushWithRebase, isPlainObject, writeMirrored, emitJSON, refuse, collectWarning, forTerminal,
 } from './lib.mjs';
 import { OWNING_COMMIT_ENV } from './hook.mjs';
 import { PROJECT_FILES, VERSION, isVerifiedLedger , productConfigPath, settingsEditHint } from './manifest.mjs';
@@ -545,14 +545,15 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
 function writeComments(epicDir, base, today, blocking) {
   if (!blocking.length) return;
   const file = path.join(epicDir, 'reviews', `${base}--${today}--comments.md`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   const lines = [`# Review comments — ${base} — ${today}`, ''];
   for (const t of blocking) {
     lines.push(`## ${t.login || 'reviewer'} ${t.changesRequested ? '(changes requested — **blocking**)' : '(unresolved)'}`);
     lines.push(`- ${(t.body || '').split('\n')[0] || '(no text)'}`);
     lines.push('');
   }
-  fs.writeFileSync(file, lines.join('\n') + '\n');
+  // Through a new file and a rename, with no `mkdirSync` first (#235): a linked `reviews/` (or epic folder) is
+  // refused with YAD-STATE-001 before any folder is made, and nothing is written where the link points.
+  writeFileAtomic(file, lines.join('\n') + '\n');
 }
 
 // Upsert machine-readable participation records into the comments ledger (the counterpart to the
@@ -1049,6 +1050,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   comments = canonicalComments(comments);
   productPrs = canonicalProductPrs(productPrs);
   if (stampedOld.stamped) info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
+  // The approval record goes in `reviews/` after the ledger: a linked `reviews/` is refused first (#235), so the
+  // ledger is never written without its record.
+  for (const pr of open) refuseLinkedWrite(approvalRecordPath(epicDir, pr, today));
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeMirrored(ledger.files.productPrs, ledger.files.productPrsLegacy, productPrs);
@@ -2244,17 +2248,18 @@ export function fillProductTemplate({ epic, artifact, step, owner, domains, hasA
 
 // The dated, human-readable approval record beside the ledger. An older approval still carries the
 // role the roster gave it (E62 left those fields on disk), and it is printed as recorded.
+const approvalRecordPath = (epicDir, pr, today) => path.join(epicDir, 'reviews', `${base(pr.artifact)}--${today}--approved.md`);
 function refreshApprovalRecord(epicDir, targets, approvals, today) {
   for (const pr of targets) {
     const stepApprovals = approvals.filter((a) => a.step === pr.step && a.status === 'approved');
-    const file = path.join(epicDir, 'reviews', `${base(pr.artifact)}--${today}--approved.md`);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const file = approvalRecordPath(epicDir, pr, today);
     const lines = [
       `# Approval record — ${pr.artifact} — ${today}`, '',
       '## Approved by',
       ...stepApprovals.map((a) => `- ${a.approver}${a.role ? ` — ${a.role}` : ''}${a.domain ? ` (${a.domain})` : ''} — approved ${a.date}${a.source ? ` (${a.source})` : ''}`),
       '',
     ];
-    fs.writeFileSync(file, lines.join('\n') + '\n');
+    // As the comments file: a linked folder on the way is refused, never written through (#235).
+    writeFileAtomic(file, lines.join('\n') + '\n');
   }
 }

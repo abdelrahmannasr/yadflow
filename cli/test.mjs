@@ -2082,6 +2082,285 @@ test('#214: a code repo inside the Product reached through a link is refused eve
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #235: the writers #214 left on plain `fs` — the status line in story and epic files, the gate's review records,
+// the stub epic.md `yad issues` makes, and the files yad writes into a code repo — refuse a linked folder too, with
+// the YAD-STATE-001 the helpers give, and write nothing where the link points.
+const LINKED_WRITE_235 = (folder) => (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.kind === 'link' && e.folder === folder
+  && e.message.startsWith(`${folder} is a link, so yad did not write `) && /^remove the link \(`git rm <folder>`\).*, then run the command again$/.test(e.hint);
+// A Product with one epic whose `linked` folder is a link to a folder outside it holding `files`.
+function linkedEpic235(T, linked, files) {
+  const P = path.join(T, 'product');
+  const outside = path.join(T, 'outside');
+  fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+  fs.mkdirSync(outside, { recursive: true });
+  for (const [f, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(outside, f)), { recursive: true }); fs.writeFileSync(path.join(outside, f), text); }
+  fs.mkdirSync(path.dirname(path.join(P, linked)), { recursive: true });
+  fs.symlinkSync(outside, path.join(P, linked));
+  return { P, outside };
+}
+
+test('#235: the status line in a story or epic file is refused under a linked stories/ or epics/, and nothing is written there', { skip: E125B_SKIP }, async () => {
+  const { setFrontmatterStatus, setBuildStatus, lowerFrontmatterStatus } = await import('./artifact-status.mjs');
+  for (const [i, linked, file] of [
+    [0, 'epics/EP-x/stories', 'epics/EP-x/stories/EP-x-S01.md'],
+    [1, 'epics', 'epics/EP-x/stories/EP-x-S01.md'],
+    [2, 'epics', 'epics/EP-x/epic.md'],
+  ]) {
+    const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-235a${i}-`)));
+    try {
+      const below = path.relative(linked, file);
+      const { P, outside } = linkedEpic235(T, linked, { [below]: '---\nid: EP-x-S01\nstatus: in-review\n---\n\n# S01\n' });
+      const before = treeOf(outside);
+      setProductRoot(P);
+      try {
+        const p = path.join(P, file);
+        assert.throws(() => setFrontmatterStatus(p, 'approved'), LINKED_WRITE_235(linked), `${linked}: sync-status`);
+        assert.throws(() => lowerFrontmatterStatus(p, 'draft'), LINKED_WRITE_235(linked), `${linked}: gate reopen`);
+        assert.throws(() => setBuildStatus(p, 'in-build'), LINKED_WRITE_235(linked), `${linked}: build ship`);
+        assert.deepEqual(treeOf(outside), before, `${linked}: the folder the link points at is untouched`);
+      } finally { setProductRoot(null); }
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('#235: a status line written in real folders keeps the file\'s other bytes (a CRLF body, no last newline) and its mode', { skip: E125B_SKIP }, async () => {
+  const { setFrontmatterStatus } = await import('./artifact-status.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235b-')));
+  try {
+    const file = path.join(T, 'epics', 'EP-x', 'stories', 'EP-x-S01.md');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '---\nid: EP-x-S01\nstatus: draft\n---\r\n\r\nbody $\' $&\r\nno newline');
+    fs.chmodSync(file, 0o640);
+    setProductRoot(T);
+    try { assert.equal(setFrontmatterStatus(file, 'approved'), 'draft'); } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(file, 'utf8'), '---\nid: EP-x-S01\nstatus: approved\n---\r\n\r\nbody $\' $&\r\nno newline');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+    assert.deepEqual(fs.readdirSync(path.dirname(file)), ['EP-x-S01.md'], 'no temp file left beside it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#235: yad gate comments refuses its review comments record under a linked reviews/, and writes nothing there', { skip: E125B_SKIP }, async () => {
+  const { gateComments } = await import('./gate.mjs');
+  const { quietly } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235c-')));
+  try {
+    const { P, outside } = linkedEpic235(T, 'epics/EP-x/reviews', { 'old.md': 'theirs\n' });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{"platform":"github"}\n');
+    fs.mkdirSync(path.join(P, 'epics', 'EP-x', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics', 'EP-x', '.sdlc', 'product-prs.json'), '[{"artifact":"epic.md","step":"epic-review","number":7}]\n');
+    const before = treeOf(outside);
+    const reader = () => ({ ok: true, reviews: [{ state: 'CHANGES_REQUESTED', login: 'bob' }], threads: [] });
+    setProductRoot(P);
+    try {
+      await assert.rejects(quietly(() => gateComments(P, { epic: 'EP-x', today: '2026-11-20', reader })), LINKED_WRITE_235('epics/EP-x/reviews'));
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'no comments record in the folder the link points at');
+    // In a real folder the record is written as before.
+    fs.rmSync(path.join(P, 'epics', 'EP-x', 'reviews'));
+    setProductRoot(P);
+    try { await quietly(() => gateComments(P, { epic: 'EP-x', today: '2026-11-20', reader })); } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(path.join(P, 'epics', 'EP-x', 'reviews', 'epic--2026-11-20--comments.md'), 'utf8'),
+      '# Review comments — epic — 2026-11-20\n\n## bob (changes requested — **blocking**)\n- (no text)\n\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#235: the stub epic.md yad issues makes is refused under a linked epic folder or epics/, and nothing is written there', { skip: E125B_SKIP }, async () => {
+  const { writeStubEpic } = await import('./issues-write.mjs');
+  for (const [i, linked] of [[0, 'epics/EP-x-parent'], [1, 'epics']]) {
+    const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-235d${i}-`)));
+    try {
+      const { P, outside } = linkedEpic235(T, linked, {});
+      setProductRoot(P);
+      try {
+        assert.throws(() => writeStubEpic(P, 'EP-x-parent', 'EP-x', '2026-11-20'), LINKED_WRITE_235(linked));
+      } finally { setProductRoot(null); }
+      assert.deepEqual(treeOf(outside), {}, `${linked}: nothing is written where the link points`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('#235: a code repo\'s own linked folder is refused for the files yad writes there ({ within } the repo)', { skip: E125B_SKIP }, async () => {
+  const { repoActions, recordManagedWrites } = await import('./plan.mjs');
+  const { copyFile, copyDir } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235e-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{}\n');
+    // The repo sits beside the Product, outside its folder: only `within` checks the repo's own folders.
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'theirs.sh'), 'theirs\n');
+    fs.symlinkSync(outside, path.join(R, 'checks'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const actions = repoActions(P, { name: 'backend', path: '../backend', platform: 'github' });
+      const checks = actions.filter((a) => a.item.startsWith('checks/'));
+      assert.ok(checks.length > 0);
+      for (const a of checks) {
+        assert.equal(a.writesNothing, true, a.item);
+        assert.match(a.refused, /^is under checks, a linked folder, so yad did not write it — remove the link/, a.item);
+      }
+      assert.throws(() => copyFile(path.join(outside, 'theirs.sh'), path.join(R, 'checks', 'x.sh'), { within: R }), LINKED_WRITE_235('checks'));
+      assert.throws(() => copyDir(path.join(P, '.sdlc'), path.join(R, 'checks', 'sub'), { within: R }), LINKED_WRITE_235('checks'));
+      fs.symlinkSync(outside, path.join(R, '.sdlc'));
+      assert.throws(() => writeJSON(path.join(R, '.sdlc', 'product-link.json'), { a: 1 }, { within: R }), LINKED_WRITE_235('.sdlc'));
+      // The provenance record of the repo, under its linked `.sdlc`.
+      const src = path.join(T, 'src.sh');
+      fs.writeFileSync(src, 'ours\n');
+      fs.mkdirSync(path.join(R, 'bin'));
+      fs.copyFileSync(src, path.join(R, 'bin', 'x.sh'));
+      // Its ledger is read first, with the repo's folder (T08): refused as a read, before any write.
+      assert.throws(() => recordManagedWrites([{ managed: { src, dest: path.join(R, 'bin', 'x.sh'), root: R } }]), (e) => e.code === 'YAD-STATE-001' && e.folder === '.sdlc');
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'nothing is written where the links point');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #235 review (T08): a code repo whose `.sdlc` is a link is refused at plan time — its provenance record is read
+// with the repo's folder, and `.sdlc/product-link.json` is a refused row — so `yad update` never stops half applied.
+test('#235: a code repo with a linked .sdlc is refused at plan time: the ledger read throws and product-link.json is a refused row', { skip: E125B_SKIP }, async () => {
+  const { repoActions, readManagedLedger, productLinkAction } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235f-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{}\n');
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    git(R, 'init', '-q');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'managed.json'), '{"version":"1","files":{}}\n');
+    fs.writeFileSync(path.join(outside, 'product-link.json'), '{"path":"x"}\n');
+    fs.symlinkSync(outside, path.join(R, '.sdlc'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const readRefused = (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.folder === '.sdlc' && /^\.sdlc is a link, so yad did not read /.test(e.message);
+      assert.throws(() => readManagedLedger(R), readRefused);
+      assert.throws(() => repoActions(P, { name: 'backend', path: '../backend', platform: 'github' }), readRefused, 'the whole repo plan stops before anything is applied');
+      const link = productLinkAction(P, { name: 'backend', path: '../backend' }, R);
+      assert.equal(link.writesNothing, true);
+      assert.match(link.refused, /^is under \.sdlc, a linked folder, so yad did not write it — remove the link/);
+      link.apply();
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'nothing is written where the link points');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #235 review (T09): a rename removes the old copy before it writes the new one, so a linked folder on either
+// side is a refused row at plan time, and the old copy stays where it is. (The skill renames get the same check;
+// a linked `.claude/skills` is already refused as an unsafe target before them.)
+test('#235: a legacy wired-file rename under a linked folder of a code repo is a refused row, and the old file is not removed', { skip: E125B_SKIP }, async () => {
+  const { legacyRepoActions } = await import('./plan.mjs');
+  const { LEGACY_MARKER } = await import('./manifest.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235g-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'workflows', 'sdlc-checks.yml'), `${LEGACY_MARKER}\nold\n`);
+    fs.symlinkSync(outside, path.join(R, '.github'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const rows = legacyRepoActions(P, { name: 'backend', path: '../backend', platform: 'github' });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].writesNothing, true);
+      assert.equal(rows[0].rename, undefined, 'not a rename, so it is never applied as one');
+      assert.match(rows[0].refused, /^is under \.github, a linked folder, so yad did not write it/);
+      rows[0].apply();
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'the old file stays where the link points');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #235 review (T11): `yad update --open-pr` keeps the team's own files by moving them aside and back. Under a
+// linked skill folder that move is refused before the first rename, so nothing moves where the link points.
+test('#235: applyKeepingOwn under a linked skill folder throws before it moves any file', { skip: E125B_SKIP }, async () => {
+  const { moduleActions } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235h-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.claude', 'skills'), { recursive: true });
+    const a0 = moduleActions(P, ['.claude']).find((a) => a.scope === '.claude' && typeof a.applyKeepingOwn === 'function');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'my-notes.md'), 'theirs\n');
+    fs.symlinkSync(outside, path.join(P, '.claude', 'skills', a0.item));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const a = moduleActions(P, ['.claude']).find((x) => x.item === a0.item && x.scope === '.claude');
+      assert.throws(() => a.applyKeepingOwn(), LINKED_WRITE_235(`.claude/skills/${a0.item}`));
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'no file moved out of (or into) the folder the link points at');
+    assert.deepEqual(fs.readdirSync(path.join(P, '.claude', 'skills')), [a0.item], 'no side folder made');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#235: writeFileAtomic keepMode gives a new file the default mode, and an existing one its own', { skip: process.platform === 'win32' && 'no file modes on Windows' }, () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235i-')));
+  try {
+    const fresh = path.join(T, 'fresh.md');
+    const plain = path.join(T, 'plain.md');
+    fs.writeFileSync(plain, 'x');
+    const defaultMode = fs.statSync(plain).mode & 0o777;
+    writeFileAtomic214(fresh, 'new\n', { keepMode: true });
+    assert.equal(fs.readFileSync(fresh, 'utf8'), 'new\n');
+    assert.equal(fs.statSync(fresh).mode & 0o777, defaultMode, 'a new file: the default mode, nothing invented');
+    fs.chmodSync(plain, 0o751);
+    writeFileAtomic214(plain, 'y', { keepMode: true });
+    assert.equal(fs.statSync(plain).mode & 0o777, 0o751);
+    // A link standing at the name is replaced, and its target's mode is not taken.
+    const target = path.join(T, 'target');
+    fs.writeFileSync(target, 't');
+    fs.chmodSync(target, 0o700);
+    fs.symlinkSync(target, path.join(T, 'via.md'));
+    writeFileAtomic214(path.join(T, 'via.md'), 'v', { keepMode: true });
+    assert.equal(fs.lstatSync(path.join(T, 'via.md')).isFile(), true);
+    assert.equal(fs.statSync(path.join(T, 'via.md')).mode & 0o777, defaultMode);
+    assert.equal(fs.readFileSync(target, 'utf8'), 't');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #235 review (T10): `yad sync-status` checks every file of an epic before it rewrites the first, so a linked
+// `stories/` stops the sweep with `epic.md` still as it was (no epic half in step).
+test('#235: syncStatuses under a linked stories/ refuses before epic.md is rewritten', { skip: E125B_SKIP }, async () => {
+  const { syncStatuses } = await import('./artifact-status.mjs');
+  const { quietly } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235j-')));
+  try {
+    const fm = (a, st) => `---\nid: EP-x\nartifact: ${a}\nstatus: ${st}\n---\n# x\n`;
+    const { P, outside } = linkedEpic235(T, 'epics/EP-x/stories', { 'EP-x-S01.md': fm('EP-x-S01', 'draft') });
+    const dir = path.join(P, 'epics', 'EP-x');
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-x', currentStep: 'ready-for-build', steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'done' },
+        { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+      ],
+    }));
+    fs.writeFileSync(path.join(dir, 'epic.md'), fm('epic', 'draft'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      await assert.rejects(quietly(() => syncStatuses(P, { epic: 'EP-x' })), LINKED_WRITE_235('epics/EP-x/stories'));
+    } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(path.join(dir, 'epic.md'), 'utf8'), fm('epic', 'draft'), 'epic.md is not rewritten');
+    assert.deepEqual(treeOf(outside), before);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
 // Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that
 // never ends (a link to /dev/zero) must fail the test, not freeze the whole run.

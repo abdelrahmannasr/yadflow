@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, shQuote, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
+  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, refuseLinkedWrite, shQuote, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -42,9 +42,10 @@ const isExecutable = (dest) => {
 };
 // What stands at a file yad writes (#222), read only as a plain file: 'plain', 'missing' (nothing there), 'link'
 // (a link at the file's own name, dangling or not), or 'refused' with the words that say why yad writes nothing:
-// a folder or a device there, a file larger than yad reads, or a file under a linked folder of the Product.
-function destState(dest) {
-  try { readPlainBytes(dest); return { state: 'plain' }; } catch (e) {
+// a folder or a device there, a file larger than yad reads, or a file under a linked folder of the Product or of
+// `within` (the folder the file belongs to: a code repo's, so its own linked `.claude/` is refused too).
+function destState(dest, within) {
+  try { readPlainBytes(dest, { within }); return { state: 'plain' }; } catch (e) {
     if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return { state: 'missing' };
     if (e?.code === NOT_PLAIN_FILE && e.folder) return { state: 'refused', refused: `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\`` };
     if (e?.code === NOT_PLAIN_FILE && e.kind === 'link') return { state: 'link' };
@@ -52,6 +53,17 @@ function destState(dest) {
     if (e?.code === FILE_TOO_BIG) return { state: 'refused', refused: `${TOO_BIG_SAID}, nor replaced it (there would be no copy of it) — replace it with a file of the right size or delete it, then re-run \`yad check --fix\`` };
     throw e;
   }
+}
+// The words of a refused row when any of `paths` is under a linked folder of the Product or of `within`, else
+// null (#235): a rename removes the old copy first, so it is checked at plan time, before anything is removed.
+function linkedOnTheWay(paths, within) {
+  for (const p of paths) {
+    try { refuseLinkedWrite(p, within); } catch (e) {
+      if (e?.folder) return `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\``;
+      throw e;
+    }
+  }
+  return null;
 }
 // A file yad installs from its template. What stands at `dest` decides (#222), never read through:
 //   nothing there      'missing'
@@ -62,7 +74,7 @@ function destState(dest) {
 //                      written, so the other files of the same run are still written
 //   a plain file       'ok' or 'outdated', as its bytes and execute bit say
 const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => {
-  const at = destState(dest);
+  const at = destState(dest, root);
   const base = { scope, item, root, paths: root ? [rel(root, dest)] : [] };
   if (at.state === 'refused') return { ...base, status: 'modified', writesNothing: true, refused: at.refused, apply: () => {} };
   return {
@@ -71,7 +83,7 @@ const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => {
       : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
         : 'outdated',
     ...(at.state === 'link' ? { replacesLink: true } : {}),
-    apply: () => copyFile(src, dest, { exec }),
+    apply: () => copyFile(src, dest, { exec, within: root }),
   };
 };
 const dirAction = (scope, item, src, dest, { root } = {}) => ({
@@ -83,7 +95,7 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   // The template's own files, one path each — for staging a folder that is already right on disk without
   // sweeping in a person's own files beside them (`yad update --open-pr` restages; E157 update review 6).
   ownPaths: () => (root ? listFiles(src).map((f) => rel(root, path.join(dest, f))) : []),
-  apply: () => copyDir(src, dest),
+  apply: () => copyDir(src, dest, { within: root }),
   // Writes the template but keeps every file the template does not have (a person's notes, or a file an older
   // yadflow shipped) — for `yad update --open-pr`, which an agent runs without asking (E157 update review 7).
   // The kept files are moved aside and back, so their bytes, modes and links are untouched. Returns them,
@@ -96,13 +108,16 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
     // come back.
     const clash = (f) => shipped.some((t) => t.startsWith(`${f}${path.sep}`) || f.startsWith(`${t}${path.sep}`));
     const own = exists(dest) ? listFiles(dest).filter((f) => !theirs.has(f) && !clash(f)) : [];
-    if (!own.length) { copyDir(src, dest); return []; }
+    if (!own.length) { copyDir(src, dest, { within: root }); return []; }
     const aside = `${dest}.yad-keep-${process.pid}`;
+    // Refused before the first move (#235): a rename under a linked folder (the skill's own folder included) would
+    // move files where the link points.
+    for (const f of own) { refuseLinkedWrite(path.join(dest, f), root); refuseLinkedWrite(path.join(aside, f), root); }
     const moved = [];
     const stuck = [];
     try {
       for (const f of own) { fs.mkdirSync(path.dirname(path.join(aside, f)), { recursive: true }); fs.renameSync(path.join(dest, f), path.join(aside, f)); moved.push(f); }
-      copyDir(src, dest);
+      copyDir(src, dest, { within: root });
     } finally {
       // Back even when the copy failed. One that cannot go back stays in the side folder, which is named, never
       // removed.
@@ -126,7 +141,8 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
 const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 export function readManagedLedger(root) {
   const file = path.join(root, MANAGED_LEDGER);
-  const rec = readJSONStrict(file, null);
+  // Checked against the repo's own folders (#235): a linked `.sdlc` stops the plan here, before anything is written.
+  const rec = readJSONStrict(file, null, { within: root });
   if (rec === null && !exists(file)) return {};
   if (!isMap(rec) || !isMap(rec.files)) {
     // Parses, but is not a record — YAD-STATE-002 (wrong shape), not -001 (does not parse).
@@ -168,7 +184,7 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
     apply: () => {
       // The copy reads only a plain file and never writes through a link at `<dest>.yad-orig` (#222).
       if (backup) backupPlain(dest, backup);
-      copyFile(src, dest, { exec });
+      copyFile(src, dest, { exec, within: root });
     },
   };
 };
@@ -192,7 +208,7 @@ export function recordManagedWrites(actions = []) {
   for (const [root, written] of byRoot) {
     const files = { ...readManagedLedger(root), ...written };
     const sorted = Object.fromEntries(Object.keys(files).sort().map((k) => [k, files[k]]));
-    writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: sorted });
+    writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: sorted }, { within: root });
     roots.push(root);
   }
   return roots;
@@ -508,6 +524,8 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
         const oldDest = path.join(root, IDE_OPENCODE_DIR, `${old}.md`);
         const newDest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);
         if (!exists(oldDest)) continue;
+        const refusedMd = linkedOnTheWay([oldDest, newDest], root);
+        if (refusedMd) { actions.push({ scope: ide, item: `${old}.md → ${skill}.md`, status: 'modified', root, paths: [], writesNothing: true, refused: refusedMd, apply: () => {} }); continue; }
         actions.push({
           scope: ide,
           item: `${old}.md → ${skill}.md`,
@@ -517,13 +535,15 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
           rename: { from: rel(root, oldDest), to: rel(root, newDest) },
           apply: () => {
             fs.rmSync(oldDest, { force: true });
-            copyFile(asset('skills', skill, 'SKILL.md'), newDest);
+            copyFile(asset('skills', skill, 'SKILL.md'), newDest, { within: root });
           },
         });
       } else {
         const oldDest = path.join(root, ide, 'skills', old);
         const newDest = path.join(root, ide, 'skills', skill);
         if (!exists(oldDest)) continue;
+        const refusedDir = linkedOnTheWay([oldDest, newDest], root);
+        if (refusedDir) { actions.push({ scope: ide, item: `${old} → ${skill}`, status: 'modified', root, paths: [], writesNothing: true, refused: refusedDir, apply: () => {} }); continue; }
         actions.push({
           scope: ide,
           item: `${old} → ${skill}`,
@@ -533,7 +553,7 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
           rename: { from: rel(root, oldDest), to: rel(root, newDest) },
           apply: () => {
             fs.rmSync(oldDest, { recursive: true, force: true });
-            copyDir(asset('skills', skill), newDest);
+            copyDir(asset('skills', skill), newDest, { within: root });
           },
         });
       }
@@ -612,6 +632,8 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
     if (!ownedByOldInstall(oldPath, marker)) continue;
     const w = wiring.find((x) => x.dest === newDest);
     if (!w) continue; // never delete a working file without a replacement to install
+    const refused = linkedOnTheWay([oldPath, path.join(baseRoot, newDest)], baseRoot);
+    if (refused) { actions.push({ scope, item: `${oldDest} → ${newDest}`, status: 'modified', root: baseRoot, paths: [], writesNothing: true, refused, apply: () => {} }); continue; }
     ledger ??= readManagedLedger(baseRoot);
     const recorded = ledger[oldDest];
     const ours = !!recorded && recorded === contentSha(oldPath);
@@ -638,16 +660,16 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
         fs.rmSync(oldPath, { force: true });
         // Only into an empty path. A file already at the new name is the new name's own wired-file action's
         // to judge — with its provenance and its backup — and may hold the team's edits (review 1).
-        if (!exists(path.join(baseRoot, newDest))) copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec });
+        if (!exists(path.join(baseRoot, newDest))) copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec, within: baseRoot });
         // No root .gitlab-ci.yml (a GitHub repo, or fragment-only GitLab), or one that is a link (#222): nothing
         // to rewrite. The rewrite goes through a new file and a rename, so it never writes through a link.
         const rootCi = path.join(baseRoot, '.gitlab-ci.yml');
         const txt = readPlainText(rootCi);
-        if (txt?.includes(oldDest)) writeFileAtomic(rootCi, txt.split(oldDest).join(newDest));
+        if (txt?.includes(oldDest)) writeFileAtomic(rootCi, txt.split(oldDest).join(newDest), { within: baseRoot });
         const current = readManagedLedger(baseRoot);
         if (Object.hasOwn(current, oldDest)) {
           delete current[oldDest];
-          writeJSON(path.join(baseRoot, MANAGED_LEDGER), { version: VERSION, files: current });
+          writeJSON(path.join(baseRoot, MANAGED_LEDGER), { version: VERSION, files: current }, { within: baseRoot });
         }
       },
     });
@@ -984,20 +1006,24 @@ export function publicGitUrl(u) {
 // the Product's own settings every time; `path` (where CI checks the Product out) is the team's to
 // change and is kept. Any other key in the file is kept too. A code repo that IS the Product's git repo
 // (a monorepo) gets none: the gates already read a Product kept in the repo from the base.
-function productLinkAction(root, repo, repoRoot) {
+export function productLinkAction(root, repo, repoRoot) {
   if (!exists(repoRoot)) return null;
   const top = gitTop(repoRoot);
   if (!top || top === gitTop(root)) return null;
   const dest = path.join(repoRoot, PRODUCT_LINK);
   const productConfig = readJSON(productConfigPath(root), {}) || {};
-  let current;
-  try { current = readJSONStrict(dest, null); } catch { current = undefined; }
   const base = {
     scope: repo.name,
     item: PRODUCT_LINK,
     root: repoRoot,
     paths: [PRODUCT_LINK],
   };
+  // A record under a linked folder of the repo (its `.sdlc`) is a refused row at plan time (#235), as a wired
+  // file's is: planned as a write, its apply would throw midway through the run.
+  const at = destState(dest, repoRoot);
+  if (at.state === 'refused') return { ...base, status: 'modified', writesNothing: true, refused: at.refused, apply: () => {} };
+  let current;
+  try { current = readJSONStrict(dest, null, { within: repoRoot }); } catch { current = undefined; }
   const want = {
     git_url: publicGitUrl(productConfig.git_url),
     path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,
@@ -1015,7 +1041,7 @@ function productLinkAction(root, repo, repoRoot) {
       // `writeJSON` replaces it.
       apply: () => {
         try { backupPlain(dest, backup); } catch (e) { if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG && e?.code !== 'ENOENT') throw e; }
-        writeJSON(dest, want);
+        writeJSON(dest, want, { within: repoRoot });
       },
     };
   }
@@ -1034,7 +1060,7 @@ function productLinkAction(root, repo, repoRoot) {
     ...base,
     status,
     pendingCommit: status === 'ok' && !committed() && !ignored(),
-    apply: () => writeJSON(dest, { ...(current || {}), ...want }),
+    apply: () => writeJSON(dest, { ...(current || {}), ...want }, { within: repoRoot }),
   };
 }
 
@@ -1246,7 +1272,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
   // A file too big to read (#215) is the team's file all the same: refused below like one that does not
   // parse, and never treated as missing, which would write a new file over it.
   let tooBig = false;
-  try { raw = readPlainFile(dest); } catch (e) {
+  try { raw = readPlainFile(dest, { within: root }); } catch (e) {
     if (e?.code === FILE_TOO_BIG) tooBig = true;
     else if (e?.code === NOT_PLAIN_FILE) notPlain = notPlainSaid(e, SETTINGS_NOT_PLAIN);
     else throw e;
@@ -1321,7 +1347,7 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
       if (!changed && raw !== null) return;
       // The same plain read: a link or a folder put there since the plan is left untouched.
       let text;
-      try { text = readPlainFile(dest); } catch (e) {
+      try { text = readPlainFile(dest, { within: root }); } catch (e) {
         if (e?.code === NOT_PLAIN_FILE) { warn(`${named} ${notPlainSaid(e, SETTINGS_NOT_PLAIN)} — left untouched; replace it with the real file (not a link), then re-run \`yad check --fix\``); return; }
         if (e?.code === FILE_TOO_BIG) { warn(`${named} ${TOO_BIG_SAID} — left untouched; replace it with a file of the right size, then re-run \`yad check --fix\``); return; }
         text = '';  // unreadable — refused below, as a file that does not parse
@@ -1338,11 +1364,11 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
           warn(`${named}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
           return;
         }
-        writeJSON(dest, merged.settings);
+        writeJSON(dest, merged.settings, { within: root });
         return;
       }
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      writeJSON(dest, merge({}).settings);
+      // No `mkdirSync` first: it would make folders through a linked one; `writeJSON` makes them after its check.
+      writeJSON(dest, merge({}).settings, { within: root });
     },
   };
 }
@@ -1351,15 +1377,17 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
 // above, the file is the team's, so `paths` is EMPTY (`yad update --push` never stages it) and `shared` names it
 // for `yad update --open-pr`, which stages it only when the change is yad's block alone (reconcile). It is
 // text, not JSON: `mergeShared` puts the block into a file's text.
-function blockState(dest, opts) {
+function blockState(dest, opts, within) {
   let raw = null;
+  let why = null;
   try {
     const st = lstatIfPresent(dest);
     // A plain read (#222): a link put in the file's place after the `lstat` is refused, not followed.
-    if (st) raw = st.isFile() ? readPlainFile(dest) : undefined;
-  } catch { raw = undefined; }
-  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission).
-  if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
+    if (st) raw = st.isFile() ? readPlainFile(dest, { within }) : undefined;
+  } catch (e) { raw = undefined; why = e; }
+  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission), or one
+  // under a linked folder, which is named (#235).
+  if (raw === undefined) return { raw, state: 'unreadable', refused: `it ${notPlainSaid(why, 'is not a file yad can read')}` };
   const now = applyMarkedBlock(raw, opts);
   if (now.refused) return { raw, state: 'refused', refused: now.refused };
   // A file with no block is `missing` too: the BLOCK is missing. So `yad update` adds it only where it adds
@@ -1373,7 +1401,7 @@ export function markedBlockAction(root, relDest, lines, { scope = 'product', mar
   const opts = { ...markers, lines };
   // `what` names the block in the row `yad update --open-pr` gives a file it leaves out ("its yadflow rules block").
   const base = { scope, item: relDest, root, paths: [], shared: relDest, kind: 'text', what: what.replace(/^the /, 'its '), mergeShared: (text) => applyMarkedBlock(text, opts) };
-  const { state, refused } = blockState(dest, opts);
+  const { state, refused } = blockState(dest, opts, root);
   // Never written, said once at plan time. Markers yad cannot trust are never guessed around: the team's
   // text is left as it is (as a broken config.yaml region is, cli/lifecycle.mjs).
   if (refused) {
@@ -1385,14 +1413,14 @@ export function markedBlockAction(root, relDest, lines, { scope = 'product', mar
     status: state,
     // Re-read at apply() time: the file may have been written since the plan was built.
     apply: () => {
-      const now = blockState(dest, opts);
+      const now = blockState(dest, opts, root);
       if (now.refused) { warn(`${scope}/${relDest}: ${now.refused} — left untouched`); return; }
       if (now.state === 'ok') return;
       const next = applyMarkedBlock(now.raw, opts);
       // Through a new file and a rename (#222): a link put at `dest` since the check is replaced, never written
       // through. The file keeps its mode.
       const st = lstatIfPresent(dest);
-      writeFileAtomic(dest, next.text, st?.isFile() ? { mode: st.mode & 0o777 } : undefined);
+      writeFileAtomic(dest, next.text, { within: root, ...(st?.isFile() ? { mode: st.mode & 0o777 } : {}) });
     },
   };
 }
@@ -1415,7 +1443,7 @@ export function agentFilesState(root, ideTargets = ideTargetsFor(root), lines = 
   const files = [['AGENTS.md', lines]];
   if (canonicalIdeTargets(ideTargets).includes('.claude')) files.push(['CLAUDE.md', claudeBlock()]);
   return files.map(([file, l]) => {
-    const { state, refused, exists = true } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l });
+    const { state, refused, exists = true } = blockState(path.join(root, file), { ...AGENTS_MARKERS, lines: l }, root);
     return { file, state, refused, exists };
   });
 }
@@ -1480,7 +1508,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
       // whether we wrote it or the team did, and a key that might be theirs is not ours to delete —
       // so a hooks.json we emptied is left as `{"version": 1}` rather than removed.
       let parsed;
-      try { parsed = readPlainJSON(settingsPath); } catch { /* refused below */ }
+      try { parsed = readPlainJSON(settingsPath, { within: root }); } catch { /* refused below */ }
       if (isPlainObject(parsed) && unmergeHookSettings(parsed, adapter).changed) {
         actions.push({
           scope: adapter.target,
@@ -1491,10 +1519,10 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
           paths: [],
           apply: () => {
             let current;
-            try { current = readPlainJSON(settingsPath); } catch { return; }
+            try { current = readPlainJSON(settingsPath, { within: root }); } catch { return; }
             if (!isPlainObject(current)) return;
             const { settings, changed } = unmergeHookSettings(current, adapter);
-            if (changed) writeJSON(settingsPath, settings);
+            if (changed) writeJSON(settingsPath, settings, { within: root });
           },
         });
       }
@@ -1891,7 +1919,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath, { within: root }); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: adapter.target,
@@ -1901,10 +1929,10 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
       paths: [],
       apply: () => {
         let current;
-        try { current = readPlainJSON(settingsPath); } catch { return; }
+        try { current = readPlainJSON(settingsPath, { within: root }); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
-        if (changed) writeJSON(settingsPath, settings);
+        if (changed) writeJSON(settingsPath, settings, { within: root });
       },
     });
   }
@@ -1985,7 +2013,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath, { within: root }); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: scope || adapter.target,
@@ -1995,10 +2023,10 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
       paths: [],
       apply: () => {
         let current;
-        try { current = readPlainJSON(settingsPath); } catch { return; }
+        try { current = readPlainJSON(settingsPath, { within: root }); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
-        if (changed) writeJSON(settingsPath, settings);
+        if (changed) writeJSON(settingsPath, settings, { within: root });
       },
     });
   }
@@ -2099,7 +2127,7 @@ function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
     return allow.length === obj.permissions.allow.length ? null : { ...obj, permissions: { ...obj.permissions, allow } };
   };
   let parsed;
-  try { parsed = readPlainJSON(file); } catch { return []; }
+  try { parsed = readPlainJSON(file, { within: root }); } catch { return []; }
   if (!without(parsed)) return [];
   return [{
     scope,
@@ -2109,9 +2137,9 @@ function allowListOrphans(root, kept, scope = ALLOW_LIST_ADAPTER.target) {
     paths: [],
     apply: () => {
       let current;
-      try { current = readPlainJSON(file); } catch { return; }
+      try { current = readPlainJSON(file, { within: root }); } catch { return; }
       const next = without(current);
-      if (next) writeJSON(file, next);
+      if (next) writeJSON(file, next, { within: root });
     },
   }];
 }
@@ -2146,7 +2174,7 @@ function agentGuardOrphans(root, kept, adapters, scope = null) {
     const settingsPath = path.join(root, adapter.settings);
     if (!exists(settingsPath)) continue;
     let parsed;
-    try { parsed = readPlainJSON(settingsPath); } catch { continue; }
+    try { parsed = readPlainJSON(settingsPath, { within: root }); } catch { continue; }
     if (!isPlainObject(parsed) || !unmergeHookSettings(parsed, adapter).changed) continue;
     actions.push({
       scope: scope || adapter.target,
@@ -2156,10 +2184,10 @@ function agentGuardOrphans(root, kept, adapters, scope = null) {
       paths: [],
       apply: () => {
         let current;
-        try { current = readPlainJSON(settingsPath); } catch { return; }
+        try { current = readPlainJSON(settingsPath, { within: root }); } catch { return; }
         if (!isPlainObject(current)) return;
         const { settings, changed } = unmergeHookSettings(current, adapter);
-        if (changed) writeJSON(settingsPath, settings);
+        if (changed) writeJSON(settingsPath, settings, { within: root });
       },
     });
   }
@@ -2383,7 +2411,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
         const current = readManagedLedger(root);
         if (Object.hasOwn(current, scriptRel)) {
           delete current[scriptRel];
-          writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: current });
+          writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: current }, { within: root });
         }
       },
     });

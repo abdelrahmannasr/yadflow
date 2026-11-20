@@ -37,7 +37,7 @@
 // up inside a desktop app has no command: its `install` is empty and `manual` links the vendor's steps.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, emitJSON, exists, hand, info, log, ok, readJSON, readJSONStrict, refuse, warn, writeJSON } from './lib.mjs';
+import { c, emitJSON, exists, hand, info, log, ok, readJSON, readJSONStrict, refuse, warn, writeFileAtomic, writeJSON } from './lib.mjs';
 import { clean, detectInstalled } from './detect.mjs';
 import { PROJECT_FILES, SCHEMA_VERSION } from './manifest.mjs';
 import { plainLine, STEP_LIMITS } from './plain-text.mjs';
@@ -1146,7 +1146,7 @@ export function syncSkillFallbacks(skillsDir, { check = false, tools = TOOLBOX }
     // One answer for both modes: `check` names what a write would refuse.
     if (why) out.refused.push({ skill, reason: why });
     if (check || why) continue;
-    fs.writeFileSync(file, next);
+    writeFileAtomic(file, next, { within: skillsDir, keepMode: true });
     out.wrote.push(skill);
   }
   return out;
