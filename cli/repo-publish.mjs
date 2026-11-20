@@ -20,7 +20,7 @@ import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness, branchToCommitOn, diffAddsManagedIgnoreOnly } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness, branchToCommitOn, diffAddsManagedIgnoreOnly, recheckBeforePush } from './productcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { codeContextPathOk } from './workspace.mjs';
@@ -171,6 +171,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   // WIP branch from being force-published onto the default branch. Shared by the fresh-commit path and
   // the retry-after-failed-push path below.
   const pushHead = () => {
+    if (!recheckBeforePush(root, git, branch)) return false; // #231 review: this run's commit is judged too
     if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return true; }
     fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
     hand(`run \`git pull --rebase\` and re-run \`yad repo refresh --push\``);
