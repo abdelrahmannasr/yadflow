@@ -506,10 +506,11 @@ test('epicLineage reads `type:` when an epic.md carries only the new name', () =
 
 // Both skills say "use EXACTLY this template", and the block they show goes into a real `epic.md`.
 // Nothing checked that the engine could read it back, and it could not: a trailing `# comment` in
-// frontmatter is NOT stripped by `readFrontmatter`, nor by `fm_val` in the bash check gates — the
-// whole rest of the line becomes the value. A commented `kind:` reads as a type nobody defined, so
-// the epic stops being a genesis and `lineage-check` refuses every commit that links a story to it.
-// A commented `thread:` reads as a cache that disagrees with the computed root, so `yad doctor` fails.
+// frontmatter was NOT stripped by `readFrontmatter`, nor by `fm_val` in the bash check gates, before
+// #618 — and a code repo whose gates are not refreshed still keeps the whole rest of the line. A
+// commented `kind:` read as a type nobody defined, so the epic stopped being a genesis and
+// `lineage-check` refused every commit that links a story to it. A commented `thread:` read as a cache
+// that disagrees with the computed root, so `yad doctor` failed.
 // Every epic the tool creates went through one of these two templates.
 const TEMPLATE_KEYS = ['id', 'status', 'kind', 'type', 'theme', 'thread', 'verified', 'stub', 'owner', 'repos'];
 

@@ -15,9 +15,10 @@
 // with no file.
 //
 // The frontmatter reader is `readFrontmatter`: one line per key, a `[ … ]` value split on commas, and
-// everything else kept as the rest of the line. So a trailing `# note` turns the list into a plain
-// string, and a YAML `- item` list on the next lines is not read at all (the key reads as blank). Both
-// are reported here instead of being read as "no frames".
+// everything else kept as the rest of the line, less a trailing `# comment` (a `#` with a space before
+// it, outside quotes, #618). So a `#` with NO space before it (`[12:34]#note`) turns the list into a
+// plain string, and a YAML `- item` list on the next lines is not read at all (the key reads as blank).
+// Both are reported here instead of being read as "no frames".
 import fs from 'node:fs';
 import path from 'node:path';
 
