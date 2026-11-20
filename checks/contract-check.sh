@@ -644,7 +644,7 @@ resolve_product() {
 # side. `wc` pads its count on some systems, so only the digits are kept.
 lock_big() {
   local _n
-  _n="$(wc -c < "$1" 2>/dev/null | tr -cd '0123456789')" || return 1
+  _n="$({ wc -c < "$1"; } 2>/dev/null | tr -cd '0123456789')" || return 1
   [ -n "$_n" ] && [ "$_n" -gt 65536 ]
 }
 # Is the file $1 one JSON text, as JSON.parse reads it (#247)? A grammar check: a missing comma, an
@@ -654,15 +654,19 @@ lock_big() {
 # holding tab, LF or CR is refused), numbers by JSON's own grammar, true, false, null, and objects and
 # arrays at any depth, with nothing but space after the outer value. A backslash is not read here: the
 # callers refuse it first, so a string ends at its next quote. One line at a time, one character at a
-# time, so the walk is linear (no token can span a line: a string holding LF is refused). Plain awk
-# (mawk, BWK awk, gawk): no interval, no class, no gawk function.
+# time (no token can span a line: a string holding LF is refused). On a long line this is still not
+# linear (BWK awk's `substr` costs grow with the line), so the 64 KiB cap (`lock_big`) is what bounds
+# the cost: about half a second for the worst lock under it. Plain awk (mawk, BWK awk, gawk): no
+# interval, no class, no gawk function.
 #   * With $2 = `any`, the outer value may be any JSON value, and nothing is printed.
 #   * Otherwise the outer value must be an object, and the TOP-LEVEL `hash`, `ref` and `inheritedFrom`
 #     are printed, one `key<TAB>value` line each, as `resolveContractLock` reads them: the same key in a
 #     nested object is not the lock's (#247 review). A string is printed as it is; `hash` and `ref` are
 #     read only as strings. An `inheritedFrom` that is no string is printed as JavaScript turns it into
-#     text when it is truthy (`true`, a number that is not 0, `[object Object]`), and an array there is
-#     refused (JavaScript would join it into a name).
+#     text when it is truthy (`true`, a number that is not 0, `[object Object]`). An array there is
+#     printed as `[array]`: it marks the lock a pointer, as in JavaScript, and is used only when there
+#     is no `ref` and no contract.md of the epic's own; then the ref built from it leaves epics/ and is
+#     refused (JavaScript joins the array into a name, which it may follow: the gate refuses instead).
 lock_json() {
   local _lc
   _lc="$(tr -cd '\000-\010\013\014\016-\037' < "$1" 2>/dev/null | tr '\000-\037' '?')" || return 1
@@ -703,7 +707,7 @@ lock_json() {
             if (k == "s" && c == "\"") printf "%s\t%s\n", kn, v
             else if (kn == "inheritedFrom" && k == "s" && (v == "true" || (v != "false" && v != "null" && v + 0 != 0))) printf "%s\t%s\n", kn, v
             else if (kn == "inheritedFrom" && k == "{") printf "%s\t%s\n", kn, "[object Object]"
-            else if (kn == "inheritedFrom" && k == "[") fail()
+            else if (kn == "inheritedFrom" && k == "[") printf "%s\t%s\n", kn, "[array]"
           }
           if (k == "s") { w = d ? "next" : "end"; continue }
           if (k == "{") { s[++d] = "{"; w = "key0"; continue }

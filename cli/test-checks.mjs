@@ -1193,9 +1193,21 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       build: hopTo(`{${H},"meta":{${TO_END}}}`) },
     { name: 'a ref nested in another member, at an epic with its own contract.md', owner: 'EP-h1',
       build: () => { hopTo(`{${H},"meta":{${TO_END}}}`)(); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
-    // #247 review: the one accepted difference. A lock over 64 KiB is not read by the gate (its awk walk would
-    // be slow, and a lock is a few hundred bytes); JSON.parse reads it (doctor's cap is far larger). The
-    // gate refusing what doctor reads is the safe side.
+    // #247 review: an `inheritedFrom` that is an array marks the lock a pointer, as in JS, and is used only
+    // when there is no string ref and no contract.md of the epic's own.
+    { name: 'an inheritedFrom array with a ref, one hop on', build: hopTo(`{${H},"inheritedFrom":["EP-gone"],"ref":"../../EP-end/.sdlc/contract-lock.json"}`) },
+    { name: 'an inheritedFrom array at an epic with its own contract.md', owner: 'EP-h1',
+      build: () => { hopTo(`{${H},"inheritedFrom":["EP-gone"]}`)(); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
+    { name: 'an empty inheritedFrom array and no ref, one hop on', broken: 'outside', says: /EP-demo-S01: EP-h1's pointer lock names '[^']*' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      build: hopTo(`{${H},"inheritedFrom":[]}`) },
+    // #247 review: the two accepted differences, both on the safe side (the gate refuses what doctor reads):
+    //   * a lock over 64 KiB is not read by the gate (its awk walk would be slow, and a lock is a few hundred
+    //     bytes); JSON.parse reads it (doctor's cap is far larger);
+    //   * an `inheritedFrom` array, used (no string ref, no contract.md of its own), is refused by the gate;
+    //     JS joins it into a name and may follow it.
+    { name: 'an inheritedFrom array naming an epic, and no ref, one hop on', gateRefuses: true,
+      says: /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/\[array\]\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      build: hopTo(`{${H},"inheritedFrom":["EP-end"]}`) },
     { name: 'a lock over 64 KiB, one hop on', gateRefuses: true,
       says: /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-h1\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), and the lock there, \S*EP-h1\/\.sdlc\/contract-lock\.json, is larger than 64 KiB, so it is not read/,
       build: hopTo(`{${H},${TO_END},"note":"${'x'.repeat(65536)}"}`) },
@@ -1572,16 +1584,26 @@ test('contract-check gate: a product lock with no readable hash FAILs, never "ha
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// Every gate this repo's own CI runs from checks/ is its shipped template, byte for byte (#247 review). A
-// script with no copy in the template folder is yadflow's own and is skipped.
+// Every gate this repo's own CI runs from checks/ is its shipped template, byte for byte (#247 review; #351
+// for verified-commits.sh): a change to a template that misses the copy leaves this repo's own CI on the old
+// rules. The templates live in two skills. A script with a copy in neither is yadflow's own and is named in
+// NO_TEMPLATE (none today), so a new one is a choice, not an accident.
 test('every checks/*.sh with a shipped template is that template, byte for byte', () => {
-  let compared = 0;
-  for (const f of fs.readdirSync(path.join(ROOT, 'checks')).filter((n) => n.endsWith('.sh'))) {
-    if (!fs.existsSync(path.join(CHECKS, f))) continue;
-    assert.ok(fs.readFileSync(path.join(ROOT, 'checks', f)).equals(fs.readFileSync(path.join(CHECKS, f))), `checks/${f} differs from its template`);
-    compared++;
+  const TEMPLATE_DIRS = [CHECKS, path.join(ROOT, 'skills/yad-pr-template/templates/checks')];
+  const NO_TEMPLATE = [];
+  const compared = [];
+  const skipped = [];
+  for (const f of fs.readdirSync(path.join(ROOT, 'checks')).filter((n) => n.endsWith('.sh')).sort()) {
+    const copies = TEMPLATE_DIRS.map((d) => path.join(d, f)).filter((p) => fs.existsSync(p));
+    if (!copies.length) { skipped.push(f); continue; }
+    const mine = fs.readFileSync(path.join(ROOT, 'checks', f));
+    for (const c of copies) assert.ok(mine.equals(fs.readFileSync(c)), `checks/${f} differs from ${path.relative(ROOT, c)}`);
+    compared.push(f);
   }
-  assert.ok(compared > 0 && fs.existsSync(path.join(ROOT, 'checks/contract-check.sh')), 'checks/contract-check.sh is compared');
+  assert.deepEqual(skipped, NO_TEMPLATE, 'a checks/*.sh with no shipped template: add its template, or name it in NO_TEMPLATE');
+  for (const f of ['contract-check.sh', 'verified-commits.sh', 'pr-template.sh', 'pr-title.sh', 'risk-route.sh']) {
+    assert.ok(compared.includes(f), `checks/${f} is compared`);
+  }
 });
 
 test('contract-check gate: a non-ASCII slice path still counts as the contract surface', () => {
@@ -6302,13 +6324,6 @@ test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
   commit(T, 'enable bridge', {});
   assert.equal(runGate(LEDGER_GUARD, T, ['origin/nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
-});
-
-// #351: yadflow's own CI runs checks/verified-commits.sh, an installed copy of the template. A change to
-// the template that misses the copy leaves this repo's own CI on the old rules.
-test('checks/verified-commits.sh is the shipped template, byte for byte', () => {
-  assert.equal(fs.readFileSync(path.join(ROOT, 'checks/verified-commits.sh'), 'utf8'),
-    fs.readFileSync(path.join(CHECKS, 'verified-commits.sh'), 'utf8'));
 });
 
 // #351: one text in eleven gates, so every copy is run — a fix in one arm and not its twin fails here.
