@@ -29192,6 +29192,74 @@ test('#235 b only the listed files write with plain fs, each as often as listed'
   }
 });
 
+// ---- #248: a team file is deleted only through the safe helpers (EP-review-followups-S04) --------------
+
+// The write guard above, for deletes. A plain `fs.rmSync` through a folder the team committed as a link
+// removes files where the link points. The helpers in cli/lib.mjs (`removeFile`, `removeDir`) refuse a
+// linked folder on the way, as a write does. So outside cli/lib.mjs an `rmSync`, `unlinkSync` or `rmdirSync`
+// call, as `fs.x(`, `nodeFs.x(` or a bare `x(`, is only for a path that is not the team's, in a file listed
+// below with its reason. `count` pins how many such calls the file has (every call on a line counts), so a
+// NEW delete in a listed file fails too. The walk is the read guards' own (`engineSources`, cli/ only). A
+// comment line is prose and is not counted. Not seen here: `fs.rm`, `fs.unlink`, `fs.promises.rm`, a delete
+// reached through another name, and `rmTree` (cli/lib.mjs: it checks nothing; cli/migrate.mjs calls it):
+// review catches those shapes. Counts are per file, so swapping one delete for another in the same file is
+// not caught; review catches that.
+const DIRECT_DELETE = /\b(?:rmSync|unlinkSync|rmdirSync)\(/g;
+const DIRECT_DELETE_ALLOWED = [
+  { file: 'cli/capture.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (the capture index)' },
+  { file: 'cli/epic-state.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (an artifact copied out of git, to hash it)' },
+  { file: 'cli/fold.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (the pathspec and message files)' },
+  { file: 'cli/ledger.mjs', count: 2, reason: 'the ledger\'s lock folder, made by this command with an exclusive mkdir and removed by an empty-only rmdir (1); a stale lock, by the same empty-only rmdir (1)' },
+  { file: 'cli/members.mjs', count: 2, reason: 'yad\'s own mkdtemp folders (a member commit\'s index; member files read from a git ref)' },
+  { file: 'cli/plan.mjs', count: 1, reason: 'the local setup notice script yad copied into the git folder (`--git-common-dir`), never committed' },
+  { file: 'cli/reports-dir.mjs', count: 7, reason: 'the reports folder beside the checkout (yad\'s own output): the catalog lock, a stale lock moved aside and the temp files beside a write (5); old reports and their side files, each proved inside the folder and removed as a file or a link (2)' },
+  { file: 'cli/run-checks.mjs', count: 6, reason: 'yad\'s own mkdtemp scratch folder and the Product copy in it (4); the Product copy this run wrote into the code repo, at a path whose folders were checked for links first (`readRecord`) and made by this run, and the empty folders it made on the way (2)' },
+  { file: 'cli/setup.mjs', count: 3, reason: 'yad\'s own mkdtemp Repomix folder (2); the temp file `placeFile` just made beside the pack, named by pid and time (1)' },
+  { file: 'cli/worktree.mjs', count: 3, reason: 'a link yad made itself in its own worktree, removed as the link only (never what it points at), after `isLinkTo` or right after making it' },
+];
+const deleteCalls = (line) => (/^\s*\/\//.test(line) ? 0 : (line.match(DIRECT_DELETE) || []).length);
+
+test('#248 the delete matcher sees each plain delete, every one on a line, and none of the safe helpers', () => {
+  for (const line of ['fs.rmSync(p)', 'rmSync(p, { force: true })', 'nodeFs.rmSync(p)', 'fs.unlinkSync(p)', 'unlinkSync(p)', 'fs.rmdirSync(d)', 'rmdirSync(d)',
+    'x = fs.rmSync( p, { recursive: true, force: true })', "apply: () => fs.rmSync(dest, { force: true }),"]) {
+    assert.equal(deleteCalls(line), 1, line);
+  }
+  assert.equal(deleteCalls('fs.rmSync(f); fs.rmdirSync(path.dirname(f));'), 2, 'two deletes on one line count twice');
+  assert.equal(deleteCalls('foo(); // fs.rmSync(x)'), 1, 'a delete after code on the line counts, even in a trailing comment');
+  for (const line of ['removeFile(p, { within: root })', 'removeDir(p, { within: root, emptyOnly: true })', 'rmTree(p)', 'fs.readFileSync(p)', 'fs.writeFileSync(p, s)',
+    '// fs.rmSync(p) in a comment', '  // `fs.rmdirSync` throws ENOTEMPTY', 'fs.rm(p, cb)', 'fs.unlink(p, cb)']) {
+    assert.equal(deleteCalls(line), 0, line);
+  }
+});
+
+test('#248 only the listed files delete with plain fs, each as often as listed', () => {
+  const allowed = new Map(DIRECT_DELETE_ALLOWED.map((a) => [a.file, a]));
+  const hits = new Map();
+  const offenders = [];
+  const sources = engineSources();
+  assert.ok(sources.some((f) => f.startsWith('cli/brain/')) && sources.some((f) => f.startsWith('cli/map/')), 'the subfolders are scanned');
+  for (const rel of sources) {
+    if (rel === 'cli/lib.mjs') continue;   // the safe helpers themselves live here
+    fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+      const n = deleteCalls(line);
+      if (!n) return;
+      const at = `${rel}:${i + 1}: ${line.trim()}`;
+      hits.set(rel, [...(hits.get(rel) || []), ...Array(n).fill(at)]);
+      if (!allowed.has(rel)) offenders.push(at);
+    });
+  }
+  const helpers = 'delete a team file with removeFile / removeDir (cli/lib.mjs), which refuse a linked folder';
+  assert.deepEqual(offenders, [], `${helpers}; or, for a path that is not the team's, list it in DIRECT_DELETE_ALLOWED with its reason`);
+  assert.ok(!allowed.has('cli/lib.mjs'), 'cli/lib.mjs is not scanned, so it needs no entry');
+  for (const a of DIRECT_DELETE_ALLOWED) {
+    assert.ok(a.reason, `${a.file}: every entry says why`);
+    assert.ok(a.count > 0, `${a.file}: an entry with count 0 — a file with no plain delete needs no entry`);
+    assert.ok(fs.existsSync(path.join(ROOT, a.file)), `${a.file}: an entry for a file that is gone`);
+    const found = hits.get(a.file) || [];
+    assert.equal(found.length, a.count, `${a.file}: ${found.length} plain deletes, ${a.count} listed — ${helpers}; or, for one that is not the team's, update the entry and its reason:\n${[...new Set(found)].join('\n')}`);
+  }
+});
+
 test('E1 bin/yad.mjs: every refusal and odd case is one envelope on stdout, prose on stderr', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-'));
   const yad = (...args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {
