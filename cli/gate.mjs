@@ -20,7 +20,7 @@ import {
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
 import { applyProductMove, planProductMove } from './migrate.mjs';
-import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, isProductWorktree } from './productcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, explainForeignFile, isProductWorktree, recheckBeforePush } from './productcommit.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
@@ -1139,6 +1139,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const detachedWorktree = head === 'HEAD' && isProductWorktree(root) && !onlyYadCommitsAhead(git, wtTrunk);
     if ((head && head !== 'HEAD' && trunk && head !== trunk) || detachedWorktree) {
       fail(`on '${forTerminal(head === 'HEAD' ? 'a detached HEAD with commits of its own' : head)}', not the default branch '${forTerminal(trunk || wtTrunk)}' — yad gate ci pushes HEAD to the default branch, and this branch's commits are not reviewed`);
+      if (detachedWorktree && explainForeignFile(git, wtTrunk)) { process.exitCode = 1; return { synced: 0, committed: false, pushed: false }; }
       hand(`run it from the default branch: \`git switch ${forTerminal(trunk || wtTrunk)}\` (in a worktree, \`git fetch origin ${forTerminal(trunk || wtTrunk)}\` then \`git switch --detach origin/${forTerminal(trunk || wtTrunk)}\`)`);
       process.exitCode = 1;
       return { synced: 0, committed: false, pushed: false };
@@ -1442,13 +1443,19 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // Half-finished edits to another artifact, or a stray untracked file, would be committed and pushed
   // straight to the default branch under a `chore(gate)` subject with [skip ci] — unreviewed, and
   // contradicting the "CI commits only the ledger" contract every doc in this repo states.
+  // `ours` is what this run stages, and the commit takes exactly the files staged under it — never anything
+  // a person had staged before (#231 review). Read with --no-renames: a move is its new names AND its old
+  // ones, so the old folder's removal is in the same commit.
+  const ours = [];
   for (const e of touched) {
+    ours.push(path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'), ...(statusFiles.get(e) || []));
     git('add', '-A', '--', path.join(epicRel(e), '.sdlc'));
     git('add', '-A', '--', path.join(epicRel(e), 'reviews'));
     for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
   // The move: exactly the files it wrote, by name, and the old folder's removal — the same allowlist rule.
   if (moved) {
+    ours.push(...moved, epicRel(DISCOVERY_EPIC));
     for (const f of moved) git('add', '--', f);
     git('add', '-A', '--', epicRel(DISCOVERY_EPIC));
   }
@@ -1463,11 +1470,15 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   })();
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
-  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
+  if (indexStaged) ours.push(INDEX_FILE);
+  const stagedRead = ours.length ? git('diff', '--cached', '--name-only', '--no-renames', '-z', '--', ...ours) : { ok: true, stdout: '' };
+  if (!stagedRead.ok) { fail(`could not read what this run staged — ${stagedRead.stderr.split('\n')[0] || stagedRead.code}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
+  const staged = stagedRead.stdout.split('\0').filter(Boolean);
+  if (!staged.length) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
   // Only the index staged (the ledger this run wrote was already committed): say that, not an advance.
-  const indexOnly = indexStaged && git('diff', '--cached', '--name-only').stdout.split('\n').filter(Boolean).every((f) => f === INDEX_FILE);
+  const indexOnly = indexStaged && staged.every((f) => f === INDEX_FILE);
   const sync = indexOnly
     ? 'rebuild the Product index'
     : !branch
@@ -1485,12 +1496,17 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // The owning command's own ledger commit: the git pre-commit guard (E48) refuses HAND commits to these
   // files, so it is told this one is not. In CI no clone has that hook; a person re-running this locally does.
   const cm = run('git', ['commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
-    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : [])],
+    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []),
+    '--', ...staged],
+  // Plain names, as git listed them: one holding a glob character can match only other files git knows, and
+  // the check before the push judges every file the commit holds.
   { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced, committed: true, pushed: false };
 
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, target)) return { synced, committed: true, pushed: false };
   if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced, committed: true, pushed: true }; }
   fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-product-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
@@ -1719,6 +1735,8 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   ok(`committed the repair: ${c.dim(message.split('\n')[0])}`);
   // Push HEAD to its OWN branch — with --allow-branch we are not on the default branch, and pushing
   // HEAD:defaultBranch would publish a WIP branch straight to it.
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, branch)) return did(true, true, false);
   if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return did(true, true, true); }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand('run `git pull --rebase` and re-run `yad gate repair <epic> --push`');
@@ -1881,6 +1899,8 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
     return answer({ written });
   }
   ok(`committed the reopen: ${c.dim(message.split('\n')[0])}`);
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, branch)) return answer({ written, committed: true });
   if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return answer({ written, committed: true, pushed: true }); }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand('run `git pull --rebase`, then `git push` — the reopen is committed locally');

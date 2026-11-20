@@ -26,7 +26,7 @@ import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWit
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, blobChangeIsYads, blobAt, recheckBeforePush } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
@@ -149,21 +149,12 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
 }
 
 // True iff a story file's STAGED diff changes ONLY the frontmatter `status:` line — every added or
-// removed content line is a `status:` line. A newly-added file (all lines added) or any prose/other
+// removed content line is a `status:` line at column 0, inside the frontmatter of HEAD's and the index's copy. A newly-added file (all lines added) or any prose/other
 // edit fails, so only a clean flip is carried into the `[skip ci]` chore commit; anything broader is
 // left for a reviewed change (#112 review-bypass guard). `git` is a productGit-style accessor.
 export function stagedStoryIsStatusOnly(git, file) {
-  const d = git('diff', '--cached', '-U0', '--', file);
-  if (!d.ok) return false;
-  let changes = 0;
-  for (const ln of d.stdout.split('\n')) {
-    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue; // headers/hunks
-    if (ln.startsWith('+') || ln.startsWith('-')) {
-      if (!/^status:\s*\S/.test(ln.slice(1).trimStart())) return false; // a non-status change ⇒ not status-only
-      changes++;
-    }
-  }
-  return changes > 0;
+  // HEAD's copy and the index's, diffed by blob id: no pathspec setting or file-name spelling can miss it.
+  return blobChangeIsYads(git, 'status', blobAt(git, 'HEAD', file), blobAt(git, '', file));
 }
 
 // --retro-ship orchestration (#142): validate the target, then write the retroactive ship shard so the
@@ -406,6 +397,8 @@ export async function runCheckpoint(root, opts = {}) {
   // Push HEAD to its OWN branch — never to `defaultBranch` blindly. On the default branch these are the
   // same; with --allow-branch on a WIP branch, pushing HEAD:defaultBranch would publish the whole WIP
   // branch to the default branch (bypassing review), so the target is always the branch we are on.
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, branch)) return { ...done, pushed: false };
   if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { ...done, pushed: true }; }
   fail(`could not push to origin/${branch} — a protected branch, or the append-only ledgers hit an unresolvable rebase conflict`);
   hand(`run \`git pull --rebase\` and re-run \`yad checkpoint --push\``);

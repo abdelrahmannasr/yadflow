@@ -13,7 +13,7 @@ import { productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, recheckBeforePush } from './productcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
 import { epicRoot, isValidEpicId, readFrontmatter } from './epic-state.mjs';
 
@@ -108,6 +108,8 @@ export async function runTidy(root, opts = {}) {
   ok(`tidied ${folded} shard(s) into ${touched.length} epic ledger(s): ${c.dim(label)}`);
 
   if (!opts.push) return { message, folded, epics: touched, committed: true, pushed: false, dryRun: false };
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, branch)) return { message, folded, epics: touched, committed: true, pushed: false, dryRun: false };
   if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { message, folded, epics: touched, committed: true, pushed: true, dryRun: false }; }
   fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
   hand(`run \`git pull --rebase\` and re-run \`yad tidy up --push\``);

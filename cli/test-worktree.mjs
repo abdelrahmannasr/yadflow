@@ -12,9 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
 import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
-import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT } from './productcommit.mjs';
+import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush } from './productcommit.mjs';
 import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
+import { PACK_IGNORE_BLOCK } from './setup.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const YAD = path.join(ROOT, 'bin/yad.mjs');
@@ -322,6 +323,242 @@ test('default-branch commands: a plain detached Product worktree (no yad record)
     assert.match(r.out, /a detached HEAD with commits of its own', not the default branch 'main'/);
     assert.equal(git(path.join(W, 'product.git'), 'rev-parse', 'main'), head, 'nothing reached origin/main');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('an amended yad commit that also carries a person\'s file is refused, names the file, and the hint moves it out; a plain checkpoint still pushes (#231)', () => {
+  const { W, P } = workspace({ product: { platform: 'github', git_url: 'https://github.com/acme/product', default_branch: 'main' } });
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const origin = path.join(W, 'product.git');
+    // A plain yad checkpoint commit is yad's own: it still counts, and pushes.
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T01', repo: 'api', mergeCommit: 'abc', date: '2026-10-25' }) });
+    assert.equal(yad(wt, 'checkpoint').code, 0);
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'main');
+    // The person amends it with an edit of their own: the subject is still yad's, the files are not.
+    write(wt, { 'notes.md': 'mine\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-q', '--amend', '--no-edit');
+    assert.match(git(wt, 'log', '-1', '--format=%s'), YAD_COMMIT_SUBJECT);
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD');
+    const head = git(origin, 'rev-parse', 'main');
+    write(wt, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T02-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T02', repo: 'api', mergeCommit: 'def', date: '2026-10-25' }) });
+    let r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main, and yad does not write it/);
+    assert.match(r.out, /git branch <branch>.*git reset --hard origin\/main.*git restore --worktree --source <branch> -- ':\(literal\)epics\/EP-x\/\.sdlc\/build-log\/EP-x-S01-T01-api\.json'.*yad checkpoint --push/);
+    const restore = r.out.match(/`(git restore --worktree --source <branch> -- [^`]+)`/)[1].replace('<branch>', 'mine');
+    r = yad(wt, 'gate', 'ci');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    r = yad(wt, 'index');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    assert.equal(git(origin, 'rev-parse', 'main'), head, 'nothing reached origin/main');
+    // The hint, followed: every commit kept on a branch, HEAD back at the tip, yad's files back, and the push goes.
+    git(wt, 'branch', 'mine');
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    execFileSync('sh', ['-c', restore], { cwd: wt, env: ENV });
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'main');
+    r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(git(origin, 'rev-parse', 'main'), git(wt, 'rev-parse', 'HEAD'));
+    assert.equal(git(origin, 'ls-tree', '--name-only', 'main', 'notes.md'), '', 'notes.md stayed off origin/main');
+    assert.match(git(origin, 'ls-tree', '-r', '--name-only', 'main'), /EP-x-S01-T01-api\.json\n.*EP-x-S01-T02-api\.json/, 'both Build records went up');
+    assert.equal(git(wt, 'ls-tree', '--name-only', 'mine', 'notes.md'), 'notes.md', 'and is kept on its branch');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the files yad writes ride a yad commit: a status-only artifact flip and the managed .gitignore block; any other edit of them does not (#231)', () => {
+  const { W, P } = workspace();
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const yadCommit = (files) => {
+      git(wt, 'reset', '-q', '--hard', 'origin/main');
+      write(wt, files);
+      git(wt, 'add', '-A');
+      git(wt, 'commit', '-qm', 'chore(gate): advance EP-x/epic on merge [skip ci]');
+      return branchToCommitOn(wt, g, 'main');
+    };
+    const ledgers = { 'epics/EP-x/.sdlc/state.json': '{}\n', '.sdlc/index.json': '{}\n', '.sdlc/repos.json': '{"repos":[]}\n', '.sdlc/code-context/api/code-map.md': '# api\n', 'epics/EP-x/reviews/epic.md': 'summary\n', 'foundation/.sdlc/state.json': '{}\n', 'foundation/reviews/foundation.md': 'summary\n' };
+    assert.equal(yadCommit(ledgers), 'main', 'the ledgers, the index, the registry, the code-context and the review summaries');
+    const epic = (status, title = 'EP-x') => ({ 'epics/EP-x/epic.md': `---\nid: EP-x\ntype: chore\nstatus: ${status}\nrepos: [api]\n---\n# ${title}\n` });
+    assert.equal(yadCommit({ ...ledgers, ...epic('approved') }), 'main', 'a status-only flip of the epic');
+    assert.equal(yadCommit(epic('approved', 'EP-x, edited')), 'HEAD', 'a flip with prose');
+    assert.equal(yadCommit({ 'epics/EP-x/stories/EP-x-S01.md': '---\nstatus: approved\n---\n' }), 'HEAD', 'a new story file');
+    assert.equal(yadCommit({ '.gitignore': `${PACK_IGNORE_BLOCK.join('\n')}\n` }), 'main', 'the managed ignore block');
+    assert.equal(yadCommit({ '.gitignore': `${PACK_IGNORE_BLOCK.join('\n')}\n.env\n` }), 'HEAD', 'an ignore line of the person\'s');
+    assert.equal(yadCommit({ 'epics/EP-x/notes.txt': 'x\n' }), 'HEAD', 'another file in the epic folder');
+    assert.equal(yadCommit({ '.sdlc/product.json': JSON.stringify({ name: 'q' }) }), 'HEAD', 'the Product settings are not a file yad writes there');
+    assert.equal(yadCommit({ '.sdlc/local-setup.json': '{}\n' }), 'HEAD', 'nor the team\'s setup steps');
+    if (process.platform !== 'win32') {
+      git(wt, 'reset', '-q', '--hard', 'origin/main');
+      fs.symlinkSync('../../../.sdlc/product.json', path.join(wt, 'epics/EP-x/.sdlc/link.json'));
+      git(wt, 'add', '-A');
+      git(wt, 'commit', '-qm', 'chore(gate): advance EP-x/epic on merge [skip ci]');
+      assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD', 'a symlink under a ledger folder');
+    }
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('every commit ahead is judged, not their sum: a file in an earlier commit, one added then taken out, and a merge are refused; the hint is right for an earlier commit too (#231 review)', () => {
+  const { W, P } = workspace();
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const origin = path.join(W, 'product.git');
+    const yadSubject = 'chore(product): sync Build state — EP-x/EP-x-S01 by bob [skip ci]';
+    const ship = (t) => ({ [`epics/EP-x/.sdlc/build-log/EP-x-S01-${t}-api.json`]: JSON.stringify({ story: 'EP-x-S01', task: t, repo: 'api', mergeCommit: t, date: '2026-10-25' }) });
+    // Added in one yad-subject commit, taken out in the next: the net change is clean, the history is not.
+    write(wt, { 'notes.md': 'mine\n', ...ship('T01') });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    git(wt, 'rm', '-q', 'notes.md');
+    git(wt, 'commit', '-qm', yadSubject);
+    assert.equal(git(wt, 'diff', '--name-only', 'origin/main...HEAD'), 'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-api.json');
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD');
+    // A merge commit in the range, even of yad's own commits.
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    git(wt, 'switch', '-q', '-c', 'side');
+    write(wt, ship('T09'));
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    git(wt, 'switch', '-q', '--detach', 'origin/main');
+    write(wt, ship('T08'));
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    git(wt, 'merge', '-q', '--no-ff', '-m', yadSubject, 'side');
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD');
+    // A person's file in an EARLIER yad commit, a plain checkpoint commit after it.
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, { 'notes.md': 'mine\n', ...ship('T01') });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    write(wt, ship('T02'));
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject); // as a checkpoint made before the person's file was there would be
+    write(wt, ship('T03'));
+    const head = git(origin, 'rev-parse', 'main');
+    const r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    assert.equal(git(origin, 'rev-parse', 'main'), head);
+    // Followed word for word, the hint keeps notes.md on its branch and every Build record goes up.
+    const restore = r.out.match(/`(git restore --worktree --source <branch> -- [^`]+)`/)[1].replace('<branch>', 'mine');
+    assert.doesNotMatch(restore, /notes\.md/);
+    git(wt, 'branch', 'mine');
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    execFileSync('sh', ['-c', restore], { cwd: wt, env: ENV });
+    const ok = yad(wt, 'checkpoint', '--push');
+    assert.equal(ok.code, 0, ok.out);
+    const tree = git(origin, 'ls-tree', '-r', '--name-only', 'main');
+    for (const t of ['T01', 'T02', 'T03']) assert.match(tree, new RegExp(`EP-x-S01-${t}-api\\.json`), t);
+    assert.doesNotMatch(tree, /notes\.md/);
+    assert.equal(git(wt, 'ls-tree', '--name-only', 'mine', 'notes.md'), 'notes.md');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('every commit must carry yad\'s subject, an empty one too; a file is judged by its blobs, whatever its name or the pathspec setting; the run\'s own commit is judged before a push (#231 review 2)', () => {
+  const { W, P } = workspace();
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const g = (...a) => run('git', a, { cwd: wt });
+    const yadSubject = 'chore(gate): advance EP-x/epic on merge [skip ci]';
+    // A commit with an empty message is a commit whose subject is not yad's — alone, or under a yad commit.
+    write(wt, { 'src/evil.js': 'steal()\n' });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-q', '--allow-empty-message', '-m', '');
+    assert.deepEqual(notYadsOwnAhead(g, 'main', { fetch: false }), { subject: '' });
+    write(wt, { 'epics/EP-x/.sdlc/x.json': '{}\n' });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    assert.equal(branchToCommitOn(wt, g, 'main'), 'HEAD');
+    // With literal pathspecs set in the person's environment, a prose edit is still refused and a status
+    // flip still passes: no read here goes through a pathspec.
+    const lit = (...a) => run('git', a, { cwd: wt, env: { ...ENV, GIT_LITERAL_PATHSPECS: '1' } });
+    const epic = (status, title) => ({ 'epics/EP-x/epic.md': `---\nid: EP-x\ntype: chore\nstatus: ${status}\nrepos: [api]\n---\n# ${title}\n` });
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, epic('draft', 'EP-x, edited'));
+    git(wt, 'commit', '-qam', yadSubject);
+    assert.equal(notYadsOwnAhead(lit, 'main', { fetch: false })?.file, 'epics/EP-x/epic.md');
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, epic('approved', 'EP-x'));
+    git(wt, 'commit', '-qam', yadSubject);
+    assert.equal(notYadsOwnAhead(lit, 'main', { fetch: false }), null);
+    // A file whose name is spelt in decomposed Unicode, which a path lookup under core.precomposeunicode misses.
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    const nfd = 'epics/EP-x/stories/Café.md';
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: wt, env: ENV, input: 'prose, not a status flip\n' }).toString().trim();
+    git(wt, '-c', 'core.precomposeunicode=false', 'update-index', '--add', '--cacheinfo', `100644,${blob},${nfd}`);
+    git(wt, '-c', 'core.precomposeunicode=false', 'commit', '-qm', yadSubject);
+    git(wt, 'config', 'core.precomposeunicode', 'true');
+    assert.deepEqual(notYadsOwnAhead(g, 'main', { fetch: false })?.files?.length, 1);
+    git(wt, 'config', '--unset', 'core.precomposeunicode');
+    // Every foreign file is named, and none of them is in the restore list.
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, { 'notes.md': 'mine\n', 'other.txt': 'mine too\n', 'epics/EP-x/.sdlc/y.json': '{}\n' });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    const why = notYadsOwnAhead(g, 'main', { fetch: false });
+    assert.deepEqual(why.files, ['notes.md', 'other.txt']);
+    assert.deepEqual(why.yadFiles, ['epics/EP-x/.sdlc/y.json']);
+    // The last check before a push: a commit the run made that holds a person's file is not pushed.
+    const code = process.exitCode;
+    try {
+      assert.equal(recheckBeforePush(wt, g, 'main'), false);
+      assert.equal(process.exitCode, 1);
+    } finally { process.exitCode = code; }
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, { 'epics/EP-x/.sdlc/y.json': '{}\n' });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', yadSubject);
+    assert.equal(recheckBeforePush(wt, g, 'main'), true);
+    assert.equal(recheckBeforePush(P, (...a) => run('git', a, { cwd: P }), 'main'), true, 'the main checkout on its branch is not judged here');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the raw log reader: commit ids, raw entries with their paths, and nothing else (#231 review 2)', () => {
+  const z = '0'.repeat(40); const a = 'a'.repeat(40); const b = 'b'.repeat(40); const c = 'c'.repeat(40);
+  const out = `\0${c}\0\n:100644 100644 ${a} ${b} M\0x.md\0:000000 120000 ${z} ${b} A\0.sdlc/l\0\0${a}\0\n`;
+  assert.deepEqual(parseRawLog(out), [
+    { commit: c, oldMode: '100644', newMode: '100644', oldBlob: a, newBlob: b, status: 'M', file: 'x.md' },
+    { commit: c, oldMode: '000000', newMode: '120000', oldBlob: z, newBlob: b, status: 'A', file: '.sdlc/l' },
+  ]);
+  assert.equal(parseRawLog(`\0${c}\0gpg: Signature made\0`), null, 'a stray line');
+  assert.equal(parseRawLog(`\0${c}\0\n:100644 100644 ${a} ${b} M\0`), null, 'an entry with no path');
+  assert.equal(parseRawLog(`\n:100644 100644 ${a} ${b} M\0x\0`), null, 'an entry before any commit');
+});
+
+test('the -U0 patch reader: a content line `---` or `++x` is a change, not a header; status lines count only at column 0 inside the frontmatter (#231 review)', () => {
+  const hdr = 'diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n';
+  assert.deepEqual(patchChanges(`${hdr}@@ -3 +3 @@\n-status: draft\n+status: approved\n`), [{ sign: '-', text: 'status: draft', line: 3 }, { sign: '+', text: 'status: approved', line: 3 }]);
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -3 +3 @@\n-status: draft\n+status: approved\n`), true);
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -3 +3 @@\n-status: draft\n+status: approved\n`, { oldEnd: 5, newEnd: 5 }), true);
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -9 +9 @@\n-status: draft\n+status: approved\n`, { oldEnd: 5, newEnd: 5 }), false, 'a status line in the body');
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -3 +3 @@\n-  status: draft\n+  status: approved\n`), false, 'not at column 0');
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -3,2 +3 @@\n-status: draft\n----\n+status: approved\n`), false, 'the frontmatter close removed');
+  assert.equal(diffIsStatusOnly(`${hdr}@@ -3 +3,2 @@\n-status: draft\n+status: approved\n+++x\n`), false, 'an added `++x`');
+  assert.equal(patchChanges(`${hdr}@@ -3 +3,2 @@\n+status: approved\n`), null, 'counts that do not add up');
+  // Two commits' patches of one file, read one after the other.
+  assert.equal(patchChanges(`${hdr}@@ -3 +3 @@\n-a\n+b\n${hdr}@@ -3 +3 @@\n-b\n+c\n`).length, 4);
+  const block = PACK_IGNORE_BLOCK.map((l) => `+${l}`).join('\n');
+  assert.equal(diffAddsManagedIgnoreOnly(`${hdr}@@ -1,0 +2,${PACK_IGNORE_BLOCK.length} @@\n${block}\n`), true);
+  assert.equal(diffAddsManagedIgnoreOnly(`${hdr}@@ -2 +1,0 @@\n-.env\n`), false, 'a removed line');
+  assert.equal(diffAddsManagedIgnoreOnly(`${hdr}@@ -1,0 +2 @@\n+.env\n`), false, 'a line of the person\'s');
+  assert.equal(diffAddsManagedIgnoreOnly(`${hdr}@@ -2 +1,0 @@\n----\n`), false, 'a removed `---` line, once read as a header');
 });
 
 test('a detached HEAD in the main Product checkout is refused, and --allow-branch (a push to a branch named HEAD) is not suggested (#597)', () => {

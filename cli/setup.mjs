@@ -8,7 +8,7 @@ import {
   writeProductConfig, forTerminal, asArg, inJSON,
 } from './lib.mjs';
 import { err } from './errors.mjs';
-import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
+import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath, PACK_IGNORE_GLOB, PACK_IGNORE_BLOCK } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, agentFileActions, agentGuardActions, allowListActions, captureHookActions, activityHookActions, legacyHookScriptActions, gitHookActions, gitHookState, gitHookAdvice, localSetupNoticeActions, localSetupNoticeAdvice,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyProductActions, withoutKeptRenames,
@@ -1032,19 +1032,9 @@ export async function runSetup(root, opts = {}) {
   };
 }
 
-// The repomix pack is a large, regenerable artifact — the Product tracks the AI-authored code-map, not the
-// pack. `yad repo refresh --push` relies on the pack being gitignored (repo-publish.mjs never stages it);
-// this makes that assumption true in every Product, so a regenerated pack never strands as a dirty tree.
-export const PACK_IGNORE_GLOB = '.sdlc/code-context/*/pack.md';
-
-// The exact lines ensurePackIgnored appends — a comment pair + the glob. Kept as data (not inline
-// strings) so the publish gate can verify a staged `.gitignore` change is ONLY this managed block and
-// never sweep an unrelated user edit into the audit commit (repo-publish.mjs, invariant 1).
-export const PACK_IGNORE_BLOCK = [
-  '# Repomix code-context packs are large, regenerable artifacts (yad repo refresh) — the',
-  '# tracked code-map.md is the reviewed AI output; the pack itself is never committed.',
-  PACK_IGNORE_GLOB,
-];
+// The repomix pack's ignore glob and the managed block that ignores it live in manifest.mjs (a module with
+// no imports, so the default-branch check in productcommit.mjs can read them, #231); re-exported here.
+export { PACK_IGNORE_GLOB, PACK_IGNORE_BLOCK };
 
 // Idempotently ensure the Product `.gitignore` ignores the repomix pack. No-op (returns false) if the line
 // is already present (as its own entry); otherwise appends the managed block to a fresh or existing file
