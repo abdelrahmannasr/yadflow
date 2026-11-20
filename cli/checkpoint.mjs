@@ -26,7 +26,7 @@ import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWit
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, diffIsStatusOnly } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, diffIsStatusOnly, frontmatterEnd } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
@@ -149,12 +149,12 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
 }
 
 // True iff a story file's STAGED diff changes ONLY the frontmatter `status:` line — every added or
-// removed content line is a `status:` line. A newly-added file (all lines added) or any prose/other
+// removed content line is a `status:` line at column 0, inside the frontmatter of HEAD's and the index's copy. A newly-added file (all lines added) or any prose/other
 // edit fails, so only a clean flip is carried into the `[skip ci]` chore commit; anything broader is
 // left for a reviewed change (#112 review-bypass guard). `git` is a productGit-style accessor.
 export function stagedStoryIsStatusOnly(git, file) {
-  const d = git('diff', '--cached', '-U0', '--', file);
-  return d.ok && diffIsStatusOnly(d.stdout);
+  const d = git('diff', '--cached', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', '--', `:(literal)${file}`);
+  return d.ok && diffIsStatusOnly(d.stdout, { oldEnd: frontmatterEnd(git, 'HEAD', file), newEnd: frontmatterEnd(git, '--cached', file) });
 }
 
 // --retro-ship orchestration (#142): validate the target, then write the retroactive ship shard so the

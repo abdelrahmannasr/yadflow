@@ -24,6 +24,15 @@ edit of their own keeps yad's subject, so the edit is pushed straight to the def
   `onlyYadCommitsAhead`; the refusal text is printed by `guardDefaultBranch`, `gate ci` and `yad index`.
 - R4. A plain yad checkpoint commit still pushes, and a commit made without `--push` is still pushed by
   the next run.
+- R5 (review). Every commit ahead is judged on its own: the allowlist applies to every file any commit
+  touches, a status-flip `.md` or `.gitignore` must pass in each commit's own patch, a merge commit is
+  refused, and a symlink or submodule entry is refused. The root `.sdlc/` allowlist is only the index, the
+  registry and the code-context.
+- R6 (review). One `-U0` patch reader, used by the worktree check, checkpoint's staged story check and repo
+  refresh's `.gitignore` check, counts a line as a header only outside a hunk (the hunk's own line counts
+  bound it), so a removed `---` or an added `++x` is a change. A `status:` line counts only at column 0
+  inside the frontmatter. Every git read uses `--no-ext-diff --no-textconv` (and the log reads
+  `--ignore-submodules=none`); the hint quotes each name as one shell word with a `:(literal)` pathspec.
 
 ## Out of scope
 
@@ -35,7 +44,9 @@ after a local write (`product-index.mjs`), which already only skips.
 
 ### Session 2026-11-20
 - Q: Light spec — one `spec.md` holding the spec, the plan and the tasks? → A: yes (chore route, no contract surface)
-- Q: Judge each commit's files, or the net change from where HEAD left the default branch? → A: the net change (`origin/<d>...HEAD`): that is what the push adds to the default branch.
+- Q: Judge each commit's files, or the net change from where HEAD left the default branch? → A: each commit (review): the push carries every commit into the default branch's history, so a file added in one commit and taken out in the next must be refused too. A merge commit in the range is refused.
+- Q: Which root `.sdlc/` files may ride? → A: only those the guarded commands write there: `.sdlc/index.json` (`yad index`, the gate's index refresh), `.sdlc/repos.json` and `.sdlc/code-context/**` (`yad repo refresh`). Not the settings (`product.json`) or the team's other files.
+- Q: The hint, when the file is in an earlier commit? → A: keep every commit on a branch, reset to `origin/<d>`, restore yad's own files (listed, as `:(literal)` pathspecs) from the branch uncommitted, and re-run the yad command, which commits them again; no hand commit of a ledger file.
 - Q: Which `.md` files may carry a status flip? → A: any artifact in an epic folder or `foundation/`: `gate ci` flips the status of each artifact it advances, and checkpoint flips a story's.
 
 ## Plan
@@ -71,4 +82,15 @@ push, and list the files that may ride a yad commit and the edits of them that m
 ## T04 — Say in the docs which files may ride a yad commit from a worktree
 **Files:**
 - docs/CLI.md
+
+## T05 — Judge every commit ahead, narrow the root allowlist, refuse links and merges, and fix the hint
+**Files:**
+- cli/productcommit.mjs
+- cli/test-worktree.mjs
+- docs/CLI.md
+
+## T06 — Read checkpoint's and repo refresh's status and ignore diffs with the shared patch reader
+**Files:**
+- cli/checkpoint.mjs
+- cli/repo-publish.mjs
 <!-- /yad:tasks -->

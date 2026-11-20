@@ -20,7 +20,7 @@ import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness, branchToCommitOn } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness, branchToCommitOn, diffAddsManagedIgnoreOnly } from './productcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { codeContextPathOk } from './workspace.mjs';
@@ -91,20 +91,10 @@ export function ignoreChangeIsManagedOnly(git, root) {
     }
     return seen > 0;
   }
-  // tracked: the working-tree-vs-HEAD diff must ADD only managed lines and remove nothing
-  const d = git('diff', '-U0', 'HEAD', '--', '.gitignore');
-  if (!d.ok) return false;
-  let added = 0;
-  for (const ln of d.stdout.split('\n')) {
-    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue; // headers/hunks
-    if (ln.startsWith('-')) return false;              // we only ever append — any removal ⇒ not ours
-    if (ln.startsWith('+')) {
-      const body = ln.slice(1).trim();
-      if (body !== '' && !managed.has(body)) return false; // a non-managed added line ⇒ a user edit
-      added++;
-    }
-  }
-  return added > 0;
+  // tracked: the working-tree-vs-HEAD diff must ADD only managed lines and remove nothing (the patch is read
+  // by the shared parser, so a removed `---` line or an added `++x` is a change, not a header — #231)
+  const d = git('diff', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', 'HEAD', '--', '.gitignore');
+  return d.ok && diffAddsManagedIgnoreOnly(d.stdout);
 }
 
 // PURE — turn the staged pathspecs into the subject `label` + the body's file list. A `<name>` is
