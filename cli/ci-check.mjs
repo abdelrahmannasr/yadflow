@@ -285,8 +285,8 @@ function platformRows(add, root, t, s, { solo }) {
 // cannot read a variable's value (GitLab shows it to a Maintainer only), so this is a warning, said as "if not
 // set already", never a gap that could not clear. A repo that runs no yad CI has no guard, and no row: a
 // Product that keeps its ledger locally, or a code repo whose entry names no platform (yad wired none of its
-// workflows; the files row says so). On the Product, gate sync still follows only the platform's default
-// branch, so the variable alone does not finish the setup there.
+// workflows; the files row says so). On the Product the gate sync follows the same variable (#232), and the
+// row says so.
 function trunkRow(add, t, p, { branch, web, gh }) {
   if (!t.ciRuns || (t.kind === 'code' && !t.target.platform)) return;
   if (typeof p.platformDefault !== 'string' || !p.platformDefault || p.branch === p.platformDefault) return;
@@ -301,10 +301,7 @@ function trunkRow(add, t, p, { branch, web, gh }) {
   const steps = gh
     ? [`If it is not set already: open ${url} → New repository variable: name YAD_TRUNK, value ${branch}.`]
     : [`If it is not set already: open ${url} → Variables → Add variable: key YAD_TRUNK, value ${branch} (or set it once on the group, for all its projects). ${protect} Set it there, not in yad's fragment: yad rewrites its files on every update.`];
-  if (t.kind === 'product') {
-    steps.push(`On the Product the variable is not enough: yad-gate-sync, the job that moves a gate on after its review merges, still follows only the platform's default branch (${other}), so merges into ${branch} do not move the gates. The simplest fix is to make ${branch} the platform's default branch (${gh ? `${web}/settings → Default branch` : `${web}/-/settings/repository → Branch defaults`}).`);
-  }
-  add('trunk', 'suggest', `the trunk ${branch} is not ${gh ? 'GitHub' : 'GitLab'}'s default branch (${other}): the update guard checks a direct push to ${branch} only when ${where} YAD_TRUNK is set to ${branch}${t.kind === 'product' ? ', and the gate sync follows only ' + other : ''}`, {
+  add('trunk', 'suggest', `the trunk ${branch} is not ${gh ? 'GitHub' : 'GitLab'}'s default branch (${other}): the update guard checks a direct push to ${branch}${t.kind === 'product' ? ', and the gate sync moves a gate on after a review merges into it,' : ''} only when ${where} YAD_TRUNK is set to ${branch}`, {
     actor: 'person', where: 'settings', url, steps,
   });
 }
