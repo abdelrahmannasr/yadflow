@@ -1455,7 +1455,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // straight to the default branch under a `chore(gate)` subject with [skip ci] — unreviewed, and
   // contradicting the "CI commits only the ledger" contract every doc in this repo states.
   // `ours` is what this run stages, and the commit takes exactly the files staged under it — never anything
-  // a person had staged before (#231 review).
+  // a person had staged before (#231 review). Read with --no-renames: a move is its new names AND its old
+  // ones, so the old folder's removal is in the same commit.
   const ours = [];
   for (const e of touched) {
     ours.push(path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'), ...(statusFiles.get(e) || []));
@@ -1481,7 +1482,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const indexStaged = onDefault ? stageIndexIfClean(root, git) : false;
   if (!onDefault) info(`${INDEX_FILE} not rebuilt — this checkout is not on the default branch, the only place it is written`);
   if (indexStaged) ours.push(INDEX_FILE);
-  const stagedRead = ours.length ? git('diff', '--cached', '--name-only', '-z', '--', ...ours) : { ok: true, stdout: '' };
+  const stagedRead = ours.length ? git('diff', '--cached', '--name-only', '--no-renames', '-z', '--', ...ours) : { ok: true, stdout: '' };
   if (!stagedRead.ok) { fail(`could not read what this run staged — ${stagedRead.stderr.split('\n')[0] || stagedRead.code}`); process.exitCode = 1; return { synced, committed: false, pushed: false }; }
   const staged = stagedRead.stdout.split('\0').filter(Boolean);
   if (!staged.length) { info('ledger unchanged — nothing to commit'); return { synced, committed: false, pushed: false }; }
