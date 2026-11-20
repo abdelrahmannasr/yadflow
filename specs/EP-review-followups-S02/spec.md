@@ -25,10 +25,11 @@ The plain-write guard in `cli/test.mjs` (`DIRECT_WRITE_ALLOWED`, PR #633) lists 
   again. The commit still counts as done (the pack is a cache). Each pack is handled on its own, so one
   refusal never stops the others or replaces the commit's own result.
 - R3. `writePlain(dir, name, data, { within })` writes through `writeFileAtomic`. `within` is the Product
-  root for the `.sdlc/brain/` files and the page's own folder for the `--html` page. A linked folder on the
-  way is refused with YAD-STATE-001, and nothing is written through it.
+  root for the `.sdlc/brain/` files. The `--html` page passes none (see the clarification). A linked folder
+  on the way is refused with YAD-STATE-001, and nothing is written through it.
 - R4. `writeOwnFile` (`cli/local-page.mjs`) keeps its `null | problem` answer: a refusal comes back as a
-  problem string, not a throw.
+  problem string, not a throw. The string says to name another path and gives the way to undo the link
+  (`LINKED_FOLDER_FIX`), as the callers pass no separate hint to `refuse`. A test covers it.
 - R5. `DIRECT_WRITE_ALLOWED`: the `cli/repo-publish.mjs` entry is removed, and the `cli/brain.mjs` entry
   drops to 1 (`.git/info/exclude`). The guard tests pass.
 - R6. Tests: a dangling link at a pack path, and a linked folder on the way to a pack, are not written
@@ -48,8 +49,12 @@ a link. Any other writer.
   there, so it is not yad's to remove.
 - Q: Warn or fail when a pack is not put back? → A: warn and hand a fix. The commit went through, and the
   pack is a cache that `yad repo refresh` makes again, so the exit code stays 0.
-- Q: `within` for the `--html` page? → A: the page's own folder. The walk starts below `within`, so that
-  folder itself may be a link the person made; the Product root is still walked when a command set it.
+- Q: `within` for the `--html` page? → A: none. A `within` equal to the page's own folder would check
+  nothing, as the walk starts below `within` (T02 passed it; T03 removes it). So only the Product-root walk
+  applies, and only when a command has set the Product root (`setProductRoot`). That walk checks every
+  folder from the Product root down to the page, the page's own last folder too. So with `mylink` a linked
+  folder in the Product, `yad map --html <Product>/mylink/page.html` is now refused. Outside the Product, a
+  linked folder on the way is the person's choice, and the page is written where it points.
 
 ## Plan
 
@@ -58,7 +63,7 @@ refuses a linked folder on the way (`refuseLinkedWrite`, as `lstat` looks throug
 plain file there returns; anything else is named; nothing there is written with `writeFileAtomic`,
 and a refusal is caught and named (`warn` + `hand`). `held` keeps the pack's relative path for the message.
 `cli/brain.mjs`: `writePlain` becomes one `writeFileAtomic` call; its four callers pass `{ within: root }`.
-`cli/local-page.mjs`: `writeOwnFile` passes `{ within: dir }` and turns a YAD-STATE-001 into its problem
+`cli/local-page.mjs`: `writeOwnFile` passes no `within` and turns a YAD-STATE-001 into its problem
 string. `cli/test.mjs`: one test per change, and the guard entries.
 
 ## Tasks
@@ -73,5 +78,11 @@ string. `cli/test.mjs`: one test per change, and the guard entries.
 **Files:**
 - cli/brain.mjs
 - cli/local-page.mjs
+- cli/test.mjs
+
+## T03 — Make writeOwnFile's link rule exact and tested (review fixes)
+**Files:**
+- cli/local-page.mjs
+- cli/brain.mjs
 - cli/test.mjs
 <!-- /yad:tasks -->
