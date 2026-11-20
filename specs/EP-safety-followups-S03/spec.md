@@ -32,6 +32,21 @@ and doctor has to warn about it.
   `resolveContractLock` and the bash gate, and holds their pass or fail equal.
 - R5. `docs/CLI.md`, `docs/GATES.md` and `skills/yad-checks/references/check-gates.md` say the gate
   follows the chain and doctor no longer warns.
+- R6 (review). A lock that a text read and JSON.parse would read two ways is refused by both: its text,
+  trimmed, is not one object (`{` … `}`), it holds a backslash, or it names `hash`, `ref` or
+  `inheritedFrom` more than once. The gate also needs a hash of exactly 64 hex digits, as
+  `resolveContractLock` does. `term_safe` keeps printable ASCII only. `lock_walk`'s names are `local`.
+- R7 (review). The table test asserts `resolveContractLock`'s `broken` kind for each row (and the owner for a
+  sound one), and adds: a linked lock file, an epic with its own `contract.md` mid-chain, an
+  `inheritedFrom`-only lock, a ref to `.sdlc/other.json`, an upper-case id, a lock pointing at itself, a file
+  where an epic folder belongs, a repeated key (at the start and one hop on), an escaped key, a cut-off lock,
+  a backslash in a ref, and a hash one digit short.
+- R8 (review). `yad doctor` warns `checks:pointer-one-hop` when an installed `checks/contract-check.sh` has no
+  `lock_walk` (a copy from before this story) and some lock in the Product needs more than one hop, with
+  the `yad check --fix` hint.
+- R9 (review). The docs that still say the gate follows ONE hop say it follows the chain:
+  `skills/yad-change/references/triage.md`, `skills/yad-epic/references/state-schema.md`, the comments in
+  `cli/epic-state.mjs`.
 
 ## Out of scope
 
@@ -73,6 +88,33 @@ doctor tests in `cli/test.mjs` and `cli/test-threads.mjs` expect `ok`.
 ## T03 — Say the gate follows the whole chain in the docs
 **Files:**
 - docs/CLI.md
+- docs/GATES.md
+- skills/yad-checks/references/check-gates.md
+
+## T04 — Refuse a pointer lock that reads two ways in resolveContractLock
+**Files:**
+- cli/epic-state.mjs
+- cli/test-threads.mjs
+
+## T05 — Read a lock strictly in the contract gate, and test more chains against both walks
+**Files:**
+- checks/contract-check.sh
+- skills/yad-checks/templates/checks/contract-check.sh
+- cli/test-checks.mjs
+
+## T06 — Warn in yad doctor when an older contract gate meets a multi-hop lock
+**Files:**
+- cli/doctor.mjs
+- cli/test.mjs
+- docs/CLI.md
+
+## T07 — Drop the one-hop wording from the change and state references
+**Files:**
+- skills/yad-change/references/triage.md
+- skills/yad-epic/references/state-schema.md
+
+## T08 — Say how the gate reads a lock in the gate docs
+**Files:**
 - docs/GATES.md
 - skills/yad-checks/references/check-gates.md
 <!-- /yad:tasks -->
