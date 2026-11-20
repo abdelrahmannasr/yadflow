@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ok, info, warn, hand, run, readJSON, writeJSON, isPlainObject, forTerminal } from './lib.mjs';
+import { ok, info, warn, hand, run, readJSON, writeJSON, isPlainObject, forTerminal, shQuote } from './lib.mjs';
 import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
@@ -183,14 +183,16 @@ export function nodeModulesLinks(main) {
 
 // The repo's `core.hooksPath` as git reads it in `dir`, or '' when unset.
 const hooksPathOf = (dir) => git(dir, 'config', '--get', 'core.hooksPath').stdout || '';
-// A hooksPath git resolves against each worktree's own root: not absolute, not `~/…` (#619).
-const relativeHooks = (v) => !!v && !path.isAbsolute(v) && !/^[\\/]/.test(v) && !/^~/.test(v);
+// A hooksPath git resolves against each worktree's own root: not absolute, not `~/…`, not `%(prefix)/…` (#619).
+const relativeHooks = (v) => !!v && !path.isAbsolute(v) && !/^[\\/]/.test(v) && !/^~/.test(v) && !/^%\(prefix\)/.test(v);
 
 // The git hooks folder to link into a worktree (#619), or null. husky v9 points `core.hooksPath` at
 // `.husky/_`, a folder its npm `prepare` makes and fills with a `.gitignore` of `*`; a linked node_modules
 // never runs `prepare`, so the worktree would have no hooks and every one would silently do nothing. Linked
 // only when it is relative, stays inside the repo (no `..`, never under `.git`), is a real folder in the
-// main checkout reached through no link, and git tracks nothing in it and would add nothing from it.
+// main checkout reached through no link, git tracks nothing in it and would add nothing from it, and git
+// ignores the folder as a whole (husky's `*`): an empty or partly ignored folder is the person's, and the
+// shared exclude line for the link would hide the hooks they write there next.
 // → the relative path, POSIX form, or null.
 export function hooksLink(main) {
   const v = hooksPathOf(main);
@@ -205,6 +207,7 @@ export function hooksLink(main) {
   if (gitRaw(main, 'ls-files', '-z', '--', rel)) return null; // tracked: the checkout has it
   const others = gitRawResult(main, 'ls-files', '-z', '--others', '--exclude-standard', '--', rel);
   if (!others.ok || others.stdout) return null; // git would add a file from it
+  if (!git(main, 'check-ignore', '-q', '--', `${rel}/.yad-probe`).ok) return null; // a new file there would not be ignored
   return rel;
 }
 
@@ -216,11 +219,15 @@ function deadHooks(p) {
   try { if (fs.statSync(path.resolve(p.path, v)).isDirectory()) return null; } catch { /* missing */ }
   const src = path.resolve(p.main, v);
   let inMain = false;
-  try { inMain = fs.statSync(src).isDirectory(); } catch { /* missing there too */ }
+  let empty = false;
+  try { inMain = fs.statSync(src).isDirectory(); empty = inMain && !fs.readdirSync(src).length; } catch { /* missing there too */ }
   const shown = forTerminal(v);
-  if (!inMain) return { hooksPath: v, fix: `it is missing in the main checkout too, so no hook runs there either: run the tool that set it up (for husky, \`npm install\` in ${p.main}), then remove and add this worktree again` };
-  if (/^(\.\/)?\.husky([\\/]|$)/.test(v)) return { hooksPath: v, fix: `run \`cd ${p.path} && npx husky\` (husky remakes ${shown} from the linked node_modules)` };
-  return { hooksPath: v, fix: `point git at the main checkout's folder, which every worktree shares: \`git -C ${p.main} config core.hooksPath ${forTerminal(src)}\`` };
+  const q = (s) => forTerminal(shQuote(s));
+  if (!inMain) return { hooksPath: v, fix: `it is missing in the main checkout too, so no hook runs there either: run the tool that set it up (for husky, \`npm install\` in ${forTerminal(p.main)}), then remove and add this worktree again` };
+  if (/^(\.\/)?\.husky([\\/]|$)/.test(v)) return { hooksPath: v, fix: `run \`cd ${q(p.path)} && npx husky\` (husky remakes ${shown} from the linked node_modules)` };
+  const share = `\`git -C ${q(p.main)} config core.hooksPath ${q(src)}\``;
+  if (empty) return { hooksPath: v, fix: `it is empty in the main checkout too, so no hook runs there either; to share the hooks you put there with every worktree: ${share}` };
+  return { hooksPath: v, fix: `point git at the main checkout's folder, which every worktree shares: ${share}` };
 }
 
 function epicRepos(main, epic) {
@@ -342,7 +349,7 @@ function linkFromMain(p) {
     if (rel === p.hooks) {
       let real = false;
       try { real = fs.lstatSync(path.dirname(dst)).isDirectory() && fs.realpathSync.native(path.dirname(dst)) === path.join(fs.realpathSync.native(p.path), path.posix.dirname(rel)); } catch { /* missing */ }
-      if (!real) { warn(`${p.name}: ${forTerminal(rel)} was not linked — its parent folder is not a plain folder of the worktree`); continue; }
+      if (!real) { warn(`${p.name}: ${forTerminal(rel)} was not linked — its parent folder is missing or is not a plain folder of the worktree`); continue; }
     }
     try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { warn(`could not link ${rel}: ${e.message}`); continue; }
     linked.push(rel);

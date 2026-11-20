@@ -745,15 +745,33 @@ test('yad worktree add leaves a tracked or absolute hooksPath alone, refuses a l
     git(api, 'config', 'core.hooksPath', 'hooks');
     r = add();
     assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
-    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(hooks\) is not there; point git at the main checkout's folder, which every worktree shares: `git -C .*api config core\.hooksPath .*api\/hooks`/);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(hooks\) is not there; point git at the main checkout's folder, which every worktree shares: `git -C '.*api' config core\.hooksPath '.*api\/hooks'`/);
     assert.doesNotMatch(r.out, /hooks run in the worktree too/);
     remove();
     fs.unlinkSync(path.join(api, 'hooks'));
 
-    // Escaping the repo: never linked.
+    // Escaping the repo: never linked. The worktree sits beside the main checkout, so `../api/.husky/_` names
+    // the main checkout's folder from both, and the hooks do run; `../nowhere` is missing from both: said.
     git(api, 'config', 'core.hooksPath', '../api/.husky/_');
     r = add();
     assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /its git hooks run in the worktree too/);
+    remove();
+    git(api, 'config', 'core.hooksPath', '../nowhere');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.\.\/nowhere\) is not there; it is missing in the main checkout too/);
+    assert.doesNotMatch(r.out, /hooks run in the worktree too/);
+    remove();
+
+    // An empty untracked folder git does not ignore as a whole: the person's, never linked (the shared exclude
+    // line would hide the hooks they write there next), and the warning says it is empty there too.
+    fs.mkdirSync(path.join(api, '.hooks'));
+    git(api, 'config', 'core.hooksPath', '.hooks');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.hooks\) is not there; it is empty in the main checkout too, so no hook runs there either; to share the hooks you put there with every worktree: `git -C '.*api' config core\.hooksPath '.*api\/\.hooks'`/);
+    assert.doesNotMatch(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /\.hooks/);
     remove();
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
@@ -765,7 +783,7 @@ test('yad worktree add says husky\'s hooks will not run, with the fix, when its 
     const r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api', '--json');
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
-    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.husky\/_\) is not there; run `cd .*api--EP-x && npx husky`/);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.husky\/_\) is not there; run `cd '.*api--EP-x' && npx husky`/);
     assert.doesNotMatch(r.out, /hooks run in the worktree too/);
     git(awt, 'commit', '-q', '--allow-empty', '-m', 'x');
     assert.equal(ran(log), '', 'as said: no hook ran');
