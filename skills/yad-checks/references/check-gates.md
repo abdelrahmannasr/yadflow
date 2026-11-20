@@ -188,7 +188,9 @@ Every gate stops on its failure except **risk-map**, which is advisory: there a 
       `epics/<EP-id>/.sdlc/contract-lock.json`, no epic folder, `.sdlc` folder, lock or `contract.md` on
       the way may be a link, no loop, at most 8 hops, every hash equal to the next, and the last
       epic's `contract.md` must hash to the lock. A broken chain fails with a reason naming the hop
-      (`hop N: EP-a → EP-b …`). An epic that re-authored its architecture and kept the pointer fields
+      (`hop N: EP-a → EP-b …`). The gate reads a lock by its text, so it reads one only when the
+      text is one JSON object (`{` … `}`) with no backslash, names `hash`, `ref` and `inheritedFrom`
+      at most once each, and holds `"hash": "sha256:<64 hex>"`; `yad doctor` refuses the same locks. An epic that re-authored its architecture and kept the pointer fields
       has its own `contract.md`, and that is read (`yad doctor` reads it too, and also warns about the
       leftover fields);
     - no slice file is deleted (a deletion changes the surface);
