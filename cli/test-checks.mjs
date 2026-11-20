@@ -1089,6 +1089,72 @@ test('contract-check gate: a change-epic\'s pointer lock reads the owner\'s cont
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #233. CI's contract-check and `yad doctor` (resolveContractLock) follow a pointer lock the same way: one
+// table of chains, run through both, gives the same pass or fail. Each chain starts at EP-demo (the
+// story's epic) and, when sound, ends at EP-end, which holds contract.md.
+test('contract-check gate and resolveContractLock agree on every pointer chain (#233)', async () => {
+  const { resolveContractLock, MAX_LOCK_HOPS } = await import('./epic-state.mjs');
+  const T = scaffoldRepo();
+  const P = path.join(T, 'product');
+  const E = path.join(P, 'epics');
+  const hash = seedLockedContract(T, 'EP-end');
+  commit(T, 'docs(spec): quote the inherited slice', {
+    'specs/EP-demo-S01/contracts/orders.md': quoteSlice(SURFACE_LINES.slice(2, 5)),
+    'specs/EP-demo-S01/link.md': quoteLink('EP-demo-S01', hash),
+  });
+  const OTHER = 'd'.repeat(64);
+  const writeLock = (dir, to, h = hash, ref = `../../${to}/.sdlc/contract-lock.json`) => {
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash: `sha256:${h}`, inheritedFrom: to, ref }));
+  };
+  const pointer = (id, to, h, ref) => writeLock(path.join(E, id), to, h, ref);
+  // EP-demo → EP-h1 → … → EP-end: `n` hops.
+  const chain = (n) => {
+    const ids = ['EP-demo', ...Array.from({ length: n - 1 }, (_, i) => `EP-h${i + 1}`), 'EP-end'];
+    for (let i = 0; i < ids.length - 1; i++) pointer(ids[i], ids[i + 1]);
+  };
+  // A real folder outside the Product, for the link cases and the ref that leaves epics/.
+  const away = path.join(T, 'away');
+  const cases = [
+    ['one hop', null, () => chain(1)],
+    ['two hops', null, () => chain(2)],
+    ['three hops', null, () => chain(3)],
+    [`${MAX_LOCK_HOPS} hops`, null, () => chain(MAX_LOCK_HOPS)],
+    [`${MAX_LOCK_HOPS + 1} hops`, /EP-demo-S01: the locks point on for more than 8 hops \(EP-demo → EP-h1 → .* → EP-h8\)/, () => chain(MAX_LOCK_HOPS + 1)],
+    ['a loop', /EP-demo-S01: the locks point in a loop back to EP-demo \(EP-demo → EP-h1 → EP-demo\)/, () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-demo'); }],
+    ['a dangling ref', /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/EP-gone\/\.sdlc\/contract-lock\.json' \(hop 2: EP-demo → EP-h1 → EP-gone\), and there is no lock there — fix ref/,
+      () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-gone'); }],
+    ['a hash that changes on the way', /EP-demo-S01: EP-h1's pointer lock copies .*, but its owner now locks another surface — EP-end locks dddddddddddd… \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/.sdlc/contract-lock.json'), JSON.stringify({ hash: `sha256:${OTHER}` })); }],
+    ['an epic folder that is a link', /EP-demo-S01: EP-h1 is a link or not a plain folder \(hop 1: EP-demo → EP-h1\)/,
+      () => { pointer('EP-demo', 'EP-h1'); writeLock(path.join(away, 'EP-h1'), 'EP-end'); fs.symlinkSync(path.join(away, 'EP-h1'), path.join(E, 'EP-h1')); }],
+    ['a .sdlc folder that is a link', /EP-demo-S01: EP-h1\/\.sdlc is a link or not a plain folder \(hop 1: EP-demo → EP-h1\)/,
+      () => { pointer('EP-demo', 'EP-h1'); writeLock(path.join(away, 'EP-h1'), 'EP-end'); fs.mkdirSync(path.join(E, 'EP-h1')); fs.symlinkSync(path.join(away, 'EP-h1/.sdlc'), path.join(E, 'EP-h1/.sdlc')); }],
+    ['a contract.md that is a link', /EP-demo-S01: EP-end\/contract\.md is a link or not a plain file \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      () => { chain(2); fs.mkdirSync(away, { recursive: true }); fs.renameSync(path.join(E, 'EP-end/contract.md'), path.join(away, 'contract.md')); fs.symlinkSync(path.join(away, 'contract.md'), path.join(E, 'EP-end/contract.md')); }],
+    ['a ref that leaves epics/', /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/\.\.\/\.\.\/away\/EP-x\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock in this Product/,
+      () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-x', hash, '../../../../away/EP-x/.sdlc/contract-lock.json'); writeLock(path.join(away, 'EP-x'), 'EP-end'); }],
+    ['a ref to a folder that is no epic ID', /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/notes\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'notes'); pointer('notes', 'EP-end'); }],
+    ['a last contract.md that drifted', /EP-demo-S01: the Product's contract\.md no longer matches its lock .* \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/contract.md'), contractMd([...SURFACE_LINES, '- `DELETE /orders/{id}` — cancel an order.'])); }],
+  ];
+  try {
+    for (const [name, fails, build] of cases) {
+      fs.rmSync(E, { recursive: true, force: true });
+      fs.rmSync(away, { recursive: true, force: true });
+      seedLockedContract(T, 'EP-end');
+      build();
+      const w = resolveContractLock(P, path.join(E, 'EP-demo'));
+      const r = runGate(CONTRACT, T);
+      assert.equal(Boolean(w.broken), Boolean(fails), `${name}: resolveContractLock ${w.broken ? `broke (${w.broken})` : 'passed'}`);
+      assert.equal(r.code, fails ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
+      if (fails) assert.match(r.out, fails, `${name}:\n${r.out}`);
+      else assert.match(r.out, /PASS \[contract-check\]: every changed slice is an exact quote of its locked contract/, name);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // Review 1, hole D: with two merge bases, `git diff BASE...HEAD` reads from ONE, and a hand-resolved merge
 // can undo what the other side brought in. Review 3: two merge bases are common on a branch tip (a hotfix
 // merged into both; stacked branches), so the gates read from EVERY merge base instead of blocking.
