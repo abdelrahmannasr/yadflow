@@ -672,7 +672,8 @@ export function ensureBackupsIgnored(root) {
   if (lines.some((l) => l.trim() === BACKUP_IGNORE_GLOB)) return false;
   const body = lines.join('\n').replace(/\n*$/, '');
   const prefix = body ? `${body}\n\n` : '';
-  fs.writeFileSync(gi, `${prefix}${BACKUP_IGNORE_BLOCK.join('\n')}\n`);
+  // Through a new file and a rename (#235), keeping the file's mode.
+  writeFileAtomic(gi, `${prefix}${BACKUP_IGNORE_BLOCK.join('\n')}\n`, { keepMode: true });
   return true;
 }
 

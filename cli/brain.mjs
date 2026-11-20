@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { c, emitJSON, fail, forTerminal, hand, info, isPlainObject, log, ok, refuse, run, warn } from './lib.mjs';
+import { c, emitJSON, fail, forTerminal, hand, info, isPlainObject, log, ok, refuse, run, warn, writeFileAtomic } from './lib.mjs';
 import { err } from './errors.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { buildIndex, indexHash, readInput } from './product-index.mjs';
@@ -85,7 +85,7 @@ export function ensureBrainDir(root) {
   let st = null;
   try { st = fs.lstatSync(gi); } catch { /* written below */ }
   if (st && !st.isFile()) throw err(CODE, `${BRAIN_DIR}/.gitignore is not a plain file`, 'remove it, then run `yad brain build` again');
-  if (!st || fs.readFileSync(gi, 'utf8') !== '*\n') fs.writeFileSync(gi, '*\n');
+  if (!st || fs.readFileSync(gi, 'utf8') !== '*\n') writeFileAtomic(gi, '*\n', { within: root, keepMode: true });
   return cur;
 }
 
