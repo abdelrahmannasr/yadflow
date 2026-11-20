@@ -2282,6 +2282,84 @@ test('#235: a legacy wired-file rename under a linked folder of a code repo is a
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #235 review (T11): `yad update --open-pr` keeps the team's own files by moving them aside and back. Under a
+// linked skill folder that move is refused before the first rename, so nothing moves where the link points.
+test('#235: applyKeepingOwn under a linked skill folder throws before it moves any file', { skip: E125B_SKIP }, async () => {
+  const { moduleActions } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235h-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.claude', 'skills'), { recursive: true });
+    const a0 = moduleActions(P, ['.claude']).find((a) => a.scope === '.claude' && typeof a.applyKeepingOwn === 'function');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'my-notes.md'), 'theirs\n');
+    fs.symlinkSync(outside, path.join(P, '.claude', 'skills', a0.item));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const a = moduleActions(P, ['.claude']).find((x) => x.item === a0.item && x.scope === '.claude');
+      assert.throws(() => a.applyKeepingOwn(), LINKED_WRITE_235(`.claude/skills/${a0.item}`));
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'no file moved out of (or into) the folder the link points at');
+    assert.deepEqual(fs.readdirSync(path.join(P, '.claude', 'skills')), [a0.item], 'no side folder made');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('#235: writeFileAtomic keepMode gives a new file the default mode, and an existing one its own', { skip: process.platform === 'win32' && 'no file modes on Windows' }, () => {
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235i-')));
+  try {
+    const fresh = path.join(T, 'fresh.md');
+    const plain = path.join(T, 'plain.md');
+    fs.writeFileSync(plain, 'x');
+    const defaultMode = fs.statSync(plain).mode & 0o777;
+    writeFileAtomic214(fresh, 'new\n', { keepMode: true });
+    assert.equal(fs.readFileSync(fresh, 'utf8'), 'new\n');
+    assert.equal(fs.statSync(fresh).mode & 0o777, defaultMode, 'a new file: the default mode, nothing invented');
+    fs.chmodSync(plain, 0o751);
+    writeFileAtomic214(plain, 'y', { keepMode: true });
+    assert.equal(fs.statSync(plain).mode & 0o777, 0o751);
+    // A link standing at the name is replaced, and its target's mode is not taken.
+    const target = path.join(T, 'target');
+    fs.writeFileSync(target, 't');
+    fs.chmodSync(target, 0o700);
+    fs.symlinkSync(target, path.join(T, 'via.md'));
+    writeFileAtomic214(path.join(T, 'via.md'), 'v', { keepMode: true });
+    assert.equal(fs.lstatSync(path.join(T, 'via.md')).isFile(), true);
+    assert.equal(fs.statSync(path.join(T, 'via.md')).mode & 0o777, defaultMode);
+    assert.equal(fs.readFileSync(target, 'utf8'), 't');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #235 review (T10): `yad sync-status` checks every file of an epic before it rewrites the first, so a linked
+// `stories/` stops the sweep with `epic.md` still as it was (no epic half in step).
+test('#235: syncStatuses under a linked stories/ refuses before epic.md is rewritten', { skip: E125B_SKIP }, async () => {
+  const { syncStatuses } = await import('./artifact-status.mjs');
+  const { quietly } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235j-')));
+  try {
+    const fm = (a, st) => `---\nid: EP-x\nartifact: ${a}\nstatus: ${st}\n---\n# x\n`;
+    const { P, outside } = linkedEpic235(T, 'epics/EP-x/stories', { 'EP-x-S01.md': fm('EP-x-S01', 'draft') });
+    const dir = path.join(P, 'epics', 'EP-x');
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-x', currentStep: 'ready-for-build', steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'done' },
+        { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+      ],
+    }));
+    fs.writeFileSync(path.join(dir, 'epic.md'), fm('epic', 'draft'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      await assert.rejects(quietly(() => syncStatuses(P, { epic: 'EP-x' })), LINKED_WRITE_235('epics/EP-x/stories'));
+    } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(path.join(dir, 'epic.md'), 'utf8'), fm('epic', 'draft'), 'epic.md is not rewritten');
+    assert.deepEqual(treeOf(outside), before);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
 
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
 // Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that

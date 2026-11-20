@@ -5,7 +5,7 @@
 // only the `status:` line — advance-only, and never touching build-owned values.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, readJSONStrict, writeFileAtomic } from './lib.mjs';
+import { c, log, ok, info, readJSONStrict, writeFileAtomic, refuseLinkedWrite } from './lib.mjs';
 import {
   epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus, FRONTMATTER_BLOCK,
 } from './epic-state.mjs';
@@ -178,6 +178,9 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
     if (!state?.steps) { info(`${e}: no state.json — skipping`); continue; }
 
     const files = artifactFiles(dir);
+    // Every file of the epic is checked before the first is rewritten (#235): a linked `stories/` stops the sync
+    // before `epic.md` changes, so the epic is never left half in step.
+    if (!dryRun) for (const { file } of files) refuseLinkedWrite(file);
     for (const { base, file } of files) {
       if (!fs.existsSync(file)) continue;
       const want = desiredStatus(state, base);
