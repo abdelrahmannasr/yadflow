@@ -36,6 +36,12 @@ fourth, and the bash check gates read scalars with `fm_val`, which keeps the com
 - R6. The docs and skills that said "the readers keep the whole rest of the line" say what is read now.
   They still tell people to write the machine-read keys bare, because a code repo whose gates
   `yad update` has not refreshed still keeps the comment.
+- R7. `theme: #checkout-revamp` (the form `yad next` prints) reads as no theme, as in YAML, and
+  `yad doctor` says so under `theme:commented`: when the parsed theme is empty and the raw text after
+  `theme:` is a single `#word`, it warns that the whole value is a YAML comment. A real comment
+  (`theme: # none yet`) says nothing.
+- R8. Every JS reader trims only spaces and tabs from the whole value, as `fm_strip` does, so a value of
+  one no-break space reads the same in JS and bash.
 
 ## Out of scope
 
@@ -113,4 +119,25 @@ runs every row through `parseFrontmatter`, `readFrontmatter`, the gate's `touche
 **Files:**
 - cli/story-frames.mjs
 - cli/test-threads.mjs
+
+## T09 — Warn when a theme is wholly a comment, and trim doctor's list value as fm_strip does
+**Files:**
+- cli/doctor.mjs
+- cli/test.mjs
+
+## T10 — Trim only spaces and tabs in the JS readers, and widen the reader table
+**Files:**
+- cli/epic-state.mjs
+- cli/map.mjs
+- cli/test-checks.mjs
+
+## T11 — Say that `theme: #tag` is a comment in the epic, change and stub skills
+**Files:**
+- skills/yad-epic/SKILL.md
+- skills/yad-change/SKILL.md
+- skills/yad-stub/SKILL.md
+
+## T12 — Say which `#` the stories skill's frames line keeps
+**Files:**
+- skills/yad-stories/SKILL.md
 <!-- /yad:tasks -->

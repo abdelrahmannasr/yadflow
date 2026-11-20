@@ -1861,8 +1861,8 @@ Four things are worth knowing:
   on the screen. The header reader cuts a `# comment` (a `#` with a space or tab before it, outside
   quotes, #618), so `theme: checkout # the big one` is `checkout` and `theme: #checkout` is no theme at
   all. A `#` it keeps — `theme: checkout#big` or a quoted `"checkout # big"` — is part of the tag: it
-  still reads and groups, but only with other epics carrying that exact text. `yad doctor` reports it
-  (`theme:commented`).
+  still reads and groups, but only with other epics carrying that exact text. `yad doctor` reports both
+  (`theme:commented`): a kept `#`, and a value that is only `#tag`.
 - **Spelling is the grouping.** `checkout-revamp` and `Checkout Revamp` are two themes, not one.
   `yad doctor` reports a theme spelled more than one way (`theme:variants`) so it does not split a
   group in silence. Copy the spelling from an epic already in the group.

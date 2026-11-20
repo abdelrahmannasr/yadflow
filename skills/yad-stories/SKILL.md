@@ -147,7 +147,8 @@ As a <role>, I want <capability>, so that <outcome>.
 `design-frames` lists the design-tool frame IDs (`nodeId`s from `design-links.json`, Step 2c) of the
 screens this story builds, on ONE line: `design-frames: [12:34, 56:78]`. Leave it `[]` for a story with
 no screens, and take the line out when the epic has no `design-links.json` (Step 2c). **Never put a `# comment` after it**, and never write it as a `- id` list on the lines
-below: this frontmatter reader keeps the rest of the line, so either one makes the list unreadable.
+below: a `# comment` with a space before it is cut off, but a `#` with none (`[12:34]#note`) is kept
+and turns the list into text, and a `- id` list is not read at all, so either one makes the list unreadable.
 Before the review, run `yad story frames <story>` for each story: it prints every frame's name and link,
 and warns on an ID it cannot find. The field is part of the story, so the stories review approves it
 like `repos`, and changing it after that review passed means the review must approve it again.
