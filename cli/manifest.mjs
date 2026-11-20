@@ -917,3 +917,17 @@ export const HOOK_PROJECT_DIR_ENVS = Object.freeze(Object.values(HOOK_ADAPTERS).
 export const HOOK_TOOL_MATCHER = CLAUDE_HOOK_ADAPTER.matcher;
 export const HOOK_COMMAND = CLAUDE_HOOK_ADAPTER.command;
 export const HOOK_COMMAND_LEGACY = CLAUDE_HOOK_ADAPTER.legacyCommands;
+
+// The repomix pack is a large, regenerable artifact — the Product tracks the AI-authored code-map, not the
+// pack. `yad repo refresh --push` relies on the pack being gitignored (repo-publish.mjs never stages it);
+// this makes that assumption true in every Product, so a regenerated pack never strands as a dirty tree.
+export const PACK_IGNORE_GLOB = '.sdlc/code-context/*/pack.md';
+
+// The exact lines ensurePackIgnored appends — a comment pair + the glob. Kept as data (not inline
+// strings) so the publish gate can verify a staged `.gitignore` change is ONLY this managed block and
+// never sweep an unrelated user edit into the audit commit (repo-publish.mjs, invariant 1).
+export const PACK_IGNORE_BLOCK = [
+  '# Repomix code-context packs are large, regenerable artifacts (yad repo refresh) — the',
+  '# tracked code-map.md is the reviewed AI output; the pack itself is never committed.',
+  PACK_IGNORE_GLOB,
+];
