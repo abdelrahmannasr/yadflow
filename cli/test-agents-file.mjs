@@ -1071,7 +1071,7 @@ test('#498: yad hook agent-guard judges in a worker; one that runs out of memory
   assert.equal(slow.verdict.allow, false, JSON.stringify(slow.verdict));
   assert.match(slow.verdict.message, /could not be judged \(no answer/);
   // The real hook: a refusal is exit 2, and a read-only line is still pre-approved from the worker.
-  const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
+  const hook = (command) => spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir(), timeout: 20_000 });
   assert.equal(hook('gh pr merge 5').status, 2);
   assert.match(hook('git status').stdout, /pre-approved/);
   // Out of time after the verdict: an allowed line stays allowed, only not pre-approved. This line's verdict
