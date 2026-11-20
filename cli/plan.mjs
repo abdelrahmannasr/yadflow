@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, refuseLinkedWrite, shQuote, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
+  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, removeFile, removeDir, backupPlain, forTerminal, refuseLinkedWrite, shQuote, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -125,7 +125,7 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
         try { fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true }); fs.renameSync(path.join(aside, f), path.join(dest, f)); } catch { stuck.push(f); }
       }
       if (stuck.length) warn(`${stuck.length} of your own file(s) could not go back into ${dest}; they are in ${aside}`);
-      else fs.rmSync(aside, { recursive: true, force: true });
+      else removeDir(aside, { within: root });
     }
     // Only the files back in place: one left in the side folder is said by the warning above.
     return own.filter((f) => !stuck.includes(f)).map((f) => (root ? rel(root, path.join(dest, f)) : f));
@@ -534,7 +534,7 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
           paths: [rel(root, oldDest), rel(root, newDest)],
           rename: { from: rel(root, oldDest), to: rel(root, newDest) },
           apply: () => {
-            fs.rmSync(oldDest, { force: true });
+            removeFile(oldDest, { within: root });
             copyFile(asset('skills', skill, 'SKILL.md'), newDest, { within: root });
           },
         });
@@ -552,7 +552,7 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
           paths: [rel(root, oldDest), rel(root, newDest)],
           rename: { from: rel(root, oldDest), to: rel(root, newDest) },
           apply: () => {
-            fs.rmSync(oldDest, { recursive: true, force: true });
+            removeDir(oldDest, { within: root });
             copyDir(asset('skills', skill), newDest, { within: root });
           },
         });
@@ -581,7 +581,7 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
           status: 'removed',
           root,
           paths: [rel(root, dest)],
-          apply: () => fs.rmSync(dest, { force: true }),
+          apply: () => removeFile(dest, { within: root }),
         });
       } else {
         const dest = path.join(root, ide, 'skills', skill);
@@ -592,7 +592,7 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
           status: 'removed',
           root,
           paths: [rel(root, dest)],
-          apply: () => fs.rmSync(dest, { recursive: true, force: true }),
+          apply: () => removeDir(dest, { within: root }),
         });
       }
     }
@@ -657,7 +657,7 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
       managed: { src: asset(w.src), dest: path.join(baseRoot, newDest), root: baseRoot },
       apply: () => {
         if (backup) backupPlain(oldPath, backup);
-        fs.rmSync(oldPath, { force: true });
+        removeFile(oldPath, { within: baseRoot });
         // Only into an empty path. A file already at the new name is the new name's own wired-file action's
         // to judge — with its provenance and its backup — and may hold the team's edits (review 1).
         if (!exists(path.join(baseRoot, newDest))) copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec, within: baseRoot });
@@ -1537,7 +1537,7 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
         status: 'removed',
         root,
         paths: [w.dest],
-        apply: () => fs.rmSync(dest, { force: true }),
+        apply: () => removeFile(dest, { within: root }),
       });
     }
   }
@@ -1730,7 +1730,7 @@ function orphanHookActionsFor(spec, root) {
   // A link is never ours to remove (#222).
   const text = readPlainText(file);
   if (text === null || !spec.scripts(prefix).includes(text)) return [];
-  return [{ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => fs.rmSync(file, { force: true }) }];
+  return [{ scope: 'product', item: `${spec.item} (removed)`, status: 'removed', root, paths: [], apply: () => removeFile(file, { within: root }) }];
 }
 
 const PRE_COMMIT_HOOK = Object.freeze({
@@ -1940,7 +1940,7 @@ export function orphanCaptureHookActions(root, ideTargets = ideTargetsFor(root))
     for (const w of CAPTURE_WIRING) {
       const dest = path.join(root, w.dest);
       if (!exists(dest)) continue;
-      actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => fs.rmSync(dest, { force: true }) });
+      actions.push({ scope: 'product', item: `${w.dest} (removed)`, status: 'removed', root, paths: [w.dest], apply: () => removeFile(dest, { within: root }) });
     }
   }
   return actions;
@@ -2039,7 +2039,7 @@ function activityOrphans(root, kept, adapters, dest, { removeScript, scope }) {
     const st = lstatIfPresent(file);
     const sha = st && st.isFile() ? contentSha(file) : null;
     const ours = sha && (readManagedLedger(root)[dest] === sha || sha === contentSha(asset(ACTIVITY_WIRING[0].src)));
-    if (ours) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => fs.rmSync(file, { force: true }) });
+    if (ours) actions.push({ scope: scope || 'product', item: `${dest} (removed)`, status: 'removed', root, paths: scope ? [] : [dest], apply: () => removeFile(file, { within: root }) });
     else if (sha) sayKept(scope || 'the Product', dest);
   }
   return actions;
@@ -2406,7 +2406,7 @@ export function legacyHookScriptActions(root, ideTargets = ideTargetsFor(root)) 
           warn(`${scriptRel} kept — ${where.join(', ')} still ${where.length > 1 ? 'run' : 'runs'} it. To clear it: ${entryAdvice(root, scriptRel)}`);
           return;
         }
-        fs.rmSync(file, { force: true });
+        removeFile(file, { within: root });
         // Drop its line from the provenance record, so the record lists only files that are there.
         const current = readManagedLedger(root);
         if (Object.hasOwn(current, scriptRel)) {

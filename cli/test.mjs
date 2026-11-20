@@ -2097,6 +2097,42 @@ test('#248 removeFile and removeDir refuse a path under a linked folder (Product
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #248: yad check --fix removes a hook script it no longer wires (capture turned off; the Cursor guard once Cursor
+// is no longer a target). Under a `hooks/` committed as a link, that
+// delete is refused, and the file where the link points stays — as the Product (setProductRoot) and as a
+// folder named only by { within } (the planner's own `root`).
+test('#248 a hook script yad unwires is not deleted through a linked hooks/ folder, and what the link points at stays', { skip: E125B_SKIP }, async () => {
+  const { orphanCaptureHookActions, orphanHookActions } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248b-')));
+  try {
+    for (const productRoot of [true, false]) {
+      const P = path.join(T, `product-${productRoot}`);
+      const outside = path.join(T, `outside-${productRoot}`);
+      fs.mkdirSync(outside);
+      for (const f of ['yad-capture.mjs', 'ledger-guard-cursor.mjs']) fs.writeFileSync(path.join(outside, f), 'their own script');
+      fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(P, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified', default_branch: 'main', capture: false }));
+      fs.symlinkSync(outside, path.join(P, 'hooks'));
+      const before = treeOf(outside);
+      const acts = [...orphanCaptureHookActions(P, ['.claude']), ...orphanHookActions(P, ['.claude'])].filter((a) => a.status === 'removed' && a.item.startsWith('hooks/'));
+      assert.deepEqual(acts.map((a) => a.item).sort(), ['hooks/ledger-guard-cursor.mjs (removed)', 'hooks/yad-capture.mjs (removed)'], `productRoot ${productRoot}`);
+      if (productRoot) setProductRoot(P);
+      try {
+        for (const a of acts) {
+          assert.throws(() => a.apply(), (e) => e.code === 'YAD-STATE-001' && e.folder === 'hooks' && /^hooks is a link, so yad did not delete hooks\//.test(e.message), a.item);
+        }
+      } finally { setProductRoot(null); }
+      assert.deepEqual(treeOf(outside), before, `nothing deleted where the link points (productRoot ${productRoot})`);
+      // A real hooks/ folder: the script is removed as before.
+      fs.rmSync(path.join(P, 'hooks'));
+      fs.mkdirSync(path.join(P, 'hooks'));
+      fs.writeFileSync(path.join(P, 'hooks', 'yad-capture.mjs'), 'x');
+      for (const a of orphanCaptureHookActions(P, ['.claude']).filter((x) => x.item.startsWith('hooks/'))) a.apply();
+      assert.equal(fs.existsSync(path.join(P, 'hooks', 'yad-capture.mjs')), false);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // #214 review: a caller that names the file itself names the linked folder too.
 test('#214: migrate and the local setup script name the linked folder a file is under', { skip: E125B_SKIP }, async () => {
   const { describeDrift } = await import('./migrate.mjs');
