@@ -34442,6 +34442,29 @@ test('#322 gate reopen --push commits exactly what it wrote, on a verified Produ
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
 
+// #245: the reopen stages and commits the files it lowered by their literal names. A story named `*.md` is lowered
+// with the walk-back; as a plain pathspec its name also matched a person's unstaged edit of a file beside it.
+test('#322 gate reopen --push takes each file it wrote by its literal name, so a `*` in a name matches only itself (#245)', { skip: process.platform === 'win32' && 'a file name cannot hold * on Windows' }, async () => {
+  const prev = process.exitCode;
+  const { T, bare, ep } = productForReopen();
+  try {
+    fs.writeFileSync(path.join(ep, 'stories/*.md'), '---\nid: EP-x-S02\nstatus: approved\nrepos: [api]\n---\n');
+    fs.writeFileSync(path.join(ep, 'stories/notes.md'), 'notes\n');
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'stories'); git(T, 'push', '-q', 'origin', 'main');
+    // A person's edit of a file the reopen does not write, left unstaged.
+    fs.writeFileSync(path.join(ep, 'stories/notes.md'), 'notes, mine\n');
+    process.exitCode = 0;
+    const r = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.committed, r.pushed], [true, true]);
+    const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.ok(files.includes('epics/EP-x/stories/*.md'), `the lowered story is in the commit: ${files}`);
+    assert.match(git(T, 'show', 'HEAD:epics/EP-x/stories/*.md').toString(), /status: draft/);
+    assert.ok(!files.includes('epics/EP-x/stories/notes.md'), `the person's file is not: ${files}`);
+    assert.equal(git(T, 'status', '--porcelain', '--', 'epics/EP-x/stories/notes.md').toString().trim(), 'M epics/EP-x/stories/notes.md', 'and stays an uncommitted edit');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
 test('#322 a retired review PR never passes its gate again: not found by sync, not named with --pr, not replayed by gate ci', async () => {
   const prev = process.exitCode;
   const { T, bare, ep } = productForReopen();

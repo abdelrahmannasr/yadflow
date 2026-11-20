@@ -1889,13 +1889,15 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
   const branch = branchToCommitOn(root, git, defaultBranch);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate reopen', root })) return answer({ written });
   // Only the files this run wrote, and only those git sees (a legacy mirror never committed is left out).
-  const specs = written.filter((f) => git('add', '--', f).ok);
-  if (git('diff', '--cached', '--quiet', '--', ...specs).ok) { info('nothing changed on disk — nothing to commit'); return answer({ written }); }
+  // Every pathspec is literal (#245): a lowered story named `*.md` stages and commits only itself.
+  const lit = (...args) => git('--literal-pathspecs', ...args);
+  const specs = written.filter((f) => lit('add', '--', f).ok);
+  if (lit('diff', '--cached', '--quiet', '--', ...specs).ok) { info('nothing changed on disk — nothing to commit'); return answer({ written }); }
   const all = [...specs, ...(branch === defaultBranch && !verified && stageIndexIfClean(root, git, specs) ? [INDEX_FILE] : [])];
   const message = buildReopenMessage({ epic, step, reason: a.reason, walked: walkedBack, revoked: a.revokedApprovals.length, retired: retiredNos });
-  const cm = run('git', ['commit', '-m', message, '--', ...all], { cwd: root, env: OWNING_COMMIT_ENV() });
+  const cm = run('git', ['--literal-pathspecs', 'commit', '-m', message, '--', ...all], { cwd: root, env: OWNING_COMMIT_ENV() });
   if (!cm.ok) {
-    git('reset', '-q', '--', ...all);
+    lit('reset', '-q', '--', ...all);
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
     return answer({ written });
