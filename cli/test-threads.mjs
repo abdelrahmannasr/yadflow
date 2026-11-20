@@ -1897,9 +1897,9 @@ test('yad epic new --parent: a parent whose lock points at another epic binds th
         const checks = [];
         epicChecks(checks, T);
         assert.equal(checks.find((c) => c.id === 'epic:EP-fix:contract-lock')?.status, 'ok', `${what}: doctor on the child`);
-        // X itself: one hop is ok; two hops are sound but CI follows one, so doctor says to flatten it.
+        // X itself: ok over one hop or two — CI's contract-check follows the same chain (#233).
         const onX = checks.find((c) => c.id === 'epic:EP-x:contract-lock');
-        assert.equal(onX?.status, name.startsWith('one hop') ? 'ok' : 'warn', `${what}: doctor on EP-x`);
+        assert.equal(onX?.status, 'ok', `${what}: doctor on EP-x`);
         const fails = checks.filter((c) => c.id.startsWith('epic:EP-fix') && c.status === 'fail');
         assert.deepEqual(fails, [], `${what}: doctor flags nothing on the child`);
       } finally { fs.rmSync(T, { recursive: true, force: true }); }

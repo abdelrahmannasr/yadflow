@@ -1009,17 +1009,10 @@ function contractLockCheck(checks, root, epic, ledger) {
       check(checks, id, 'epics', 'fail', message, hint);
       return;
     }
-    if (!own && w.hops.length > 1) {
-      // Sound, but CI follows ONE hop: checks/contract-check.sh reads the lock this one names and then
-      // that epic's contract.md, which a pointer epic does not have. `yad epic new --parent` writes a
-      // flattened lock for this reason; an older one is flattened by hand, with the hash unchanged.
-      check(checks, id, 'epics', 'warn',
-        `${epic}: pointer-lock matches ${w.ownerId} via ${w.chain.slice(1, -1).join(' → ')} (${short(stored)}), but CI's contract-check follows one hop and will refuse it`,
-        `flatten it: in ${epicRel(epic)}/.sdlc/contract-lock.json set "inheritedFrom": "${w.ownerId}" and "ref": "../../${w.ownerId}/.sdlc/contract-lock.json", and leave "hash" as it is`);
-      return;
-    }
     if (!own) {
-      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${w.ownerId} (${short(stored)})`);
+      // Over any number of hops: CI's checks/contract-check.sh follows the same chain the same way (#233).
+      const via = w.hops.length > 1 ? ` via ${w.chain.slice(1, -1).join(' → ')}` : '';
+      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${w.ownerId}${via} (${short(stored)})`);
       return;
     }
     check(checks, `${id}:inherited`, 'epics', 'warn',
