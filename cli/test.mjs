@@ -2139,6 +2139,31 @@ test('#235: a status line written in real folders keeps the file\'s other bytes 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#235: yad gate comments refuses its review comments record under a linked reviews/, and writes nothing there', { skip: E125B_SKIP }, async () => {
+  const { gateComments } = await import('./gate.mjs');
+  const { quietly } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235c-')));
+  try {
+    const { P, outside } = linkedEpic235(T, 'epics/EP-x/reviews', { 'old.md': 'theirs\n' });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{"platform":"github"}\n');
+    fs.mkdirSync(path.join(P, 'epics', 'EP-x', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics', 'EP-x', '.sdlc', 'product-prs.json'), '[{"artifact":"epic.md","step":"epic-review","number":7}]\n');
+    const before = treeOf(outside);
+    const reader = () => ({ ok: true, reviews: [{ state: 'CHANGES_REQUESTED', login: 'bob' }], threads: [] });
+    setProductRoot(P);
+    try {
+      await assert.rejects(quietly(() => gateComments(P, { epic: 'EP-x', today: '2026-11-20', reader })), LINKED_WRITE_235('epics/EP-x/reviews'));
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'no comments record in the folder the link points at');
+    // In a real folder the record is written as before.
+    fs.rmSync(path.join(P, 'epics', 'EP-x', 'reviews'));
+    setProductRoot(P);
+    try { await quietly(() => gateComments(P, { epic: 'EP-x', today: '2026-11-20', reader })); } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(path.join(P, 'epics', 'EP-x', 'reviews', 'epic--2026-11-20--comments.md'), 'utf8'),
+      '# Review comments — epic — 2026-11-20\n\n## bob (changes requested — **blocking**)\n- (no text)\n\n');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#235: a code repo\'s own linked folder is refused for the files yad writes there ({ within } the repo)', { skip: E125B_SKIP }, async () => {
   const { repoActions, recordManagedWrites } = await import('./plan.mjs');
   const { copyFile, copyDir } = await import('./lib.mjs');

@@ -1269,8 +1269,9 @@ export async function buildDone(root, { story, today, fetch = true } = {}) {
   const laneText = fs.existsSync(ctx.file) ? fs.readFileSync(ctx.file, 'utf8') : null;
   // The lanes first: a story file that could not be written (the usual cause) cannot be written back either.
   const restore = () => {
-    if (laneText === null) fs.rmSync(ctx.file, { force: true }); else fs.writeFileSync(ctx.file, laneText);
-    try { if (fs.readFileSync(ctx.storyFile, 'utf8') !== storyText) fs.writeFileSync(ctx.storyFile, storyText); } catch { /* left as it was */ }
+    // Written back through a new file and a rename (#235), the bytes as they were read and the file's mode kept.
+    if (laneText === null) fs.rmSync(ctx.file, { force: true }); else writeFileAtomic(ctx.file, laneText, { keepMode: true });
+    try { if (fs.readFileSync(ctx.storyFile, 'utf8') !== storyText) writeFileAtomic(ctx.storyFile, storyText, { keepMode: true }); } catch { /* left as it was */ }
   };
   if (changedLanes || !ctx.buildState?.story) writeJSON(ctx.file, bs);
   let moved;
