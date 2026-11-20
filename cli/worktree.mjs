@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ok, info, warn, hand, run, readJSON, writeJSON, isPlainObject, forTerminal } from './lib.mjs';
+import { ok, info, warn, hand, run, readJSON, writeJSON, isPlainObject, forTerminal, shQuote } from './lib.mjs';
 import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
@@ -145,7 +145,7 @@ function stateOf(w, { ignored: wantIgnored = false } = {}) {
     if (e.length < 4) continue;
     const file = e.slice(3);
     const bare = file.replace(/\/$/, '');
-    if (links.has(bare) && isLinkTo(path.join(w.path, bare))) continue; // yad's own node_modules link
+    if (links.has(bare) && isLinkTo(path.join(w.path, bare))) continue; // yad's own link (node_modules, the hooks folder)
     (e.startsWith('!!') ? ignored : changes).push(file);
   }
   const count = git(w.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes');
@@ -179,6 +179,55 @@ export function nodeModulesLinks(main) {
     out.push(rel);
   }
   return out;
+}
+
+// The repo's `core.hooksPath` as git reads it in `dir`, or '' when unset.
+const hooksPathOf = (dir) => git(dir, 'config', '--get', 'core.hooksPath').stdout || '';
+// A hooksPath git resolves against each worktree's own root: not absolute, not `~/…`, not `%(prefix)/…` (#619).
+const relativeHooks = (v) => !!v && !path.isAbsolute(v) && !/^[\\/]/.test(v) && !/^~/.test(v) && !/^%\(prefix\)/.test(v);
+
+// The git hooks folder to link into a worktree (#619), or null. husky v9 points `core.hooksPath` at
+// `.husky/_`, a folder its npm `prepare` makes and fills with a `.gitignore` of `*`; a linked node_modules
+// never runs `prepare`, so the worktree would have no hooks and every one would silently do nothing. Linked
+// only when it is relative, stays inside the repo (no `..`, never under `.git`), is a real folder in the
+// main checkout reached through no link, git tracks nothing in it and would add nothing from it, and git
+// ignores the folder as a whole (husky's `*`): an empty or partly ignored folder is the person's, and the
+// shared exclude line for the link would hide the hooks they write there next.
+// → the relative path, POSIX form, or null.
+export function hooksLink(main) {
+  const v = hooksPathOf(main);
+  if (!relativeHooks(v)) return null;
+  const rel = path.posix.normalize(v.replace(/\\/g, '/')).replace(/\/+$/, '');
+  if (!rel || rel === '.' || rel === '..' || rel.startsWith('../') || rel.split('/')[0] === '.git') return null;
+  const src = path.join(main, rel);
+  try {
+    if (!fs.lstatSync(src).isDirectory()) return null; // a link, or a file
+    if (fs.realpathSync.native(src) !== path.join(fs.realpathSync.native(main), rel)) return null; // through a link
+  } catch { return null; }
+  if (gitRaw(main, 'ls-files', '-z', '--', rel)) return null; // tracked: the checkout has it
+  const others = gitRawResult(main, 'ls-files', '-z', '--others', '--exclude-standard', '--', rel);
+  if (!others.ok || others.stdout) return null; // git would add a file from it
+  if (!git(main, 'check-ignore', '-q', '--', `${rel}/.yad-probe`).ok) return null; // a new file there would not be ignored
+  return rel;
+}
+
+// Will git find the hooks in the new worktree? A relative hooksPath whose folder is not there: no hook runs,
+// and nothing says so. → null (they run, or yad cannot tell), or { hooksPath, fix }.
+function deadHooks(p) {
+  const v = hooksPathOf(p.path);
+  if (!relativeHooks(v)) return null;
+  try { if (fs.statSync(path.resolve(p.path, v)).isDirectory()) return null; } catch { /* missing */ }
+  const src = path.resolve(p.main, v);
+  let inMain = false;
+  let empty = false;
+  try { inMain = fs.statSync(src).isDirectory(); empty = inMain && !fs.readdirSync(src).length; } catch { /* missing there too */ }
+  const shown = forTerminal(v);
+  const q = (s) => forTerminal(shQuote(s));
+  if (!inMain) return { hooksPath: v, fix: `it is missing in the main checkout too, so no hook runs there either: run the tool that set it up (for husky, \`npm install\` in ${forTerminal(p.main)}), then remove and add this worktree again` };
+  if (/^(\.\/)?\.husky([\\/]|$)/.test(v)) return { hooksPath: v, fix: `run \`cd ${q(p.path)} && npx husky\` (husky remakes ${shown} from the linked node_modules)` };
+  const share = `\`git -C ${q(p.main)} config core.hooksPath ${q(src)}\``;
+  if (empty) return { hooksPath: v, fix: `it is empty in the main checkout too, so no hook runs there either; to share the hooks you put there with every worktree: ${share}` };
+  return { hooksPath: v, fix: `point git at the main checkout's folder, which every worktree shares: ${share}` };
 }
 
 function epicRepos(main, epic) {
@@ -225,7 +274,9 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
     });
     if (plan.refuse) throw err(CODE, plan.refuse.message, plan.refuse.hint);
     const branch = t.defaultBranch || resolveDefaultBranch((...a) => git(t.main, ...a), {});
-    plans.push({ ...t, name, path: plan.path, skip: plan.skip, branch, links: t.repo && !plan.skip ? nodeModulesLinks(t.main) : [] });
+    const hooks = t.repo && !plan.skip ? hooksLink(t.main) : null;
+    const links = t.repo && !plan.skip ? [...nodeModulesLinks(t.main), ...(hooks ? [hooks] : [])] : [];
+    plans.push({ ...t, name, path: plan.path, skip: plan.skip, branch, links, hooks });
   }
   if (dryRun) {
     for (const p of plans) info(p.skip ? `${p.name}: ${p.path} is already there` : `would add ${p.path} for ${p.name}, detached at origin/${p.branch}${p.links.length ? `, linking ${p.links.join(', ')}` : ''}`);
@@ -251,7 +302,7 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
       if (!added.ok && sameDir(commonDirOf(linkedGitDir(p.path) || ''), path.join(p.main, '.git'))) made.push(p);
       if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again — the worktrees this run made were taken back');
       made.push(p);
-      const linked = linkNodeModules(p);
+      const linked = linkFromMain(p);
       writeJSON(path.join(linkedGitDir(p.path), WORKTREE_RECORD), { epic, repo: p.repo, base: p.branch, created: today, by, links: linked });
       done.push({ repo: p.repo, path: p.path, base: p.branch, links: linked, added: true, existing: false });
     }
@@ -271,8 +322,12 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
   }
   for (const p of made) {
     ok(`${p.name}: ${p.path} (detached at origin/${p.branch})`);
-    if (p.linked.length) warn(`${p.name}: ${p.linked.join(', ')} ${p.linked.length > 1 ? 'are links' : 'is a link'} to the main checkout's — do not \`npm install\` in the worktree, or delete the link first`);
-    if (p.repo && (fs.existsSync(path.join(p.main, '.husky')) || git(p.main, 'config', 'core.hooksPath').stdout)) {
+    const modules = p.linked.filter((rel) => rel !== p.hooks);
+    if (modules.length) warn(`${p.name}: ${modules.join(', ')} ${modules.length > 1 ? 'are links' : 'is a link'} to the main checkout's — do not \`npm install\` in the worktree, or delete the link first`);
+    if (p.hooks && p.linked.includes(p.hooks)) info(`${p.name}: ${forTerminal(p.hooks)} (git's core.hooksPath) is a link to the main checkout's hooks folder`);
+    const dead = p.repo ? deadHooks(p) : null;
+    if (dead) warn(`${p.name}: its git hooks will not run in the worktree — git's core.hooksPath (${forTerminal(dead.hooksPath)}) is not there; ${dead.fix}`);
+    else if (p.repo && (fs.existsSync(path.join(p.main, '.husky')) || hooksPathOf(p.main))) {
       info(`${p.name}: its git hooks run in the worktree too — a hook that rewrites files adds them to your commits`);
     }
   }
@@ -280,15 +335,22 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
   return { epic, dryRun: false, worktrees: done };
 }
 
-// Link each planned node_modules into the new worktree. A `node_modules/` ignore line matches folders only,
-// and git sees a link as a file — so a link it would not ignore is excluded in the repo's own
-// `info/exclude` (local, never committed), or taken back: it must never be staged by a `git add -A`.
+// Link each planned folder (node_modules, and the hooks folder: `p.hooks`) into the new worktree. A
+// `node_modules/` ignore line matches folders only, a `.gitignore` inside the hooks folder is not read
+// through a link, and git sees a link as a file — so a link it would not ignore is excluded in the repo's
+// own `info/exclude` (local, never committed), or taken back: it must never be staged by a `git add -A`.
 // `p.linked` holds each link the moment it is made, so a rollback takes back exactly yad's own. Never throws.
-function linkNodeModules(p) {
+function linkFromMain(p) {
   const linked = (p.linked = []);
   for (const rel of p.links) {
     const dst = path.join(p.path, rel);
-    if (fs.existsSync(dst)) continue;
+    if (fs.existsSync(dst) || isLinkTo(dst)) continue;
+    // Made only in a real folder of the worktree: a tracked link on the way would put it somewhere else.
+    if (rel === p.hooks) {
+      let real = false;
+      try { real = fs.lstatSync(path.dirname(dst)).isDirectory() && fs.realpathSync.native(path.dirname(dst)) === path.join(fs.realpathSync.native(p.path), path.posix.dirname(rel)); } catch { /* missing */ }
+      if (!real) { warn(`${p.name}: ${forTerminal(rel)} was not linked — its parent folder is missing or is not a plain folder of the worktree`); continue; }
+    }
     try { fs.symlinkSync(path.join(p.main, rel), dst, process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { warn(`could not link ${rel}: ${e.message}`); continue; }
     linked.push(rel);
     if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
@@ -296,12 +358,12 @@ function linkNodeModules(p) {
       try {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         const had = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-        if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}${EXCLUDE_MARK}\n/${rel}\n`);
+        if (!had.split(/\r?\n/).includes(`/${rel}`)) fs.appendFileSync(file, `${had && !had.endsWith('\n') ? '\n' : ''}${rel === p.hooks ? HOOKS_MARK : EXCLUDE_MARK}\n/${rel}\n`);
       } catch { /* checked below */ }
       if (!git(p.path, 'check-ignore', '-q', '--', rel).ok) {
         try { fs.unlinkSync(dst); } catch (e) { warn(`${p.name}: could not take back the link ${dst}: ${e.message} — delete it before any \`git add -A\``); continue; }
         linked.pop();
-        warn(`${p.name}: ${rel} was not linked — git would not ignore the link, so a \`git add -A\` would commit it`);
+        warn(`${p.name}: ${forTerminal(rel)} was not linked — git would not ignore the link, so a \`git add -A\` would commit it`);
       }
     }
   }
@@ -310,6 +372,8 @@ function linkNodeModules(p) {
 
 // `info/exclude` is a common-dir file: the main checkout and every worktree of the repo share it.
 const EXCLUDE_MARK = '# yad worktree (#115): the node_modules link';
+const HOOKS_MARK = '# yad worktree (#619): the git hooks link';
+const MARKS = new Set([EXCLUDE_MARK, HOOKS_MARK]);
 const excludeFile = (dir) => path.resolve(dir, git(dir, 'rev-parse', '--git-path', 'info/exclude').stdout || '.git/info/exclude');
 // After a worktree is gone: drop yad's own pair (the mark, then `/<rel>`) for each link no other yad
 // worktree of the repo still has — another epic's link must stay unstageable. Only a pair under yad's mark
@@ -323,7 +387,7 @@ export function dropExcludeLines(main, rels) {
   try { lines = fs.readFileSync(file, 'utf8').split('\n'); } catch { return; }
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].replace(/\r$/, '') === EXCLUDE_MARK && gone.has((lines[i + 1] ?? '').replace(/\r$/, ''))) { i++; continue; }
+    if (MARKS.has(lines[i].replace(/\r$/, '')) && gone.has((lines[i + 1] ?? '').replace(/\r$/, ''))) { i++; continue; }
     out.push(lines[i]);
   }
   if (out.length === lines.length) return;
