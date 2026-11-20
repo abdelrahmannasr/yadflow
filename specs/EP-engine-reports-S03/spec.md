@@ -28,6 +28,15 @@ edit of their own keeps yad's subject, so the edit is pushed straight to the def
   touches, a status-flip `.md` or `.gitignore` must pass in each commit's own patch, a merge commit is
   refused, and a symlink or submodule entry is refused. The root `.sdlc/` allowlist is only the index, the
   registry and the code-context.
+- R7 (review 2). Every commit in the range must carry yad's subject, read one record per commit, so a commit
+  with an empty message is refused. Files are judged by their blob ids from one `git log --raw --no-abbrev`
+  pass (no path lookups, so neither `GIT_LITERAL_PATHSPECS` nor a decomposed-Unicode name can make a file
+  pass unread), one change judged once however many commits repeat it. The raw reader refuses any token it
+  does not expect; the log reads pass `--no-show-signature`. Every foreign file is named and left out of
+  the restore list.
+- R8 (review 2). Before each push from a Product worktree (checkpoint, tidy, repo refresh, gate ci, gate
+  repair, gate reopen), the commits ahead, with the run's own, are judged again; a refusal leaves the commit
+  unpushed. `gate ci` commits only the files it staged, by name.
 - R6 (review). One `-U0` patch reader, used by the worktree check, checkpoint's staged story check and repo
   refresh's `.gitignore` check, counts a line as a header only outside a hunk (the hunk's own line counts
   bound it), so a removed `---` or an added `++x` is a change. A `status:` line counts only at column 0
@@ -37,7 +46,7 @@ edit of their own keeps yad's subject, so the edit is pushed straight to the def
 ## Out of scope
 
 The one-time foundation move commit of `gate ci` (shape 8), which renames whole files: it is committed and
-pushed in the same run; one left unpushed (`--no-push`, a failed push) is refused by the next worktree run. The main checkout, where a detached HEAD is refused as before. The index refresh
+pushed in the same run. From a Product worktree it is refused (it renames whole files yad's check does not accept), so it fails closed; one left unpushed (`--no-push`, a failed push) is refused by the next worktree run. The main checkout, where a detached HEAD is refused as before. The index refresh
 after a local write (`product-index.mjs`), which already only skips.
 
 ## Clarifications
@@ -93,4 +102,21 @@ push, and list the files that may ride a yad commit and the edits of them that m
 **Files:**
 - cli/checkpoint.mjs
 - cli/repo-publish.mjs
+
+## T07 — Judge every commit's subject and every file by its blobs, and name every foreign file
+**Files:**
+- cli/productcommit.mjs
+- cli/checkpoint.mjs
+- cli/test-worktree.mjs
+
+## T08 — Commit only what gate ci staged, and judge its commit and repair's and reopen's before the push
+**Files:**
+- cli/gate.mjs
+- cli/test-foundation-publish.mjs
+
+## T09 — Judge tidy's and repo refresh's commit before the push, and say so in the docs
+**Files:**
+- cli/tidy.mjs
+- cli/repo-publish.mjs
+- docs/CLI.md
 <!-- /yad:tasks -->

@@ -492,6 +492,25 @@ test('a verified solo Product: CI at the merge records the solo re-review, and p
   assert.equal(await publishes(T), true);
 });
 
+test('gate ci commits only what it staged: a file a person had staged stays out of the ledger commit, still staged (#231 review 2)', async () => {
+  const { T, reviewId } = await changedFoundation({ solo: true, ledger: 'verified' });
+  openFresh(T, reviewId, 9);
+  const { execFileSync } = await import('node:child_process');
+  const git = (...a) => execFileSync('git', a, { cwd: T, stdio: 'pipe' }).toString();
+  git('init', '-q'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 'x'); git('add', '-A'); git('commit', '-q', '-m', 'seed');
+  fs.writeFileSync(path.join(T, 'notes.md'), 'mine\n');
+  git('add', 'notes.md');
+  const { gateCi } = await import('./gate.mjs');
+  const ci = await gateCi(T, { branch: 'review/EP-foundation/foundation', pr: 9, merged: true, today: '2026-11-12', push: false, reader: mergedPr(), branchOf: () => ({ ok: false, reason: 'not asked in tests' }),
+    contentAt: ({ epicDir, artifact }) => ({ ok: true, hash: hashOf(epicDir, artifact) }) });
+  reset();
+  assert.equal(ci.committed, true);
+  const files = git('show', '--name-only', '--format=', 'HEAD');
+  assert.match(files, /foundation\/\.sdlc\/state\.json/);
+  assert.doesNotMatch(files, /notes\.md/);
+  assert.equal(git('diff', '--cached', '--name-only').trim(), 'notes.md', 'the person\'s file is still staged, theirs to commit');
+});
+
 test('a failed read of a merge already on file, or on a read-only run, stays a warning: the run is not failed', async () => {
   const { gateSync } = await import('./gate.mjs');
   // The first close's own PR, read again by a later sync: nothing new could be recorded.
