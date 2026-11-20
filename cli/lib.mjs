@@ -598,10 +598,11 @@ export function readJSON(p, def = null) {
 // returns `def`, but a file that exists and fails to parse must throw — silently defaulting a
 // corrupt approvals.json to [] would let the next sync rewrite it and permanently lose approvals.
 // A link or a folder in place of a ledger file is refused without reading it (E125 b): it may point at a
-// file outside the Product, or at a device whose read never ends.
-export function readJSONStrict(p, def = null) {
+// file outside the Product, or at a device whose read never ends. `opts.within`, as for the plain reads: a code
+// repo's folder, whose own sub-folders must not be links either (#235).
+export function readJSONStrict(p, def = null, opts) {
   let text;
-  try { text = readPlainFile(p); } catch (e) {
+  try { text = readPlainFile(p, opts); } catch (e) {
     if (e?.code === NOT_PLAIN_FILE && e.folder) throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX} — never delete a ledger blindly`), { kind: e.kind, folder: e.folder });
     if (e?.code === NOT_PLAIN_FILE) throw err('YAD-STATE-001', e.message, 'replace it with the real file from git (`git checkout -- <file>`) — never delete a ledger blindly');
     if (e?.code === FILE_TOO_BIG) throw err('YAD-STATE-001', e.message, 'restore the file from a commit where it had its real size (`git log -- <file>`) — never delete a ledger blindly');

@@ -130,7 +130,8 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
 const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 export function readManagedLedger(root) {
   const file = path.join(root, MANAGED_LEDGER);
-  const rec = readJSONStrict(file, null);
+  // Checked against the repo's own folders (#235): a linked `.sdlc` stops the plan here, before anything is written.
+  const rec = readJSONStrict(file, null, { within: root });
   if (rec === null && !exists(file)) return {};
   if (!isMap(rec) || !isMap(rec.files)) {
     // Parses, but is not a record — YAD-STATE-002 (wrong shape), not -001 (does not parse).
@@ -988,20 +989,24 @@ export function publicGitUrl(u) {
 // the Product's own settings every time; `path` (where CI checks the Product out) is the team's to
 // change and is kept. Any other key in the file is kept too. A code repo that IS the Product's git repo
 // (a monorepo) gets none: the gates already read a Product kept in the repo from the base.
-function productLinkAction(root, repo, repoRoot) {
+export function productLinkAction(root, repo, repoRoot) {
   if (!exists(repoRoot)) return null;
   const top = gitTop(repoRoot);
   if (!top || top === gitTop(root)) return null;
   const dest = path.join(repoRoot, PRODUCT_LINK);
   const productConfig = readJSON(productConfigPath(root), {}) || {};
-  let current;
-  try { current = readJSONStrict(dest, null); } catch { current = undefined; }
   const base = {
     scope: repo.name,
     item: PRODUCT_LINK,
     root: repoRoot,
     paths: [PRODUCT_LINK],
   };
+  // A record under a linked folder of the repo (its `.sdlc`) is a refused row at plan time (#235), as a wired
+  // file's is: planned as a write, its apply would throw midway through the run.
+  const at = destState(dest, repoRoot);
+  if (at.state === 'refused') return { ...base, status: 'modified', writesNothing: true, refused: at.refused, apply: () => {} };
+  let current;
+  try { current = readJSONStrict(dest, null, { within: repoRoot }); } catch { current = undefined; }
   const want = {
     git_url: publicGitUrl(productConfig.git_url),
     path: isPlainObject(current) && typeof current.path === 'string' && current.path ? current.path : PRODUCT_LINK_DEFAULT_PATH,

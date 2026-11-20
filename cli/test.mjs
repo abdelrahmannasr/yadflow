@@ -2194,7 +2194,6 @@ test('#235: a code repo\'s own linked folder is refused for the files yad writes
     fs.mkdirSync(outside);
     fs.writeFileSync(path.join(outside, 'theirs.sh'), 'theirs\n');
     fs.symlinkSync(outside, path.join(R, 'checks'));
-    fs.symlinkSync(outside, path.join(R, '.sdlc'));
     const before = treeOf(outside);
     setProductRoot(P);
     try {
@@ -2207,17 +2206,52 @@ test('#235: a code repo\'s own linked folder is refused for the files yad writes
       }
       assert.throws(() => copyFile(path.join(outside, 'theirs.sh'), path.join(R, 'checks', 'x.sh'), { within: R }), LINKED_WRITE_235('checks'));
       assert.throws(() => copyDir(path.join(P, '.sdlc'), path.join(R, 'checks', 'sub'), { within: R }), LINKED_WRITE_235('checks'));
+      fs.symlinkSync(outside, path.join(R, '.sdlc'));
       assert.throws(() => writeJSON(path.join(R, '.sdlc', 'product-link.json'), { a: 1 }, { within: R }), LINKED_WRITE_235('.sdlc'));
       // The provenance record of the repo, under its linked `.sdlc`.
       const src = path.join(T, 'src.sh');
       fs.writeFileSync(src, 'ours\n');
       fs.mkdirSync(path.join(R, 'bin'));
       fs.copyFileSync(src, path.join(R, 'bin', 'x.sh'));
-      assert.throws(() => recordManagedWrites([{ managed: { src, dest: path.join(R, 'bin', 'x.sh'), root: R } }]), LINKED_WRITE_235('.sdlc'));
+      // Its ledger is read first, with the repo's folder (T08): refused as a read, before any write.
+      assert.throws(() => recordManagedWrites([{ managed: { src, dest: path.join(R, 'bin', 'x.sh'), root: R } }]), (e) => e.code === 'YAD-STATE-001' && e.folder === '.sdlc');
     } finally { setProductRoot(null); }
     assert.deepEqual(treeOf(outside), before, 'nothing is written where the links point');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #235 review (T08): a code repo whose `.sdlc` is a link is refused at plan time — its provenance record is read
+// with the repo's folder, and `.sdlc/product-link.json` is a refused row — so `yad update` never stops half applied.
+test('#235: a code repo with a linked .sdlc is refused at plan time: the ledger read throws and product-link.json is a refused row', { skip: E125B_SKIP }, async () => {
+  const { repoActions, readManagedLedger, productLinkAction } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235f-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{}\n');
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    git(R, 'init', '-q');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'managed.json'), '{"version":"1","files":{}}\n');
+    fs.writeFileSync(path.join(outside, 'product-link.json'), '{"path":"x"}\n');
+    fs.symlinkSync(outside, path.join(R, '.sdlc'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const readRefused = (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.folder === '.sdlc' && /^\.sdlc is a link, so yad did not read /.test(e.message);
+      assert.throws(() => readManagedLedger(R), readRefused);
+      assert.throws(() => repoActions(P, { name: 'backend', path: '../backend', platform: 'github' }), readRefused, 'the whole repo plan stops before anything is applied');
+      const link = productLinkAction(P, { name: 'backend', path: '../backend' }, R);
+      assert.equal(link.writesNothing, true);
+      assert.match(link.refused, /^is under \.sdlc, a linked folder, so yad did not write it — remove the link/);
+      link.apply();
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'nothing is written where the link points');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
 // Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that
