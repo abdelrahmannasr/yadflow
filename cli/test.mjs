@@ -30123,6 +30123,41 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor: an older contract-check that follows one hop, with a lock that needs more, is checks:pointer-one-hop (#233)', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, pointerBlindText } = await import('./doctor.mjs');
+    const { contractSurfaceHash } = await import('./epic-state.mjs');
+    const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:pointer-one-hop');
+    const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/checks/contract-check.sh'), 'utf8');
+    const put = (dir, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, 'checks/contract-check.sh'), text); };
+    const lock = (id, body) => { fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true }); fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/contract-lock.json'), JSON.stringify(body)); };
+    fs.mkdirSync(path.join(T, 'epics/EP-gen'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-gen/contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+    const hash = contractSurfaceHash(path.join(T, 'epics/EP-gen'));
+    lock('EP-gen', { artifact: 'contract.md', hash });
+    const to = (owner) => ({ artifact: 'contract.md', hash, inheritedFrom: owner, ref: `../../${owner}/.sdlc/contract-lock.json` });
+    lock('EP-mid', to('EP-gen'));
+    lock('EP-chg', to('EP-gen'));
+    // An older gate: the one-hop read, built from the shipped one (CI may clone shallow).
+    const old = shipped.replace(/^lock_walk\(\) \{/m, 'lock_walk_gone() {');
+    assert.notEqual(old, shipped);
+    put(backend, old);
+    assert.deepEqual(hits(), [], 'every lock is one hop: an older gate reads them all');
+    lock('EP-chg', to('EP-mid'));
+    const hit = hits();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend is an older copy that follows a pointer lock one hop only, and the lock of EP-chg needs more/);
+    assert.match(hit[0].hint, /`yad check --fix`/);
+    put(backend, shipped);
+    assert.deepEqual(hits(), [], 'the shipped gate follows the chain');
+    // A comment naming the function is not the function.
+    assert.equal(pointerBlindText('# lock_walk() {\n'), true);
+    assert.equal(pointerBlindText('lock_walk() {\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E116 doctor: an older backfill-check that reads the approval from the PR is checks:backfill-blind', async () => {
   const { T, backend } = scaffold();
   try {
