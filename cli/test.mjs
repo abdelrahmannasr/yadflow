@@ -28904,20 +28904,21 @@ test('#222 doctor, setup and check read a file with readFileSync only where list
 // walk is the read guards' own (`engineSources`, cli/ only), so scripts/ is not scanned. A comment line is
 // prose and is not counted. Not seen here: `fs.promises.writeFile`, `fs.writeFile`, `createWriteStream`, and
 // a write reached through another name (`const w = fs.writeFileSync; w(p)`): review catches those shapes.
+// Counts are per file, so swapping one write for another in the same file is not caught; review catches that.
 const DIRECT_WRITE = /\b(?:writeFileSync|appendFileSync|renameSync|copyFileSync)\(/g;
 const DIRECT_WRITE_ALLOWED = [
   { file: 'cli/agent-guide.mjs', count: 1, reason: 'the engine\'s own yad-guide SKILL.md, synced by scripts/agent-guide.mjs in the engine repo' },
   { file: 'cli/brain-skills.mjs', count: 1, reason: 'the engine\'s own skills/*/SKILL.md, synced by scripts/brain-skills.mjs in the engine repo' },
-  { file: 'cli/brain.mjs', count: 3, reason: '`writePlain`, a link-safe temp file (`wx`) and rename (2); `.git/info/exclude` in the git folder, never committed (1)' },
+  { file: 'cli/brain.mjs', count: 3, reason: '`writePlain` writes team files in the Product\'s .sdlc/brain/ (and the `--html` page) by a temp file (`wx`) and a rename (2); it does not refuse a linked folder itself, so every caller must pass a folder checked by `plainDirs`. `.git/info/exclude` in the git folder, never committed (1)' },
   { file: 'cli/epic-state.mjs', count: 1, reason: 'an artifact copied out of git into yad\'s own mkdtemp folder, to hash it' },
   { file: 'cli/fold.mjs', count: 3, reason: 'the pathspec and message files in yad\'s own mkdtemp folder' },
   { file: 'cli/map-view.mjs', count: 1, reason: 'the map\'s digest side file in this machine\'s reports folder (yad\'s own output), exclusive create (`wx`)' },
   { file: 'cli/members.mjs', count: 2, reason: 'the members access cache in the git folder, never committed (1); member files from a git ref into yad\'s own mkdtemp folder (1)' },
   { file: 'cli/plan.mjs', count: 2, reason: '`applyKeepingOwn` moves a person\'s own files aside and back by rename, each path refused by `refuseLinkedWrite` before the first move (#235)' },
-  { file: 'cli/repo-publish.mjs', count: 1, reason: 'puts back the code-map pack bytes it removed for the commit, only where no file is now' },
+  { file: 'cli/repo-publish.mjs', count: 1, reason: 'writes a team file: puts back a code-map pack in the Product, whose bytes it removed for the commit, only where no file is now; `writeFileAtomic` could replace it (a follow-up)' },
   { file: 'cli/reports-dir.mjs', count: 8, reason: 'the reports folder (yad\'s own output): exclusive-create report names, the catalog lock, link-safe temp file and rename (7); the `--out` path the person names (1)' },
   { file: 'cli/run-checks.mjs', count: 1, reason: 'the changed-paths list in yad\'s own mkdtemp scratch folder' },
-  { file: 'cli/setup.mjs', count: 3, reason: 'the package.json in yad\'s own mkdtemp Repomix folder (1); `placeFile`, a link-safe exclusive copy and rename (2)' },
+  { file: 'cli/setup.mjs', count: 3, reason: 'the package.json in yad\'s own mkdtemp Repomix folder (1); `placeFile` puts the pack at the `-o` path the person names (`yad repo pack -o`), by an exclusive copy and a rename, after the caller checked its folder (2)' },
   { file: 'cli/usage.mjs', count: 1, reason: '`writeReport`, the `--out` path the person names' },
   { file: 'cli/worktree.mjs', count: 2, reason: 'yad\'s own lines in `info/exclude`, in the git folder, never committed' },
 ];
@@ -28929,6 +28930,7 @@ test('#235 b the write matcher sees each plain write, every one on a line, and n
     assert.equal(writeCalls(line), 1, line);
   }
   assert.equal(writeCalls('fs.writeFileSync(tmp, d); fs.renameSync(tmp, f);'), 2, 'two writes on one line count twice');
+  assert.equal(writeCalls('foo(); // fs.writeFileSync(x)'), 1, 'a write after code on the line counts, even in a trailing comment');
   for (const line of ['writeFileAtomic(p, s)', 'writeJSON(p, o)', 'copyFile(a, b)', 'copyDir(a, b)', 'fs.rmSync(p)', 'fs.readFileSync(p)', 'fs.mkdirSync(d)',
     '// fs.writeFileSync(p) in a comment', 'fs.linkSync(a, b)']) {
     assert.equal(writeCalls(line), 0, line);
@@ -28956,6 +28958,7 @@ test('#235 b only the listed files write with plain fs, each as often as listed'
   assert.ok(!allowed.has('cli/lib.mjs'), 'cli/lib.mjs is not scanned, so it needs no entry');
   for (const a of DIRECT_WRITE_ALLOWED) {
     assert.ok(a.reason, `${a.file}: every entry says why`);
+    assert.ok(a.count > 0, `${a.file}: an entry with count 0 — a file with no plain write needs no entry`);
     assert.ok(fs.existsSync(path.join(ROOT, a.file)), `${a.file}: an entry for a file that is gone`);
     const found = hits.get(a.file) || [];
     assert.equal(found.length, a.count, `${a.file}: ${found.length} plain writes, ${a.count} listed — ${helpers}; or, for one that is not the team's, update the entry and its reason:\n${[...new Set(found)].join('\n')}`);
