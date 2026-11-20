@@ -244,8 +244,11 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   try {
     for (const p of trackedPacks) {
       const abs = path.join(root, p);
-      held.push({ rel: p, abs, buf: fs.readFileSync(abs) });
+      // Held only once it is removed (#248): a delete refused under a linked folder leaves the pack where it
+      // is, so it is not one to put back, and the refusal stops the publish before the commit.
+      const buf = fs.readFileSync(abs);
       removeFile(abs, { within: root, force: false });
+      held.push({ rel: p, abs, buf });
     }
     const cm = git('commit', '-m', message, '--', ...fileset); // --only: adds from the tree, packs as deletions
     if (!cm.ok) {
