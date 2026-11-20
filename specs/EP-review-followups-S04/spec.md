@@ -37,16 +37,28 @@ path. A path that passes through a folder committed as a link (for example `hook
   `yad check --fix` unwires (`orphanCaptureHookActions`, `orphanHookActions` in `cli/plan.mjs`) are refused
   on apply, and nothing where the link points is removed. It runs once with the Product root set and once
   with `within` only. It fails on the old code. It is skipped on Windows (`E125B_SKIP`).
+- R5. A removal `yad check --fix` or `yad update` plans under a linked folder is a refused row, as a refused
+  rename is: `status: 'modified'`, `writesNothing: true`, `paths: []`, a no-op `apply`, and `refused` saying
+  "is under <folder>, a linked folder, so yad did not delete it — <fix>, then re-run `yad check --fix`".
+  The run warns about it and goes on: the version stamp and the managed-writes record are written, and the
+  other fixes are applied and staged. The helper's own refusal stays at apply, as a backstop. (Review of
+  T01–T06: a refused removal threw from `apply()` and stopped the run partway.) A test runs it through
+  `reconcile` (`yad check --fix`).
+- R6. `yad migrate`'s product-level move (`planProductMove` / `applyProductMove`) copies `epics/EP-discovery`
+  into `foundation/` and then deletes it with `rmTree`. A linked folder on the way (`epics/`, the product
+  level's own folder, `foundation/`, or their `.sdlc/`) refuses the move with the `refuseLinkedWrite` check
+  from the Product's folder, set or not: an `unreadable` plan (the run fails), and at apply a throw before
+  the first copy (a folder made a link after the plan). The message is `<folder> is a link, so yad did not
+  move epics/EP-discovery/ to foundation/ (it moves files only through real folders) — <fix>, then migrate`.
+- R7. `cli/repo-publish.mjs` holds a tracked pack to put back only after `removeFile` has removed it, so a
+  refused delete stops the publish before the commit and never warns "not put back" about a pack still there.
 
 ## Out of scope
 
-- `rmTree` (`cli/lib.mjs`) and its callers in `cli/migrate.mjs`, `fs.rm`, `fs.unlink` and `fs.promises.rm`:
-  the guard does not see these shapes, and the guard's comment says so.
-- A plan-time "refused" row for a removal under a linked folder. The planner's convention for a write or a
-  rename is such a row (`writesNothing` + `refused`, from `linkedOnTheWay` or `wiredFileState`), which
-  `yad check --fix` and setup warn about and step past. Here a refused removal throws YAD-STATE-001 from its
-  action's `apply`, so the run stops at it, with the actions before it already applied. Nothing is deleted
-  through the link either way; a refused row for removals is a follow-up.
+- `fs.rm`, `fs.unlink`, `fs.promises.rm` and `rmTree` (`cli/lib.mjs`): the guard does not see these shapes,
+  and its comment says so. `rmTree`'s only callers (`cli/migrate.mjs`) are checked by hand (R6).
+- `cli/migrate.mjs`'s per-file rows, which write through a linked folder when no Product root is set: a
+  write, not a delete. The CLI always sets the Product root, and then they are refused.
 - Any write, and any refactor beyond the deletes.
 
 ## Clarifications
@@ -60,6 +72,12 @@ path. A path that passes through a folder committed as a link (for example `hook
 - Q: An empty-folder delete after a file (`owners.mjs`, `checkpoint.mjs`)? → A: `removeDir(…, { emptyOnly: true })`,
   so a folder that still holds other files is never removed. Its refusal is caught with the ENOTEMPTY it
   sits beside, which is fine: the file delete before it has already checked the same folders.
+- Q: (review) A product-level folder that is itself a link? → A: refused too. `rmTree` would remove only the
+  link, but the copy and the hash read the files where it points, so they would land in the Product as its
+  own. With the Product root set, the old read of `state.json` already refused it at plan time; the new
+  check also covers a caller with no Product root and the window between the plan and the apply.
+- Q: (review) A test for R7? → A: none cheap. `codeContextPathOk` drops a pack whose path holds a link, and
+  nothing runs between that check and the delete, so the refusal is reached only by a race.
 - Q: The Product copy `yad run-checks` writes into a code repo? → A: kept plain. `readRecord` refuses a link
   on the way before the copy is made, and the delete removes only what this run made.
 
@@ -120,4 +138,19 @@ helpers call it with `'delete'`. Each call site below is moved or kept.
 ## T06 — Guard: a plain delete outside cli/lib.mjs fails unless it is listed with its reason
 **Files:**
 - cli/test.mjs
+
+## T07 — A removal planned under a linked folder is a refused row, and the run goes on
+**Files:**
+- cli/plan.mjs
+- cli/test.mjs
+
+## T08 — Refuse yad migrate's product-level move under a linked folder, before the first copy
+**Files:**
+- cli/migrate.mjs
+- cli/test-migrate.mjs
+- cli/test.mjs
+
+## T09 — Hold a code-map pack only once it is removed
+**Files:**
+- cli/repo-publish.mjs
 <!-- /yad:tasks -->
