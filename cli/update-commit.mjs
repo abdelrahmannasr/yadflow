@@ -25,7 +25,7 @@ import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase, samePath, readPlainJSON } from './lib.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, productConfigPath } from './manifest.mjs';
 import { parseVersion, compare as compareVersions } from './toolbox.mjs';
-import { productGit, resolveDefaultBranch } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, recheckBeforePush } from './productcommit.mjs';
 import { judgedRepos, judgeRepo, runnable } from './workspace.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
@@ -302,6 +302,11 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   ok(`${label}: committed ${staged.length} file(s)`);
 
   if (!push) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: false };
+  // #245: the Product's commit is judged with every other commit ahead before it leaves a Product worktree, as
+  // `yad checkpoint --push` judges its own. Only a detached HEAD there is judged (one --allow-branch let past
+  // the branch check above), and a refusal keeps the commit here, unpushed. A code repo's worktree is not the
+  // Product's, so it is not judged by the Product's rules.
+  if (isProduct && !recheckBeforePush(root, git, target)) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: true };
   if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, product: isProduct, committed: true, pushed: true, skipped: false, error: false }; }
   // The commit already landed locally — a re-run of `yad update --push` would see no drift and skip
   // this repo, so point the operator at the direct push of the commit that already exists.

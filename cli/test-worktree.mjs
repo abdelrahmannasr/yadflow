@@ -15,6 +15,7 @@ import { registryEntryFor, findProduct } from './find-product.mjs';
 import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush } from './productcommit.mjs';
 import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
+import { commitAndPush } from './update-commit.mjs';
 import { PACK_IGNORE_BLOCK } from './setup.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -566,6 +567,50 @@ test('after a refusal, the hint names `yad sync-status`, which writes again a st
     assert.equal(fs.readFileSync(storyFile, 'utf8'), story('approved'), 'the flip is back, without the person\'s prose');
     assert.match(git(wt, 'status', '--porcelain', '--', 'epics/EP-x/stories'), /^M epics\/EP-x\/stories\/EP-x-S01\.md$/, 'and left uncommitted, as the hint says');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad update --push judges the Product\'s commit before it leaves a Product worktree, as checkpoint does; the main checkout on main still pushes (#245)', () => {
+  const { W, P } = workspace();
+  // commitAndPush runs git in this process: keep the person's own git settings (a global ignore, signing) out.
+  const realEnv = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
+  Object.assign(process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' });
+  try {
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    const origin = path.join(W, 'product.git');
+    const head = git(origin, 'rev-parse', 'main');
+    // A person's commit ahead, then the update's own: --allow-branch lets the detached HEAD past the branch check.
+    write(wt, { 'notes.md': 'mine\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-qm', 'unreviewed');
+    write(wt, { '.claude/skills/x/SKILL.md': 'x\n' });
+    const code = process.exitCode;
+    const said = [];
+    const realLog = console.log;
+    let r;
+    try {
+      console.log = (...a) => said.push(a.map(String).join(' '));
+      r = commitAndPush({ root: wt, paths: ['.claude/skills/x/SKILL.md'], items: ['workflow'] }, { push: true, allowBranch: true, productRoot: wt, defaultBranch: 'main' });
+      assert.equal(process.exitCode, 1);
+    } finally { console.log = realLog; process.exitCode = code; }
+    assert.deepEqual(r, { label: 'product', product: true, committed: true, pushed: false, skipped: false, error: true });
+    const out = said.join('\n');
+    assert.match(out, /not pushed to origin\/main: the commits ahead, with the one this run made, hold more than yad's own/, out);
+    assert.doesNotMatch(out, /could not push/, 'refused before any push was tried');
+    assert.equal(git(origin, 'rev-parse', 'main'), head, 'nothing reached origin/main');
+    assert.equal(git(origin, 'for-each-ref', '--format=%(refname)', 'refs/heads/'), 'refs/heads/main', 'no branch named HEAD');
+    assert.match(git(wt, 'log', '-1', '--format=%s'), /^chore\(yad-update\): /, 'the commit stays here');
+    // The main checkout on its default branch is not judged here: the update goes up as before.
+    write(P, { '.claude/skills/x/SKILL.md': 'x\n' });
+    r = commitAndPush({ root: P, paths: ['.claude/skills/x/SKILL.md'], items: ['workflow'] }, { push: true, productRoot: P, defaultBranch: 'main' });
+    assert.equal(r.pushed, true);
+    assert.equal(git(origin, 'rev-parse', 'main'), git(P, 'rev-parse', 'HEAD'));
+  } finally {
+    for (const [k, v] of Object.entries(realEnv)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    fs.rmSync(W, { recursive: true, force: true });
+  }
 });
 
 test('the raw log reader: commit ids, raw entries with their paths, and nothing else (#231 review 2)', () => {
