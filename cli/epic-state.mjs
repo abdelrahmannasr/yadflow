@@ -4015,7 +4015,8 @@ export function parseFrontmatter(text) {
     const kv = line.match(/^(\w[\w-]*):(.*)$/);
     if (!kv) continue;
     const k = kv[1];
-    const v = stripFrontmatterComment(kv[2]).trim();
+    // Spaces and tabs only, as the bash gates' `fm_strip` trims: a no-break space is part of the value.
+    const v = stripFrontmatterComment(kv[2]).replace(/^[ \t]+|[ \t]+$/g, '');
     out[k] = /^\[.*\]$/.test(v) ? v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean) : v;
   }
   return out;
@@ -4026,8 +4027,9 @@ export function parseFrontmatter(text) {
 // counts, so `key: # note` is empty, as in YAML) that is outside quotes; `a#b` and `"a # b"` keep their
 // `#`. A quote opens only where a YAML scalar or list item can start — the start of the value, or after
 // a space, a tab, `[` or `,` — so the apostrophe in `O'Brien # x` opens nothing. Inside double quotes a
-// backslash escapes the next character; inside single quotes `''` is one quote, as in YAML. The bash check gates' `fm_strip` (checks/*.sh) is this same
-// rule, character for character: change one and change the other.
+// backslash escapes the next character; inside single quotes `''` is one quote, as in YAML. The bash
+// check gates' `fm_strip` (checks/*.sh) is this same rule, character for character: change one and
+// change the other.
 export function stripFrontmatterComment(raw) {
   const s = String(raw);
   let quote = null;

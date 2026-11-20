@@ -52,7 +52,7 @@ export function frontmatterText(md) {
   for (const l of m[1].split(/\r?\n/)) {
     const k = /^([A-Za-z_][\w-]*):(.*)$/.exec(l);
     if (!k) continue;
-    let v = stripFrontmatterComment(k[2]).trim();
+    let v = stripFrontmatterComment(k[2]).replace(/^[ \t]+|[ \t]+$/g, '');
     if (/^\[.*\]$/.test(v)) v = v.slice(1, -1).split(',').map((x) => x.trim()).filter(Boolean);
     else v = v.replace(/^"(.*)"$/, '$1');
     out[k[1]] = v;

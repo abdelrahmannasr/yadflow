@@ -7951,7 +7951,10 @@ test('#433 merged results: the gates judge only the MR\'s own commits when HEAD 
 // The engine reads frontmatter in JS (parseFrontmatter, which the gate also reads through; the progress
 // map's frontmatterText; doctor's yamlList) and the check gates read it in bash (fm_val, and link_val's
 // whole-file fallback). They must cut the same comment. Each row is the text after `key:` and the value
-// with its comment cut; every reader is then held to its own view of that one value.
+// with its comment cut; every reader is then held to its own view of that one value. Each reader trims
+// only spaces and tabs, as `fm_strip` does, so a value of one no-break space is kept. No row has a CR:
+// `parseFrontmatter` does not read a line that ends in one (a CRLF file reads as empty), which is older
+// than #618 and outside it; the bash gates and the map do read CRLF files.
 const FM_COMMENT_ROWS = [
   [' x # who', 'x'],
   [' x\t# who', 'x'],
@@ -7969,6 +7972,12 @@ const FM_COMMENT_ROWS = [
   [' Fix issue #12', 'Fix issue'],
   [' plain', 'plain'],
   [' plain  ', 'plain'],
+  [' "a # b', '"a # b'],             // a quote never closed: everything after it is inside it
+  [' "a\\', '"a\\'],                  // a backslash at the very end escapes nothing
+  [' a\t#\tb', 'a'],
+  [" 'x'#y", "'x'#y"],               // no space before the `#`
+  [' é # x', 'é'],
+  [' \u00a0', '\u00a0'],             // a no-break space is not trimmed
 ];
 
 test('#618: every frontmatter reader cuts the same trailing `# comment` (one table, JS and bash)', async () => {
@@ -7993,7 +8002,8 @@ test('#618: every frontmatter reader cuts the same trailing `# comment` (one tab
       fs.writeFileSync(file, text);
       assert.deepEqual(readFrontmatter(file).k, want, `readFrontmatter ${say}`);
       assert.deepEqual(frontmatterText(text).k, isList(cut) ? want : cut.replace(/^"(.*)"$/, '$1'), `map ${say}`);
-      assert.deepEqual(yamlList(raw, []), (isList(cut) ? asList(cut) : cut ? [cut] : []).map(unquote).filter(Boolean), `yamlList ${say}`);
+      // yamlList trims each ITEM in full (an item is never a whole value), so a no-break space alone goes.
+      assert.deepEqual(yamlList(raw, []), (isList(cut) ? asList(cut) : cut ? [cut] : []).map((x) => unquote(x.trim())).filter(Boolean), `yamlList ${say}`);
       if (isList(cut)) {
         // The gate's own touched-domains read goes through readFrontmatter too.
         const ep = path.join(T, 'EP-x');
