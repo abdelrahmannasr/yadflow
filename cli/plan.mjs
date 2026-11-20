@@ -6,7 +6,7 @@ import path from 'node:path';
 import { err } from './errors.mjs';
 import {
   asset, exists, listFiles, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, contentSha, warn, info, isPlainObject, run, samePath,
-  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, refuseLinkedWrite, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
+  readPlainFile, readPlainJSON, readPlainText, readPlainBytes, writeFileAtomic, backupPlain, forTerminal, refuseLinkedWrite, shQuote, LINKED_FOLDER_FIX, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, notPlainSaid,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -1561,7 +1561,6 @@ export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
 // Either way nothing is written: `gitHookState` says so, with the one line to add by hand, and doctor
 // and `yad check` print it.
 export const GIT_HOOK_MARKER = '# yadflow ledger-guard (E48)';
-const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // The last two comment lines of the script, today's first. The earlier ones are kept so a copy yad wrote
 // before is still known as yad's own (`orphanGitHookActions` removes only yad's bytes).
 const PRE_COMMIT_NOTES = [

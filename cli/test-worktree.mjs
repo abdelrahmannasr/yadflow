@@ -670,6 +670,145 @@ test('the add rollback never unlinks a node_modules symlink git tracks at origin
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+// #619: husky v9 points core.hooksPath at `.husky/_`, a folder its npm `prepare` makes (with a `.gitignore`
+// of `*`) and a linked node_modules never remakes. The shape here is husky's: `_/pre-commit` relays to the
+// tracked `.husky/pre-commit` beside it, found from `$0`, and that one logs the folder it ran in.
+function husky(W, api, { ignored = true } = {}) {
+  const log = path.join(W, 'hooks.log');
+  write(api, { '.husky/pre-commit': `#!/bin/sh\npwd -P >> '${log}'\n` });
+  git(api, 'add', '.husky');
+  git(api, 'commit', '-qm', 'husky');
+  git(api, 'push', '-q', 'origin', 'main');
+  write(api, { '.husky/_/pre-commit': '#!/bin/sh\nexec sh -e "$(dirname "$(dirname "$0")")/pre-commit" "$@"\n', ...(ignored ? { '.husky/_/.gitignore': '*' } : {}) });
+  fs.chmodSync(path.join(api, '.husky/_/pre-commit'), 0o755);
+  git(api, 'config', 'core.hooksPath', '.husky/_');
+  return log;
+}
+const ran = (log) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
+
+test('yad worktree add links husky\'s ignored hooks folder, so the hooks run there; remove takes the link back (#619)', { skip: process.platform === 'win32' && 'sh hooks and symlinks' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    const log = husky(W, api);
+    let r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api', '--dry-run', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules', '.husky/_'], '--dry-run lists the hooks link with the node_modules one');
+    r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(fs.lstatSync(path.join(awt, '.husky/_')).isSymbolicLink(), true);
+    assert.deepEqual(worktreeAt(awt).links, ['node_modules', '.husky/_'], 'recorded, so remove takes it back');
+    assert.match(r.out, /api: node_modules is a link to the main checkout's/);
+    assert.match(r.out, /\.husky\/_ \(git's core\.hooksPath\) is a link to the main checkout's hooks folder/);
+    assert.match(r.out, /its git hooks run in the worktree too/);
+    assert.doesNotMatch(r.out, /will not run/);
+    assert.match(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /# yad worktree \(#619\): the git hooks link\n\/\.husky\/_\n/);
+    assert.equal(git(awt, 'status', '--porcelain'), '', 'the link is never a change');
+    git(awt, 'commit', '-q', '--allow-empty', '-m', 'x');
+    assert.equal(ran(log).trim(), awt, 'the hook ran, in the worktree');
+    git(awt, 'push', '-q', 'origin', 'HEAD:refs/heads/t');
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--repo', 'api');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(fs.existsSync(awt), false);
+    assert.equal(fs.existsSync(path.join(api, '.husky/_/pre-commit')), true, 'only the link went');
+    assert.doesNotMatch(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /yad worktree/, 'and its exclude pair');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add leaves a tracked or absolute hooksPath alone, refuses a link, and says when the hooks will not run (#619)', { skip: process.platform === 'win32' && 'sh hooks and symlinks' }, () => {
+  const { W, P, api, awt } = workspace();
+  const add = () => { const r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api', '--json'); assert.equal(r.code, 0, r.out); return r; };
+  const remove = () => assert.equal(yad(P, 'worktree', 'remove', 'EP-x', '--repo', 'api').code, 0);
+  try {
+    // Tracked: the checkout has it, nothing new.
+    write(api, { '.githooks/pre-commit': '#!/bin/sh\n' });
+    git(api, 'add', '.githooks');
+    git(api, 'commit', '-qm', 'hooks');
+    git(api, 'push', '-q', 'origin', 'main');
+    git(api, 'config', 'core.hooksPath', '.githooks');
+    let r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /its git hooks run in the worktree too/);
+    assert.doesNotMatch(r.out, /will not run/);
+    remove();
+
+    // Absolute: every worktree finds the same folder, nothing new.
+    husky(W, api);
+    git(api, 'config', 'core.hooksPath', path.join(api, '.husky/_'));
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.equal(fs.existsSync(path.join(awt, '.husky/_')), false);
+    assert.match(r.out, /its git hooks run in the worktree too/);
+    remove();
+
+    // A link in the main checkout is never followed: not linked, and the worktree is told its hooks are dead.
+    fs.symlinkSync('.husky/_', path.join(api, 'hooks'));
+    git(api, 'config', 'core.hooksPath', 'hooks');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(hooks\) is not there; point git at the main checkout's folder, which every worktree shares: `git -C '.*api' config core\.hooksPath '.*api\/hooks'`/);
+    assert.doesNotMatch(r.out, /hooks run in the worktree too/);
+    remove();
+    fs.unlinkSync(path.join(api, 'hooks'));
+
+    // Escaping the repo: never linked. The worktree sits beside the main checkout, so `../api/.husky/_` names
+    // the main checkout's folder from both, and the hooks do run; `../nowhere` is missing from both: said.
+    git(api, 'config', 'core.hooksPath', '../api/.husky/_');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /its git hooks run in the worktree too/);
+    remove();
+    git(api, 'config', 'core.hooksPath', '../nowhere');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.\.\/nowhere\) is not there; it is missing in the main checkout too/);
+    assert.doesNotMatch(r.out, /hooks run in the worktree too/);
+    remove();
+
+    // An empty untracked folder git does not ignore as a whole: the person's, never linked (the shared exclude
+    // line would hide the hooks they write there next), and the warning says it is empty there too.
+    fs.mkdirSync(path.join(api, '.hooks'));
+    git(api, 'config', 'core.hooksPath', '.hooks');
+    r = add();
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.hooks\) is not there; it is empty in the main checkout too, so no hook runs there either; to share the hooks you put there with every worktree: `git -C '.*api' config core\.hooksPath '.*api\/\.hooks'`/);
+    assert.doesNotMatch(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /\.hooks/);
+    remove();
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add says husky\'s hooks will not run, with the fix, when its folder is not one git ignores (#619)', { skip: process.platform === 'win32' && 'sh hooks' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    const log = husky(W, api, { ignored: false }); // git would add `.husky/_/pre-commit`: not yad's to link
+    const r = yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees[0].links, ['node_modules']);
+    assert.match(r.out, /api: its git hooks will not run in the worktree — git's core\.hooksPath \(\.husky\/_\) is not there; run `cd '.*api--EP-x' && npx husky`/);
+    assert.doesNotMatch(r.out, /hooks run in the worktree too/);
+    git(awt, 'commit', '-q', '--allow-empty', '-m', 'x');
+    assert.equal(ran(log), '', 'as said: no hook ran');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the add rollback takes back the hooks link and its exclude pair (#619)', { skip: process.platform === 'win32' && 'a sh hook and symlinks' }, () => {
+  const { W, P, api, awt } = workspace();
+  try {
+    husky(W, api);
+    const web = repoWithOrigin(W, 'web', { f: 'x\n' });
+    write(P, {
+      '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api' }, { name: 'web', path: '../web' }] }),
+      'epics/EP-x/epic.md': '---\nid: EP-x\ntype: chore\nstatus: draft\nrepos: [api, web]\n---\n# EP-x\n',
+    });
+    write(web, { '.git/hooks/post-checkout': '#!/bin/sh\nexit 1\n' });
+    fs.chmodSync(path.join(web, '.git/hooks/post-checkout'), 0o755);
+    const r = yad(P, 'worktree', 'add', 'EP-x', '--all');
+    assert.equal(r.code, 1, r.out);
+    assert.equal(fs.existsSync(awt), false);
+    assert.doesNotMatch(fs.readFileSync(path.join(api, '.git/info/exclude'), 'utf8'), /yad worktree/);
+    assert.equal(fs.existsSync(path.join(api, '.husky/_/pre-commit')), true, 'only the link went');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 // #217: each registered folder is judged before any git runs in it, as E125 does for the other commands. A
 // logging git first on PATH writes the folder each call runs in, as the disk spells it: a call in a link to
 // api is logged as api.
