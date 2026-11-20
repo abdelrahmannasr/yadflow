@@ -34,14 +34,33 @@ which reads with `JSON.parse`) refuses it. CI and doctor disagree.
   `null`, `true` and number members. The existing "cut-off lock" row keeps its answer; its message is now
   the not-valid-JSON one.
 - R5. The two copies (`checks/contract-check.sh` and `skills/yad-checks/templates/checks/contract-check.sh`)
-  stay byte-identical, pinned by a test.
+  stay byte-identical, pinned by a test. Review: the test compares bytes (`Buffer.equals`) and covers every
+  `checks/*.sh` that has a copy in `skills/yad-checks/templates/checks/` (one with no copy is skipped).
+- R6 (review). A lock larger than 64 KiB is not read: `lock_big` refuses it before any other read, and each
+  of the three report places says so first ("is larger than 64 KiB, so it is not read (a contract lock is
+  a few hundred bytes)"). The awk walk is linear (one line at a time, one character at a time), and a lock
+  at the cap is read in well under a second.
+  - Trade-off: `yad doctor` reads files up to its own, much larger cap, so a valid lock between 64 KiB and
+    that cap passes doctor and fails the gate. This is the one accepted difference, and it is on the safe
+    side (the gate refuses what doctor reads, never the reverse). The table marks those rows
+    `gateRefuses`: JS gives its own answer, and the gate refuses with the size message.
+- R7 (review). The gate reads `hash`, `ref` and `inheritedFrom` only at the top level of the lock, as
+  `resolveContractLock` does: `lock_json` prints the top-level values, and the same keys in a nested member
+  are read as absent. `hash` and `ref` are read only as strings. A truthy `inheritedFrom` that is no string
+  is read as JavaScript turns it into text (`true`, a number that is not 0, `[object Object]`); an array
+  there is refused.
+  - Why not refuse a nested key instead: an epic with its own contract.md and a lock with a `ref` nested in
+    another member is sound in JS (the walk ends there). Refusing would fail that lock in the gate alone.
+    Reading the nested key as absent gives the same answer as JS in all three new rows.
 
 ## Out of scope
 
 Changing `resolveContractLock`, `lockReadsTwoWays` or anything in `cli/epic-state.mjs`: JSON.parse already
-refuses these locks. How the gate reads values out of a VALID lock is unchanged (`lock_hash` and `lock_str`
-read the first match at any depth; JS reads top-level members by type). Those differ only on valid JSON,
-such as a `ref` nested in another member or a non-string `inheritedFrom`, and are left for a later story.
+refuses these locks. Left as known differences on odd valid JSON, where both sides still refuse: a `hash`
+written as a one-item array (JS passes its hash test, then fails on the compare; the gate finds no hash), an
+`inheritedFrom` written as a number such as `1.50` (both say the ref leaves `epics/`, and the ref in the
+message reads `1.50` in the gate, `1.5` in JS), and an `inheritedFrom` written as an array (refused by the
+gate; JS joins it into a name).
 
 ## Clarifications
 
@@ -60,10 +79,22 @@ then the per-key counts; add `lock_not_json` and a not-valid-JSON branch before 
 new rows in the `#233` table, a not-valid-JSON case in the Contract-Change lock test, and a byte-for-byte
 test for the two copies.
 
+Review (T02): add `lock_big`; `lock_json` walks line by line and prints the top-level reads; `lock_reads`
+(size, backslash, `lock_json`, key counts) replaces `lock_ok`, and `lock_str` / `lock_hash` read its lines;
+a size branch goes before each not-valid-JSON branch. In the tests: the nested-key and size rows (with
+`gateRefuses` in the table loop), a size case in the Contract-Change lock test, and the byte test widened
+to every gate copy.
+
 ## Tasks
 
 <!-- yad:tasks -->
 ## T01 — Refuse a contract lock that is not valid JSON, in both gate copies
+**Files:**
+- checks/contract-check.sh
+- skills/yad-checks/templates/checks/contract-check.sh
+- cli/test-checks.mjs
+
+## T02 — cap the lock size, refuse nested lock keys, pin every gate copy (review fixes)
 **Files:**
 - checks/contract-check.sh
 - skills/yad-checks/templates/checks/contract-check.sh
