@@ -20,10 +20,13 @@ hook silently does nothing — while yad prints "its git hooks run in the worktr
   parent is a plain folder of the worktree; excluded in `info/exclude` under its own mark so a
   `git add -A` never stages it; recorded in the worktree's `links`, so `yad worktree remove` and the add
   rollback take it back (and its exclude pair).
-- R2. A tracked, absolute (or `~/`), already-present, linked or escaping `core.hooksPath` gets no link.
+- R2. A tracked, absolute (or `~/`, `%(prefix)/`), already-present, linked or escaping `core.hooksPath`
+  gets no link, nor does a folder git does not ignore as a whole (an empty or partly ignored folder: the
+  shared exclude line would hide the hooks the person writes there next).
 - R3. After the add, when a relative `core.hooksPath` folder is not in the worktree, yad warns that the
   hooks will not run there and prints the fix: `cd <worktree> && npx husky` for a `.husky/…` path, else
   `git -C <main> config core.hooksPath <absolute folder>`; when the main checkout lacks it too, it says so.
+  An empty folder in the main checkout is said to be empty there too. Paths in the fix are shell-quoted.
   It no longer says "its git hooks run in the worktree too" in that case; otherwise that line is unchanged.
 - R4. `--dry-run` (and its `--json` `links`) lists the hooks link with the `node_modules` links.
 - R5. `docs/CLI.md` describes the hooks link and the warning.
@@ -53,6 +56,17 @@ cover the tracked, absolute, linked and escaping paths, the warning, dry-run, re
 
 <!-- yad:tasks -->
 ## T01 — Link husky's ignored hooks folder into a worktree, or warn that its hooks will not run
+**Files:**
+- cli/worktree.mjs
+- cli/test-worktree.mjs
+- docs/CLI.md
+
+## T02 — Share the shell-quoting helper from lib.mjs
+**Files:**
+- cli/lib.mjs
+- cli/plan.mjs
+
+## T03 — Link only a hooks folder git ignores as a whole, and quote the printed fix
 **Files:**
 - cli/worktree.mjs
 - cli/test-worktree.mjs
