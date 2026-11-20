@@ -1122,12 +1122,18 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
   const TO_END = '"inheritedFrom":"EP-end","ref":"../../EP-end/.sdlc/contract-lock.json"';
   const NO_HASH = "and the lock there has no usable hash — a lock is one JSON object with a \"hash\": \"sha256:<64 hex>\", each key once and no backslash";
   const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // #247: a lock JSON.parse refuses is named as no JSON, one hop on (missing) or at the start (unusable).
+  const NOT_JSON = /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-h1\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), and the lock there, \S*EP-h1\/\.sdlc\/contract-lock\.json, is not valid JSON \(yad doctor cannot read it either\)/;
+  const NOT_JSON_START = /EP-demo-S01: \S*EP-demo\/\.sdlc\/contract-lock\.json is not valid JSON \(yad doctor cannot read it either\)/;
+  const hopTo = (text) => () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', text); };
   // `broken` is what resolveContractLock says (null: sound, ending at `owner`); `says` is the gate's reason.
   const cases = [
     { name: 'one hop', build: () => chain(1) },
     { name: 'two hops', build: () => chain(2) },
     { name: 'three hops', build: () => chain(3) },
     { name: `${MAX_LOCK_HOPS} hops`, build: () => chain(MAX_LOCK_HOPS) },
+    // #247: JSON over many lines with CRLF, with members nested, null, true and numbers: still one lock.
+    { name: 'a lock over many lines, with nested members', build: hopTo(`{\r\n  ${H},\r\n\t"lockedAt": null, "n": -1.5e3, "ok": true,\r\n  "by": {"who": ["a", 0, false, {}], "at": []},\r\n  ${TO_END}\r\n}\r\n`) },
     { name: 'a lock naming its owner by inheritedFrom only', build: () => { rawLock('EP-demo', `{${H},"inheritedFrom":"EP-h1"}`); pointer('EP-h1', 'EP-end'); } },
     { name: 'an epic with its own contract.md mid-chain', owner: 'EP-h1',
       build: () => { chain(2); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
@@ -1166,8 +1172,47 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
     // JSON.parse reads `hash` as a second `hash` and keeps it; a text read would keep the first.
     { name: 'an escaped key, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"h\\u0061sh":"sha256:${OTHER}",${TO_END}}`); } },
-    { name: 'a cut-off lock, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+    { name: 'a cut-off lock, one hop on', broken: 'missing', says: NOT_JSON,
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},${TO_END}`); } },
+    // #247: one object, no backslash, each key once — and still no JSON. The text reads found the hash.
+    { name: 'a missing comma between members, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H} ${TO_END}}`) },
+    { name: 'a missing comma between members, at the start', broken: 'unusable', says: NOT_JSON_START,
+      build: () => { rawLock('EP-demo', `{${H} ${TO_END}}`); } },
+    { name: 'an unclosed string, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":"2026-06-26,${TO_END}}`) },
+    { name: 'a trailing comma, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},${TO_END},}`) },
+    { name: 'an unquoted date for a value, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":2026-06-26,${TO_END}}`) },
+    { name: 'an unquoted inheritedFrom, one hop on', broken: 'missing', says: NOT_JSON,
+      build: hopTo(`{${H},"inheritedFrom":EP-end,"ref":"../../EP-end/.sdlc/contract-lock.json"}`) },
+    { name: 'a closing brace too many, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},${TO_END}}}`) },
+    { name: 'a newline inside a string, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":"2026-06\n-26",${TO_END}}`) },
+    // #247 review: JSON.parse reads only the TOP-LEVEL hash, ref and inheritedFrom; the same keys in a nested
+    // member are not the lock's, so the gate reads them as absent too (refusing them would fail the third row).
+    { name: 'a hash nested in another member, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: hopTo(`{"meta":{${H}},${TO_END}}`) },
+    { name: 'a ref nested in another member, one hop on', broken: 'no-contract', says: /EP-demo-S01: \S*EP-h1\/contract\.md is not there \(hop 1: EP-demo → EP-h1\), so there is nothing to quote from/,
+      build: hopTo(`{${H},"meta":{${TO_END}}}`) },
+    { name: 'a ref nested in another member, at an epic with its own contract.md', owner: 'EP-h1',
+      build: () => { hopTo(`{${H},"meta":{${TO_END}}}`)(); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
+    // #247 review: an `inheritedFrom` that is an array marks the lock a pointer, as in JS, and is used only
+    // when there is no string ref and no contract.md of the epic's own.
+    { name: 'an inheritedFrom array with a ref, one hop on', build: hopTo(`{${H},"inheritedFrom":["EP-gone"],"ref":"../../EP-end/.sdlc/contract-lock.json"}`) },
+    { name: 'an inheritedFrom array at an epic with its own contract.md', owner: 'EP-h1',
+      build: () => { hopTo(`{${H},"inheritedFrom":["EP-gone"]}`)(); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
+    { name: 'an empty inheritedFrom array and no ref, one hop on', broken: 'outside', says: /EP-demo-S01: EP-h1's pointer lock names '[^']*' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      build: hopTo(`{${H},"inheritedFrom":[]}`) },
+    // #247 review: the two accepted differences, both on the safe side (the gate refuses what doctor reads):
+    //   * a lock over 64 KiB is not read by the gate (its awk walk would be slow, and a lock is a few hundred
+    //     bytes); JSON.parse reads it (doctor's cap is far larger);
+    //   * an `inheritedFrom` array, used (no string ref, no contract.md of its own), is refused by the gate;
+    //     JS joins it into a name and may follow it.
+    { name: 'an inheritedFrom array naming an epic, and no ref, one hop on', gateRefuses: true,
+      says: /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/\[array\]\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      build: hopTo(`{${H},"inheritedFrom":["EP-end"]}`) },
+    { name: 'a lock over 64 KiB, one hop on', gateRefuses: true,
+      says: /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-h1\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), and the lock there, \S*EP-h1\/\.sdlc\/contract-lock\.json, is larger than 64 KiB, so it is not read/,
+      build: hopTo(`{${H},${TO_END},"note":"${'x'.repeat(65536)}"}`) },
+    { name: 'a lock over 64 KiB, at the start', gateRefuses: true, says: /EP-demo-S01: \S*EP-demo\/\.sdlc\/contract-lock\.json is larger than 64 KiB, so it is not read/,
+      build: () => rawLock('EP-demo', `{${H},${TO_END},"note":"${'x'.repeat(65536)}"}`) },
     { name: 'a backslash in a ref', broken: 'missing', says: new RegExp(esc(NO_HASH)),
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"ref":"..\\\\..\\\\EP-end\\\\.sdlc\\\\contract-lock.json"}`); } },
     { name: 'a hash one hex digit short, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
@@ -1176,7 +1221,7 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       build: () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/contract.md'), contractMd([...SURFACE_LINES, '- `DELETE /orders/{id}` — cancel an order.'])); } },
   ];
   try {
-    for (const { name, broken = null, says, owner = 'EP-end', build } of cases) {
+    for (const { name, broken = null, says, owner = 'EP-end', gateRefuses = false, build } of cases) {
       fs.rmSync(E, { recursive: true, force: true });
       fs.rmSync(away, { recursive: true, force: true });
       seedLockedContract(T, 'EP-end');
@@ -1185,8 +1230,9 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       const r = runGate(CONTRACT, T);
       assert.equal(w.broken ?? null, broken, `${name}: resolveContractLock`);
       if (!broken) assert.equal(w.ownerId, owner, `${name}: the epic the walk ends at`);
-      assert.equal(r.code, broken ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
-      if (broken) assert.match(r.out, says, `${name}:\n${r.out}`);
+      const refused = Boolean(broken) || gateRefuses; // `gateRefuses`: the gate alone refuses, on purpose
+      assert.equal(r.code, refused ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
+      if (refused) assert.match(r.out, says, `${name}:\n${r.out}`);
       else assert.match(r.out, /PASS \[contract-check\]: every changed slice is an exact quote of its locked contract/, name);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1523,7 +1569,41 @@ test('contract-check gate: a product lock with no readable hash FAILs, never "ha
   assert.equal(r.code, 1, `an unparseable lock proves nothing and must not pass:\n${r.out}`);
   assert.match(r.out, /has no readable "hash": "sha256:…" value/);
   assert.doesNotMatch(r.out, /hash matches the product lock/);
+  // #247: a lock with the hash in it, but a missing comma, is no JSON — doctor's JSON.parse refuses it too.
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'), `{"hash": "sha256:${'a'.repeat(64)}" "lockedAt": "2026-06-26"}\n`);
+  const r2 = runGate(CONTRACT, T);
+  assert.equal(r2.code, 1, `a lock that is no JSON proves nothing and must not pass:\n${r2.out}`);
+  assert.match(r2.out, /FAIL \[contract-check\]: \S*product\/epics\/EP-demo\/\.sdlc\/contract-lock\.json is not valid JSON \(yad doctor cannot read it either\)/);
+  assert.doesNotMatch(r2.out, /hash matches the product lock/);
+  // #247 review: a lock over 64 KiB is not read at all, and says so before anything else.
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'), `{"hash": "sha256:${'a'.repeat(64)}", "note": "${'x'.repeat(65536)}"}\n`);
+  const r3 = runGate(CONTRACT, T);
+  assert.equal(r3.code, 1, r3.out);
+  assert.match(r3.out, /FAIL \[contract-check\]: \S*product\/epics\/EP-demo\/\.sdlc\/contract-lock\.json is larger than 64 KiB, so it is not read/);
+  assert.doesNotMatch(r3.out, /hash matches the product lock|is not valid JSON/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Every gate this repo's own CI runs from checks/ is its shipped template, byte for byte (#247 review; #351
+// for verified-commits.sh): a change to a template that misses the copy leaves this repo's own CI on the old
+// rules. The templates live in two skills. A script with a copy in neither is yadflow's own and is named in
+// NO_TEMPLATE (none today), so a new one is a choice, not an accident.
+test('every checks/*.sh with a shipped template is that template, byte for byte', () => {
+  const TEMPLATE_DIRS = [CHECKS, path.join(ROOT, 'skills/yad-pr-template/templates/checks')];
+  const NO_TEMPLATE = [];
+  const compared = [];
+  const skipped = [];
+  for (const f of fs.readdirSync(path.join(ROOT, 'checks')).filter((n) => n.endsWith('.sh')).sort()) {
+    const copies = TEMPLATE_DIRS.map((d) => path.join(d, f)).filter((p) => fs.existsSync(p));
+    if (!copies.length) { skipped.push(f); continue; }
+    const mine = fs.readFileSync(path.join(ROOT, 'checks', f));
+    for (const c of copies) assert.ok(mine.equals(fs.readFileSync(c)), `checks/${f} differs from ${path.relative(ROOT, c)}`);
+    compared.push(f);
+  }
+  assert.deepEqual(skipped, NO_TEMPLATE, 'a checks/*.sh with no shipped template: add its template, or name it in NO_TEMPLATE');
+  for (const f of ['contract-check.sh', 'verified-commits.sh', 'pr-template.sh', 'pr-title.sh', 'risk-route.sh']) {
+    assert.ok(compared.includes(f), `checks/${f} is compared`);
+  }
 });
 
 test('contract-check gate: a non-ASCII slice path still counts as the contract surface', () => {
@@ -6244,13 +6324,6 @@ test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
   commit(T, 'enable bridge', {});
   assert.equal(runGate(LEDGER_GUARD, T, ['origin/nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
-});
-
-// #351: yadflow's own CI runs checks/verified-commits.sh, an installed copy of the template. A change to
-// the template that misses the copy leaves this repo's own CI on the old rules.
-test('checks/verified-commits.sh is the shipped template, byte for byte', () => {
-  assert.equal(fs.readFileSync(path.join(ROOT, 'checks/verified-commits.sh'), 'utf8'),
-    fs.readFileSync(path.join(CHECKS, 'verified-commits.sh'), 'utf8'));
 });
 
 // #351: one text in eleven gates, so every copy is run — a fix in one arm and not its twin fails here.
