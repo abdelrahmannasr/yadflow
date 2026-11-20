@@ -102,18 +102,12 @@ function readPlain(base, rel, opts) {
 
 // Write a file by a temp file and a rename: a rename replaces a link where `writeFileSync` would follow it,
 // and a committed link (`files.txt -> ~/.zshrc`) would take every name from the code repo (E176 review 2).
-export function writePlain(dir, name, data) {
-  const file = path.join(dir, name);
-  const tmp = `${file}.${process.pid}.tmp`;
-  // A temp left by a killed run under a reused pid is removed first; `rmSync` takes a link itself, never
-  // what it points at, and `wx` still refuses one made in between.
-  fs.rmSync(tmp, { force: true });
-  try {
-    fs.writeFileSync(tmp, data, { flag: 'wx' });
-    fs.renameSync(tmp, file);
-  } finally {
-    fs.rmSync(tmp, { force: true });
-  }
+// `writeFileAtomic` does both (a fresh temp name made with `wx`, then the rename), and it refuses a linked
+// folder between `within` and the file itself (#246), so a caller no longer has to check the folder first.
+// `within`: the Product root for the files under `.sdlc/brain/`; the page's own folder for the `--html` page.
+// The Product's own root is walked too whenever a command has settled it (`setProductRoot`).
+export function writePlain(dir, name, data, { within } = {}) {
+  writeFileAtomic(path.join(dir, name), data, { within });
 }
 
 // ---- Graphify's file -----------------------------------------------------------------------------
@@ -234,13 +228,13 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   const lsr = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo.target, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const ls = { ok: lsr.status === 0, stdout: lsr.stdout || '' };
   const dir = plainDirs(root, [...BRAIN_DIR.split(path.sep), 'repos', repo.name], (p) => path.relative(root, p));
-  writePlain(dir, 'graph.json', text);
+  writePlain(dir, 'graph.json', text, { within: root });
   // The list git holds is NUL-separated; kept sorted and LF-separated, so it hashes the same everywhere.
   const files = ls.ok ? [...new Set([...ls.stdout.split('\0').filter(Boolean).filter((f) => fs.existsSync(path.join(repo.target, f))), ...g.nodes.map((n) => (isPlainObject(n) && typeof n.source_file === 'string' ? posix(n.source_file) : null)).filter(Boolean)])].sort() : null;
-  if (files) writePlain(dir, 'files.txt', `${files.join('\n')}\n`);
+  if (files) writePlain(dir, 'files.txt', `${files.join('\n')}\n`, { within: root });
   else fs.rmSync(path.join(dir, 'files.txt'), { force: true });
   const meta = { head, graphifyVersion: g.graphifyVersion, schemaVersion: g.schemaVersion, builtAt: new Date().toISOString() };
-  writePlain(dir, 'meta.json', `${JSON.stringify(meta, null, 2)}\n`);
+  writePlain(dir, 'meta.json', `${JSON.stringify(meta, null, 2)}\n`, { within: root });
   return { ok: true, nodes: g.nodes.length, edges: g.edges.length, ...(excluded ? {} : { warning: 'graphify-out/ could not be added to the repo\'s .git/info/exclude — git may show it' }) };
 }
 
@@ -531,7 +525,7 @@ export function readBrain(root) {
 }
 
 export function writeBrain(root, brain) {
-  writePlain(ensureBrainDir(root), 'graph.json', `${JSON.stringify(brain)}\n`);
+  writePlain(ensureBrainDir(root), 'graph.json', `${JSON.stringify(brain)}\n`, { within: root });
 }
 
 // How the brain on disk compares with the files it is built from.

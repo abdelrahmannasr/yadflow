@@ -124,7 +124,12 @@ export function writeOwnFile(file, data) {
   if (st && !st.isFile()) return `${file} is not a plain file (a link or a folder) — name another path`;
   const dir = path.dirname(file);
   if (!fs.existsSync(dir)) return `the folder ${dir} does not exist`;
-  writePlain(dir, path.basename(file), data);
+  // The page's own folder is the person's choice, so it may be a link; a linked folder inside the Product, on
+  // the way to it, is refused like any other write there (#246), and named as a problem.
+  try { writePlain(dir, path.basename(file), data, { within: dir }); } catch (e) {
+    if (e?.code === 'YAD-STATE-001') return `${e.message} — name another path`;
+    throw e;
+  }
   return null;
 }
 
