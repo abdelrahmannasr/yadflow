@@ -56,4 +56,8 @@ checks the matcher on sample lines; one walks `engineSources()`, skips `cli/lib.
 ## T01 — Add the plain-write guard test and its allowlist
 **Files:**
 - cli/test.mjs
+
+## T02 — Make the guard's reasons and entry checks exact (review fixes)
+**Files:**
+- cli/test.mjs
 <!-- /yad:tasks -->
