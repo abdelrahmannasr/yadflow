@@ -11,7 +11,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix, linkedHookSaid } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
+import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, stripFrontmatterComment, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -1703,8 +1703,9 @@ export function themeChecks(checks, root) {
     }
     const t = themeOf(fm);
     if (!t) continue;
-    // A `#` inside the tag is almost always the comment trap: neither `readFrontmatter` nor the check
-    // gates' `fm_val` strips a trailing `# …`, so it lands in the value. The tag IS read — it is not
+    // A `#` left inside the tag is almost always a comment that was not read as one: `readFrontmatter`
+    // and the check gates' `fm_val` cut a `#` with a space before it (#618), but not one with none
+    // (`checkout#note`) or one inside quotes, so it lands in the value. The tag IS read — it is not
     // unreadable — but it now includes the note, so it groups only with epics carrying that exact
     // text. Reported on its own rather than as a spelling variant, which would be true of
     // `#checkout-revamp` beside `checkout-revamp` while naming the wrong problem.
@@ -1741,7 +1742,7 @@ export function themeChecks(checks, root) {
     check(
       checks, 'theme:commented', 'shape', 'warn',
       `${commented.length} epic(s) have a \`#\` inside the theme itself: ${some(commented, 3)}`,
-      'these frontmatter readers keep the whole rest of the line, so a `#` and everything after it becomes part of the tag — the epic then groups only with epics carrying that exact text. Write the tag bare. `yad next` and `yad thread` print a `#` in front of it, but that is decoration on the screen, not part of the value',
+      'the frontmatter readers cut a `# comment` only when a space or tab comes before the `#` and it is outside quotes, so this `#` and everything after it is part of the tag — the epic then groups only with epics carrying that exact text. Write the tag bare. `yad next` and `yad thread` print a `#` in front of it, but that is decoration on the screen, not part of the value',
     );
   }
 }
@@ -3173,16 +3174,19 @@ const globMatches = (glob, ref) => {
   const body = glob.split('**').map((part) => part.replace(/[.^${}()|\\]/g, '\\$&').replace(/\*/g, '[^/]*')).join('.*');
   try { return new RegExp(`^${body}$`).test(ref); } catch { return false; }
 };
-const yamlList = (inline, childLines) => {
-  const v = (inline || '').trim();
-  const items = v.startsWith('[') ? v.replace(/^\[/, '').replace(/\]\s*(#.*)?$/, '').split(',') : v && !v.startsWith('#') ? [v] : childLines.map((l) => l.replace(/^\s*-\s*/, ''));
-  return items.map((x) => x.replace(/\s+#.*$/, '').trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+// A trailing `# comment` is cut by the frontmatter readers' rule (`stripFrontmatterComment`, #618): a `#`
+// with a space or tab before it, outside quotes. `inline` is the text right after `key:`, untrimmed, so
+// `branches: # note` is empty and its `- item` lines are read instead.
+export const yamlList = (inline, childLines) => {
+  const v = stripFrontmatterComment(inline || '').trim();
+  const items = v.startsWith('[') ? v.replace(/^\[/, '').replace(/\]$/, '').split(',') : v ? [v] : childLines.map((l) => stripFrontmatterComment(l.replace(/^\s*-/, '')));
+  return items.map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 };
 function pushRunsOnWip(block) {
   // `block` is the lines of the `push:` value, deeper than the `push:` key.
   const keys = {};
   for (let i = 0; i < block.length; i++) {
-    const m = block[i].match(/^(\s+)(branches|branches-ignore|tags|tags-ignore):\s*(.*)$/);
+    const m = block[i].match(/^(\s+)(branches|branches-ignore|tags|tags-ignore):(.*)$/);
     if (!m) continue;
     const children = [];
     for (let j = i + 1; j < block.length; j++) {
