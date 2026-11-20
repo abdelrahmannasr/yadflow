@@ -530,6 +530,44 @@ test('every commit must carry yad\'s subject, an empty one too; a file is judged
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('after a refusal, the hint names `yad sync-status`, which writes again a story status the reset dropped (#245)', () => {
+  const { W, P } = workspace();
+  try {
+    const st = (id, type, status) => ({ id, type, artifact: id.startsWith('stories') ? 'stories/' : 'epic.md', status, risk_tags: [] });
+    const state = (review) => JSON.stringify({ epicId: 'EP-x', profile: 'chore', currentStep: 'stories-review', steps: [st('epic', 'author', 'done'), st('epic-review', 'review+approve', 'done'), st('stories', 'author', 'done'), st('stories-review', 'review+approve', review)] });
+    const story = (status, prose = '') => `---\nid: EP-x-S01\nepic: EP-x\nstatus: ${status}\nrepos: [api]\n---\n# S01\n${prose}`;
+    write(P, { 'epics/EP-x/.sdlc/state.json': state('in_review'), 'epics/EP-x/stories/EP-x-S01.md': story('draft') });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'stories');
+    git(P, 'push', '-q', 'origin', 'main');
+    const wt = path.join(W, 'product-build');
+    git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    git(wt, 'config', 'user.name', 'bob');
+    git(wt, 'config', 'user.email', 'bob@corp.io');
+    // yad's advance carried the ledger and the story's status flip; the person's prose edit of the same story
+    // rode in it, so the story file is not yad's, and the restore the hint gives leaves it out.
+    write(wt, { 'epics/EP-x/.sdlc/state.json': state('done'), 'epics/EP-x/stories/EP-x-S01.md': story('approved', 'more prose\n') });
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-qm', 'chore(gate): advance EP-x/stories on merge [skip ci]');
+    const r = yad(wt, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /'epics\/EP-x\/stories\/EP-x-S01\.md' is changed by the commits ahead of origin\/main/);
+    assert.match(r.out, /git reset --hard origin\/main.*git restore --worktree --source <branch> -- [^`]+`; then `yad sync-status`, which writes again, uncommitted, an artifact's `status:` change the reset dropped; then re-run/);
+    // Followed word for word: the reset drops the flip, the restore brings the ledger back, and sync-status writes the flip again.
+    const restore = r.out.match(/`(git restore --worktree --source <branch> -- [^`]+)`/)[1].replace('<branch>', 'mine');
+    assert.doesNotMatch(restore, /stories/);
+    git(wt, 'branch', 'mine');
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    execFileSync('sh', ['-c', restore], { cwd: wt, env: ENV });
+    const storyFile = path.join(wt, 'epics/EP-x/stories/EP-x-S01.md');
+    assert.match(fs.readFileSync(storyFile, 'utf8'), /status: draft/, 'the reset dropped the flip');
+    const s = yad(wt, 'sync-status', 'EP-x');
+    assert.equal(s.code, 0, s.out);
+    assert.equal(fs.readFileSync(storyFile, 'utf8'), story('approved'), 'the flip is back, without the person\'s prose');
+    assert.match(git(wt, 'status', '--porcelain', '--', 'epics/EP-x/stories'), /^M epics\/EP-x\/stories\/EP-x-S01\.md$/, 'and left uncommitted, as the hint says');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('the raw log reader: commit ids, raw entries with their paths, and nothing else (#231 review 2)', () => {
   const z = '0'.repeat(40); const a = 'a'.repeat(40); const b = 'b'.repeat(40); const c = 'c'.repeat(40);
   const out = `\0${c}\0\n:100644 100644 ${a} ${b} M\0x.md\0:000000 120000 ${z} ${b} A\0.sdlc/l\0\0${a}\0\n`;

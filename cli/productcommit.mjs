@@ -245,9 +245,10 @@ export function onlyYadCommitsAhead(git, defaultBranch, opts = {}) {
 
 // When a Product worktree is refused for files yad does not write (#231), name them all, and say how to keep
 // them on a branch of their own while yad's own files go up. Every commit ahead is kept on that branch; HEAD
-// goes back to the tip; yad's files come back uncommitted, and the yad command commits them again. Reads the
-// local origin/<default> (the refusal just fetched it) unless the caller passes what it read. True when it
-// printed. Names are printed through forTerminal, so a name holding a control character is shown, not run.
+// goes back to the tip; yad's files come back uncommitted; `yad sync-status` writes again, uncommitted, an
+// artifact's `status:` change the reset dropped (a story flip in a file that is also the person's is not
+// restored) (#245); and the yad command commits yad's files again. Reads the local origin/<default> (the refusal just fetched it) unless the
+// caller passes what it read. True when it printed. Names are printed through forTerminal, so a name holding a control character is shown, not run.
 export function explainForeignFile(git, defaultBranch, why = notYadsOwnAhead(git, defaultBranch, { fetch: false })) {
   if (!why?.file) return false;
   const d = forTerminal(defaultBranch);
@@ -258,7 +259,7 @@ export function explainForeignFile(git, defaultBranch, why = notYadsOwnAhead(git
   const restore = why.yadFiles.length
     ? `; bring yad's own files back, uncommitted: \`git restore --worktree --source <branch> -- ${why.yadFiles.map((x) => forTerminal(sq(literal(x)))).join(' ')}\``
     : '';
-  hand(`move ${why.files.length > 1 ? 'them' : 'it'} to a branch of their own: \`git branch <branch>\` keeps every commit, with ${why.files.length > 1 ? 'them' : 'it'}, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
+  hand(`move ${why.files.length > 1 ? 'them' : 'it'} to a branch of their own: \`git branch <branch>\` keeps every commit, with ${why.files.length > 1 ? 'them' : 'it'}, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then \`yad sync-status\`, which writes again, uncommitted, an artifact's \`status:\` change the reset dropped; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
   return true;
 }
 
