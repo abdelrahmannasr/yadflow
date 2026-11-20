@@ -11,7 +11,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { c, log, ok, info, warn, hand, fail, readJSON, runLauncher, has, exists } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, readJSON, runLauncher, has, exists, writeFileAtomic } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
@@ -408,8 +408,8 @@ function wirePages(root, docs) {
   const platform = wiredPagesPlatform(docs);
   const rel = pagesWorkflowPath(platform);
   const dest = path.join(root, rel);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, pagesWorkflow(platform));
+  // No `mkdirSync` first (#235): a linked `.github/` is refused before any folder is made, never written through.
+  writeFileAtomic(dest, pagesWorkflow(platform), { within: root });
   ok(`wired ${rel} ${c.dim(`(${platform} Pages)`)}`);
   if (platform === 'gitlab') hand(`include it from .gitlab-ci.yml:  include: { local: ${rel} }`);
   else hand('commit it; set the repo Pages source to "GitHub Actions" so it publishes on push');
