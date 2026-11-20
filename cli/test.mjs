@@ -28893,6 +28893,75 @@ test('#222 doctor, setup and check read a file with readFileSync only where list
   }
 });
 
+// ---- #235 b: a team file is written only through the safe helpers (EP-safety-followups-S02) ------------
+
+// A file in the Product or a code repo is the team's: anyone who can commit there can put a link where yad
+// writes, and a plain `fs.writeFileSync` follows it. The helpers in cli/lib.mjs (`writeFileAtomic`,
+// `writeJSON`, `copyFile`, `copyDir`) refuse a linked folder (engine PR #627). So outside cli/lib.mjs a
+// `writeFileSync`, `appendFileSync`, `renameSync` or `copyFileSync` call, as `fs.x(`, `nodeFs.x(` or a bare
+// `x(`, is only for a file that is not the team's, in a file listed below with its reason. `count` pins how
+// many such calls the file has (every call on a line counts), so a NEW write in a listed file fails too. The
+// walk is the read guards' own (`engineSources`, cli/ only), so scripts/ is not scanned. A comment line is
+// prose and is not counted. Not seen here: `fs.promises.writeFile`, `fs.writeFile`, `createWriteStream`, and
+// a write reached through another name (`const w = fs.writeFileSync; w(p)`): review catches those shapes.
+const DIRECT_WRITE = /\b(?:writeFileSync|appendFileSync|renameSync|copyFileSync)\(/g;
+const DIRECT_WRITE_ALLOWED = [
+  { file: 'cli/agent-guide.mjs', count: 1, reason: 'the engine\'s own yad-guide SKILL.md, synced by scripts/agent-guide.mjs in the engine repo' },
+  { file: 'cli/brain-skills.mjs', count: 1, reason: 'the engine\'s own skills/*/SKILL.md, synced by scripts/brain-skills.mjs in the engine repo' },
+  { file: 'cli/brain.mjs', count: 3, reason: '`writePlain`, a link-safe temp file (`wx`) and rename (2); `.git/info/exclude` in the git folder, never committed (1)' },
+  { file: 'cli/epic-state.mjs', count: 1, reason: 'an artifact copied out of git into yad\'s own mkdtemp folder, to hash it' },
+  { file: 'cli/fold.mjs', count: 3, reason: 'the pathspec and message files in yad\'s own mkdtemp folder' },
+  { file: 'cli/map-view.mjs', count: 1, reason: 'the map\'s digest side file in this machine\'s reports folder (yad\'s own output), exclusive create (`wx`)' },
+  { file: 'cli/members.mjs', count: 2, reason: 'the members access cache in the git folder, never committed (1); member files from a git ref into yad\'s own mkdtemp folder (1)' },
+  { file: 'cli/plan.mjs', count: 2, reason: '`applyKeepingOwn` moves a person\'s own files aside and back by rename, each path refused by `refuseLinkedWrite` before the first move (#235)' },
+  { file: 'cli/repo-publish.mjs', count: 1, reason: 'puts back the code-map pack bytes it removed for the commit, only where no file is now' },
+  { file: 'cli/reports-dir.mjs', count: 8, reason: 'the reports folder (yad\'s own output): exclusive-create report names, the catalog lock, link-safe temp file and rename (7); the `--out` path the person names (1)' },
+  { file: 'cli/run-checks.mjs', count: 1, reason: 'the changed-paths list in yad\'s own mkdtemp scratch folder' },
+  { file: 'cli/setup.mjs', count: 3, reason: 'the package.json in yad\'s own mkdtemp Repomix folder (1); `placeFile`, a link-safe exclusive copy and rename (2)' },
+  { file: 'cli/usage.mjs', count: 1, reason: '`writeReport`, the `--out` path the person names' },
+  { file: 'cli/worktree.mjs', count: 2, reason: 'yad\'s own lines in `info/exclude`, in the git folder, never committed' },
+];
+const writeCalls = (line) => (/^\s*\/\//.test(line) ? 0 : (line.match(DIRECT_WRITE) || []).length);
+
+test('#235 b the write matcher sees each plain write, every one on a line, and none of the safe helpers', () => {
+  for (const line of ["fs.writeFileSync(p, 'x')", "writeFileSync(p, 'x')", "nodeFs.writeFileSync(p, 'x')", "fs.appendFileSync(p, 'x')", 'appendFileSync(p, s)',
+    'fs.renameSync(a, b)', 'renameSync(a, b)', 'fs.copyFileSync(a, b)', 'copyFileSync(a, b, fs.constants.COPYFILE_EXCL)', "x = fs.writeFileSync( p, 'x')"]) {
+    assert.equal(writeCalls(line), 1, line);
+  }
+  assert.equal(writeCalls('fs.writeFileSync(tmp, d); fs.renameSync(tmp, f);'), 2, 'two writes on one line count twice');
+  for (const line of ['writeFileAtomic(p, s)', 'writeJSON(p, o)', 'copyFile(a, b)', 'copyDir(a, b)', 'fs.rmSync(p)', 'fs.readFileSync(p)', 'fs.mkdirSync(d)',
+    '// fs.writeFileSync(p) in a comment', 'fs.linkSync(a, b)']) {
+    assert.equal(writeCalls(line), 0, line);
+  }
+});
+
+test('#235 b only the listed files write with plain fs, each as often as listed', () => {
+  const allowed = new Map(DIRECT_WRITE_ALLOWED.map((a) => [a.file, a]));
+  const hits = new Map();
+  const offenders = [];
+  const sources = engineSources();
+  assert.ok(sources.some((f) => f.startsWith('cli/brain/')) && sources.some((f) => f.startsWith('cli/map/')), 'the subfolders are scanned');
+  for (const rel of sources) {
+    if (rel === 'cli/lib.mjs') continue;   // the safe helpers themselves live here
+    fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+      const n = writeCalls(line);
+      if (!n) return;
+      const at = `${rel}:${i + 1}: ${line.trim()}`;
+      hits.set(rel, [...(hits.get(rel) || []), ...Array(n).fill(at)]);
+      if (!allowed.has(rel)) offenders.push(at);
+    });
+  }
+  const helpers = 'write a team file with writeFileAtomic / writeJSON / copyFile (cli/lib.mjs), which refuse a linked folder';
+  assert.deepEqual(offenders, [], `${helpers}; or, for a file that is not the team's, list it in DIRECT_WRITE_ALLOWED with its reason`);
+  assert.ok(!allowed.has('cli/lib.mjs'), 'cli/lib.mjs is not scanned, so it needs no entry');
+  for (const a of DIRECT_WRITE_ALLOWED) {
+    assert.ok(a.reason, `${a.file}: every entry says why`);
+    assert.ok(fs.existsSync(path.join(ROOT, a.file)), `${a.file}: an entry for a file that is gone`);
+    const found = hits.get(a.file) || [];
+    assert.equal(found.length, a.count, `${a.file}: ${found.length} plain writes, ${a.count} listed — ${helpers}; or, for one that is not the team's, update the entry and its reason:\n${[...new Set(found)].join('\n')}`);
+  }
+});
+
 test('E1 bin/yad.mjs: every refusal and odd case is one envelope on stdout, prose on stderr', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e1-'));
   const yad = (...args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], {
