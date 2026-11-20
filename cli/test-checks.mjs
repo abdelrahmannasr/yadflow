@@ -1122,12 +1122,18 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
   const TO_END = '"inheritedFrom":"EP-end","ref":"../../EP-end/.sdlc/contract-lock.json"';
   const NO_HASH = "and the lock there has no usable hash — a lock is one JSON object with a \"hash\": \"sha256:<64 hex>\", each key once and no backslash";
   const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // #247: a lock JSON.parse refuses is named as no JSON, one hop on (missing) or at the start (unusable).
+  const NOT_JSON = /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-h1\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), and the lock there, \S*EP-h1\/\.sdlc\/contract-lock\.json, is not valid JSON \(yad doctor cannot read it either\)/;
+  const NOT_JSON_START = /EP-demo-S01: \S*EP-demo\/\.sdlc\/contract-lock\.json is not valid JSON \(yad doctor cannot read it either\)/;
+  const hopTo = (text) => () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', text); };
   // `broken` is what resolveContractLock says (null: sound, ending at `owner`); `says` is the gate's reason.
   const cases = [
     { name: 'one hop', build: () => chain(1) },
     { name: 'two hops', build: () => chain(2) },
     { name: 'three hops', build: () => chain(3) },
     { name: `${MAX_LOCK_HOPS} hops`, build: () => chain(MAX_LOCK_HOPS) },
+    // #247: JSON over many lines with CRLF, with members nested, null, true and numbers: still one lock.
+    { name: 'a lock over many lines, with nested members', build: hopTo(`{\r\n  ${H},\r\n\t"lockedAt": null, "n": -1.5e3, "ok": true,\r\n  "by": {"who": ["a", 0, false, {}], "at": []},\r\n  ${TO_END}\r\n}\r\n`) },
     { name: 'a lock naming its owner by inheritedFrom only', build: () => { rawLock('EP-demo', `{${H},"inheritedFrom":"EP-h1"}`); pointer('EP-h1', 'EP-end'); } },
     { name: 'an epic with its own contract.md mid-chain', owner: 'EP-h1',
       build: () => { chain(2); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
@@ -1166,8 +1172,19 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
     // JSON.parse reads `hash` as a second `hash` and keeps it; a text read would keep the first.
     { name: 'an escaped key, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"h\\u0061sh":"sha256:${OTHER}",${TO_END}}`); } },
-    { name: 'a cut-off lock, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+    { name: 'a cut-off lock, one hop on', broken: 'missing', says: NOT_JSON,
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},${TO_END}`); } },
+    // #247: one object, no backslash, each key once — and still no JSON. The text reads found the hash.
+    { name: 'a missing comma between members, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H} ${TO_END}}`) },
+    { name: 'a missing comma between members, at the start', broken: 'unusable', says: NOT_JSON_START,
+      build: () => { rawLock('EP-demo', `{${H} ${TO_END}}`); } },
+    { name: 'an unclosed string, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":"2026-06-26,${TO_END}}`) },
+    { name: 'a trailing comma, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},${TO_END},}`) },
+    { name: 'an unquoted date for a value, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":2026-06-26,${TO_END}}`) },
+    { name: 'an unquoted inheritedFrom, one hop on', broken: 'missing', says: NOT_JSON,
+      build: hopTo(`{${H},"inheritedFrom":EP-end,"ref":"../../EP-end/.sdlc/contract-lock.json"}`) },
+    { name: 'a closing brace too many, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},${TO_END}}}`) },
+    { name: 'a newline inside a string, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":"2026-06\n-26",${TO_END}}`) },
     { name: 'a backslash in a ref', broken: 'missing', says: new RegExp(esc(NO_HASH)),
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"ref":"..\\\\..\\\\EP-end\\\\.sdlc\\\\contract-lock.json"}`); } },
     { name: 'a hash one hex digit short, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
@@ -1523,7 +1540,18 @@ test('contract-check gate: a product lock with no readable hash FAILs, never "ha
   assert.equal(r.code, 1, `an unparseable lock proves nothing and must not pass:\n${r.out}`);
   assert.match(r.out, /has no readable "hash": "sha256:…" value/);
   assert.doesNotMatch(r.out, /hash matches the product lock/);
+  // #247: a lock with the hash in it, but a missing comma, is no JSON — doctor's JSON.parse refuses it too.
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'), `{"hash": "sha256:${'a'.repeat(64)}" "lockedAt": "2026-06-26"}\n`);
+  const r2 = runGate(CONTRACT, T);
+  assert.equal(r2.code, 1, `a lock that is no JSON proves nothing and must not pass:\n${r2.out}`);
+  assert.match(r2.out, /FAIL \[contract-check\]: \S*product\/epics\/EP-demo\/\.sdlc\/contract-lock\.json is not valid JSON \(yad doctor cannot read it either\)/);
+  assert.doesNotMatch(r2.out, /hash matches the product lock/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The script this repo's own CI runs is the shipped template, byte for byte (#247: both copies changed).
+test('checks/contract-check.sh is the shipped template, byte for byte', () => {
+  assert.equal(fs.readFileSync(path.join(ROOT, 'checks/contract-check.sh'), 'utf8'), fs.readFileSync(CONTRACT, 'utf8'));
 });
 
 test('contract-check gate: a non-ASCII slice path still counts as the contract surface', () => {
