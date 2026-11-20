@@ -466,10 +466,27 @@ export const notPlainSaid = (e, said) => (e?.folder ? `is under ${e.folder}, a l
 // A write under a linked folder: a YAD-STATE-001 with the way out, so a command stops with a clear answer.
 // It keeps the plain read's `kind` and `folder`. Exported for a writer that moves files itself (a rename), so
 // it stops before the first move.
-export function refuseLinkedWrite(p, within) {
-  try { refuseLinkedFolder(p, within, 'write'); } catch (e) {
+export function refuseLinkedWrite(p, within) { refuseLinked(p, within, 'write'); }
+function refuseLinked(p, within, verb) {
+  try { refuseLinkedFolder(p, within, verb); } catch (e) {
     throw Object.assign(err('YAD-STATE-001', e.message, `${LINKED_FOLDER_FIX}, then run the command again`), { kind: e.kind, folder: e.folder });
   }
+}
+// A delete of a team file (#248): refused under a linked folder the way a write is — the same walk, from the
+// Product's folder (`setProductRoot`) and from the caller's own (`within`), and the same YAD-STATE-001, which
+// says "did not delete". A delete through a linked folder would remove files where the link points. Only the
+// folders on the way are checked: a link AT the path is removed as the link it is (`rmSync` and `rmdirSync`
+// never follow the last link), so what it points at stays. `force` (the default) makes a missing file fine.
+export function removeFile(p, { within, force = true } = {}) {
+  refuseLinked(p, within, 'delete');
+  fs.rmSync(p, { force });
+}
+// A folder and all it holds, or with `emptyOnly` the folder only while it is empty (`rmdirSync`: it throws
+// ENOTEMPTY otherwise). A folder that is not there is fine, except with `emptyOnly` (ENOENT, as rmdirSync).
+export function removeDir(p, { within, emptyOnly = false } = {}) {
+  refuseLinked(p, within, 'delete');
+  if (emptyOnly) fs.rmdirSync(p);
+  else fs.rmSync(p, { recursive: true, force: true });
 }
 // A Product whose `.sdlc` is a link is refused as a whole (#214): its settings decide whether the Product is
 // verified, and a lenient read of them through the link would run a verified Product as an unverified one.

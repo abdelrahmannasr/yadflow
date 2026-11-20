@@ -2035,6 +2035,68 @@ test('#214: copyFile and copyDir refuse a destination under a linked folder of t
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #248: a delete of a team file goes through removeFile / removeDir, which refuse a linked folder on the way.
+test('#248 removeFile and removeDir refuse a path under a linked folder (Product or { within }), and delete nothing where it points', { skip: E125B_SKIP }, async () => {
+  const { removeFile, removeDir } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248a-')));
+  try {
+    const P = path.join(T, 'product');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'a.json'), 'theirs');
+    fs.writeFileSync(path.join(outside, 'sub', 'b.md'), 'theirs');
+    fs.mkdirSync(path.join(outside, 'empty'));
+    fs.mkdirSync(path.join(P, 'epics', 'EP-x'), { recursive: true });
+    fs.symlinkSync(outside, path.join(P, 'epics', 'EP-x', 'reviews'));
+    const before = treeOf(outside);
+    const refused = (e) => e.code === 'YAD-STATE-001' && e.folder === 'epics/EP-x/reviews'
+      && /^epics\/EP-x\/reviews is a link, so yad did not delete epics\/EP-x\/reviews\//.test(e.message) && /git rm <folder>/.test(e.hint || '');
+    const under = (...p) => path.join(P, 'epics', 'EP-x', 'reviews', ...p);
+    setProductRoot(P);
+    try {
+      assert.throws(() => removeFile(under('a.json')), refused);
+      assert.throws(() => removeDir(under('sub')), refused);
+      assert.throws(() => removeDir(under('empty'), { emptyOnly: true }), refused);
+      assert.throws(() => removeFile(under('sub', 'b.md'), { within: P }), refused);
+    } finally { setProductRoot(null); }
+    // No Product root set: { within } alone (a code repo's folder) is checked the same way.
+    assert.throws(() => removeDir(under('sub'), { within: P }), refused);
+    assert.doesNotThrow(() => removeFile(under('a.json')), 'outside every root it names, a path is not checked (as a write)');
+    fs.writeFileSync(path.join(outside, 'a.json'), 'theirs');
+    assert.deepEqual(treeOf(outside), before, 'nothing deleted in the folder the link points at');
+
+    // A link AT the path is removed as a link: what it points at stays, for a file and for a folder.
+    const R = path.join(T, 'repo');
+    fs.mkdirSync(R);
+    fs.symlinkSync(path.join(outside, 'a.json'), path.join(R, 'file-link'));
+    fs.symlinkSync(path.join(outside, 'sub'), path.join(R, 'dir-link'));
+    fs.symlinkSync(path.join(outside, 'empty'), path.join(R, 'empty-link'));
+    removeFile(path.join(R, 'file-link'), { within: R });
+    removeDir(path.join(R, 'dir-link'), { within: R });
+    assert.throws(() => removeDir(path.join(R, 'empty-link'), { within: R, emptyOnly: true }), /ENOTDIR/, 'rmdir never follows a last link');
+    assert.deepEqual(fs.readdirSync(R), ['empty-link']);
+    assert.deepEqual(treeOf(outside), before, 'a link at the path is removed, never what it points at');
+
+    // Real folders: deleted as before. A missing path is fine, unless force is off or the folder must be empty.
+    fs.mkdirSync(path.join(R, 'd', 'e'), { recursive: true });
+    fs.writeFileSync(path.join(R, 'd', 'f.json'), '{}');
+    removeFile(path.join(R, 'd', 'f.json'), { within: R });
+    assert.throws(() => removeDir(path.join(R, 'd'), { within: R, emptyOnly: true }), /ENOTEMPTY|EEXIST/);
+    removeDir(path.join(R, 'd', 'e'), { within: R, emptyOnly: true });
+    removeDir(path.join(R, 'd'), { within: R, emptyOnly: true });
+    fs.mkdirSync(path.join(R, 'tree', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(R, 'tree', 'x', 'y'), 'y');
+    removeDir(path.join(R, 'tree'), { within: R });
+    assert.deepEqual(fs.readdirSync(R), ['empty-link']);
+    assert.doesNotThrow(() => removeFile(path.join(R, 'gone.json'), { within: R }));
+    assert.doesNotThrow(() => removeDir(path.join(R, 'gone'), { within: R }));
+    assert.throws(() => removeFile(path.join(R, 'gone.json'), { within: R, force: false }), /ENOENT/);
+    assert.throws(() => removeDir(path.join(R, 'gone'), { within: R, emptyOnly: true }), /ENOENT/);
+    fs.mkdirSync(path.join(R, 'a-folder'));
+    assert.throws(() => removeFile(path.join(R, 'a-folder'), { within: R }), (e) => e.code === 'ERR_FS_EISDIR', 'removeFile never removes a folder');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // #214 review: a caller that names the file itself names the linked folder too.
 test('#214: migrate and the local setup script name the linked folder a file is under', { skip: E125B_SKIP }, async () => {
   const { describeDrift } = await import('./migrate.mjs');
