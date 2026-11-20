@@ -1148,6 +1148,17 @@ export const MAX_JUDGED = 1_000_000;
 // under a harness's hook timeout. Each reading is linear, so a 1 MB line costs well under a second per reading.)
 export const JUDGE_BUDGET_MS = 5000;
 let deadline = Infinity;
+// The budget each judgement gets: JUDGE_BUDGET_MS, unless a test in this same process sets another (#234: a slow
+// CI runner, under coverage, took past 5 s on lines a test expects allowed, and they were refused at random).
+// Module state, never an environment variable: the hook judges in a worker thread, which loads its own copy of
+// this module and so always has JUDGE_BUDGET_MS, while a worker would inherit the environment. `ms` undefined
+// puts the real budget back; the budget it replaces is returned, for a test to put back in a `finally`.
+let budgetMs = JUDGE_BUDGET_MS;
+export function setJudgeBudgetForTests(ms) {
+  const was = budgetMs;
+  budgetMs = ms ?? JUDGE_BUDGET_MS;
+  return was;
+}
 // How many characters of `case` words one reading may scan (#498 review round 2).
 const CASE_SCAN = 1 << 20;
 const caseLeft = { n: Infinity };
@@ -1176,7 +1187,7 @@ export function agentGuardDecision(line, depth = 0, ends = undefined, redir = nu
     return { allow: false, message: `yad agent guard: this command is too long to judge (${line.length} characters, more than ${MAX_JUDGED}). Write what it carries to a file with your editor, or run it as separate commands.` };
   }
   if (depth > 0) return judgeReadings(line, depth, ends, redir);
-  deadline = Date.now() + JUDGE_BUDGET_MS;
+  deadline = Date.now() + budgetMs;
   caseLeft.n = CASE_SCAN;
   built.n = 0;
   resetFiles();

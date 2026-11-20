@@ -234,7 +234,9 @@ test('yad update brings the block to an install that predates it, beside the tea
 
 // ---- the agent guard (E158) --------------------------------------------------------------------------
 
-const { agentGuardDecision, shellParts } = await import('./agent-guard.mjs');
+const { agentGuardDecision, shellParts, setJudgeBudgetForTests, JUDGE_BUDGET_MS: REAL_BUDGET_MS } = await import('./agent-guard.mjs');
+// A judgement under a budget a test sets (#234), the real one put back after, however `fn` ends.
+const withBudget = (ms, fn) => { const was = setJudgeBudgetForTests(ms); try { return fn(); } finally { setJudgeBudgetForTests(was); } };
 const { agentGuardActions, orphanAgentGuardActions } = await import('./plan.mjs');
 const { AGENT_GUARD_ADAPTERS } = await import('./manifest.mjs');
 const { spawnSync } = await import('node:child_process');
@@ -637,7 +639,10 @@ test('the agent guard refuses every human-only yad command and every force push,
   ]) assert.equal(agentGuardDecision(cmd).allow, false, cmd.slice(-40));
 });
 
-test('the agent guard lets the rest through: reads, the agent\'s own pushes, text that only mentions a command', () => {
+// Every line here is judged with no deadline (#234): the longest take about 1.7 s under coverage on a laptop, and a
+// CI runner past three times slower passed the 5 s cut-off, which refused them. The verdict, not the time, is
+// what this test checks; the #492 and #498 tests time the guard against its real budget.
+test('the agent guard lets the rest through: reads, the agent\'s own pushes, text that only mentions a command', () => withBudget(Infinity, () => {
   for (const cmd of [
     'yad gate status EP-a',
     'yad guide --json',
@@ -1085,6 +1090,39 @@ test('#498: yad hook agent-guard judges in a worker; one that runs out of memory
   const late = await judgeInWorker(longRead, { root: os.tmpdir(), cwd: os.tmpdir() }, { wallMs: 3000 });
   assert.equal(late.pre, null, JSON.stringify(late.pre));
   if (!process.env.NODE_V8_COVERAGE) assert.equal(late.verdict.allow, true, late.verdict.message);
+});
+
+test('#234: a test can set the guard\'s budget, and the real one comes back', () => {
+  assert.equal(REAL_BUDGET_MS, 5000);
+  // A budget already spent refuses any line on its first reading, on every runner.
+  const spent = withBudget(-1, () => agentGuardDecision('npm test'));
+  assert.equal(spent.allow, false);
+  assert.match(spent.message, /took too long to judge/);
+  assert.equal(agentGuardDecision('npm test').allow, true, 'the real budget is back after withBudget');
+  // The setter hands back the budget it replaced; with no value it puts the real one back.
+  assert.equal(setJudgeBudgetForTests(123), REAL_BUDGET_MS);
+  assert.equal(setJudgeBudgetForTests(), 123);
+  assert.equal(setJudgeBudgetForTests(), REAL_BUDGET_MS);
+  // A throw inside withBudget still puts the budget back.
+  assert.throws(() => withBudget(-1, () => { throw new Error('x'); }), /x/);
+  assert.equal(agentGuardDecision('npm test').allow, true);
+});
+
+test('#234: the hook entry ignores a budget a test set: it judges with the real 5 s', async () => {
+  const { judgeInWorker, GUARD_WALL_MS } = await import('./hook.mjs');
+  assert.equal(GUARD_WALL_MS, 2 * REAL_BUDGET_MS + 2000);
+  const yadBin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'yad.mjs');
+  const was = setJudgeBudgetForTests(-1);
+  try {
+    // Here, in the test's own thread, the spent budget refuses the line...
+    assert.match(agentGuardDecision('npm test').message ?? '', /took too long to judge/, 'the test setting is in force here');
+    // ...but the hook's worker, and `yad hook agent-guard` run as the harness runs it, judge with the real budget.
+    const inWorker = await judgeInWorker('npm test', null);
+    assert.equal(inWorker.verdict.allow, true, JSON.stringify(inWorker.verdict));
+    const r = spawnSync(process.execPath, [yadBin, 'hook', 'agent-guard'], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' } }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: os.tmpdir(), YAD_HOOK_DISABLE: '' }, cwd: os.tmpdir() });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /took too long/);
+  } finally { setJudgeBudgetForTests(was); }
 });
 
 test('#498: a named pipe where a shipped check should be is not read, so pre-approval never blocks the hook', { skip: process.platform === 'win32', timeout: 20_000 }, async () => {
