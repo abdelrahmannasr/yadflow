@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
 import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
-import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush } from './productcommit.mjs';
+import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush, epicOf } from './productcommit.mjs';
 import { refreshIndexAfterWrite, INDEX_FILE } from './product-index.mjs';
 import { run } from './lib.mjs';
 import { commitAndPush } from './update-commit.mjs';
@@ -531,7 +531,7 @@ test('every commit must carry yad\'s subject, an empty one too; a file is judged
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
-test('after a refusal, the hint names `yad sync-status`, which writes again a story status the reset dropped (#245)', () => {
+test('after a refusal, the hint names `yad sync-status <epic>`, which writes again, uncommitted, a story status the reset dropped; only with a restore (#245)', () => {
   const { W, P } = workspace();
   try {
     const st = (id, type, status) => ({ id, type, artifact: id.startsWith('stories') ? 'stories/' : 'epic.md', status, risk_tags: [] });
@@ -553,7 +553,7 @@ test('after a refusal, the hint names `yad sync-status`, which writes again a st
     const r = yad(wt, 'checkpoint', '--push');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /'epics\/EP-x\/stories\/EP-x-S01\.md' is changed by the commits ahead of origin\/main/);
-    assert.match(r.out, /git reset --hard origin\/main.*git restore --worktree --source <branch> -- [^`]+`; then `yad sync-status`, which writes again, uncommitted, an artifact's `status:` change the reset dropped; then re-run/);
+    assert.match(r.out, /git reset --hard origin\/main.*git restore --worktree --source <branch> -- [^`]+`; then `yad sync-status EP-x`, which writes again a `status:` change the reset dropped — it stays uncommitted, and reaches 'main' with <branch> when that is reviewed and merged, so `git restore` it once <branch> carries it; then re-run/);
     // Followed word for word: the reset drops the flip, the restore brings the ledger back, and sync-status writes the flip again.
     const restore = r.out.match(/`(git restore --worktree --source <branch> -- [^`]+)`/)[1].replace('<branch>', 'mine');
     assert.doesNotMatch(restore, /stories/);
@@ -562,18 +562,39 @@ test('after a refusal, the hint names `yad sync-status`, which writes again a st
     execFileSync('sh', ['-c', restore], { cwd: wt, env: ENV });
     const storyFile = path.join(wt, 'epics/EP-x/stories/EP-x-S01.md');
     assert.match(fs.readFileSync(storyFile, 'utf8'), /status: draft/, 'the reset dropped the flip');
-    const s = yad(wt, 'sync-status', 'EP-x');
+    const sync = r.out.match(/`yad (sync-status [^`]+)`/)[1].split(' ');
+    const s = yad(wt, ...sync);
     assert.equal(s.code, 0, s.out);
     assert.equal(fs.readFileSync(storyFile, 'utf8'), story('approved'), 'the flip is back, without the person\'s prose');
     assert.match(git(wt, 'status', '--porcelain', '--', 'epics/EP-x/stories'), /^M epics\/EP-x\/stories\/EP-x-S01\.md$/, 'and left uncommitted, as the hint says');
+    // Nothing of yad's to restore: no ledger to read anew, so no sync-status clause.
+    git(wt, 'reset', '-q', '--hard', 'origin/main');
+    write(wt, { 'notes.md': 'mine\n' });
+    git(wt, 'add', 'notes.md');
+    git(wt, 'commit', '-qm', 'chore(gate): advance EP-x/stories on merge [skip ci]');
+    const bare = yad(wt, 'checkpoint', '--push');
+    assert.equal(bare.code, 1, bare.out);
+    assert.match(bare.out, /'notes\.md' is changed by the commits ahead of origin\/main/);
+    assert.doesNotMatch(bare.out, /git restore|sync-status/);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
-test('yad update --push judges the Product\'s commit before it leaves a Product worktree, as checkpoint does; the main checkout on main still pushes (#245)', () => {
+test('the epic named in the sync-status hint: one epic or the Product level, else none (#245)', () => {
+  assert.equal(epicOf(['epics/EP-x/.sdlc/state.json', 'epics/EP-x/reviews/epic.md', '.sdlc/index.json']), 'EP-x', 'a root file names no epic');
+  assert.equal(epicOf(['foundation/.sdlc/state.json']), 'EP-foundation');
+  assert.equal(epicOf(['epics/EP-x/.sdlc/state.json', 'epics/EP-y/.sdlc/state.json']), null, 'two epics');
+  assert.equal(epicOf(['epics/EP-x/.sdlc/state.json', 'foundation/.sdlc/state.json']), null);
+  assert.equal(epicOf(['epics/not an id/.sdlc/state.json']), null, 'not an epic id');
+  assert.equal(epicOf(['.sdlc/index.json']), null);
+  assert.equal(epicOf([]), null);
+});
+
+test('yad update refuses a detached HEAD before it stages or commits, even with --allow-branch; the main checkout on main still pushes (#245)', () => {
   const { W, P } = workspace();
   // commitAndPush runs git in this process: keep the person's own git settings (a global ignore, signing) out.
   const realEnv = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM };
   Object.assign(process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' });
+  const realLog = console.log;
   try {
     const wt = path.join(W, 'product-build');
     git(P, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
@@ -581,33 +602,32 @@ test('yad update --push judges the Product\'s commit before it leaves a Product 
     git(wt, 'config', 'user.email', 'bob@corp.io');
     const origin = path.join(W, 'product.git');
     const head = git(origin, 'rev-parse', 'main');
-    // A person's commit ahead, then the update's own: --allow-branch lets the detached HEAD past the branch check.
-    write(wt, { 'notes.md': 'mine\n' });
-    git(wt, 'add', 'notes.md');
-    git(wt, 'commit', '-qm', 'unreviewed');
+    const wtHead = git(wt, 'rev-parse', 'HEAD');
     write(wt, { '.claude/skills/x/SKILL.md': 'x\n' });
-    const code = process.exitCode;
-    const said = [];
-    const realLog = console.log;
-    let r;
-    try {
+    const group = { root: wt, paths: ['.claude/skills/x/SKILL.md'], items: ['skill x'] };
+    for (const opts of [{ push: true, allowBranch: true }, { push: true }, {}]) {
+      const said = [];
       console.log = (...a) => said.push(a.map(String).join(' '));
-      r = commitAndPush({ root: wt, paths: ['.claude/skills/x/SKILL.md'], items: ['workflow'] }, { push: true, allowBranch: true, productRoot: wt, defaultBranch: 'main' });
-      assert.equal(process.exitCode, 1);
-    } finally { console.log = realLog; process.exitCode = code; }
-    assert.deepEqual(r, { label: 'product', product: true, committed: true, pushed: false, skipped: false, error: true });
-    const out = said.join('\n');
-    assert.match(out, /not pushed to origin\/main: the commits ahead, with the one this run made, hold more than yad's own/, out);
-    assert.doesNotMatch(out, /could not push/, 'refused before any push was tried');
+      let r;
+      try { r = commitAndPush(group, { ...opts, productRoot: wt, defaultBranch: 'main' }); } finally { console.log = realLog; }
+      const out = said.join('\n');
+      assert.deepEqual(r, { label: 'product', product: true, committed: false, pushed: false, skipped: true, error: false }, out);
+      assert.match(out, /product: on a detached HEAD, not the default branch 'main' — skipped/, out);
+      assert.equal(/--allow-branch cannot apply/.test(out), !!opts.allowBranch, out);
+      assert.match(out, /run `yad update` from the main checkout on 'main'/, out);
+      assert.doesNotMatch(out, /origin\/HEAD|committed/, out);
+      assert.equal(git(wt, 'rev-parse', 'HEAD'), wtHead, 'nothing committed');
+      assert.equal(git(wt, 'diff', '--cached', '--name-only'), '', 'nothing staged');
+    }
     assert.equal(git(origin, 'rev-parse', 'main'), head, 'nothing reached origin/main');
     assert.equal(git(origin, 'for-each-ref', '--format=%(refname)', 'refs/heads/'), 'refs/heads/main', 'no branch named HEAD');
-    assert.match(git(wt, 'log', '-1', '--format=%s'), /^chore\(yad-update\): /, 'the commit stays here');
-    // The main checkout on its default branch is not judged here: the update goes up as before.
+    // The main checkout on its default branch: the update goes up as before (the recheck there lets it pass).
     write(P, { '.claude/skills/x/SKILL.md': 'x\n' });
-    r = commitAndPush({ root: P, paths: ['.claude/skills/x/SKILL.md'], items: ['workflow'] }, { push: true, productRoot: P, defaultBranch: 'main' });
+    const r = commitAndPush({ root: P, paths: ['.claude/skills/x/SKILL.md'], items: ['skill x'] }, { push: true, productRoot: P, defaultBranch: 'main' });
     assert.equal(r.pushed, true);
     assert.equal(git(origin, 'rev-parse', 'main'), git(P, 'rev-parse', 'HEAD'));
   } finally {
+    console.log = realLog;
     for (const [k, v] of Object.entries(realEnv)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     fs.rmSync(W, { recursive: true, force: true });
   }

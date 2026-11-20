@@ -270,9 +270,18 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const target = defaultBranch || resolveDefaultBranch(git);
 
+  // A detached HEAD is refused before anything is staged, even with --allow-branch, as `guardDefaultBranch`
+  // refuses it (#597, #245): the push goes to the branch HEAD is on, and a detached HEAD is on none. A Product
+  // worktree sits detached, so the update is run from the main checkout instead.
+  if (branch === 'HEAD') {
+    warn(`${label}: on a detached HEAD, not the default branch '${target}' — skipped${allowBranch ? ' (--allow-branch cannot apply: a detached HEAD is on no branch)' : ''}`);
+    hand(`${label}: run \`yad update\` from the main checkout on '${target}', or check out '${target}' here (\`git switch ${target}\`) and run it again`);
+    return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
+  }
   if (branch !== target) {
     if (allowBranch) {
-      warn(`${label}: on '${branch}', not default '${target}' — --allow-branch: commit/push go to origin/${branch}`);
+      // A named branch, never HEAD (refused above): the push really goes to origin/<that branch>.
+      warn(`${label}: on '${branch}', not default '${target}' — --allow-branch: commit/push go to origin/${branch}, not '${target}'`);
     } else {
       warn(`${label}: on '${branch}', not the default branch '${target}' — skipped (switch to '${target}' or pass --allow-branch)`);
       return { label, product: isProduct, committed: false, pushed: false, skipped: true, error: false };
@@ -302,10 +311,10 @@ export function commitAndPush(group, { push = false, allowBranch = false, produc
   ok(`${label}: committed ${staged.length} file(s)`);
 
   if (!push) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: false };
-  // #245: the Product's commit is judged with every other commit ahead before it leaves a Product worktree, as
-  // `yad checkpoint --push` judges its own. Only a detached HEAD there is judged (one --allow-branch let past
-  // the branch check above), and a refusal keeps the commit here, unpushed. A code repo's worktree is not the
-  // Product's, so it is not judged by the Product's rules.
+  // #245: a guard only, as `yad checkpoint --push` has. The recheck judges a detached HEAD in a Product worktree,
+  // and the HEAD check above means none reaches here; if one ever did, the recheck could only refuse it, since an
+  // update commit is not one of yad's own default-branch commits. A refusal keeps the commit here, unpushed. A
+  // code repo's worktree is not the Product's, so it is not judged by the Product's rules.
   if (isProduct && !recheckBeforePush(root, git, target)) return { label, product: isProduct, committed: true, pushed: false, skipped: false, error: true };
   if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, product: isProduct, committed: true, pushed: true, skipped: false, error: false }; }
   // The commit already landed locally — a re-run of `yad update --push` would see no drift and skip

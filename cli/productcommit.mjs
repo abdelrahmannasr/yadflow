@@ -7,6 +7,7 @@ import { SETTINGS_EDIT_HINT, settingsEditHint, PACK_IGNORE_BLOCK } from './manif
 import fs from 'node:fs';
 import path from 'node:path';
 import { worktreeAt, linkedGitDir, WORKTREE_RECORD } from './worktree-record.mjs';
+import { isValidEpicId, FOUNDATION_EPIC, FOUNDATION_DIR } from './epic-state.mjs';
 
 export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
@@ -243,12 +244,28 @@ export function onlyYadCommitsAhead(git, defaultBranch, opts = {}) {
   return notYadsOwnAhead(git, defaultBranch, opts) === null;
 }
 
+// The one epic yad's own files belong to (`epics/<id>/…`, or `foundation/…` for the Product level), or null when
+// they name none or more than one. A root file (the index, the registry) belongs to no epic and is passed over.
+export function epicOf(files) {
+  const ids = new Set();
+  for (const f of files) {
+    if (f.startsWith(`${FOUNDATION_DIR}/`)) ids.add(FOUNDATION_EPIC);
+    else {
+      const m = f.match(/^epics\/([^/]+)\//);
+      if (m) ids.add(isValidEpicId(m[1]) ? m[1] : null);
+    }
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+}
+
 // When a Product worktree is refused for files yad does not write (#231), name them all, and say how to keep
 // them on a branch of their own while yad's own files go up. Every commit ahead is kept on that branch; HEAD
-// goes back to the tip; yad's files come back uncommitted; `yad sync-status` writes again, uncommitted, an
-// artifact's `status:` change the reset dropped (a story flip in a file that is also the person's is not
-// restored) (#245); and the yad command commits yad's files again. Reads the local origin/<default> (the refusal just fetched it) unless the
-// caller passes what it read. True when it printed. Names are printed through forTerminal, so a name holding a control character is shown, not run.
+// goes back to the tip; yad's files come back uncommitted; and the yad command commits them again. A `status:`
+// change in a file that is also the person's is not restored, so the hint names `yad sync-status`, which
+// writes it again, uncommitted: it reaches the default branch with the person's branch, once that is reviewed
+// and merged (#245). Reads the local origin/<default> (the refusal just fetched it) unless the caller passes
+// what it read. True when it printed. Names are printed through forTerminal, so a name holding a control
+// character is shown, not run.
 export function explainForeignFile(git, defaultBranch, why = notYadsOwnAhead(git, defaultBranch, { fetch: false })) {
   if (!why?.file) return false;
   const d = forTerminal(defaultBranch);
@@ -256,10 +273,13 @@ export function explainForeignFile(git, defaultBranch, why = notYadsOwnAhead(git
   fail(why.link
     ? `${names} ${why.files.length > 1 ? 'are' : 'is'} in the commits ahead of origin/${d}, and yad never writes a symlink or a submodule (or the other files) — they are not pushed to '${d}'`
     : `${names} ${why.files.length > 1 ? 'are' : 'is'} changed by the commits ahead of origin/${d}, and yad does not write ${why.files.length > 1 ? 'them' : 'it'} — they are not pushed to '${d}'`);
+  // The status clause comes only with the restore: without yad's files back there is no ledger to read anew.
+  const epic = epicOf(why.yadFiles);
   const restore = why.yadFiles.length
     ? `; bring yad's own files back, uncommitted: \`git restore --worktree --source <branch> -- ${why.yadFiles.map((x) => forTerminal(sq(literal(x)))).join(' ')}\``
+      + `; then \`yad sync-status${epic ? ` ${epic}` : ''}\`, which writes again a \`status:\` change the reset dropped — it stays uncommitted, and reaches '${d}' with <branch> when that is reviewed and merged, so \`git restore\` it once <branch> carries it`
     : '';
-  hand(`move ${why.files.length > 1 ? 'them' : 'it'} to a branch of their own: \`git branch <branch>\` keeps every commit, with ${why.files.length > 1 ? 'them' : 'it'}, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then \`yad sync-status\`, which writes again, uncommitted, an artifact's \`status:\` change the reset dropped; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
+  hand(`move ${why.files.length > 1 ? 'them' : 'it'} to a branch of their own: \`git branch <branch>\` keeps every commit, with ${why.files.length > 1 ? 'them' : 'it'}, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
   return true;
 }
 
