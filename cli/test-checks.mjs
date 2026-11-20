@@ -8049,3 +8049,84 @@ test('#433 merged results: the gates judge only the MR\'s own commits when HEAD 
     assert.doesNotMatch(msg.out, new RegExp(`\\b(${bad.merge}|${bad.theirs})\\b`), msg.out);
   } finally { fs.rmSync(bad.T, { recursive: true, force: true }); }
 });
+
+// ---- #618: one rule for a trailing `# comment`, in every frontmatter reader -------------------------
+// The engine reads frontmatter in JS (parseFrontmatter, which the gate also reads through; the progress
+// map's frontmatterText; doctor's yamlList) and the check gates read it in bash (fm_val, and link_val's
+// whole-file fallback). They must cut the same comment. Each row is the text after `key:` and the value
+// with its comment cut; every reader is then held to its own view of that one value. Each reader trims
+// only spaces and tabs, as `fm_strip` does, so a value of one no-break space is kept. No row has a CR:
+// `parseFrontmatter` does not read a line that ends in one (a CRLF file reads as empty), which is older
+// than #618 and outside it; the bash gates and the map do read CRLF files.
+const FM_COMMENT_ROWS = [
+  [' x # who', 'x'],
+  [' x\t# who', 'x'],
+  [' [a, b]  # note', '[a, b]'],
+  [' a#b', 'a#b'],
+  [' https://x.test/a#frag', 'https://x.test/a#frag'],
+  [' "a # b"', '"a # b"'],
+  [" 'a # b' # n", "'a # b'"],
+  [" 'it''s # x' # y", "'it''s # x'"],
+  [' "a \\" # b" # c', '"a \\" # b"'],
+  [" O'Brien # x", "O'Brien"],
+  [' [a, "b # c"] # n', '[a, "b # c"]'],
+  [' # only a comment', ''],
+  ['#x', '#x'],
+  [' Fix issue #12', 'Fix issue'],
+  [' plain', 'plain'],
+  [' plain  ', 'plain'],
+  [' "a # b', '"a # b'],             // a quote never closed: everything after it is inside it
+  [' "a\\', '"a\\'],                  // a backslash at the very end escapes nothing
+  [' a\t#\tb', 'a'],
+  [" 'x'#y", "'x'#y"],               // no space before the `#`
+  [' é # x', 'é'],
+  [' \u00a0', '\u00a0'],             // a no-break space is not trimmed
+];
+
+test('#618: every frontmatter reader cuts the same trailing `# comment` (one table, JS and bash)', async () => {
+  const { parseFrontmatter, readFrontmatter } = await import('./epic-state.mjs');
+  const { touchedDomains } = await import('./gate.mjs');
+  const { yamlList } = await import('./doctor.mjs');
+  const { frontmatterText } = await import('./map.mjs');
+  const asList = (v) => v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
+  const isList = (v) => /^\[.*\]$/.test(v);
+  const unquote = (s) => s.replace(/^["']|["']$/g, '');
+  // The four gates that share the link.md block, each in its shipped template and in this repo's copy.
+  const gates = ['contract-check.sh', 'lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh']
+    .flatMap((g) => [path.join(CHECKS, g), path.join(ROOT, 'checks', g)]);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-fm618-'));
+  try {
+    for (const [raw, cut] of FM_COMMENT_ROWS) {
+      const say = JSON.stringify(raw);
+      const text = `---\nk:${raw}\n---\n`;
+      const want = isList(cut) ? asList(cut) : cut;
+      assert.deepEqual(parseFrontmatter(text).k, want, `parseFrontmatter ${say}`);
+      const file = path.join(T, 'f.md');
+      fs.writeFileSync(file, text);
+      assert.deepEqual(readFrontmatter(file).k, want, `readFrontmatter ${say}`);
+      assert.deepEqual(frontmatterText(text).k, isList(cut) ? want : cut.replace(/^"(.*)"$/, '$1'), `map ${say}`);
+      // yamlList trims each ITEM in full (an item is never a whole value), so a no-break space alone goes.
+      assert.deepEqual(yamlList(raw, []), (isList(cut) ? asList(cut) : cut ? [cut] : []).map((x) => unquote(x.trim())).filter(Boolean), `yamlList ${say}`);
+      if (isList(cut)) {
+        // The gate's own touched-domains read goes through readFrontmatter too.
+        const ep = path.join(T, 'EP-x');
+        fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
+        fs.writeFileSync(path.join(ep, 'stories', 'S01.md'), `---\nrepos:${raw}\n---\n`);
+        assert.deepEqual(touchedDomains(ep, { id: 'stories-review' }), want, `gate ${say}`);
+      }
+      // A link.md with no frontmatter: link_val's whole-file fallback.
+      const bare = path.join(T, 'bare.md');
+      fs.writeFileSync(bare, `k:${raw}\n`);
+      for (const g of gates) {
+        const src = fs.readFileSync(g, 'utf8');
+        const defs = src.split('\n').filter((l) => /^(fm_val|fm_strip)\(\) \{/.test(l));
+        assert.equal(defs.length, 2, `${g}: fm_val and fm_strip`);
+        const start = src.indexOf('\nlink_val() {');
+        const linkVal = src.slice(start, src.indexOf('\n}\n', start) + 3);
+        const r = spawnSync('bash', ['-c', `${defs.join('\n')}\n${linkVal}\nprintf '%s|' "$(fm_val k "$1")"; link_val k "$2"`, 'x', file, bare], { encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout, `${cut}|${cut}`, `${path.relative(ROOT, g)} ${say}`);
+      }
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

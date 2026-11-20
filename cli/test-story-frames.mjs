@@ -147,7 +147,9 @@ test('#354: doctor — no row without frames, an ok row with a count, one warn r
     assert.match(row.message, /^1 story\(ies\) record design frames.*; 1 story\(ies\) say they have no screens/);
   } finally { done(T); }
 
-  T = product({ 'EP-shop-S01': `${FRAMES_KEY}: [12:34] # cart`, 'EP-shop-S02': `${FRAMES_KEY}: [77:1]` });
+  // #618: a `# cart` with a space before it is a comment and is cut off, so the list reads. A `#` with
+  // no space before it is kept, which turns the list into text: that is the trap still reported.
+  T = product({ 'EP-shop-S01': `${FRAMES_KEY}: [12:34]#cart`, 'EP-shop-S02': `${FRAMES_KEY}: [77:1]`, 'EP-shop-S03': `${FRAMES_KEY}: [12:34] # cart` });
   try {
     const rows = run(T);
     assert.equal(rows.length, 1);
@@ -155,7 +157,8 @@ test('#354: doctor — no row without frames, an ok row with a count, one warn r
     assert.match(rows[0].message, /^2 problem/);
     assert.match(rows[0].message, /EP-shop-S01: .*#/);
     assert.match(rows[0].message, /EP-shop-S02: .*77:1/);
-    assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => s.findings[0].kind), ['commented', 'not-found']);
+    assert.doesNotMatch(rows[0].message, /EP-shop-S03/);
+    assert.deepEqual(allStoryFrames(T, ['EP-shop']).map((s) => s.findings[0]?.kind), ['commented', 'not-found', undefined]);
   } finally { done(T); }
 });
 

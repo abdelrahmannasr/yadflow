@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
-import { epicIds, epicRoot, loadLedger, readFrontmatter, FOUNDATION_EPIC } from './epic-state.mjs';
+import { epicIds, epicRoot, loadLedger, readFrontmatter, stripFrontmatterComment, FOUNDATION_EPIC } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { readOwners } from './owners.mjs';
@@ -44,14 +44,15 @@ const json = (t) => { try { return JSON.parse(t); } catch { return null; } };
 export const compiles = (pattern) => { try { new RegExp(pattern, 'i'); return true; } catch { return false; } };
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function frontmatterText(md) {
+// A trailing `# comment` is cut by the rule every frontmatter reader shares (#618).
+export function frontmatterText(md) {
   const out = {};
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(md || '');
   if (!m) return out;
   for (const l of m[1].split(/\r?\n/)) {
-    const k = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(l);
+    const k = /^([A-Za-z_][\w-]*):(.*)$/.exec(l);
     if (!k) continue;
-    let v = k[2].trim();
+    let v = stripFrontmatterComment(k[2]).replace(/^[ \t]+|[ \t]+$/g, '');
     if (/^\[.*\]$/.test(v)) v = v.slice(1, -1).split(',').map((x) => x.trim()).filter(Boolean);
     else v = v.replace(/^"(.*)"$/, '$1');
     out[k[1]] = v;

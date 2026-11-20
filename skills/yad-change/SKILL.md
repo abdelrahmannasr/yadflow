@@ -112,10 +112,11 @@ has a `theme:`, copy the spelling **exactly** onto this one, so the change group
 changes. If the parent has none, leave `theme:` empty. Never invent a new spelling of an existing
 theme — `yad doctor` reports that, because two spellings group as two themes. Write the tag bare, with
 no `#`: `yad next` and `yad thread` print it as `#checkout-revamp`, but that `#` is decoration on the
-screen and is kept as part of the value if it lands in the file.
+screen. Copied into the file, `theme: #checkout-revamp` is a YAML comment, so the epic has no theme at
+all (`yad doctor` warns), and a `#` with no space before it is kept as part of the tag.
 
 **Write `title:` in `epic.md` too**, with the same words as the `title` input. It is the name a list of
-work items shows for this change (E111). Write it on ONE line, as plain words. If it begins with `[` and ends with `]` (such as `[Mobile] Checkout [v2]`), wrap the whole title in double quotes, writing an inner `"` as `\"` — otherwise it is read as a list, which is not a title. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML block (`>` or `|`): only one line is read. "The same words" means the title as it READS: quotes you add around it in `epic.md` are not part of it, so do not copy them into `change.json`. The full rules are the `title` row of the `epic.md` frontmatter table in `../yad-epic/references/state-schema.md`. Set it now — the
+work items shows for this change (E111). Write it on ONE line, as plain words. If it begins with `[` and ends with `]` (such as `[Mobile] Checkout [v2]`), wrap the whole title in double quotes, writing an inner `"` as `\"` — otherwise it is read as a list, which is not a title. A `#` with a space before it starts a comment that is cut off (`Fix #42` reads as `Fix`), so quote a title that holds one, and never use a YAML block (`>` or `|`): only one line is read. "The same words" means the title as it READS: quotes you add around it in `epic.md` are not part of it, so do not copy them into `change.json`. The full rules are the `title` row of the `epic.md` frontmatter table in `../yad-epic/references/state-schema.md`. Set it now — the
 review gate is bound to a hash of the file, so a title changed after approval drops the approval.
 
 

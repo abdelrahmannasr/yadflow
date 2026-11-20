@@ -72,7 +72,17 @@ EXEMPT='ci|chore|build|test|docs'
 # at the first closing fence), so a body `---` or an absent key can never leak a body line. Plain
 # scalars only; trailing spaces/CR are stripped so they never become part of a path. The CR goes BEFORE
 # the fences are matched: a CRLF file's `---\r` is no fence, and every key in it read as empty (E117 r2).
-fm_val() { awk -v k="$1" '{ sub(/\r$/, "") } NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r' | sed -E 's/[[:space:]]+$//'; }
+# A trailing `# comment` is cut by fm_strip (#618), so `kind: defect # note` reads as `defect`.
+fm_val() { awk -v k="$1" '{ sub(/\r$/, "") } NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {print substr($0, length(k) + 2); exit}' "$2" 2>/dev/null | fm_strip; }
+
+# Cut a trailing YAML comment off the value on stdin (the text right after `key:`), then trim it. The
+# same rule as stripFrontmatterComment in the engine's cli/epic-state.mjs, character for character: a
+# comment is a `#` with a space or tab before it (the space after the colon counts, so `key: # note`
+# is empty) that is outside quotes, so `a#b` and `"a # b"` keep their `#`. A quote opens only at the
+# start of the value or after a space, tab, `[` or `,` (the apostrophe in `O'Brien` opens nothing);
+# inside double quotes a backslash escapes the next character, and inside single quotes `''` is one
+# quote, as in YAML. POSIX awk only.
+fm_strip() { awk '{ sub(/\r$/, ""); v = $0; q = ""; n = length(v); for (i = 1; i <= n; i++) { ch = substr(v, i, 1); p = (i > 1) ? substr(v, i - 1, 1) : ""; if (q != "") { if (q == "\"" && ch == "\\") i++; else if (q == "\047" && ch == "\047" && substr(v, i + 1, 1) == "\047") i++; else if (ch == q) q = ""; continue } if ((ch == "\"" || ch == "\047") && (i == 1 || index(" \t[,", p) > 0)) { q = ch; continue } if (ch == "#" && (p == " " || p == "\t")) { v = substr(v, 1, i - 1); break } } sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }'; }
 
 # Same, for a link.md field. yad-spec writes link.md WITH frontmatter, but code repos still carry
 # pre-frontmatter ones that contract-check used to read with a whole-file scan — so fall back to that
@@ -80,7 +90,7 @@ fm_val() { awk -v k="$1" '{ sub(/\r$/, "") } NR==1 && /^---$/ {f=1; next} f && /
 # from fm_val: Product artifacts (epic.md, stories/*.md) stay bounded to their first block.
 link_val() {
   _v="$(fm_val "$1" "$2")"
-  [ -n "$_v" ] || _v="$(sed -nE "s/^$1:[[:space:]]*(.*)\$/\1/p" "$2" 2>/dev/null | head -1 | tr -d '\r' | sed -E 's/[[:space:]]+$//')"
+  [ -n "$_v" ] || _v="$(sed -nE "s/^$1:(.*)\$/\1/p" "$2" 2>/dev/null | head -1 | fm_strip)"
   printf '%s' "$_v"
 }
 

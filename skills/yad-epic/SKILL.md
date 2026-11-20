@@ -123,15 +123,16 @@ Adopt the **pm** lens and write `{project-root}/epics/EP-<slug>/epic.md`
 using EXACTLY this template (build plan §6b).
 
 **Five of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
-frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) keep the whole rest of
-the line, so a comment becomes part of the value and the gates stop recognising it:
+frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) cut a `# comment` with a
+space before it (#618), but a code repo whose check gates `yad update` has not refreshed yet still keeps
+the whole rest of the line, so there a comment becomes part of the value and the gates stop recognising it:
 
 - `title` is the epic's **one-line name** — the name a list of work items shows for it (E111; it is carried in `.sdlc/index.json`). Plain words,
   such as `Checkout from the mobile app`, on ONE line. Quotes are optional: a title quoted the YAML way
   (`"…"` or `'…'`) is read without them. If the title begins with `[` and ends with `]` (such as
   `[Mobile] Checkout [v2]`), wrap it in double quotes, writing an inner `"` as `\"` — otherwise it is
   read as a list, which is not a title. The full rules are the `title` row of the frontmatter table in
-  `references/state-schema.md`. Never end it with a `#` comment (the comment becomes part of the title), and never use a YAML
+  `references/state-schema.md`. A `#` with a space before it starts a comment that is cut off (`Fix #42 in the queue` reads as `Fix`), so quote a title that holds one; never use a YAML
   block (`>` or `|`): only one line is read. Set it NOW, for the same reason as the theme below: the epic review gate is bound to a hash of
   the file, so a title added or reworded after that gate is approved drops the approval as stale. An
   epic with no title is shown by its id.
@@ -149,8 +150,9 @@ the line, so a comment becomes part of the value and the gates stop recognising 
   two ways, because two spellings group as two themes). Leave the key empty when there is no group.
   Write ONE tag, never a list — `theme: [a, b]` is read as no theme at all — and never write a `#`:
   `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, but the `#` is decoration on the
-  screen, and anything from a `#` onward is kept as part of the value, so the epic then groups only
-  with epics carrying that exact text. Any language is fine. Set it NOW, while the epic
+  screen. Written into the file, `theme: #checkout-revamp` is a YAML comment, so the epic has no theme
+  at all, and a `#` with no space before it is kept as part of the tag, so the epic then groups only
+  with epics carrying that exact text (`yad doctor` warns on both). Any language is fine. Set it NOW, while the epic
   is being written: the epic review gate is bound to a hash of the file (all of it except the `status:` line), so adding a theme after
   that gate is approved drops the approval as stale and the step has to be approved again.
 

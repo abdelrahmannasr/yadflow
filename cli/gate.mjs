@@ -15,7 +15,7 @@ import {
   upsertProductPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards, recordSoloRereview, soloRereviewDue,
-  reopenStep, retiredPr, epicLineage, heldByReopen, reopenStampDue, stampPassed, isGateStep,
+  reopenStep, retiredPr, epicLineage, heldByReopen, reopenStampDue, stampPassed, isGateStep, readFrontmatter,
 } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
@@ -68,21 +68,6 @@ export function closedLine(closed) {
   return `closed${date ? ` on ${date}` : ''} — ${how}${waived}${capped}${by ? `; recorded by ${by}` : ''}`;
 }
 
-// ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
-function frontmatter(file) {
-  if (!fs.existsSync(file)) return {};
-  const m = fs.readFileSync(file, 'utf8').match(/^---\n([\s\S]*?)\n---/);
-  if (!m) return {};
-  const out = {};
-  for (const line of m[1].split('\n')) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/);
-    if (!kv) continue;
-    const [, k, v] = kv;
-    out[k] = /^\[.*\]$/.test(v) ? v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean) : v.trim();
-  }
-  return out;
-}
-
 // Touched domains, resolved from files (gating.md): stories => union of every story's repos; a step
 // carrying a risk tag (architecture's `contract`) => epic.repos; otherwise none. The stories clause is
 // checked FIRST and on its own: it used to live inside `isEscalated`, which E62 narrowed to risk tags.
@@ -92,20 +77,20 @@ export function touchedDomains(epicDir, step) {
     if (!fs.existsSync(dir)) return [];
     const set = new Set();
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.md'))) {
-      for (const r of (frontmatter(path.join(dir, f)).repos || [])) set.add(r);
+      for (const r of (readFrontmatter(path.join(dir, f)).repos || [])) set.add(r);
     }
     return [...set];
   }
   if (!isEscalated(step)) return [];
-  return frontmatter(path.join(epicDir, 'epic.md')).repos || [];
+  return readFrontmatter(path.join(epicDir, 'epic.md')).repos || [];
 }
 
 // The artifact owner shown in the review PR/MR body. Feature epics carry it in epic.md; the Product
 // level has no epic.md, so fall back to roadmap.md's frontmatter owner — a section the Foundation and
 // its old `EP-discovery` spelling both have, under that same name, in their own folder.
 const ownerOf = (epicDir) =>
-  frontmatter(path.join(epicDir, 'epic.md')).owner
-  || frontmatter(path.join(epicDir, 'roadmap.md')).owner
+  readFrontmatter(path.join(epicDir, 'epic.md')).owner
+  || readFrontmatter(path.join(epicDir, 'roadmap.md')).owner
   || '<owner>';
 
 // A null architecture hash with a BEGIN marker present means the surface block is malformed

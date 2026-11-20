@@ -13626,24 +13626,31 @@ test('doctor theme: a theme in any script groups normally and is never called un
   assert.equal(mixed.find((x) => x.id === 'theme:variants')?.status, 'warn');
 });
 
-test('doctor theme: a `#` in the tag is reported as a comment, not as unreadable', async () => {
-  // The `#` case is NOT unreadable: `themeOf` hands the value back verbatim, so the tag IS read and
-  // does group — with the note attached. Two epics carrying `theme: x # note` group together, and
-  // neither groups with a plain `theme: x`. Calling that "nothing can read it" would send the reader
+test('doctor theme: a `#` left in the tag is reported as a comment, not as unreadable', async () => {
+  // The readers cut a `#` with a space or tab before it (#618), so `theme: x # note` is plain `x` and
+  // `theme: #x` is no theme at all, as in YAML. That second one is the form `yad next` prints, so it is
+  // reported too: a `theme:` that is only a comment. A real comment (`# none yet`) is not. A `#` they keep — one with no space before it, or one
+  // inside quotes — is NOT unreadable: `themeOf` hands the value back verbatim, so the tag IS read and
+  // does group, with the note attached. Calling that "nothing can read it" would send the reader
   // looking for a missing theme that is present but polluted.
   const checks = await themeChecksOn({
-    'EP-c': { fm: 'kind: feature\ntheme: #checkout-revamp' },
-    'EP-e': { fm: 'kind: feature\ntheme: checkout-revamp # the big one' },
+    'EP-c': { fm: 'kind: feature\ntheme: checkout-revamp#the-big-one' },
+    'EP-e': { fm: 'kind: feature\ntheme: checkout-revamp # the big one' },   // cut: plain checkout-revamp
     'EP-d': { fm: 'kind: feature\ntheme: checkout-revamp' },
-    'EP-f': { fm: 'kind: feature\ntheme: ###' },     // symbols AND a `#` — the comment report wins
+    'EP-f': { fm: 'kind: feature\ntheme: "##"' },     // symbols AND a `#` — the comment report wins
+    'EP-g': { fm: 'kind: feature\ntheme: #checkout-revamp' },   // wholly a comment: no theme, and said
+    'EP-h': { fm: 'kind: feature\ntheme: # none yet' },           // a real comment: no theme, nothing said
   });
   const c = checks.find((x) => x.id === 'theme:commented');
   assert.equal(c.status, 'warn');
   assert.equal(c.section, 'shape');
-  assert.match(c.message, /EP-c: `theme: #checkout-revamp`/);
-  assert.match(c.message, /EP-e: `theme: checkout-revamp # the big one`/);
-  assert.match(c.message, /EP-f: `theme: ###`/, 'symbols AND a `#`: the comment report is the actionable one');
+  assert.match(c.message, /EP-c: `theme: checkout-revamp#the-big-one`/);
+  assert.match(c.message, /EP-f: `theme: "##"`/, 'symbols AND a `#`: the comment report is the actionable one');
+  assert.match(c.message, /1 epic\(s\) have a `theme:` that is only a comment, so they have no theme: EP-g: `theme: #checkout-revamp`/);
+  assert.doesNotMatch(c.message, /EP-e|EP-h/, 'a cut comment after a tag, or a real comment, leaves nothing to report');
   assert.match(c.hint, /decoration on the screen/);
+  assert.match(c.hint, /this whole value is a YAML comment/);
+  assert.match(c.hint, /write the tag bare, without the `#`/);
   assert.equal(checks.find((x) => x.id === 'theme:unreadable'), undefined, 'it reads fine; it is just polluted');
   // …and it is NOT also called a spelling variant of the clean tag beside it, which would be true and
   // would name the wrong problem.
@@ -27657,6 +27664,27 @@ test('E111 titleOf: the frontmatter key, then change.json, then null — normali
   for (const change of [null, [], 'x', { title: 7 }, { title: '' }, {}]) assert.equal(titleOf({}, change), null, `no title in ${JSON.stringify(change)}`);
   assert.equal(titleOf(), null);
   assert.equal(FOUNDATION_TITLE, 'Foundation');
+});
+
+test('#618 parseFrontmatter: a trailing `# comment` is cut before the value is read', () => {
+  const fm = (body) => parseFrontmatter(`---\n${body}\n---\n`);
+  assert.deepEqual(fm('domain: [a, b]  # note').domain, ['a', 'b'], 'a list stays a list');
+  assert.equal(fm('owner: x # who').owner, 'x');
+  assert.equal(fm('owner: x\t# who').owner, 'x', 'a tab before the `#` counts');
+  assert.equal(fm('theme: a#b').theme, 'a#b', 'no space before the `#`: part of the value');
+  assert.equal(fm('source: https://x.test/a#frag').source, 'https://x.test/a#frag');
+  assert.equal(fm('title: "a # b"').title, '"a # b"', 'inside double quotes: kept');
+  assert.equal(fm("title: 'a # b' # n").title, "'a # b'", 'inside single quotes: kept; the comment after them is cut');
+  assert.equal(fm("title: 'it''s # x'").title, "'it''s # x'", "YAML's `''` does not close the quotes");
+  assert.equal(fm('title: "a \\" # b"').title, '"a \\" # b"', 'an escaped quote does not close them');
+  assert.equal(fm("owner: O'Brien # x").owner, "O'Brien", 'an apostrophe inside a word opens no quote');
+  assert.deepEqual(fm('repos: [a, "b # c"] # n').repos, ['a', '"b # c"']);
+  assert.equal(fm('parent: # fill in later').parent, '', 'only a comment after the key: an empty value, as in YAML');
+  assert.equal(fm('theme:#x').theme, '#x', 'no space after the colon: no comment');
+  assert.deepEqual(fm('# a note\nkind: feature'), { kind: 'feature' }, 'a line that is only a comment sets nothing');
+  assert.equal(fm('title: Fix issue #12').title, 'Fix issue', 'as in YAML — quote a title that holds ` #`');
+  // The epic-state reader and the gate's are one reader (gate.mjs reads through readFrontmatter).
+  assert.equal(fm('kind: defect # a bug').kind, 'defect');
 });
 
 test('E111 buildIndex: each item carries its title; a broken change.json leaves it null, never unreadable', () => {

@@ -3998,7 +3998,7 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
 
 // ---- Phase 6: feature threads (lineage frontmatter on epic.md) -----------------------------------
 
-// Minimal frontmatter reader (key: value, and `inherits: [a, b]` arrays). Mirrors gate.mjs's reader so
+// Minimal frontmatter reader (key: value, and `inherits: [a, b]` arrays). The gate reads with it too, so
 // the thread helpers and the gate agree on the same parse; shared here as the lineage source.
 export function readFrontmatter(file) {
   if (!fs.existsSync(file)) return {};
@@ -4012,12 +4012,40 @@ export function parseFrontmatter(text) {
   if (!m) return {};
   const out = {};
   for (const line of m[1].split('\n')) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/);
+    const kv = line.match(/^(\w[\w-]*):(.*)$/);
     if (!kv) continue;
-    const [, k, v] = kv;
-    out[k] = /^\[.*\]$/.test(v) ? v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean) : v.trim();
+    const k = kv[1];
+    // Spaces and tabs only, as the bash gates' `fm_strip` trims: a no-break space is part of the value.
+    const v = stripFrontmatterComment(kv[2]).replace(/^[ \t]+|[ \t]+$/g, '');
+    out[k] = /^\[.*\]$/.test(v) ? v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean) : v;
   }
   return out;
+}
+
+// Cut a trailing YAML comment off a frontmatter value (issue #618). `raw` is the text right after
+// `key:`, untrimmed. A comment is a `#` with a space or tab before it (the space after the colon
+// counts, so `key: # note` is empty, as in YAML) that is outside quotes; `a#b` and `"a # b"` keep their
+// `#`. A quote opens only where a YAML scalar or list item can start — the start of the value, or after
+// a space, a tab, `[` or `,` — so the apostrophe in `O'Brien # x` opens nothing. Inside double quotes a
+// backslash escapes the next character; inside single quotes `''` is one quote, as in YAML. The bash
+// check gates' `fm_strip` (checks/*.sh) is this same rule, character for character: change one and
+// change the other.
+export function stripFrontmatterComment(raw) {
+  const s = String(raw);
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const prev = i ? s[i - 1] : '';
+    if (quote) {
+      if (quote === '"' && ch === '\\') i++;
+      else if (quote === "'" && ch === "'" && s[i + 1] === "'") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if ((ch === '"' || ch === "'") && (i === 0 || ' \t[,'.includes(prev))) { quote = ch; continue; }
+    if (ch === '#' && (prev === ' ' || prev === '\t')) return s.slice(0, i);
+  }
+  return s;
 }
 
 const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
