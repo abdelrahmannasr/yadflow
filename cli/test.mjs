@@ -29244,8 +29244,9 @@ test('#235 b only the listed files write with plain fs, each as often as listed'
 // below with its reason. `count` pins how many such calls the file has (every call on a line counts), so a
 // NEW delete in a listed file fails too. The walk is the read guards' own (`engineSources`, cli/ only). A
 // comment line is prose and is not counted. Not seen here: `fs.rm`, `fs.unlink`, `fs.promises.rm`, a delete
-// reached through another name, and `rmTree` (cli/lib.mjs: it checks nothing; cli/migrate.mjs calls it):
-// review catches those shapes. Counts are per file, so swapping one delete for another in the same file is
+// reached through another name, and `rmTree` (cli/lib.mjs: it checks nothing): review catches those shapes.
+// `rmTree`'s callers are checked by hand: cli/migrate.mjs (`applyProductMove`) refuses a linked folder on the
+// way before its first copy (`linkedMoveFolder`, #248), so its `rmTree` calls remove only real folders. Counts are per file, so swapping one delete for another in the same file is
 // not caught; review catches that.
 const DIRECT_DELETE = /\b(?:rmSync|unlinkSync|rmdirSync)\(/g;
 const DIRECT_DELETE_ALLOWED = [
