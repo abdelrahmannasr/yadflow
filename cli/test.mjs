@@ -17666,6 +17666,51 @@ test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its r
   }
 });
 
+// #246 (EP-review-followups-S02): the pack put back after the commit is written only where nothing stands, by
+// `writeFileAtomic`. A link at the pack's path, dangling, is something there: `existsSync` followed it and
+// read it as no file, so the pack's bytes went wherever it pointed. A linked folder on the way is refused the
+// same way. A post-commit hook makes the link in the window between the pack's removal and its return.
+for (const [what, hook, said, fix] of [
+  ['a dangling link at a pack path', (pack, outside) => `ln -s '${path.join(outside, 'written-through')}' '${pack}'`,
+    /the code-map pack \.sdlc\/code-context\/backend\/pack\.md was not put back after the commit: a link now stands at that path/,
+    /move what stands at \.sdlc\/code-context\/backend\/pack\.md aside if it is not yours, then run `yad repo refresh` to make the pack again/],
+  ['a linked folder on the way to a pack', (pack, outside) => `mv '${path.dirname(pack)}' '${path.dirname(pack)}.aside' && ln -s '${outside}' '${path.dirname(pack)}'`,
+    /the code-map pack \.sdlc\/code-context\/backend\/pack\.md was not put back after the commit: \.sdlc\/code-context\/backend is a link, so yad did not write/,
+    /remove the link \(`git rm <folder>`\).*, then run `yad repo refresh` to make the pack again/],
+]) {
+  test(`#246 publishCodeContext: ${what} is not written through, and the pack not put back is named`, { skip: E125B_SKIP }, async () => {
+    const prev = process.exitCode;
+    const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-pack-outside-'));
+    const pack = path.join(T, '.sdlc/code-context/backend/pack.md');
+    try {
+      process.exitCode = 0;
+      fs.mkdirSync(path.dirname(pack), { recursive: true });
+      fs.writeFileSync(pack, '# stale pack\n');
+      git(T, 'add', '.sdlc/code-context/backend/pack.md');
+      git(T, 'commit', '-q', '-m', 'legacy: track pack');
+      fs.writeFileSync(pack, '# regenerated pack\n');
+      fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
+      ensurePackIgnored(T);
+      const hooks = path.join(T, '.git', 'hooks');
+      fs.mkdirSync(hooks, { recursive: true });
+      fs.writeFileSync(path.join(hooks, 'post-commit'), `#!/bin/sh\n${hook(pack, outside)}\n`, { mode: 0o755 });
+      git(T, 'config', 'core.hooksPath', hooks);   // this Product's own hooks, whatever the machine's git says
+      const out = await grab(() => publishCodeContext(T, { push: false }));
+
+      assert.match(git(T, 'diff-tree', '--no-commit-id', '--name-status', '-r', 'HEAD').toString(), /^D\s+\.sdlc\/code-context\/backend\/pack\.md$/m, 'the commit still records the pack\'s removal');
+      assert.deepEqual(fs.readdirSync(outside), [], 'nothing written through the link');
+      assert.ok(fs.lstatSync(path.join(T, '.sdlc/code-context/backend')).isSymbolicLink() || fs.lstatSync(pack).isSymbolicLink(), 'the link is left as it is');
+      assert.match(out, said);
+      assert.match(out, fix);
+      assert.ok(!process.exitCode, 'the commit went through: the pack is a cache, so it is named, not failed');
+    } finally {
+      process.exitCode = prev;
+      for (const d of [T, backend, productBare, beBare, outside]) fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+}
+
 // Invariant 1: the audit commit must never sweep unrelated work — not a pre-staged file, and not an
 // unrelated edit to the Product `.gitignore` (which a naive `git add .gitignore` would combine with the
 // managed pack glob). Invariant: the user's INDEX is left untouched (no whole-index reset), matching
@@ -28893,6 +28938,59 @@ test('#222 doctor, setup and check read a file with readFileSync only where list
   }
 });
 
+// ---- #246: `writePlain` refuses a linked folder itself (EP-review-followups-S02) --------------------------
+
+// `writePlain` writes the Product's .sdlc/brain/ files. It relied on each caller checking the folder with
+// `plainDirs` first; it now writes through `writeFileAtomic`, which refuses a linked folder on the way. So a
+// call with a folder nobody checked still puts nothing where the link points.
+test('#246 writePlain refuses a linked .sdlc/brain/ folder and writes nothing through it', { skip: E125B_SKIP }, async () => {
+  const { writePlain } = await import('./brain.mjs');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-brainlink-')));
+  const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-brainlink-other-')));
+  try {
+    fs.mkdirSync(path.join(root, '.sdlc'));
+    fs.symlinkSync(other, path.join(root, '.sdlc', 'brain'));
+    assert.throws(() => writePlain(path.join(root, '.sdlc', 'brain'), 'graph.json', '{}\n', { within: root }),
+      (e) => e.code === 'YAD-STATE-001' && /^\.sdlc\/brain is a link, so yad did not write \.sdlc\/brain\/graph\.json/.test(e.message) && e.folder === '.sdlc/brain');
+    assert.deepEqual(fs.readdirSync(other), [], 'nothing written through the link, not even a temp file');
+    // A plain folder is written as before: the whole file, and no temp file left beside it.
+    fs.rmSync(path.join(root, '.sdlc', 'brain'));
+    fs.mkdirSync(path.join(root, '.sdlc', 'brain'));
+    writePlain(path.join(root, '.sdlc', 'brain'), 'graph.json', '{}\n', { within: root });
+    assert.deepEqual(fs.readdirSync(path.join(root, '.sdlc', 'brain')), ['graph.json']);
+    assert.equal(fs.readFileSync(path.join(root, '.sdlc', 'brain', 'graph.json'), 'utf8'), '{}\n');
+  } finally {
+    for (const d of [root, other]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// `writeOwnFile` writes the `--html` page at the path the person names. Inside the Product (once a command set its
+// root) a linked folder on the way, the page's own folder too, is refused and comes back as a problem, never a
+// throw; outside the Product the same link is the person's choice and the page is written where it points.
+test('#246 writeOwnFile refuses a linked folder inside the Product as a problem, and writes nothing through it', { skip: E125B_SKIP }, async () => {
+  const { writeOwnFile } = await import('./local-page.mjs');
+  const { LINKED_FOLDER_FIX } = await import('./lib.mjs');
+  const P = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ownpage-')));
+  const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ownpage-other-')));
+  const page = path.join(P, 'mylink', 'page.html');
+  try {
+    fs.symlinkSync(other, path.join(P, 'mylink'));
+    setProductRoot(P);
+    try {
+      const problem = writeOwnFile(page, '<p>x</p>');
+      assert.equal(typeof problem, 'string', 'a problem, not a throw');
+      assert.match(problem, /^mylink is a link, so yad did not write mylink\/page\.html .* — name another path \(or /);
+      assert.ok(problem.includes(LINKED_FOLDER_FIX), 'the way out is named');
+      assert.deepEqual(fs.readdirSync(other), [], 'nothing written through the link');
+    } finally { setProductRoot(null); }
+    // With no Product root set, the folder is the person's own: the page goes where the link points.
+    assert.equal(writeOwnFile(page, '<p>x</p>'), null);
+    assert.equal(fs.readFileSync(path.join(other, 'page.html'), 'utf8'), '<p>x</p>');
+  } finally {
+    for (const d of [P, other]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // ---- #235 b: a team file is written only through the safe helpers (EP-safety-followups-S02) ------------
 
 // A file in the Product or a code repo is the team's: anyone who can commit there can put a link where yad
@@ -28909,13 +29007,12 @@ const DIRECT_WRITE = /\b(?:writeFileSync|appendFileSync|renameSync|copyFileSync)
 const DIRECT_WRITE_ALLOWED = [
   { file: 'cli/agent-guide.mjs', count: 1, reason: 'the engine\'s own yad-guide SKILL.md, synced by scripts/agent-guide.mjs in the engine repo' },
   { file: 'cli/brain-skills.mjs', count: 1, reason: 'the engine\'s own skills/*/SKILL.md, synced by scripts/brain-skills.mjs in the engine repo' },
-  { file: 'cli/brain.mjs', count: 3, reason: '`writePlain` writes team files in the Product\'s .sdlc/brain/ (and the `--html` page) by a temp file (`wx`) and a rename (2); it does not refuse a linked folder itself, so every caller must pass a folder checked by `plainDirs`. `.git/info/exclude` in the git folder, never committed (1)' },
+  { file: 'cli/brain.mjs', count: 1, reason: '`.git/info/exclude` in the git folder, never committed' },
   { file: 'cli/epic-state.mjs', count: 1, reason: 'an artifact copied out of git into yad\'s own mkdtemp folder, to hash it' },
   { file: 'cli/fold.mjs', count: 3, reason: 'the pathspec and message files in yad\'s own mkdtemp folder' },
   { file: 'cli/map-view.mjs', count: 1, reason: 'the map\'s digest side file in this machine\'s reports folder (yad\'s own output), exclusive create (`wx`)' },
   { file: 'cli/members.mjs', count: 2, reason: 'the members access cache in the git folder, never committed (1); member files from a git ref into yad\'s own mkdtemp folder (1)' },
   { file: 'cli/plan.mjs', count: 2, reason: '`applyKeepingOwn` moves a person\'s own files aside and back by rename, each path refused by `refuseLinkedWrite` before the first move (#235)' },
-  { file: 'cli/repo-publish.mjs', count: 1, reason: 'writes a team file: puts back a code-map pack in the Product, whose bytes it removed for the commit, only where no file is now; `writeFileAtomic` could replace it (a follow-up)' },
   { file: 'cli/reports-dir.mjs', count: 8, reason: 'the reports folder (yad\'s own output): exclusive-create report names, the catalog lock, link-safe temp file and rename (7); the `--out` path the person names (1)' },
   { file: 'cli/run-checks.mjs', count: 1, reason: 'the changed-paths list in yad\'s own mkdtemp scratch folder' },
   { file: 'cli/setup.mjs', count: 3, reason: 'the package.json in yad\'s own mkdtemp Repomix folder (1); `placeFile` puts the pack at the `-o` path the person names (`yad repo pack -o`), by an exclusive copy and a rename, after the caller checked its folder (2)' },
