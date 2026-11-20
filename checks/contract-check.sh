@@ -628,12 +628,28 @@ resolve_product() {
   esac
 }
 
-# The `"hash": "sha256:<hex>"` of a contract-lock.json, hex only. Newline-tolerant, first match: the key
-# and its value may legally sit on separate lines. Empty when there is none (`|| true`: under `pipefail`
-# a no-match grep would fail the pipeline).
-lock_hash() { tr '\n' ' ' < "$1" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]+"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/' || true; }
-# One string value of a lock file ($2 = its key), the same newline-tolerant way. Empty when absent.
-lock_str() { tr '\n' ' ' < "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true; }
+# Can the lock file $1 be read by its text, the way JSON.parse reads it (#233)? These reads are not a JSON
+# parser, so a lock is read only when its text, trimmed, is one object (`{` … `}`), holds no backslash
+# (an escaped key or value reads one way here and another there), and names `hash`, `ref` and
+# `inheritedFrom` at most once each (JSON.parse keeps the LAST of a repeated key, a text read the first).
+# `resolveContractLock` in cli/epic-state.mjs refuses the same locks.
+lock_ok() {
+  local _lt _lk
+  _lt="$(tr '\n' ' ' < "$1" 2>/dev/null)" || return 1
+  _lt="${_lt#"${_lt%%[![:space:]]*}"}"; _lt="${_lt%"${_lt##*[![:space:]]}"}"
+  case "$_lt" in '{'*'}') ;; *) return 1 ;; esac
+  case "$_lt" in *'\'*) return 1 ;; esac
+  for _lk in hash ref inheritedFrom; do
+    [ "$(printf '%s' "$_lt" | grep -oE "\"${_lk}\"[[:space:]]*:" | awk 'END { print NR }')" -le 1 ] || return 1
+  done
+}
+# The `"hash": "sha256:<64 hex>"` of a contract-lock.json, hex only. Newline-tolerant: the key and its
+# value may legally sit on separate lines. Empty when there is none, or when the lock cannot be read by
+# its text (`lock_ok`) (`|| true`: under `pipefail` a no-match grep would fail the pipeline).
+lock_hash() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]{64}"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/' || true; }
+# One string value of a lock file ($2 = its key), the same newline-tolerant way. Empty when absent, or
+# when the lock cannot be read by its text.
+lock_str() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true; }
 
 # The lines of a contract.md's CONTRACT-SURFACE block, as yadflow hashes them (contractSurfaceHash in
 # cli/epic-state.mjs): a CR before the newline dropped, every line once with its newline.
@@ -654,8 +670,8 @@ abs_fold() (
   done
   printf '%s' "${_o:-/}"
 )
-# Text read from a file, safe to print on a terminal: control characters dropped.
-term_safe() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177'; }
+# Text read from a file, safe to print on a terminal: only printable ASCII is kept.
+term_safe() { printf '%s' "$1" | LC_ALL=C tr -cd '\040-\176'; }
 
 # The most pointer locks one walk follows: MAX_LOCK_HOPS in cli/epic-state.mjs. An epic ID's shape:
 # isValidEpicId there, with the letters spelled out so no locale widens them.
@@ -673,8 +689,11 @@ _epic_re='^EP-[abcdefghijklmnopqrstuvwxyz0123456789-]+$'
 #   * an epic seen twice is a loop, and more than $_max_lock_hops hops is refused;
 #   * each lock's hash must equal the hash of the lock that points at it.
 # The caller has read the first lock's hash. On a break this says where, naming the hop, and returns 1.
-# Sets `_wvia` (` (hop N: EP-a → EP-b)`, empty when no pointer was followed) for the caller's messages.
+# Sets `_wvia` (` (hop N: EP-a → EP-b)`, empty when no pointer was followed) for the caller's messages;
+# every other name it uses is `local`.
 lock_walk() {
+  local _ws _wid _wprod _wabs _wepics _wepicsp _wchain _wseen _whops _wprev _wprevh _wprevl _wprevref _wfix
+  local _wd _wx _wk _wp _wwhat _wl _wh _wref _wfrom _wt _wn _we
   _ws="$1"; _wid="$2"; _wprod="$3"
   case "$_wprod" in /*) _wabs="$_wprod" ;; *) _wabs="$(pwd)/$_wprod" ;; esac
   _wepics="$(abs_fold "${_wabs}/epics")"
@@ -695,6 +714,10 @@ lock_walk() {
     _wl="${_wd}/.sdlc/contract-lock.json"
     _wh=""; if [ -f "$_wl" ]; then _wh="$(lock_hash "$_wl")" || _wh=""; fi
     if [ -n "$_wprev" ]; then
+      if [ -z "$_wh" ] && [ -f "$_wl" ]; then
+        echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and the lock there has no usable hash — a lock is one JSON object with a \"hash\": \"sha256:<64 hex>\", each key once and no backslash; lock ${_wid}'s contract again upstream (yad-architecture Step 5), or ${_wfix#— } ${_wprevl}."
+        return 1
+      fi
       if [ -z "$_wh" ]; then
         echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and there is no lock there ${_wfix} ${_wprevl} (the yad-change skill writes them)."
         return 1
