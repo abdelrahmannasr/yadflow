@@ -40,7 +40,7 @@
 #
 # Token: CI_JOB_TOKEN can neither read the approvals API nor push to a protected branch. Create a
 # PROJECT ACCESS TOKEN with `read_api` + `write_repository` (role Developer+, allowed to push to the
-# default branch — the merge advance pushes there) and store it as a masked CI/CD variable
+# default branch, or to the YAD_TRUNK branch when it is set — the merge advance pushes there) and store it as a masked CI/CD variable
 # SDLC_GATE_TOKEN. Without it the job fails visibly; recover by setting the token, then re-run the
 # pipeline or run `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default
 # branch (advisory `yad gate sync` is read-only in verified mode and cannot recover a stuck gate).
@@ -93,6 +93,11 @@ yad-gate-sync:
       files: [.sdlc/cli-version.json, .sdlc/product.json]
     paths: [.npm/_cacache/]
   rules:
+    # With YAD_TRUNK naming another branch, a push anywhere else never runs this job (#232): a promotion
+    # push to the default branch whose tip names a review branch would otherwise run the merge path there
+    # and fail. Unset or empty, this rule never matches.
+    - if: $CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH != $YAD_TRUNK
+      when: never
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\/EP-/

@@ -30,14 +30,14 @@
 #
 # A trunk that is not GitHub's default branch (#232): a team whose trunk (the branch named in the
 # Product's .sdlc/product.json) is another branch sets a repository variable YAD_TRUNK to it — in the
-# settings, never in this file, which `yad update` rewrites. The merge job needs nothing: it runs on every
-# merged review PR, whatever branch it merged into, and checks out that branch. The reconcile job then
+# settings, never in this file, which `yad update` rewrites. The merge job then runs only for a review PR
+# merged into that branch (unset, for one merged into any branch), and checks out that branch. The reconcile job
 # checks out the YAD_TRUNK branch instead of the default branch, and `yad gate ci` pushes the advance to
 # the trunk the Product names. Unset, the variable is '', and the job checks out the default branch as before.
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
-# Protected default branch? Only these jobs push there, and the built-in Actions token cannot get past
+# Protected default branch (or YAD_TRUNK branch)? Only these jobs push there, and the built-in Actions token cannot get past
 # branch protection or a ruleset: a ruleset's bypass list takes actors such as roles, teams and GitHub
 # Apps, never GitHub Actions. So give the push a token whose owner may bypass, and pass it to actions/checkout
 # below via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }`:
@@ -75,7 +75,8 @@ jobs:
     if: >
       github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.head.ref, 'review/EP-') &&
-      github.event.pull_request.merged == true
+      github.event.pull_request.merged == true &&
+      (vars.YAD_TRUNK == '' || github.event.pull_request.base.ref == vars.YAD_TRUNK)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Serialize every advance with the reconcile job — they all push the default branch.

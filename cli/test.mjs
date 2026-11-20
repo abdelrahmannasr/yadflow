@@ -29145,15 +29145,25 @@ test('#232: the gate sync follows the YAD_TRUNK branch when it is set, and the d
     '${{ vars.YAD_TRUNK || github.event.repository.default_branch }}',
   ]);
   assert.match(github, /\non:\n {2}pull_request:\n {4}types: \[closed\]\n {2}schedule:\n/, 'no branch filter, no push trigger');
-  assert.equal((github.match(/YAD_TRUNK/g) || []).length, 1, 'read once, in the checkout, never in a run: block');
+  // The merge job runs only for a review merged into the YAD_TRUNK branch, when it is set.
+  const mergeIf = github.match(/^ {2}mergesync:\n[\s\S]*?^ {4}if: >\n((?: {6}.+\n)+)/m);
+  assert.ok(mergeIf, 'the merge job\'s if:');
+  assert.match(mergeIf[1], /github\.event\.pull_request\.merged == true &&\n {6}\(vars\.YAD_TRUNK == '' \|\| github\.event\.pull_request\.base\.ref == vars\.YAD_TRUNK\)\n$/);
+  // Read only in that if: and the reconcile checkout, never in a run: block.
+  assert.equal((github.match(/YAD_TRUNK/g) || []).length, 3);
+  for (const m of github.matchAll(/^( +)run: \|\n((?:\1 {2}.*\n|\s*\n)*)/gm)) assert.doesNotMatch(m[2], /YAD_TRUNK/);
 
   const gitlab = code(read('gitlab/yad-gate-sync.gitlab-ci.yml'));
   const rules = gitlab.slice(gitlab.indexOf('\n  rules:\n'), gitlab.indexOf('\n  script:\n'));
   assert.deepEqual([...rules.matchAll(/^ {4}- if: (.+)$/gm)].map((m) => m[1]), [
+    '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH != $YAD_TRUNK',
     '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
     '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
     '$CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"',
   ]);
+  // A push to another branch than YAD_TRUNK never runs the job; unset, that first rule never matches.
+  assert.match(rules, /^ {4}- if: \$CI_PIPELINE_SOURCE == "push" && \$YAD_TRUNK && \$CI_COMMIT_BRANCH != \$YAD_TRUNK\n {6}when: never\n {4}- if: /m);
+  assert.equal((rules.match(/when: /g) || []).length, 1, 'only the never rule sets when:');
   assert.doesNotMatch(gitlab, /^\s+YAD_TRUNK:/m, 'the value is the team\'s, set in the settings');
   // Every fetch and checkout goes to the one branch the script picks.
   const moves = [...gitlab.matchAll(/git (?:fetch|checkout)\b.*$/gm)].map((m) => m[0]);
