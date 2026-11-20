@@ -26,7 +26,7 @@ import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWit
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
-import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, diffIsStatusOnly, frontmatterEnd } from './productcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, blobChangeIsYads, blobAt, recheckBeforePush } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
@@ -153,8 +153,8 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
 // edit fails, so only a clean flip is carried into the `[skip ci]` chore commit; anything broader is
 // left for a reviewed change (#112 review-bypass guard). `git` is a productGit-style accessor.
 export function stagedStoryIsStatusOnly(git, file) {
-  const d = git('diff', '--cached', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', '--', `:(literal)${file}`);
-  return d.ok && diffIsStatusOnly(d.stdout, { oldEnd: frontmatterEnd(git, 'HEAD', file), newEnd: frontmatterEnd(git, '--cached', file) });
+  // HEAD's copy and the index's, diffed by blob id: no pathspec setting or file-name spelling can miss it.
+  return blobChangeIsYads(git, 'status', blobAt(git, 'HEAD', file), blobAt(git, '', file));
 }
 
 // --retro-ship orchestration (#142): validate the target, then write the retroactive ship shard so the
@@ -397,6 +397,8 @@ export async function runCheckpoint(root, opts = {}) {
   // Push HEAD to its OWN branch — never to `defaultBranch` blindly. On the default branch these are the
   // same; with --allow-branch on a WIP branch, pushing HEAD:defaultBranch would publish the whole WIP
   // branch to the default branch (bypassing review), so the target is always the branch we are on.
+  // #231 review: the commit this run made is judged too, before anything leaves a Product worktree.
+  if (!recheckBeforePush(root, git, branch)) return { ...done, pushed: false };
   if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { ...done, pushed: true }; }
   fail(`could not push to origin/${branch} — a protected branch, or the append-only ledgers hit an unresolvable rebase conflict`);
   hand(`run \`git pull --rebase\` and re-run \`yad checkpoint --push\``);

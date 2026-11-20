@@ -127,75 +127,114 @@ export function diffAddsManagedIgnoreOnly(diff) {
   return changes.every(({ sign, text }) => sign === '+' && (text.trim() === '' || managed.has(text.trim())));
 }
 
-// The line number of the frontmatter's closing `---` in `file` at `rev` (or in the index with `--cached`),
-// 0 when it has none. Read with git grep's line numbers, so no blank line or trimmed output can shift it.
-export function frontmatterEnd(git, rev, file) {
-  const at = rev === '--cached' ? ['--cached'] : [rev];
-  const r = git('grep', '-n', '--no-column', '--no-color', '-e', '^---$', ...at, '--', literal(file));
+// The line number of the closing `---` of the frontmatter in the blob `blob`, 0 when it has none (or the blob
+// cannot be read). The blob is read by id, so no pathspec setting or file-name spelling can make it miss.
+// The output is trimmed by run(): a blob that starts with blank lines then `---` reads as frontmatter at
+// line 1, which only shifts the range earlier than the diff's real line numbers — a refusal, never a pass.
+export function blobFrontmatterEnd(git, blob) {
+  if (!blob || /^0+$/.test(blob)) return 0;
+  const r = git('cat-file', 'blob', blob);
   if (!r.ok) return 0;
-  const lines = r.stdout.split('\n').map((l) => Number((l.match(/:(\d+):---$/) || [])[1])).filter(Boolean);
-  return lines[0] === 1 && lines[1] ? lines[1] : 0;
+  const lines = r.stdout.split('\n');
+  if (lines[0] !== '---') return 0;
+  const close = lines.indexOf('---', 1);
+  return close > 0 ? close + 1 : 0;
 }
 
-// Each commit's own patch of `file` passes `check` — not only their sum, which a later commit could undo.
-function everyCommitPasses(git, range, file, check) {
-  const shas = git('rev-list', range, '--', literal(file));
-  if (!shas.ok) return false;
-  return shas.stdout.split('\n').filter(Boolean).every((sha) => {
-    const d = git('diff', '-U0', ...DIFF_OPTS, `${sha}^`, sha, '--', literal(file));
-    if (!d.ok) return false;
-    if (check !== diffIsStatusOnly) return check(d.stdout);
-    return check(d.stdout, { oldEnd: frontmatterEnd(git, `${sha}^`, file), newEnd: frontmatterEnd(git, sha, file) });
-  });
+// The blob ids of `file` at `rev` (`:` for the index) — for checkpoint's staged story check. Null when absent.
+export function blobAt(git, rev, file) {
+  const r = git('rev-parse', '--verify', '--quiet', `${rev}:${file}`);
+  return r.ok && r.stdout ? r.stdout : null;
+}
+
+// True iff the change from blob `oldBlob` to blob `newBlob` passes: only `status:` lines inside the
+// frontmatter of both (`kind: 'status'`), or only managed lines added to `.gitignore` (`kind: 'ignore'`, where
+// a new file must hold nothing else). Diffed by blob id: no path lookup, no textconv, no external diff.
+export function blobChangeIsYads(git, kind, oldBlob, newBlob) {
+  const none = (b) => !b || /^0+$/.test(b);
+  if (none(newBlob)) return false; // a deletion is never one of yad's
+  if (none(oldBlob)) {
+    if (kind !== 'ignore') return false; // a new artifact is all prose
+    const r = git('cat-file', 'blob', newBlob);
+    if (!r.ok) return false;
+    const managed = new Set(PACK_IGNORE_BLOCK.map((l) => l.trim()));
+    const body = r.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+    return body.length > 0 && body.every((l) => managed.has(l));
+  }
+  const d = git('diff', '-U0', '--no-ext-diff', '--no-textconv', '--no-color', oldBlob, newBlob);
+  if (!d.ok) return false;
+  if (kind === 'ignore') return diffAddsManagedIgnoreOnly(d.stdout);
+  return diffIsStatusOnly(d.stdout, { oldEnd: blobFrontmatterEnd(git, oldBlob), newEnd: blobFrontmatterEnd(git, newBlob) });
+}
+
+// PURE — the records of `git log -z --raw --no-abbrev --no-renames --format=%x00%H`: each commit's files as
+// [{ commit, oldMode, newMode, oldBlob, newBlob, status, file }]. Null on any token that is not a commit id,
+// a raw entry with its path, or the separators between them — unknown is not safe.
+export function parseRawLog(out) {
+  const tokens = String(out ?? '').split('\0');
+  const entries = [];
+  let commit = null;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (/^\n*$/.test(t)) continue;
+    if (/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(t)) { commit = t; continue; }
+    const m = t.match(/^\n?:(\d{6}) (\d{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([A-Z])\d*$/);
+    const file = tokens[i + 1];
+    if (!m || !commit || !file) return null;
+    entries.push({ commit, oldMode: m[1], newMode: m[2], oldBlob: m[3], newBlob: m[4], status: m[5], file });
+    i++;
+  }
+  return entries;
 }
 
 // Why HEAD's commits ahead of origin/<default> are not all yad's own — null when they are. `{ subject }`: a
-// commit whose subject is not one yad writes; `{ merge }`: a merge commit, which yad never makes; `{ file }`:
-// a file one of the commits touches that yad does not write there (#231) — an amended yad commit that carries
-// a person's edit, even one a later commit takes out again, as the push carries every commit; `link: true`
-// when it is a symlink or a submodule. With a file, `yadFiles` lists the files of yad's own the commits
-// touch that HEAD or origin/<default> holds (the hint restores them). `{ unknown: true }`: the fetch or a
-// read failed — unknown is not safe.
+// commit whose subject is not one yad writes (an empty one too); `{ merge }`: a merge commit, which yad never
+// makes; `{ file, files }`: files the commits touch that yad does not write there (#231) — an amended yad
+// commit that carries a person's edit, even one a later commit takes out again, as the push carries every
+// commit; `link: true` when the first is a symlink or a submodule. With files, `yadFiles` lists the files of
+// yad's own the commits touch that HEAD or origin/<default> holds, never a foreign one (the hint restores
+// them). `{ unknown: true }`: the fetch or a read failed — unknown is not safe.
 export function notYadsOwnAhead(git, defaultBranch, { fetch = true } = {}) {
   if (fetch && !git('fetch', '--quiet', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`).ok) return { unknown: true };
   const range = `origin/${defaultBranch}..HEAD`;
-  const ahead = git('log', '--format=%s', range);
+  // One record per commit, so a commit with an empty message is a record with an empty subject, not a gap.
+  const ahead = git('log', '-z', '--no-show-signature', '--format=%H%x1f%s', range);
   if (!ahead.ok) return { unknown: true };
-  const subjects = ahead.stdout.split('\n').filter(Boolean);
-  const subject = subjects.find((s) => !YAD_COMMIT_SUBJECT.test(s));
-  if (subject !== undefined) return { subject };
-  if (!subjects.length) return null;
+  const records = ahead.stdout.split('\0').filter((r) => r !== '');
+  for (const rec of records) {
+    const cut = rec.indexOf('\x1f');
+    if (cut < 0) return { unknown: true };
+    const subject = rec.slice(cut + 1);
+    if (!YAD_COMMIT_SUBJECT.test(subject)) return { subject };
+  }
+  if (!records.length) return null;
   const merges = git('rev-list', '--min-parents=2', range);
   if (!merges.ok) return { unknown: true };
   if (merges.stdout) return { merge: merges.stdout.split('\n')[0] };
-  // Every file any commit touches, with its modes: `:<old> <new> <sha> <sha> <status>\0<path>\0`.
-  const raw = git('log', '-z', '--raw', '--format=', ...DIFF_OPTS, range);
-  if (!raw.ok) return { unknown: true };
-  const files = new Map();
-  const tokens = raw.stdout.split('\0');
-  for (let i = 0; i < tokens.length; i++) {
-    const meta = tokens[i].replace(/^\n+/, '');
-    if (!meta.startsWith(':')) continue;
-    const file = tokens[++i];
-    if (file === undefined) return { unknown: true };
-    const [oldMode, newMode] = meta.slice(1).split(' ');
-    const link = LINK_MODES.has(oldMode) || LINK_MODES.has(newMode);
-    files.set(file, (files.get(file) || false) || link);
+  const raw = git('log', '-z', '--raw', '--no-abbrev', '--format=%x00%H', '--no-show-signature', ...DIFF_OPTS, range);
+  const entries = raw.ok ? parseRawLog(raw.stdout) : null;
+  if (!entries) return { unknown: true };
+  const foreign = [];
+  const judged = new Map();
+  let link = false;
+  for (const e of entries) {
+    if (foreign.includes(e.file)) continue;
+    const isLink = LINK_MODES.has(e.oldMode) || LINK_MODES.has(e.newMode);
+    if (isLink) { if (!foreign.length) link = true; foreign.push(e.file); continue; }
+    if (YAD_WRITTEN.some((re) => re.test(e.file))) continue;
+    const kind = e.file === '.gitignore' ? 'ignore' : STATUS_FLIP.test(e.file) ? 'status' : null;
+    const key = `${kind}:${e.oldBlob}:${e.newBlob}`; // one change seen in many commits is judged once
+    if (kind && !judged.has(key)) judged.set(key, blobChangeIsYads(git, kind, e.oldBlob, e.newBlob));
+    if (!kind || !judged.get(key)) foreign.push(e.file);
   }
-  let foreign = null;
-  for (const [file, link] of files) {
-    if (link) { foreign = { file, link: true }; break; }
-    if (YAD_WRITTEN.some((re) => re.test(file))) continue;
-    const check = file === '.gitignore' ? diffAddsManagedIgnoreOnly : STATUS_FLIP.test(file) ? diffIsStatusOnly : null;
-    if (!check || !everyCommitPasses(git, range, file, check)) { foreign = { file }; break; }
-  }
-  if (!foreign) return null;
+  if (!foreign.length) return null;
   const held = new Set();
   for (const rev of ['HEAD', `origin/${defaultBranch}`]) {
     const t = git('ls-tree', '-r', '-z', '--name-only', rev);
     if (t.ok) for (const f of t.stdout.split('\0')) if (f) held.add(f);
   }
-  return { ...foreign, yadFiles: [...files.keys()].filter((f) => f !== foreign.file && held.has(f)) };
+  const touched = [...new Set(entries.map((e) => e.file))];
+  return { file: foreign[0], files: foreign, ...(link ? { link: true } : {}), yadFiles: touched.filter((f) => !foreign.includes(f) && held.has(f)) };
 }
 
 // HEAD holds nothing origin/<default> lacks but yad's own `[skip ci]` commits, touching only the files yad
@@ -204,23 +243,40 @@ export function onlyYadCommitsAhead(git, defaultBranch, opts = {}) {
   return notYadsOwnAhead(git, defaultBranch, opts) === null;
 }
 
-// When a Product worktree is refused for a file yad does not write (#231), say which, and how to keep it on a
-// branch of its own while yad's own files go up. Every commit ahead is kept on that branch; HEAD goes back to
-// the tip; yad's files come back uncommitted, and the yad command commits them again. Reads the local
-// origin/<default> (the refusal just fetched it). True when it printed. Names are printed through
-// forTerminal, so a name holding a control character is shown, not run, as it is.
-export function explainForeignFile(git, defaultBranch) {
-  const why = notYadsOwnAhead(git, defaultBranch, { fetch: false });
+// When a Product worktree is refused for files yad does not write (#231), name them all, and say how to keep
+// them on a branch of their own while yad's own files go up. Every commit ahead is kept on that branch; HEAD
+// goes back to the tip; yad's files come back uncommitted, and the yad command commits them again. Reads the
+// local origin/<default> (the refusal just fetched it) unless the caller passes what it read. True when it
+// printed. Names are printed through forTerminal, so a name holding a control character is shown, not run.
+export function explainForeignFile(git, defaultBranch, why = notYadsOwnAhead(git, defaultBranch, { fetch: false })) {
   if (!why?.file) return false;
-  const [f, d] = [forTerminal(why.file), forTerminal(defaultBranch)];
+  const d = forTerminal(defaultBranch);
+  const names = why.files.map((x) => `'${forTerminal(x)}'`).join(', ');
   fail(why.link
-    ? `'${f}' is a symlink or a submodule in the commits ahead of origin/${d}, and yad never writes one — they are not pushed to '${d}'`
-    : `'${f}' is changed by the commits ahead of origin/${d}, and it is not a file yad writes — they are not pushed to '${d}'`);
+    ? `${names} ${why.files.length > 1 ? 'are' : 'is'} in the commits ahead of origin/${d}, and yad never writes a symlink or a submodule (or the other files) — they are not pushed to '${d}'`
+    : `${names} ${why.files.length > 1 ? 'are' : 'is'} changed by the commits ahead of origin/${d}, and yad does not write ${why.files.length > 1 ? 'them' : 'it'} — they are not pushed to '${d}'`);
   const restore = why.yadFiles.length
     ? `; bring yad's own files back, uncommitted: \`git restore --worktree --source <branch> -- ${why.yadFiles.map((x) => forTerminal(sq(literal(x)))).join(' ')}\``
     : '';
-  hand(`move it to its own branch: \`git branch <branch>\` keeps every commit, with it, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
+  hand(`move ${why.files.length > 1 ? 'them' : 'it'} to a branch of their own: \`git branch <branch>\` keeps every commit, with ${why.files.length > 1 ? 'them' : 'it'}, for review; then go back to the tip: \`git reset --hard origin/${d}\` (\`git stash\` first if this folder holds uncommitted work)${restore}; then re-run the yad command that made them (\`yad checkpoint --push\` for Build state), which commits them again`);
   return true;
+}
+
+// The last check before a default-branch command pushes from a Product worktree's detached HEAD: the commit
+// this run just made is judged with every other commit ahead, as the run's start judged the ones before it
+// (#231 review) — a file a person had staged, or edited in a file the run commits whole, is caught here. On a
+// refusal the commit stays here, unpushed, and the refusal says why. True when the push may go.
+export function recheckBeforePush(root, git, defaultBranch) {
+  if (git('rev-parse', '--abbrev-ref', 'HEAD').stdout !== 'HEAD' || !isProductWorktree(root)) return true;
+  const why = notYadsOwnAhead(git, defaultBranch, { fetch: false });
+  if (!why) return true;
+  const d = forTerminal(defaultBranch);
+  fail(`not pushed to origin/${d}: the commits ahead, with the one this run made, hold more than yad's own — the commit stays here`);
+  if (!explainForeignFile(git, defaultBranch, why)) {
+    hand(`a step's work goes on its branch and through review: \`git switch -c <step>/<epic>\` keeps it, then \`git fetch origin ${d}\` and \`git switch --detach origin/${d}\``);
+  }
+  process.exitCode = 1;
+  return false;
 }
 
 // Guard: only commit on the default branch. Returns true when OK; on a non-default branch it prints the
