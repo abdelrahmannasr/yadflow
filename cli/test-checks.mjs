@@ -1185,6 +1185,22 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       build: hopTo(`{${H},"inheritedFrom":EP-end,"ref":"../../EP-end/.sdlc/contract-lock.json"}`) },
     { name: 'a closing brace too many, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},${TO_END}}}`) },
     { name: 'a newline inside a string, one hop on', broken: 'missing', says: NOT_JSON, build: hopTo(`{${H},"lockedAt":"2026-06\n-26",${TO_END}}`) },
+    // #247 review: JSON.parse reads only the TOP-LEVEL hash, ref and inheritedFrom; the same keys in a nested
+    // member are not the lock's, so the gate reads them as absent too (refusing them would fail the third row).
+    { name: 'a hash nested in another member, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: hopTo(`{"meta":{${H}},${TO_END}}`) },
+    { name: 'a ref nested in another member, one hop on', broken: 'no-contract', says: /EP-demo-S01: \S*EP-h1\/contract\.md is not there \(hop 1: EP-demo → EP-h1\), so there is nothing to quote from/,
+      build: hopTo(`{${H},"meta":{${TO_END}}}`) },
+    { name: 'a ref nested in another member, at an epic with its own contract.md', owner: 'EP-h1',
+      build: () => { hopTo(`{${H},"meta":{${TO_END}}}`)(); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
+    // #247 review: the one accepted difference. A lock over 64 KiB is not read by the gate (its awk walk would
+    // be slow, and a lock is a few hundred bytes); JSON.parse reads it (doctor's cap is far larger). The
+    // gate refusing what doctor reads is the safe side.
+    { name: 'a lock over 64 KiB, one hop on', gateRefuses: true,
+      says: /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-h1\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), and the lock there, \S*EP-h1\/\.sdlc\/contract-lock\.json, is larger than 64 KiB, so it is not read/,
+      build: hopTo(`{${H},${TO_END},"note":"${'x'.repeat(65536)}"}`) },
+    { name: 'a lock over 64 KiB, at the start', gateRefuses: true, says: /EP-demo-S01: \S*EP-demo\/\.sdlc\/contract-lock\.json is larger than 64 KiB, so it is not read/,
+      build: () => rawLock('EP-demo', `{${H},${TO_END},"note":"${'x'.repeat(65536)}"}`) },
     { name: 'a backslash in a ref', broken: 'missing', says: new RegExp(esc(NO_HASH)),
       build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"ref":"..\\\\..\\\\EP-end\\\\.sdlc\\\\contract-lock.json"}`); } },
     { name: 'a hash one hex digit short, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
@@ -1193,7 +1209,7 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       build: () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/contract.md'), contractMd([...SURFACE_LINES, '- `DELETE /orders/{id}` — cancel an order.'])); } },
   ];
   try {
-    for (const { name, broken = null, says, owner = 'EP-end', build } of cases) {
+    for (const { name, broken = null, says, owner = 'EP-end', gateRefuses = false, build } of cases) {
       fs.rmSync(E, { recursive: true, force: true });
       fs.rmSync(away, { recursive: true, force: true });
       seedLockedContract(T, 'EP-end');
@@ -1202,8 +1218,9 @@ test('contract-check gate and resolveContractLock agree on every pointer chain (
       const r = runGate(CONTRACT, T);
       assert.equal(w.broken ?? null, broken, `${name}: resolveContractLock`);
       if (!broken) assert.equal(w.ownerId, owner, `${name}: the epic the walk ends at`);
-      assert.equal(r.code, broken ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
-      if (broken) assert.match(r.out, says, `${name}:\n${r.out}`);
+      const refused = Boolean(broken) || gateRefuses; // `gateRefuses`: the gate alone refuses, on purpose
+      assert.equal(r.code, refused ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
+      if (refused) assert.match(r.out, says, `${name}:\n${r.out}`);
       else assert.match(r.out, /PASS \[contract-check\]: every changed slice is an exact quote of its locked contract/, name);
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1546,12 +1563,25 @@ test('contract-check gate: a product lock with no readable hash FAILs, never "ha
   assert.equal(r2.code, 1, `a lock that is no JSON proves nothing and must not pass:\n${r2.out}`);
   assert.match(r2.out, /FAIL \[contract-check\]: \S*product\/epics\/EP-demo\/\.sdlc\/contract-lock\.json is not valid JSON \(yad doctor cannot read it either\)/);
   assert.doesNotMatch(r2.out, /hash matches the product lock/);
+  // #247 review: a lock over 64 KiB is not read at all, and says so before anything else.
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'), `{"hash": "sha256:${'a'.repeat(64)}", "note": "${'x'.repeat(65536)}"}\n`);
+  const r3 = runGate(CONTRACT, T);
+  assert.equal(r3.code, 1, r3.out);
+  assert.match(r3.out, /FAIL \[contract-check\]: \S*product\/epics\/EP-demo\/\.sdlc\/contract-lock\.json is larger than 64 KiB, so it is not read/);
+  assert.doesNotMatch(r3.out, /hash matches the product lock|is not valid JSON/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// The script this repo's own CI runs is the shipped template, byte for byte (#247: both copies changed).
-test('checks/contract-check.sh is the shipped template, byte for byte', () => {
-  assert.equal(fs.readFileSync(path.join(ROOT, 'checks/contract-check.sh'), 'utf8'), fs.readFileSync(CONTRACT, 'utf8'));
+// Every gate this repo's own CI runs from checks/ is its shipped template, byte for byte (#247 review). A
+// script with no copy in the template folder is yadflow's own and is skipped.
+test('every checks/*.sh with a shipped template is that template, byte for byte', () => {
+  let compared = 0;
+  for (const f of fs.readdirSync(path.join(ROOT, 'checks')).filter((n) => n.endsWith('.sh'))) {
+    if (!fs.existsSync(path.join(CHECKS, f))) continue;
+    assert.ok(fs.readFileSync(path.join(ROOT, 'checks', f)).equals(fs.readFileSync(path.join(CHECKS, f))), `checks/${f} differs from its template`);
+    compared++;
+  }
+  assert.ok(compared > 0 && fs.existsSync(path.join(ROOT, 'checks/contract-check.sh')), 'checks/contract-check.sh is compared');
 });
 
 test('contract-check gate: a non-ASCII slice path still counts as the contract surface', () => {

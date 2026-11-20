@@ -638,87 +638,127 @@ resolve_product() {
   esac
 }
 
-# Is the file $1 one JSON text, as JSON.parse reads it (#247)? A grammar check, not a reader: a missing
-# comma, an unclosed string, a trailing comma, a bare word for a value or an unbalanced brace is refused
-# here as `yad doctor` refuses it. Every byte below 0x20 but tab, LF and CR is refused anywhere (outside
-# a string it is not JSON space, inside one it must be escaped); then awk walks the tokens: strings (a
-# string holding tab, LF or CR is refused), numbers by JSON's own grammar, true, false, null, and objects
-# and arrays at any depth, the outer one an object (any value when $2 is `any`), with nothing but space
-# after it. A backslash is not read here: `lock_ok` refuses it first, so a string ends at its next quote.
-# Plain awk (mawk, BWK awk, gawk): no interval, no class, no gawk function.
+# Is the lock file $1 larger than 64 KiB? A contract lock is a few hundred bytes, and the reads below walk
+# it in awk, which is slow on a large file, so a larger one is not read (#247 review). `yad doctor` reads
+# files up to its own, larger cap: on a lock between the two, the gate refuses what doctor reads — the safe
+# side. `wc` pads its count on some systems, so only the digits are kept.
+lock_big() {
+  local _n
+  _n="$(wc -c < "$1" 2>/dev/null | tr -cd '0123456789')" || return 1
+  [ -n "$_n" ] && [ "$_n" -gt 65536 ]
+}
+# Is the file $1 one JSON text, as JSON.parse reads it (#247)? A grammar check: a missing comma, an
+# unclosed string, a trailing comma, a bare word for a value or an unbalanced brace is refused here as
+# `yad doctor` refuses it. Every byte below 0x20 but tab, LF and CR is refused anywhere (outside a string
+# it is not JSON space, inside one it must be escaped); then awk walks the tokens: strings (a string
+# holding tab, LF or CR is refused), numbers by JSON's own grammar, true, false, null, and objects and
+# arrays at any depth, with nothing but space after the outer value. A backslash is not read here: the
+# callers refuse it first, so a string ends at its next quote. One line at a time, one character at a
+# time, so the walk is linear (no token can span a line: a string holding LF is refused). Plain awk
+# (mawk, BWK awk, gawk): no interval, no class, no gawk function.
+#   * With $2 = `any`, the outer value may be any JSON value, and nothing is printed.
+#   * Otherwise the outer value must be an object, and the TOP-LEVEL `hash`, `ref` and `inheritedFrom`
+#     are printed, one `key<TAB>value` line each, as `resolveContractLock` reads them: the same key in a
+#     nested object is not the lock's (#247 review). A string is printed as it is; `hash` and `ref` are
+#     read only as strings. An `inheritedFrom` that is no string is printed as JavaScript turns it into
+#     text when it is truthy (`true`, a number that is not 0, `[object Object]`), and an array there is
+#     refused (JavaScript would join it into a name).
 lock_json() {
   local _lc
   _lc="$(tr -cd '\000-\010\013\014\016-\037' < "$1" 2>/dev/null | tr '\000-\037' '?')" || return 1
   [ -z "$_lc" ] || return 1
   awk -v any="${2:-}" '
-    { t = t $0 "\n" }
-    END {
-      n = length(t); i = 1; d = 0; w = "top"
+    function fail() { bad = 1; exit 1 }
+    BEGIN { d = 0; w = "top"; kn = "" }
+    {
+      t = $0; n = length(t); i = 1
       while (i <= n) {
         c = substr(t, i, 1)
-        if (c == " " || c == "\t" || c == "\n" || c == "\r") { i++; continue }
-        if (w == "end") exit 1
+        if (c == " " || c == "\t" || c == "\r") { i++; continue }
+        if (w == "end") fail()
         if (c == "\"") {
-          j = index(substr(t, i + 1), "\"")
-          if (!j || substr(t, i + 1, j - 1) ~ /[\t\n\r]/) exit 1
-          i += j + 1; k = "s"
+          p = i + 1
+          while (p <= n && (ch = substr(t, p, 1)) != "\"") { if (ch == "\t" || ch == "\r") fail(); p++ }
+          if (p > n) fail()
+          v = substr(t, i + 1, p - i - 1); i = p + 1; k = "s"
         } else if (c == "-" || (c >= "0" && c <= "9")) {
-          if (!match(substr(t, i), /^-?(0|[123456789][0123456789]*)(\.[0123456789]+)?([eE][-+]?[0123456789]+)?/)) exit 1
-          i += RLENGTH; k = "s"
-        } else if (substr(t, i, 4) == "true" || substr(t, i, 4) == "null") { i += 4; k = "s" }
-        else if (substr(t, i, 5) == "false") { i += 5; k = "s" }
+          p = i
+          while (p <= n && index("0123456789+-.eE", substr(t, p, 1))) p++
+          v = substr(t, i, p - i); i = p; k = "s"
+          if (v !~ /^-?(0|[123456789][0123456789]*)(\.[0123456789]+)?([eE][-+]?[0123456789]+)?$/) fail()
+        } else if (substr(t, i, 4) == "true" || substr(t, i, 4) == "null") { v = substr(t, i, 4); i += 4; k = "s" }
+        else if (substr(t, i, 5) == "false") { v = "false"; i += 5; k = "s" }
         else if (index("{}[]:,", c)) { i++; k = c }
-        else exit 1
-        if (w == "top" && any != "any" && k != "{") exit 1
+        else fail()
+        if (w == "top" && any != "any" && k != "{") fail()
         if (w == "top") w = "val0"
         if (w == "key0" || w == "key") {
-          if (k == "s" && c == "\"") { w = ":"; continue }
+          if (k == "s" && c == "\"") { w = ":"; kn = (d == 1) ? v : ""; continue }
           if (k == "}" && w == "key0") { d--; w = d ? "next" : "end"; continue }
-          exit 1
+          fail()
         }
-        if (w == ":") { if (k != ":") exit 1; w = "val"; continue }
+        if (w == ":") { if (k != ":") fail(); w = "val"; continue }
         if (w == "val" || w == "val0") {
+          if (w == "val" && d == 1 && any != "any" && (kn == "hash" || kn == "ref" || kn == "inheritedFrom")) {
+            if (k == "s" && c == "\"") printf "%s\t%s\n", kn, v
+            else if (kn == "inheritedFrom" && k == "s" && (v == "true" || (v != "false" && v != "null" && v + 0 != 0))) printf "%s\t%s\n", kn, v
+            else if (kn == "inheritedFrom" && k == "{") printf "%s\t%s\n", kn, "[object Object]"
+            else if (kn == "inheritedFrom" && k == "[") fail()
+          }
           if (k == "s") { w = d ? "next" : "end"; continue }
           if (k == "{") { s[++d] = "{"; w = "key0"; continue }
           if (k == "[") { s[++d] = "["; w = "val0"; continue }
           if (k == "]" && w == "val0" && d) { d--; w = d ? "next" : "end"; continue }
-          exit 1
+          fail()
         }
         if (k == ",") { w = (s[d] == "{") ? "key" : "val"; continue }
         if ((k == "}" && s[d] == "{") || (k == "]" && s[d] == "[")) { d--; w = d ? "next" : "end"; continue }
-        exit 1
+        fail()
       }
-      exit ((w == "end") ? 0 : 1)
-    }' "$1" 2>/dev/null
+    }
+    END { exit ((!bad && w == "end") ? 0 : 1) }' "$1" 2>/dev/null
 }
-# Can the lock file $1 be read by its text, the way JSON.parse reads it (#233)? These reads are not a JSON
-# parser, so a lock is read only when it holds no backslash (an escaped key or value reads one way here and
-# another there), is one JSON object (`lock_json`, #247), and names `hash`, `ref` and `inheritedFrom` at
-# most once each (JSON.parse keeps the LAST of a repeated key, a text read the first).
+# The top-level reads of the lock file $1 (`key<TAB>value` lines, see `lock_json`), when it can be read by
+# its text the way JSON.parse reads it (#233); fails otherwise. A lock is read only when it is at most
+# 64 KiB (`lock_big`), holds no backslash (an escaped key or value reads one way here and another there),
+# is one JSON object (`lock_json`, #247), and names `hash`, `ref` and `inheritedFrom` at most once each,
+# at any depth (JSON.parse keeps the LAST of a repeated key, a text read the first).
 # `resolveContractLock` in cli/epic-state.mjs refuses the same locks.
-lock_ok() {
-  local _lb _lk
+lock_reads() {
+  local _lb _lr _lk
+  ! lock_big "$1" || return 1
   _lb="$(tr -cd '\\' < "$1" 2>/dev/null)" || return 1
   [ -z "$_lb" ] || return 1
-  lock_json "$1" || return 1
+  _lr="$(lock_json "$1")" || return 1
   for _lk in hash ref inheritedFrom; do
     [ "$(tr '\n' ' ' < "$1" | grep -oE "\"${_lk}\"[[:space:]]*:" | awk 'END { print NR }')" -le 1 ] || return 1
   done
+  printf '%s\n' "$_lr"
 }
-# Is the lock file $1 refused for being no JSON at all (no backslash in it, and no JSON value by
-# `lock_json`)? Says so by name where a refused lock is reported; `[]` or `null` is JSON, not a lock.
+# Is the lock file $1 refused for being no JSON at all (at most 64 KiB, no backslash in it, and no JSON
+# value by `lock_json`)? Says so by name where a refused lock is reported; `[]` or `null` is JSON, not a lock.
 lock_not_json() {
   local _lb
+  ! lock_big "$1" || return 1
   _lb="$(tr -cd '\\' < "$1" 2>/dev/null)" || return 1
   [ -z "$_lb" ] && ! lock_json "$1" any
 }
-# The `"hash": "sha256:<64 hex>"` of a contract-lock.json, hex only. Newline-tolerant: the key and its
-# value may legally sit on separate lines. Empty when there is none, or when the lock cannot be read by
-# its text (`lock_ok`) (`|| true`: under `pipefail` a no-match grep would fail the pipeline).
-lock_hash() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]{64}"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/' || true; }
-# One string value of a lock file ($2 = its key), the same newline-tolerant way. Empty when absent, or
-# when the lock cannot be read by its text.
-lock_str() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true; }
+# One top-level value of a lock file ($2 = its key): a string, or the text of a truthy `inheritedFrom`.
+# Newline-tolerant: the key and its value may legally sit on separate lines. Empty when absent, or when
+# the lock cannot be read by its text (`lock_reads`).
+lock_str() {
+  local _lr
+  _lr="$(lock_reads "$1")" || return 0
+  printf '%s\n' "$_lr" | awk -F '\t' -v k="$2" '$1 == k { print substr($0, length(k) + 2); exit }'
+}
+# The `"hash": "sha256:<64 hex>"` of a contract-lock.json, hex only. Empty when there is none, or when the
+# lock cannot be read by its text.
+lock_hash() {
+  local _lv
+  _lv="$(lock_str "$1" hash)"
+  [[ $_lv =~ ^sha256:[0123456789abcdef]+$ ]] && [ "${#_lv}" -eq 71 ] && printf '%s' "${_lv#sha256:}"
+  return 0
+}
 
 # The lines of a contract.md's CONTRACT-SURFACE block, as yadflow hashes them (contractSurfaceHash in
 # cli/epic-state.mjs): a CR before the newline dropped, every line once with its newline.
@@ -783,6 +823,10 @@ lock_walk() {
     _wl="${_wd}/.sdlc/contract-lock.json"
     _wh=""; if [ -f "$_wl" ]; then _wh="$(lock_hash "$_wl")" || _wh=""; fi
     if [ -n "$_wprev" ]; then
+      if [ -z "$_wh" ] && [ -f "$_wl" ] && lock_big "$_wl"; then
+        echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and the lock there, ${_wl}, is larger than 64 KiB, so it is not read (a contract lock is a few hundred bytes) — write it again as the one small JSON object it should be; lock ${_wid}'s contract again upstream (yad-architecture Step 5), or ${_wfix#— } ${_wprevl}."
+        return 1
+      fi
       if [ -z "$_wh" ] && [ -f "$_wl" ] && lock_not_json "$_wl"; then
         echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and the lock there, ${_wl}, is not valid JSON (yad doctor cannot read it either) — write it again as one JSON object, a comma between members and every string closed; lock ${_wid}'s contract again upstream (yad-architecture Step 5), or ${_wfix#— } ${_wprevl}."
         return 1
@@ -901,6 +945,7 @@ quote_story() {
     return 1
   fi
   current="$(lock_hash "$_qlock")" || current=""
+  if [ -z "$current" ] && lock_big "$_qlock"; then echo "  ${_qs}: ${_qlock} is larger than 64 KiB, so it is not read (a contract lock is a few hundred bytes) — write it again as the one small JSON object it should be, or lock the contract again upstream (yad-architecture Step 5), then run again."; return 1; fi
   if [ -z "$current" ] && lock_not_json "$_qlock"; then echo "  ${_qs}: ${_qlock} is not valid JSON (yad doctor cannot read it either) — write it again as one JSON object, a comma between members and every string closed, or lock the contract again upstream (yad-architecture Step 5), then run again."; return 1; fi
   if [ -z "$current" ]; then echo "  ${_qs}: ${_qlock} has no readable \"hash\": \"sha256:…\" value — lock the contract again upstream (yad-architecture Step 5), then run again."; return 1; fi
   if [ -z "$_qpin" ]; then
@@ -1115,6 +1160,12 @@ STORYSURF
     # the comparison below straight into the "hash matches" note — the gate affirmatively reporting a
     # match it never made. Fail closed instead: a truncated, half-written or schema-changed lock is a
     # broken lock, and a Contract-Change is being claimed against it.
+    if [ -z "$current" ] && lock_big "$lock"; then
+      echo "FAIL [contract-check]: ${lock} is larger than 64 KiB, so it is not read (a contract lock is a few hundred bytes) —"
+      echo "  the lock cannot prove ${link}'s pin. Write it again as the one small JSON object it should be, or re-lock the contract upstream (yad-architecture Step 5)."
+      rc=1
+      continue
+    fi
     if [ -z "$current" ] && lock_not_json "$lock"; then
       echo "FAIL [contract-check]: ${lock} is not valid JSON (yad doctor cannot read it either) —"
       echo "  the lock cannot prove ${link}'s pin. Write it again as one JSON object, or re-lock the contract upstream (yad-architecture Step 5)."
