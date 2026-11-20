@@ -16,7 +16,7 @@
 //      commit never enters a PR's base..HEAD range where it would strand required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, ok, info, fail, hand, exists, pushWithRebase, forTerminal } from './lib.mjs';
+import { c, ok, info, warn, fail, hand, exists, pushWithRebase, forTerminal, writeFileAtomic, refuseLinkedWrite, LINKED_FOLDER_FIX } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
@@ -68,6 +68,30 @@ export function packPathspecs(root, registry = { repos: [] }, name = null) {
     if (codeContextPathOk(root, rel) && fs.existsSync(path.join(root, rel))) out.push(rel);
   }
   return out;
+}
+
+// Put back a pack whose bytes publish removed for the commit, only where nothing stands now. `lstat`, not
+// `existsSync`: `existsSync` follows a link, so a dangling one there would read as no file and be written
+// through. Anything at the path now (a file, a folder, a link, dangling or not) is left as it is.
+// A linked folder on the way is refused first (`refuseLinkedWrite`), as `lstat` would look through it. A pack
+// not put back is named, never dropped in silence: it is a cache, so `yad repo refresh` makes it again. Each
+// pack is caught on its own: this runs in a `finally`, where a throw would replace the commit's own result.
+function restorePack(root, { rel, abs, buf }) {
+  const shown = forTerminal(rel);   // a registry value: the path is named only through forTerminal (E81 review 15)
+  try {
+    // First, as `lstat` follows a linked folder on the way: a file found through one is not the Product's.
+    refuseLinkedWrite(abs, root);
+    let st = null;
+    try { st = fs.lstatSync(abs); } catch { /* nothing there: put it back below */ }
+    if (st?.isFile()) return;   // a plain file is there again: it is the newer one
+    if (st) throw new Error(`a ${st.isDirectory() ? 'folder' : st.isSymbolicLink() ? 'link' : 'non-file'} now stands at that path, and yad left it as it is`);
+    writeFileAtomic(abs, buf, { within: root });
+  } catch (e) {
+    warn(`the code-map pack ${shown} was not put back after the commit: ${forTerminal(e.message)}`);
+    // A linked folder on the way is undone as everywhere else; anything else at the path is moved aside.
+    const fix = e.folder ? LINKED_FOLDER_FIX : `move what stands at ${shown} aside if it is not yours`;
+    hand(`${fix}, then run \`yad repo refresh\` to make the pack again`);
+  }
 }
 
 // True iff committing `.gitignore` would carry ONLY the managed pack-ignore block (comments + glob) and
@@ -220,7 +244,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   try {
     for (const p of trackedPacks) {
       const abs = path.join(root, p);
-      held.push({ abs, buf: fs.readFileSync(abs) });
+      held.push({ rel: p, abs, buf: fs.readFileSync(abs) });
       fs.rmSync(abs);
     }
     const cm = git('commit', '-m', message, '--', ...fileset); // --only: adds from the tree, packs as deletions
@@ -231,7 +255,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
       return { message, committed: false, pushed: false };
     }
   } finally {
-    for (const h of held) if (!fs.existsSync(h.abs)) fs.writeFileSync(h.abs, h.buf);
+    for (const h of held) restorePack(root, h);
   }
   ok(`published ${fileset.length} file(s): ${c.dim(forTerminal(label))}`);   // a registry name can be in it (E81 review 15)
 

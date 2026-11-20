@@ -17666,6 +17666,51 @@ test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its r
   }
 });
 
+// #246 (EP-review-followups-S02): the pack put back after the commit is written only where nothing stands, by
+// `writeFileAtomic`. A link at the pack's path, dangling, is something there: `existsSync` followed it and
+// read it as no file, so the pack's bytes went wherever it pointed. A linked folder on the way is refused the
+// same way. A post-commit hook makes the link in the window between the pack's removal and its return.
+for (const [what, hook, said, fix] of [
+  ['a dangling link at a pack path', (pack, outside) => `ln -s '${path.join(outside, 'written-through')}' '${pack}'`,
+    /the code-map pack \.sdlc\/code-context\/backend\/pack\.md was not put back after the commit: a link now stands at that path/,
+    /move what stands at \.sdlc\/code-context\/backend\/pack\.md aside if it is not yours, then run `yad repo refresh` to make the pack again/],
+  ['a linked folder on the way to a pack', (pack, outside) => `mv '${path.dirname(pack)}' '${path.dirname(pack)}.aside' && ln -s '${outside}' '${path.dirname(pack)}'`,
+    /the code-map pack \.sdlc\/code-context\/backend\/pack\.md was not put back after the commit: \.sdlc\/code-context\/backend is a link, so yad did not write/,
+    /remove the link \(`git rm <folder>`\).*, then run `yad repo refresh` to make the pack again/],
+]) {
+  test(`#246 publishCodeContext: ${what} is not written through, and the pack not put back is named`, { skip: E125B_SKIP }, async () => {
+    const prev = process.exitCode;
+    const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-pack-outside-'));
+    const pack = path.join(T, '.sdlc/code-context/backend/pack.md');
+    try {
+      process.exitCode = 0;
+      fs.mkdirSync(path.dirname(pack), { recursive: true });
+      fs.writeFileSync(pack, '# stale pack\n');
+      git(T, 'add', '.sdlc/code-context/backend/pack.md');
+      git(T, 'commit', '-q', '-m', 'legacy: track pack');
+      fs.writeFileSync(pack, '# regenerated pack\n');
+      fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
+      ensurePackIgnored(T);
+      const hooks = path.join(T, '.git', 'hooks');
+      fs.mkdirSync(hooks, { recursive: true });
+      fs.writeFileSync(path.join(hooks, 'post-commit'), `#!/bin/sh\n${hook(pack, outside)}\n`, { mode: 0o755 });
+      git(T, 'config', 'core.hooksPath', hooks);   // this Product's own hooks, whatever the machine's git says
+      const out = await grab(() => publishCodeContext(T, { push: false }));
+
+      assert.match(git(T, 'diff-tree', '--no-commit-id', '--name-status', '-r', 'HEAD').toString(), /^D\s+\.sdlc\/code-context\/backend\/pack\.md$/m, 'the commit still records the pack\'s removal');
+      assert.deepEqual(fs.readdirSync(outside), [], 'nothing written through the link');
+      assert.ok(fs.lstatSync(path.join(T, '.sdlc/code-context/backend')).isSymbolicLink() || fs.lstatSync(pack).isSymbolicLink(), 'the link is left as it is');
+      assert.match(out, said);
+      assert.match(out, fix);
+      assert.ok(!process.exitCode, 'the commit went through: the pack is a cache, so it is named, not failed');
+    } finally {
+      process.exitCode = prev;
+      for (const d of [T, backend, productBare, beBare, outside]) fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+}
+
 // Invariant 1: the audit commit must never sweep unrelated work — not a pre-staged file, and not an
 // unrelated edit to the Product `.gitignore` (which a naive `git add .gitignore` would combine with the
 // managed pack glob). Invariant: the user's INDEX is left untouched (no whole-index reset), matching
@@ -28915,7 +28960,6 @@ const DIRECT_WRITE_ALLOWED = [
   { file: 'cli/map-view.mjs', count: 1, reason: 'the map\'s digest side file in this machine\'s reports folder (yad\'s own output), exclusive create (`wx`)' },
   { file: 'cli/members.mjs', count: 2, reason: 'the members access cache in the git folder, never committed (1); member files from a git ref into yad\'s own mkdtemp folder (1)' },
   { file: 'cli/plan.mjs', count: 2, reason: '`applyKeepingOwn` moves a person\'s own files aside and back by rename, each path refused by `refuseLinkedWrite` before the first move (#235)' },
-  { file: 'cli/repo-publish.mjs', count: 1, reason: 'writes a team file: puts back a code-map pack in the Product, whose bytes it removed for the commit, only where no file is now; `writeFileAtomic` could replace it (a follow-up)' },
   { file: 'cli/reports-dir.mjs', count: 8, reason: 'the reports folder (yad\'s own output): exclusive-create report names, the catalog lock, link-safe temp file and rename (7); the `--out` path the person names (1)' },
   { file: 'cli/run-checks.mjs', count: 1, reason: 'the changed-paths list in yad\'s own mkdtemp scratch folder' },
   { file: 'cli/setup.mjs', count: 3, reason: 'the package.json in yad\'s own mkdtemp Repomix folder (1); `placeFile` puts the pack at the `-o` path the person names (`yad repo pack -o`), by an exclusive copy and a rename, after the caller checked its folder (2)' },
