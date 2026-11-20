@@ -459,12 +459,14 @@ test('yad build done: a status write that fails puts the lanes back; another bui
     assert.match(r.out, /build-state\/copy\.json also says story: EP-l-S01/);
     fs.rmSync(path.join(dir, '.sdlc/build-state/copy.json'));
     const before = fs.readFileSync(file, 'utf8');
-    fs.chmodSync(story(dir), 0o444);
+    // The story's folder, not the file, is made read-only: the status line is written through a new file and a
+    // rename (#235), which a read-only file does not stop.
+    fs.chmodSync(path.dirname(story(dir)), 0o555);
     try {
       r = yad(P, 'build', 'done', 'EP-l-S01');
       assert.notEqual(r.code, 0, r.out);
       assert.equal(fs.readFileSync(file, 'utf8'), before, 'the lanes are exactly as they were');
-    } finally { fs.chmodSync(story(dir), 0o644); }
+    } finally { fs.chmodSync(path.dirname(story(dir)), 0o755); }
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

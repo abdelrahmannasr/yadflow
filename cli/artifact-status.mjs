@@ -5,7 +5,7 @@
 // only the `status:` line — advance-only, and never touching build-owned values.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, readJSONStrict } from './lib.mjs';
+import { c, log, ok, info, readJSONStrict, writeFileAtomic } from './lib.mjs';
 import {
   epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus, FRONTMATTER_BLOCK,
 } from './epic-state.mjs';
@@ -44,6 +44,10 @@ export function desiredStatus(state, base) {
   return 'draft';
 }
 
+// The file written back whole, through a new file and a rename (#235): a story or epic folder that is a link is
+// refused with YAD-STATE-001, as a read is, and nothing is written where it points. The file keeps its mode.
+const rewrite = (file, text) => writeFileAtomic(file, text, { keepMode: true });
+
 // Rewrite ONLY the `status:` line inside the first `---\n...\n---` frontmatter block, preserving
 // everything else. Returns the prior status when a change was written, or null for a no-op (no
 // frontmatter, no status line, preserved value, or not an advance). Mirrors the frontmatter regex
@@ -62,7 +66,7 @@ export function setFrontmatterStatus(file, status) {
   // frontmatter value holding one (`title: costs $' less`) rewrote the file wrongly — on the default
   // branch, in the gate's merge commit.
   const block = fm[1].replace(/^status:\s*.*$/m, () => `status: ${status}`);
-  fs.writeFileSync(file, text.replace(fm[1], () => block));
+  rewrite(file, text.replace(fm[1], () => block));
   return cur;
 }
 
@@ -97,7 +101,7 @@ export function setBuildStatus(file, status) {
   if (BUILD_LADDER[status] < BUILD_LADDER[prior]) return { prior, changed: false };
   if (BUILD_LADDER[status] === BUILD_LADDER[prior] && lines[0][0] === `status: ${status}`) return { prior, changed: false };
   const block = fm[1].replace(/^status:\s*.*$/m, () => `status: ${status}`);
-  fs.writeFileSync(file, text.replace(fm[1], () => block));
+  rewrite(file, text.replace(fm[1], () => block));
   return { prior, changed: true };
 }
 
@@ -139,7 +143,7 @@ export function lowerFrontmatterStatus(file, status) {
   if (cur === undefined || PRESERVE.has(cur)) return null;
   if (!(cur in RANK) || !(status in RANK) || RANK[status] >= RANK[cur]) return null;
   const block = fm[1].replace(/^status:\s*.*$/m, () => `status: ${status}`);
-  fs.writeFileSync(file, text.replace(fm[1], () => block));
+  rewrite(file, text.replace(fm[1], () => block));
   return cur;
 }
 

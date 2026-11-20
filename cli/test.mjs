@@ -2099,6 +2099,46 @@ function linkedEpic235(T, linked, files) {
   return { P, outside };
 }
 
+test('#235: the status line in a story or epic file is refused under a linked stories/ or epics/, and nothing is written there', { skip: E125B_SKIP }, async () => {
+  const { setFrontmatterStatus, setBuildStatus, lowerFrontmatterStatus } = await import('./artifact-status.mjs');
+  for (const [i, linked, file] of [
+    [0, 'epics/EP-x/stories', 'epics/EP-x/stories/EP-x-S01.md'],
+    [1, 'epics', 'epics/EP-x/stories/EP-x-S01.md'],
+    [2, 'epics', 'epics/EP-x/epic.md'],
+  ]) {
+    const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-235a${i}-`)));
+    try {
+      const below = path.relative(linked, file);
+      const { P, outside } = linkedEpic235(T, linked, { [below]: '---\nid: EP-x-S01\nstatus: in-review\n---\n\n# S01\n' });
+      const before = treeOf(outside);
+      setProductRoot(P);
+      try {
+        const p = path.join(P, file);
+        assert.throws(() => setFrontmatterStatus(p, 'approved'), LINKED_WRITE_235(linked), `${linked}: sync-status`);
+        assert.throws(() => lowerFrontmatterStatus(p, 'draft'), LINKED_WRITE_235(linked), `${linked}: gate reopen`);
+        assert.throws(() => setBuildStatus(p, 'in-build'), LINKED_WRITE_235(linked), `${linked}: build ship`);
+        assert.deepEqual(treeOf(outside), before, `${linked}: the folder the link points at is untouched`);
+      } finally { setProductRoot(null); }
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('#235: a status line written in real folders keeps the file\'s other bytes (a CRLF body, no last newline) and its mode', { skip: E125B_SKIP }, async () => {
+  const { setFrontmatterStatus } = await import('./artifact-status.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235b-')));
+  try {
+    const file = path.join(T, 'epics', 'EP-x', 'stories', 'EP-x-S01.md');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '---\nid: EP-x-S01\nstatus: draft\n---\r\n\r\nbody $\' $&\r\nno newline');
+    fs.chmodSync(file, 0o640);
+    setProductRoot(T);
+    try { assert.equal(setFrontmatterStatus(file, 'approved'), 'draft'); } finally { setProductRoot(null); }
+    assert.equal(fs.readFileSync(file, 'utf8'), '---\nid: EP-x-S01\nstatus: approved\n---\r\n\r\nbody $\' $&\r\nno newline');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+    assert.deepEqual(fs.readdirSync(path.dirname(file)), ['EP-x-S01.md'], 'no temp file left beside it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#235: a code repo\'s own linked folder is refused for the files yad writes there ({ within } the repo)', { skip: E125B_SKIP }, async () => {
   const { repoActions, recordManagedWrites } = await import('./plan.mjs');
   const { copyFile, copyDir } = await import('./lib.mjs');
