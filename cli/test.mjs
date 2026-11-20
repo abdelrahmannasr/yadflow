@@ -11706,6 +11706,38 @@ test('gate ci --merged: advances the step + flips artifact status on the default
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #245: the merge commit takes the files it staged by their literal names. A story named `*.md` is flipped with
+// the advance; as a plain pathspec its name also matched a person's unstaged edit of another file beside it.
+test('gate ci --merged: the commit takes each staged file by its literal name, so a `*` in a name matches only itself (#245)', { skip: process.platform === 'win32' && 'a file name cannot hold * on Windows' }, async () => {
+  const { T, author, ci } = scaffoldCiProduct();
+  try {
+    const ep = path.join(author, 'epics/EP-test');
+    const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+    state.steps.push({ id: 'stories', type: 'author', artifact: 'stories/', status: 'done', risk_tags: [] },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done', risk_tags: [] });
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
+    fs.mkdirSync(path.join(ep, 'stories'));
+    fs.writeFileSync(path.join(ep, 'stories/*.md'), '---\nid: EP-test-S01\nstatus: draft\n---\n# S01\n');
+    fs.writeFileSync(path.join(ep, 'stories/notes.md'), 'notes\n');
+    git(author, 'add', '-A');
+    git(author, 'commit', '-q', '-m', 'stories');
+    git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge review/EP-test/architecture');
+    git(author, 'push', '-q', 'origin', 'trunk');
+    git(ci, 'fetch', '-q', 'origin');
+    git(ci, 'reset', '-q', '--hard', 'origin/trunk');
+    // A person's edit of a file the run does not write, left unstaged in the checkout.
+    fs.writeFileSync(path.join(ci, 'epics/EP-test/stories/notes.md'), 'notes, mine\n');
+
+    await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval });
+
+    const files = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.ok(files.includes('epics/EP-test/stories/*.md'), `the flipped story is in the commit: ${files}`);
+    assert.match(show(ci, 'HEAD:epics/EP-test/stories/*.md'), /status: approved/);
+    assert.ok(!files.includes('epics/EP-test/stories/notes.md'), `the person's file is not: ${files}`);
+    assert.equal(git(ci, 'status', '--porcelain', '--', 'epics/EP-test/stories/notes.md').toString().trim(), 'M epics/EP-test/stories/notes.md', 'and stays an uncommitted edit');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // issue #163, end to end: the wired sweep calls `gate ci --branch <ref> --pr <n> --merged` once per
 // merged review PR/MR inside its 7-day window, every 15 minutes. On the buggy code each of those calls
 // re-appended its own step's approvals at the tail of a shared approvals.json, so every call produced a
