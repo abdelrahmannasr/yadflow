@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 // The #280 guard (cli/test.mjs): printed lines go to stderr while the runner owns stdout.
 if (process.env.NODE_TEST_CONTEXT) {
@@ -803,46 +803,36 @@ test('the agent guard lets the rest through: reads, the agent\'s own pushes, tex
     "printf 'x=1\\n' > env.sh; echo 'echo $x' >> env.sh; bash env.sh"]) {
     assert.equal(agentGuardDecision(ok).allow, true, ok);
   }
-});
+}));
 
-// A copy of the guard whose deadline a test sets per call (`globalThis.YAD_TEST_BUDGET`, cleared after), with its
-// imports pointing back here (its SHIPPED_CHECKS path points nowhere, which agentGuardDecision never reads).
-async function guardCopy() {
-  const dir = path.dirname(fileURLToPath(import.meta.url));
-  const src = fs.readFileSync(path.join(dir, 'agent-guard.mjs'), 'utf8')
-    .replace('deadline = Date.now() + JUDGE_BUDGET_MS;', 'deadline = Date.now() + (globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS);')
-    .replace(/from '\.\/([\w-]+\.mjs)'/g, (_, f) => `from ${JSON.stringify(new URL(f, import.meta.url).href)}`);
-  assert.ok(src.includes('globalThis.YAD_TEST_BUDGET ?? JUDGE_BUDGET_MS'), 'the budget is set per call in the copy');
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guard-copy-'));
-  const copy = path.join(T, 'agent-guard.mjs');
-  fs.writeFileSync(copy, src);
-  const mod = await import(pathToFileURL(copy).href);
-  const done = () => { delete globalThis.YAD_TEST_BUDGET; fs.rmSync(T, { recursive: true, force: true }); };
+// The guard with a budget set per call (#234: `withBudget`). `done` puts the real budget back, should a test stop
+// between a set and its `finally`.
+async function budgetedGuard() {
+  const mod = await import('./agent-guard.mjs');
+  const done = () => { setJudgeBudgetForTests(); };
   // A judgement with no deadline: a slow runner takes the real time, and the verdict never depends on it.
-  const uncut = (l) => { globalThis.YAD_TEST_BUDGET = Infinity; try { return mod.agentGuardDecision(l); } finally { delete globalThis.YAD_TEST_BUDGET; } };
+  const uncut = (l) => withBudget(Infinity, () => mod.agentGuardDecision(l));
   return { mod, uncut, done };
 }
 
 test('#535 CI: a reading of what a command writes, stopped by the deadline, is refused as out of time, not as too much written', async () => {
-  // A slow runner, made on purpose, from the copy whose budget is set per call. Where the deadline lands depends
+  // A slow runner, made on purpose, from a budget set per call. Where the deadline lands depends
   // on the machine's speed, so each line is timed with no deadline, then judged again at budgets from a tenth of
   // that time to nearly all of it: every phase the deadline can stop is reached.
-  const { mod: slow, done } = await guardCopy();
+  const { mod: slow, done } = await budgetedGuard();
   try {
     const half = (unit) => unit.repeat(Math.floor(slow.MAX_JUDGED / 2 / unit.length));
     const steps = process.env.NODE_V8_COVERAGE ? [0.1, 0.3, 0.5, 0.7, 0.9] : [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
     for (const unit of ['bash -c "$(echo x)";', 'echo x > f; bash f;', 'x=$(echo a > f; bash f);', 'echo $(echo x)', 'bash <(cat <<E\nx\nE\n) ']) {
       const line = half(unit);
-      globalThis.YAD_TEST_BUDGET = Infinity;
       const t0 = Date.now();
-      assert.equal(slow.agentGuardDecision(line).allow, true, `${unit}: allowed in full time`);
+      assert.equal(withBudget(Infinity, () => slow.agentGuardDecision(line)).allow, true, `${unit}: allowed in full time`);
       const full = Date.now() - t0;
       for (const f of steps) {
-        globalThis.YAD_TEST_BUDGET = Math.max(1, Math.round(full * f));
-        const d = slow.agentGuardDecision(line);
-        assert.ok(d.allow || /took too long to judge/.test(d.message), `${unit} at ${globalThis.YAD_TEST_BUDGET} of ${full} ms: ${d.message}`);
+        const ms = Math.max(1, Math.round(full * f));
+        const d = withBudget(ms, () => slow.agentGuardDecision(line));
+        assert.ok(d.allow || /took too long to judge/.test(d.message), `${unit} at ${ms} of ${full} ms: ${d.message}`);
       }
-      delete globalThis.YAD_TEST_BUDGET;
     }
   } finally { done(); }
 });
@@ -859,7 +849,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   const within = (ms) => (process.env.NODE_V8_COVERAGE ? Infinity : ms);
   const { MAX_JUDGED, JUDGE_BUDGET_MS } = await import('./agent-guard.mjs');
   const SLOW = JUDGE_BUDGET_MS + 1500;
-  const { uncut, done } = await guardCopy();
+  const { uncut, done } = await budgetedGuard();
   t.after(done);
   const line = `${'cat <<X\n'.repeat(60000)}gh pr merge 5`;
   const t0 = Date.now();
@@ -953,7 +943,7 @@ test('#492: a line of many heredocs that never end is judged in bounded time; on
   // near-limit `case` line in about 1.8 s on a laptop, and a CI runner has been about four times slower. So
   // `exact` always runs the real guard, and on every run but coverage its verdict is the one checked, and the long
   // lines are timed against the real budget (4.5 s, under the 5 s cut-off). Under coverage (not timed) the real guard still runs, so
-  // its lines are counted, and the verdict checked is the copy's with no deadline (`uncut`), which never depends
+  // its lines are counted, and the verdict checked is the one given with no deadline (`uncut`), which never depends
   // on the runner's speed.
   const exact = (l) => { const real = agentGuardDecision(l); return process.env.NODE_V8_COVERAGE ? uncut(l) : real; };
   // Review round 1: nested process substitutions are refused past their bound, not read in quadratic time.
