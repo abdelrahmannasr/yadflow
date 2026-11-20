@@ -4413,7 +4413,11 @@ export const MAX_LOCK_HOPS = 8;
 // The walk starts at `epicDir` and stops at the first epic that has its own contract.md, or whose lock is
 // not a pointer. There, contract.md's CONTRACT-SURFACE block must hash to the lock. On the way:
 //   * every ref must resolve to exactly epics/<EP-id>/.sdlc/contract-lock.json in this Product (the rule
-//     checks/contract-check.sh applies), so a lock file cannot send the walk elsewhere;
+//     checks/contract-check.sh applies, over every hop since #233), so a lock file cannot send the walk
+//     elsewhere;
+//   * a lock is read only when its text holds no backslash and names `hash`, `ref` and `inheritedFrom`
+//     at most once each (#233): the CI gate reads a lock by its text, and JSON.parse keeps the LAST of a
+//     repeated key, so a lock that reads two ways is refused by both rather than read one way by each;
 //   * that check compares path TEXT, so a link is refused at every level the walk reads: an epic
 //     folder, its .sdlc folder, the lock and contract.md (`readJSONStrict` refuses only the last part
 //     of a path, and `fs.existsSync` / `contractSurfaceHash` follow links). An `epics/EP-y` that links
@@ -4448,7 +4452,9 @@ export function resolveContractLock(root, epicDir, { followOwn = false } = {}) {
       if (notPlain(p, kind)) return broken('link', { what });
     }
     let lock;
-    try { lock = readJSONStrict(path.join(dir, '.sdlc', 'contract-lock.json'), null); } catch { lock = undefined; }
+    const lockFile = path.join(dir, '.sdlc', 'contract-lock.json');
+    try { lock = readJSONStrict(lockFile, null); } catch { lock = undefined; }
+    if (lock && lockReadsTwoWays(lockFile)) lock = undefined;
     if (!isPlainObject(lock) || !LOCK_HASH.test(String(lock.hash || ''))) return broken(prev ? 'missing' : 'unusable');
     if (prev && lock.hash !== prev.hash) return broken('mismatch', { pinned: prev.hash, locked: lock.hash });
     const isPointer = Boolean(lock.inheritedFrom || lock.ref);
@@ -4475,6 +4481,15 @@ export function resolveContractLock(root, epicDir, { followOwn = false } = {}) {
     prev = { id, hash: lock.hash };
     dir = nextDir;
   }
+}
+
+// A lock file whose text a reader by text (checks/contract-check.sh) could read otherwise than JSON.parse
+// does: a backslash anywhere (an escaped key or value), or `hash`, `ref` or `inheritedFrom` named twice.
+const LOCK_KEYS_ONCE = ['hash', 'ref', 'inheritedFrom'].map((k) => new RegExp(`"${k}"\\s*:`, 'g'));
+function lockReadsTwoWays(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return true; }
+  return text.includes('\\') || LOCK_KEYS_ONCE.some((re) => (text.match(re) || []).length > 1);
 }
 
 // One line naming where a `resolveContractLock` walk broke. Epic ids on it are checked ids; the one piece
@@ -4691,7 +4706,9 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
           `run \`yad doctor\` — fix the lock it names before a change points at ${owner}'s contract`);
       }
       // FLATTENED: the child points straight at the epic holding contract.md, so every reader of the
-      // child's lock (doctor, checks/contract-check.sh) needs one hop. The hash is that epic's, unchanged.
+      // child's lock needs one hop. Doctor and checks/contract-check.sh both follow longer chains (#233),
+      // but a short one is the plain record, and an older wired gate follows one hop only. The hash is
+      // that epic's, unchanged.
       lock = {
         artifact: 'contract.md', hash: w.hash, lockedAt: today,
         inheritedFrom: w.ownerId, ref: `../../${w.ownerId}/.sdlc/contract-lock.json`,

@@ -14040,11 +14040,10 @@ test('doctor: a pointer-lock is followed over every hop, with the walk `yad epic
   pointer(chg, 'EP-mid');
   const status = async (epic) => (await doctorOn(T)).checks.find((x) => x.id === `epic:${epic}:contract-lock`);
   try {
-    // Sound over two hops, but CI's contract-check follows one: a warning that says how to flatten it.
+    // Sound over two hops, and CI's contract-check follows the same chain (#233): ok, naming the way.
     const clean = await status('EP-chg');
-    assert.equal(clean?.status, 'warn');
-    assert.match(clean.message, /pointer-lock matches EP-gen via EP-mid .*, but CI's contract-check follows one hop/);
-    assert.match(clean.hint, /set "inheritedFrom": "EP-gen" and "ref": "\.\.\/\.\.\/EP-gen\/\.sdlc\/contract-lock\.json", and leave "hash" as it is/);
+    assert.equal(clean?.status, 'ok');
+    assert.match(clean.message, /^EP-chg: pointer-lock matches EP-gen via EP-mid \(sha256:/);
     // One hop (the mid epic) is plainly ok.
     assert.equal((await status('EP-mid'))?.status, 'ok');
     // Flattened as the hint says, the child is ok.
@@ -30452,6 +30451,41 @@ test('E115 doctor: an older contract-check that never reads specs/ for links is 
     // A comment naming the command is not the command; a split command is one command.
     assert.equal(symlinkBlindText('# git ls-tree -r -z HEAD -- specs\n'), true);
     assert.equal(symlinkBlindText('links="$(git ls-tree -r -z \\\n  --full-tree HEAD | tr x y)"\n'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: an older contract-check that follows one hop, with a lock that needs more, is checks:pointer-one-hop (#233)', async () => {
+  const { T, backend } = scaffold();
+  try {
+    const { collectDoctor, pointerBlindText } = await import('./doctor.mjs');
+    const { contractSurfaceHash } = await import('./epic-state.mjs');
+    const hits = () => collectDoctor(T).checks.filter((x) => x.id === 'checks:pointer-one-hop');
+    const shipped = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/checks/contract-check.sh'), 'utf8');
+    const put = (dir, text) => { fs.mkdirSync(path.join(dir, 'checks'), { recursive: true }); fs.writeFileSync(path.join(dir, 'checks/contract-check.sh'), text); };
+    const lock = (id, body) => { fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true }); fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/contract-lock.json'), JSON.stringify(body)); };
+    fs.mkdirSync(path.join(T, 'epics/EP-gen'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-gen/contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+    const hash = contractSurfaceHash(path.join(T, 'epics/EP-gen'));
+    lock('EP-gen', { artifact: 'contract.md', hash });
+    const to = (owner) => ({ artifact: 'contract.md', hash, inheritedFrom: owner, ref: `../../${owner}/.sdlc/contract-lock.json` });
+    lock('EP-mid', to('EP-gen'));
+    lock('EP-chg', to('EP-gen'));
+    // An older gate: the one-hop read, built from the shipped one (CI may clone shallow).
+    const old = shipped.replace(/^lock_walk\(\) \{/m, 'lock_walk_gone() {');
+    assert.notEqual(old, shipped);
+    put(backend, old);
+    assert.deepEqual(hits(), [], 'every lock is one hop: an older gate reads them all');
+    lock('EP-chg', to('EP-mid'));
+    const hit = hits();
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].status, 'warn');
+    assert.match(hit[0].message, /^checks\/contract-check\.sh in backend is an older copy that follows a pointer lock one hop only, and the lock of EP-chg needs more/);
+    assert.match(hit[0].hint, /`yad check --fix`/);
+    put(backend, shipped);
+    assert.deepEqual(hits(), [], 'the shipped gate follows the chain');
+    // A comment naming the function is not the function.
+    assert.equal(pointerBlindText('# lock_walk() {\n'), true);
+    assert.equal(pointerBlindText('lock_walk() {\n'), false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

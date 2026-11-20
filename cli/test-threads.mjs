@@ -1897,9 +1897,9 @@ test('yad epic new --parent: a parent whose lock points at another epic binds th
         const checks = [];
         epicChecks(checks, T);
         assert.equal(checks.find((c) => c.id === 'epic:EP-fix:contract-lock')?.status, 'ok', `${what}: doctor on the child`);
-        // X itself: one hop is ok; two hops are sound but CI follows one, so doctor says to flatten it.
+        // X itself: ok over one hop or two — CI's contract-check follows the same chain (#233).
         const onX = checks.find((c) => c.id === 'epic:EP-x:contract-lock');
-        assert.equal(onX?.status, name.startsWith('one hop') ? 'ok' : 'warn', `${what}: doctor on EP-x`);
+        assert.equal(onX?.status, 'ok', `${what}: doctor on EP-x`);
         const fails = checks.filter((c) => c.id.startsWith('epic:EP-fix') && c.status === 'fail');
         assert.deepEqual(fails, [], `${what}: doctor flags nothing on the child`);
       } finally { fs.rmSync(T, { recursive: true, force: true }); }
@@ -1977,6 +1977,33 @@ test('resolveContractLock: the walk stops after MAX_LOCK_HOPS hops, and a contra
     const here = resolveContractLock(T, own);
     assert.deepEqual([here.ownerId, here.pointer], ['EP-own', false]);
     assert.equal(resolveContractLock(T, own, { followOwn: true }).broken, 'mismatch');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('resolveContractLock: a lock that reads two ways is no usable lock (#233)', async () => {
+  const { resolveContractLock } = await import('./epic-state.mjs');
+  const T = productConfig();
+  try {
+    contractEpic(T, 'EP-end');
+    pointerEpic(T, 'EP-mid', 'EP-end');
+    pointerEpic(T, 'EP-x', 'EP-mid');
+    const hash = sdlcOf(T, 'EP-end', 'contract-lock.json').hash;
+    assert.equal(resolveContractLock(T, epicRoot(T, 'EP-x')).ownerId, 'EP-end', 'the plain chain is sound');
+    const ref = '../../EP-end/.sdlc/contract-lock.json';
+    // JSON.parse keeps the LAST of a repeated key, and a reader by text the first: refused, as CI refuses it.
+    for (const [what, text] of [
+      ['"hash" twice', `{"hash":"sha256:${'d'.repeat(64)}","hash":"${hash}","inheritedFrom":"EP-end","ref":"${ref}"}`],
+      ['"ref" twice', `{"hash":"${hash}","ref":"../../EP-gone/.sdlc/contract-lock.json","ref":"${ref}"}`],
+      ['"inheritedFrom" twice', `{"hash":"${hash}","inheritedFrom":"EP-gone","inheritedFrom":"EP-end"}`],
+      ['an escaped key', `{"hash":"${hash}","h\\u0061sh":"${hash}","ref":"${ref}"}`],
+      ['a backslash in ref', `{"hash":"${hash}","ref":"..\\\\..\\\\EP-end\\\\.sdlc\\\\contract-lock.json"}`],
+    ]) {
+      fs.writeFileSync(lockFile(T, 'EP-mid'), text);
+      assert.equal(resolveContractLock(T, epicRoot(T, 'EP-x')).broken, 'missing', `${what}, one hop on`);
+      fs.writeFileSync(lockFile(T, 'EP-x'), text);
+      assert.equal(resolveContractLock(T, epicRoot(T, 'EP-x')).broken, 'unusable', `${what}, at the start`);
+      pointerEpic(T, 'EP-x', 'EP-mid', { hash });
+    }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

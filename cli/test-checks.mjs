@@ -1089,6 +1089,109 @@ test('contract-check gate: a change-epic\'s pointer lock reads the owner\'s cont
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #233. CI's contract-check and `yad doctor` (resolveContractLock) follow a pointer lock the same way: one
+// table of chains, run through both, gives the same pass or fail — and the same refusal of a lock that a
+// text read and JSON.parse would read two ways (a repeated key, a backslash, a cut-off object). Each chain starts at EP-demo (the
+// story's epic) and, when sound, ends at EP-end, which holds contract.md.
+test('contract-check gate and resolveContractLock agree on every pointer chain (#233)', async () => {
+  const { resolveContractLock, MAX_LOCK_HOPS } = await import('./epic-state.mjs');
+  const T = scaffoldRepo();
+  const P = path.join(T, 'product');
+  const E = path.join(P, 'epics');
+  const hash = seedLockedContract(T, 'EP-end');
+  commit(T, 'docs(spec): quote the inherited slice', {
+    'specs/EP-demo-S01/contracts/orders.md': quoteSlice(SURFACE_LINES.slice(2, 5)),
+    'specs/EP-demo-S01/link.md': quoteLink('EP-demo-S01', hash),
+  });
+  const OTHER = 'd'.repeat(64);
+  const writeLock = (dir, to, h = hash, ref = `../../${to}/.sdlc/contract-lock.json`) => {
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash: `sha256:${h}`, inheritedFrom: to, ref }));
+  };
+  const pointer = (id, to, h, ref) => writeLock(path.join(E, id), to, h, ref);
+  // EP-demo → EP-h1 → … → EP-end: `n` hops.
+  const chain = (n) => {
+    const ids = ['EP-demo', ...Array.from({ length: n - 1 }, (_, i) => `EP-h${i + 1}`), 'EP-end'];
+    for (let i = 0; i < ids.length - 1; i++) pointer(ids[i], ids[i + 1]);
+  };
+  // A real folder outside the Product, for the link cases and the ref that leaves epics/.
+  const away = path.join(T, 'away');
+  // A lock written as text, for the locks a JSON writer never makes.
+  const rawLock = (id, text) => { fs.mkdirSync(path.join(E, id, '.sdlc'), { recursive: true }); fs.writeFileSync(path.join(E, id, '.sdlc/contract-lock.json'), text); };
+  const H = `"hash":"sha256:${hash}"`;
+  const TO_END = '"inheritedFrom":"EP-end","ref":"../../EP-end/.sdlc/contract-lock.json"';
+  const NO_HASH = "and the lock there has no usable hash — a lock is one JSON object with a \"hash\": \"sha256:<64 hex>\", each key once and no backslash";
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // `broken` is what resolveContractLock says (null: sound, ending at `owner`); `says` is the gate's reason.
+  const cases = [
+    { name: 'one hop', build: () => chain(1) },
+    { name: 'two hops', build: () => chain(2) },
+    { name: 'three hops', build: () => chain(3) },
+    { name: `${MAX_LOCK_HOPS} hops`, build: () => chain(MAX_LOCK_HOPS) },
+    { name: 'a lock naming its owner by inheritedFrom only', build: () => { rawLock('EP-demo', `{${H},"inheritedFrom":"EP-h1"}`); pointer('EP-h1', 'EP-end'); } },
+    { name: 'an epic with its own contract.md mid-chain', owner: 'EP-h1',
+      build: () => { chain(2); fs.copyFileSync(path.join(E, 'EP-end/contract.md'), path.join(E, 'EP-h1/contract.md')); } },
+    { name: `${MAX_LOCK_HOPS + 1} hops`, broken: 'too-deep', says: /EP-demo-S01: the locks point on for more than 8 hops \(EP-demo → EP-h1 → .* → EP-h8\)/, build: () => chain(MAX_LOCK_HOPS + 1) },
+    { name: 'a loop', broken: 'loop', says: /EP-demo-S01: the locks point in a loop back to EP-demo \(EP-demo → EP-h1 → EP-demo\)/, build: () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-demo'); } },
+    { name: 'a lock pointing at itself', broken: 'loop', says: /EP-demo-S01: the locks point in a loop back to EP-demo \(EP-demo → EP-demo\)/, build: () => pointer('EP-demo', 'EP-demo') },
+    { name: 'a dangling ref', broken: 'missing', says: /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/EP-gone\/\.sdlc\/contract-lock\.json' \(hop 2: EP-demo → EP-h1 → EP-gone\), and there is no lock there — fix ref/,
+      build: () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-gone'); } },
+    { name: 'a hash that changes on the way', broken: 'mismatch', says: /EP-demo-S01: EP-h1's pointer lock copies .*, but its owner now locks another surface — EP-end locks dddddddddddd… \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      build: () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/.sdlc/contract-lock.json'), JSON.stringify({ hash: `sha256:${OTHER}` })); } },
+    { name: 'an epic folder that is a link', broken: 'link', says: /EP-demo-S01: EP-h1 is a link or not a plain folder \(hop 1: EP-demo → EP-h1\)/,
+      build: () => { pointer('EP-demo', 'EP-h1'); writeLock(path.join(away, 'EP-h1'), 'EP-end'); fs.symlinkSync(path.join(away, 'EP-h1'), path.join(E, 'EP-h1')); } },
+    { name: 'a .sdlc folder that is a link', broken: 'link', says: /EP-demo-S01: EP-h1\/\.sdlc is a link or not a plain folder \(hop 1: EP-demo → EP-h1\)/,
+      build: () => { pointer('EP-demo', 'EP-h1'); writeLock(path.join(away, 'EP-h1'), 'EP-end'); fs.mkdirSync(path.join(E, 'EP-h1')); fs.symlinkSync(path.join(away, 'EP-h1/.sdlc'), path.join(E, 'EP-h1/.sdlc')); } },
+    // readJSONStrict refuses a linked lock, so the walk finds no lock there; the gate names the link.
+    { name: 'a lock file that is a link', broken: 'missing', says: /EP-demo-S01: EP-h1\/\.sdlc\/contract-lock\.json is a link or not a plain file \(hop 1: EP-demo → EP-h1\)/,
+      build: () => { pointer('EP-demo', 'EP-h1'); writeLock(path.join(away, 'EP-h1'), 'EP-end'); fs.mkdirSync(path.join(E, 'EP-h1/.sdlc'), { recursive: true }); fs.symlinkSync(path.join(away, 'EP-h1/.sdlc/contract-lock.json'), path.join(E, 'EP-h1/.sdlc/contract-lock.json')); } },
+    { name: 'a contract.md that is a link', broken: 'link', says: /EP-demo-S01: EP-end\/contract\.md is a link or not a plain file \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      build: () => { chain(2); fs.mkdirSync(away, { recursive: true }); fs.renameSync(path.join(E, 'EP-end/contract.md'), path.join(away, 'contract.md')); fs.symlinkSync(path.join(away, 'contract.md'), path.join(E, 'EP-end/contract.md')); } },
+    { name: 'a file where an epic folder belongs', broken: 'link', says: /EP-demo-S01: EP-h1 is a link or not a plain folder \(hop 1: EP-demo → EP-h1\)/,
+      build: () => { pointer('EP-demo', 'EP-h1'); fs.writeFileSync(path.join(E, 'EP-h1'), 'x'); } },
+    { name: 'a ref that leaves epics/', broken: 'outside', says: /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/\.\.\/\.\.\/away\/EP-x\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock in this Product/,
+      build: () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'EP-x', hash, '../../../../away/EP-x/.sdlc/contract-lock.json'); writeLock(path.join(away, 'EP-x'), 'EP-end'); } },
+    { name: 'a ref to a folder that is no epic ID', broken: 'outside', says: /EP-demo-S01: EP-h1's pointer lock names '\.\.\/\.\.\/notes\/\.sdlc\/contract-lock\.json' \(hop 1: EP-demo → EP-h1\), which is not another epic's lock/,
+      build: () => { pointer('EP-demo', 'EP-h1'); pointer('EP-h1', 'notes'); pointer('notes', 'EP-end'); } },
+    { name: 'a ref to an upper-case epic ID', broken: 'outside', says: /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-Mid\/\.sdlc\/contract-lock\.json', which is not another epic's lock/,
+      build: () => { pointer('EP-demo', 'EP-Mid'); pointer('EP-Mid', 'EP-end'); } },
+    { name: 'a ref to another file in .sdlc', broken: 'outside', says: /EP-demo-S01: EP-demo's pointer lock names '\.\.\/\.\.\/EP-end\/\.sdlc\/other\.json', which is not another epic's lock/,
+      build: () => { pointer('EP-demo', 'EP-end', hash, '../../EP-end/.sdlc/other.json'); fs.copyFileSync(path.join(E, 'EP-end/.sdlc/contract-lock.json'), path.join(E, 'EP-end/.sdlc/other.json')); } },
+    { name: 'a lock naming "hash" twice, one hop on', broken: 'missing', says: new RegExp(`EP-demo-S01: EP-demo's pointer lock names '\\.\\./\\.\\./EP-h1/\\.sdlc/contract-lock\\.json' \\(hop 1: EP-demo → EP-h1\\), ${esc(NO_HASH)}`),
+      build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{"hash":"sha256:${OTHER}",${H},${TO_END}}`); } },
+    { name: 'a lock naming "ref" twice, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"ref":"../../EP-gone/.sdlc/contract-lock.json","ref":"../../EP-end/.sdlc/contract-lock.json"}`); } },
+    { name: 'a lock naming "hash" twice, at the start', broken: 'unusable', says: /EP-demo-S01: .*EP-demo\/\.sdlc\/contract-lock\.json has no readable "hash": "sha256:…" value/,
+      build: () => rawLock('EP-demo', `{"hash":"sha256:${OTHER}",${H},${TO_END}}`) },
+    // JSON.parse reads `hash` as a second `hash` and keeps it; a text read would keep the first.
+    { name: 'an escaped key, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"h\\u0061sh":"sha256:${OTHER}",${TO_END}}`); } },
+    { name: 'a cut-off lock, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},${TO_END}`); } },
+    { name: 'a backslash in a ref', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: () => { pointer('EP-demo', 'EP-h1'); rawLock('EP-h1', `{${H},"ref":"..\\\\..\\\\EP-end\\\\.sdlc\\\\contract-lock.json"}`); } },
+    { name: 'a hash one hex digit short, one hop on', broken: 'missing', says: new RegExp(esc(NO_HASH)),
+      build: () => { pointer('EP-demo', 'EP-h1', hash); rawLock('EP-h1', `{"hash":"sha256:${hash.slice(1)}",${TO_END}}`); } },
+    { name: 'a last contract.md that drifted', broken: 'surface', says: /EP-demo-S01: the Product's contract\.md no longer matches its lock .* \(hop 2: EP-demo → EP-h1 → EP-end\)/,
+      build: () => { chain(2); fs.writeFileSync(path.join(E, 'EP-end/contract.md'), contractMd([...SURFACE_LINES, '- `DELETE /orders/{id}` — cancel an order.'])); } },
+  ];
+  try {
+    for (const { name, broken = null, says, owner = 'EP-end', build } of cases) {
+      fs.rmSync(E, { recursive: true, force: true });
+      fs.rmSync(away, { recursive: true, force: true });
+      seedLockedContract(T, 'EP-end');
+      build();
+      const w = resolveContractLock(P, path.join(E, 'EP-demo'));
+      const r = runGate(CONTRACT, T);
+      assert.equal(w.broken ?? null, broken, `${name}: resolveContractLock`);
+      if (!broken) assert.equal(w.ownerId, owner, `${name}: the epic the walk ends at`);
+      assert.equal(r.code, broken ? 1 : 0, `${name}: the gate disagrees with resolveContractLock:\n${r.out}`);
+      if (broken) assert.match(r.out, says, `${name}:\n${r.out}`);
+      else assert.match(r.out, /PASS \[contract-check\]: every changed slice is an exact quote of its locked contract/, name);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // Review 1, hole D: with two merge bases, `git diff BASE...HEAD` reads from ONE, and a hand-resolved merge
 // can undo what the other side brought in. Review 3: two merge bases are common on a branch tip (a hotfix
 // merged into both; stacked branches), so the gates read from EVERY merge base instead of blocking.

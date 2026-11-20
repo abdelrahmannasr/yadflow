@@ -693,6 +693,23 @@ export function projectChecks(checks, root, { headCount = null } = {}) {
         `checks/contract-check.sh in ${symlinkBlind.join(', ')} ${symlinkBlind.length > 1 ? 'are older copies that do' : 'is an older copy that does'} not refuse a symlink or submodule under specs/ — a link there hides the contract slice, and every later edit to its target passes`,
         'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy skills/yad-checks/templates/checks/contract-check.sh over it');
     }
+    // #233. An older contract-check follows a pointer lock ONE hop, so a lock that needs more fails in CI
+    // although doctor now says it is ok. Said only when some lock in this Product needs more than one hop
+    // (a flattened lock passes every copy). The current gate defines `lock_walk`. Named, not fixed.
+    const hopBlind = gateRoots.filter((x) => pointerBlindGate(path.join(x.root, 'checks/contract-check.sh'))).map((x) => x.where);
+    if (hopBlind.length) {
+      const longer = epicIds(root).filter((e) => {
+        const dir = epicRoot(root, e);
+        if (fs.existsSync(path.join(dir, 'contract.md')) || !fs.existsSync(path.join(dir, '.sdlc', 'contract-lock.json'))) return false;
+        const w = resolveContractLock(root, dir);
+        return !w.broken && w.hops.length > 1;
+      });
+      if (longer.length) {
+        check(checks, 'checks:pointer-one-hop', 'project', 'warn',
+          `checks/contract-check.sh in ${hopBlind.join(', ')} ${hopBlind.length > 1 ? 'are older copies that follow' : 'is an older copy that follows'} a pointer lock one hop only, and the lock of ${longer.join(', ')} needs more — CI will refuse a story of ${longer.length > 1 ? 'those epics' : 'that epic'} that quotes its contract`,
+          'run `yad check --fix` (it refreshes a wired contract-check nobody changed by hand); otherwise copy skills/yad-checks/templates/checks/contract-check.sh over it — or point each such lock straight at the epic that holds contract.md (`"inheritedFrom": "EP-<owner>"`, `"ref": "../../EP-<owner>/.sdlc/contract-lock.json"`), with the hash unchanged');
+      }
+    }
     // E116. An older backfill-check reads the spec (and its `verified: true`) from the PR itself, so a PR
     // can approve itself or delete the spec; and it reads paths only, so a symlink or submodule at `src`,
     // `src/<feature>` or inside the feature hides every later edit to its target. Never wired: named, not fixed.
@@ -1009,17 +1026,10 @@ function contractLockCheck(checks, root, epic, ledger) {
       check(checks, id, 'epics', 'fail', message, hint);
       return;
     }
-    if (!own && w.hops.length > 1) {
-      // Sound, but CI follows ONE hop: checks/contract-check.sh reads the lock this one names and then
-      // that epic's contract.md, which a pointer epic does not have. `yad epic new --parent` writes a
-      // flattened lock for this reason; an older one is flattened by hand, with the hash unchanged.
-      check(checks, id, 'epics', 'warn',
-        `${epic}: pointer-lock matches ${w.ownerId} via ${w.chain.slice(1, -1).join(' → ')} (${short(stored)}), but CI's contract-check follows one hop and will refuse it`,
-        `flatten it: in ${epicRel(epic)}/.sdlc/contract-lock.json set "inheritedFrom": "${w.ownerId}" and "ref": "../../${w.ownerId}/.sdlc/contract-lock.json", and leave "hash" as it is`);
-      return;
-    }
     if (!own) {
-      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${w.ownerId} (${short(stored)})`);
+      // Over any number of hops: CI's checks/contract-check.sh follows the same chain the same way (#233).
+      const via = w.hops.length > 1 ? ` via ${w.chain.slice(1, -1).join(' → ')}` : '';
+      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${w.ownerId}${via} (${short(stored)})`);
       return;
     }
     check(checks, `${id}:inherited`, 'epics', 'warn',
@@ -2160,6 +2170,14 @@ export function symlinkBlindGate(file) {
   const src = readPlainText(file);
   if (src === null) return false;
   return symlinkBlindText(src);
+}
+// #233: a contract-check from before the gate followed a pointer lock over every hop. The current one
+// defines `lock_walk`; a `#` line is prose.
+export const pointerBlindText = (src) => !src.split('\n').some((l) => /^\s*lock_walk\s*\(\)/.test(l));
+export function pointerBlindGate(file) {
+  const src = readPlainText(file);
+  if (src === null) return false;
+  return pointerBlindText(src);
 }
 // E116: a backfill-check that reads the spec from the PR's working tree, or never reads the tree at HEAD
 // for links under src/, or splits its --raw list with `tr`. Read like the ones above; no older copy ran

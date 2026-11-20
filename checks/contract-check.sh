@@ -628,12 +628,28 @@ resolve_product() {
   esac
 }
 
-# The `"hash": "sha256:<hex>"` of a contract-lock.json, hex only. Newline-tolerant, first match: the key
-# and its value may legally sit on separate lines. Empty when there is none (`|| true`: under `pipefail`
-# a no-match grep would fail the pipeline).
-lock_hash() { tr '\n' ' ' < "$1" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]+"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/' || true; }
-# One string value of a lock file ($2 = its key), the same newline-tolerant way. Empty when absent.
-lock_str() { tr '\n' ' ' < "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true; }
+# Can the lock file $1 be read by its text, the way JSON.parse reads it (#233)? These reads are not a JSON
+# parser, so a lock is read only when its text, trimmed, is one object (`{` … `}`), holds no backslash
+# (an escaped key or value reads one way here and another there), and names `hash`, `ref` and
+# `inheritedFrom` at most once each (JSON.parse keeps the LAST of a repeated key, a text read the first).
+# `resolveContractLock` in cli/epic-state.mjs refuses the same locks.
+lock_ok() {
+  local _lt _lk
+  _lt="$(tr '\n' ' ' < "$1" 2>/dev/null)" || return 1
+  _lt="${_lt#"${_lt%%[![:space:]]*}"}"; _lt="${_lt%"${_lt##*[![:space:]]}"}"
+  case "$_lt" in '{'*'}') ;; *) return 1 ;; esac
+  case "$_lt" in *'\'*) return 1 ;; esac
+  for _lk in hash ref inheritedFrom; do
+    [ "$(printf '%s' "$_lt" | grep -oE "\"${_lk}\"[[:space:]]*:" | awk 'END { print NR }')" -le 1 ] || return 1
+  done
+}
+# The `"hash": "sha256:<64 hex>"` of a contract-lock.json, hex only. Newline-tolerant: the key and its
+# value may legally sit on separate lines. Empty when there is none, or when the lock cannot be read by
+# its text (`lock_ok`) (`|| true`: under `pipefail` a no-match grep would fail the pipeline).
+lock_hash() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]{64}"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/' || true; }
+# One string value of a lock file ($2 = its key), the same newline-tolerant way. Empty when absent, or
+# when the lock cannot be read by its text.
+lock_str() { lock_ok "$1" || return 0; tr '\n' ' ' < "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true; }
 
 # The lines of a contract.md's CONTRACT-SURFACE block, as yadflow hashes them (contractSurfaceHash in
 # cli/epic-state.mjs): a CR before the newline dropped, every line once with its newline.
@@ -645,6 +661,101 @@ sha256_hex() {
 }
 # The physical path of a folder, or nothing when it cannot be entered.
 phys_dir() { (cd "$1" 2>/dev/null && pwd -P) || true; }
+
+# The absolute path $1 with `.` and `..` folded by its text alone, as Node's path.resolve folds it.
+abs_fold() (
+  set -f; IFS=/; _o=""
+  for _c in $1; do
+    case "$_c" in ''|.) ;; ..) _o="${_o%/*}" ;; *) _o="$_o/$_c" ;; esac
+  done
+  printf '%s' "${_o:-/}"
+)
+# Text read from a file, safe to print on a terminal: only printable ASCII is kept.
+term_safe() { printf '%s' "$1" | LC_ALL=C tr -cd '\040-\176'; }
+
+# The most pointer locks one walk follows: MAX_LOCK_HOPS in cli/epic-state.mjs. An epic ID's shape:
+# isValidEpicId there, with the letters spelled out so no locale widens them.
+_max_lock_hops=8
+_epic_re='^EP-[abcdefghijklmnopqrstuvwxyz0123456789-]+$'
+
+# #233. Follow the lock of epic $2 in the Product $3 to the epic whose contract.md it locks, for story $1.
+# This is the walk `resolveContractLock` in cli/epic-state.mjs runs for `yad doctor` and `yad epic new
+# --parent`, so the gate and doctor give the same answer on every chain (a test holds them equal):
+#   * the walk stops at the first epic that has its own contract.md, or whose lock is not a pointer
+#     (`inheritedFrom` / `ref`), and sets `_qc` to that epic's contract.md;
+#   * every ref must fold, by its text, to exactly <Product>/epics/<EP-id>/.sdlc/contract-lock.json;
+#   * at every epic on the way, its folder, its .sdlc folder, its lock and its contract.md must not be a
+#     link (nor a file where a folder belongs): `-f` and `-d` follow links, so a link is refused by name;
+#   * an epic seen twice is a loop, and more than $_max_lock_hops hops is refused;
+#   * each lock's hash must equal the hash of the lock that points at it.
+# The caller has read the first lock's hash. On a break this says where, naming the hop, and returns 1.
+# Sets `_wvia` (` (hop N: EP-a → EP-b)`, empty when no pointer was followed) for the caller's messages;
+# every other name it uses is `local`.
+lock_walk() {
+  local _ws _wid _wprod _wabs _wepics _wepicsp _wchain _wseen _whops _wprev _wprevh _wprevl _wprevref _wfix
+  local _wd _wx _wk _wp _wwhat _wl _wh _wref _wfrom _wt _wn _we
+  _ws="$1"; _wid="$2"; _wprod="$3"
+  case "$_wprod" in /*) _wabs="$_wprod" ;; *) _wabs="$(pwd)/$_wprod" ;; esac
+  _wepics="$(abs_fold "${_wabs}/epics")"
+  _wepicsp="$(phys_dir "${_wprod}/epics")"
+  _wchain="$_wid"; _wseen=" ${_wid} "; _whops=0; _wvia=""
+  _wprev=""; _wprevh=""; _wprevl=""; _wprevref=""
+  _wfix="— fix ref (a path to the owner epic's .sdlc/contract-lock.json) or inheritedFrom (the owner epic's ID) in"
+  while :; do
+    _wd="${_wprod}/epics/${_wid}"
+    for _wx in "d:${_wid}" "d:${_wid}/.sdlc" "f:${_wid}/.sdlc/contract-lock.json" "f:${_wid}/contract.md"; do
+      _wk="${_wx%%:*}"; _wp="${_wprod}/epics/${_wx#*:}"
+      if [ -L "$_wp" ] || { [ -e "$_wp" ] && { { [ "$_wk" = d ] && [ ! -d "$_wp" ]; } || { [ "$_wk" = f ] && [ ! -f "$_wp" ]; }; }; }; then
+        _wwhat=folder; [ "$_wk" = f ] && _wwhat=file
+        echo "  ${_ws}: ${_wx#*:} is a link or not a plain ${_wwhat}${_wvia}, and a lock is followed only through this Product's own folders — replace it with the ${_wwhat} itself."
+        return 1
+      fi
+    done
+    _wl="${_wd}/.sdlc/contract-lock.json"
+    _wh=""; if [ -f "$_wl" ]; then _wh="$(lock_hash "$_wl")" || _wh=""; fi
+    if [ -n "$_wprev" ]; then
+      if [ -z "$_wh" ] && [ -f "$_wl" ]; then
+        echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and the lock there has no usable hash — a lock is one JSON object with a \"hash\": \"sha256:<64 hex>\", each key once and no backslash; lock ${_wid}'s contract again upstream (yad-architecture Step 5), or ${_wfix#— } ${_wprevl}."
+        return 1
+      fi
+      if [ -z "$_wh" ]; then
+        echo "  ${_ws}: ${_wprev}'s pointer lock names '$(term_safe "$_wprevref")'${_wvia}, and there is no lock there ${_wfix} ${_wprevl} (the yad-change skill writes them)."
+        return 1
+      fi
+      if [ "$_wh" != "$_wprevh" ]; then
+        echo "  ${_ws}: ${_wprev}'s pointer lock copies ${_wprevh:0:12}…, but its owner now locks another surface — ${_wid} locks ${_wh:0:12}…${_wvia} — re-copy the owner's hash (yad-change)."
+        return 1
+      fi
+    fi
+    _wref="$(lock_str "$_wl" ref)"
+    _wfrom="$(lock_str "$_wl" inheritedFrom)"
+    if [ -f "${_wd}/contract.md" ] || { [ -z "$_wref" ] && [ -z "$_wfrom" ]; }; then
+      _qc="${_wd}/contract.md"
+      return 0
+    fi
+    if [ "$_whops" -ge "$_max_lock_hops" ]; then
+      echo "  ${_ws}: the locks point on for more than ${_max_lock_hops} hops (${_wchain}) — point ${_wid}'s lock straight at the epic that holds contract.md, with that epic's hash (yad epic new --parent writes ../../EP-<owner>/.sdlc/contract-lock.json)."
+      return 1
+    fi
+    [ -n "$_wref" ] || _wref="../../${_wfrom}/.sdlc/contract-lock.json"
+    case "$_wref" in /*) _wt="$(abs_fold "$_wref")" ;; *) _wt="$(abs_fold "${_wabs}/epics/${_wid}/.sdlc/${_wref}")" ;; esac
+    _wn=""
+    for _we in "$_wepics" "$_wepicsp"; do
+      [ -n "$_we" ] || continue
+      case "$_wt" in "$_we"/*/.sdlc/contract-lock.json) _wn="${_wt#"$_we"/}"; _wn="${_wn%/.sdlc/contract-lock.json}"; break ;; esac
+    done
+    if [ -z "$_wn" ] || ! [[ $_wn =~ $_epic_re ]]; then
+      echo "  ${_ws}: ${_wid}'s pointer lock names '$(term_safe "$_wref")'${_wvia}, which is not another epic's lock in this Product ${_wfix} ${_wl} (the yad-change skill writes them)."
+      return 1
+    fi
+    case "$_wseen" in
+      *" ${_wn} "*) echo "  ${_ws}: the locks point in a loop back to ${_wn} (${_wchain} → ${_wn}) — point ${_wid}'s lock at the epic that holds contract.md, not back along the chain."; return 1 ;;
+    esac
+    _whops=$((_whops + 1))
+    _wchain="${_wchain} → ${_wn}"; _wseen="${_wseen}${_wn} "; _wvia=" (hop ${_whops}: ${_wchain})"
+    _wprev="$_wid"; _wprevh="$_wh"; _wprevl="$_wl"; _wprevref="$_wref"; _wid="$_wn"
+  done
+}
 
 # Issue #344: is story $1's changed slice an exact quote of its locked contract? Says why not, one line
 # per reason, and returns 1. Sets `current` (the lock's hash) for the caller's note.
@@ -726,40 +837,20 @@ quote_story() {
     return 1
   fi
   # Where the locked text lives. A change-epic that inherits its architecture carries a POINTER lock
-  # (`inheritedFrom` / `ref`, yad-change) and no contract.md of its own: the surface is the owner's. Read
-  # it there, as `yad doctor` does — only inside this Product's epics/, and only when the owner's lock
-  # still holds the hash this one copied. An epic WITH its own contract.md re-authored its architecture
-  # and left the pointer fields behind: its own surface is read (review 2). `yad doctor` reads it too, and
-  # also still checks the pointer and warns about the leftover fields; the gate needs only the surface
-  # the quote is compared with, so it does not.
-  _qc="${prod}/epics/${_qepic}/contract.md"
-  _qref="$(lock_str "$_qlock" ref)"
-  _qfrom="$(lock_str "$_qlock" inheritedFrom)"
-  if [ ! -f "$_qc" ] && { [ -n "$_qref" ] || [ -n "$_qfrom" ]; }; then
-    [ -n "$_qref" ] || _qref="../../${_qfrom}/.sdlc/contract-lock.json"
-    _qepics="$(phys_dir "${prod}/epics")"
-    case "$_qref" in /*) _qrefp="$_qref" ;; *) _qrefp="${prod}/epics/${_qepic}/.sdlc/${_qref}" ;; esac
-    _qowner_sdlc="$(phys_dir "$(dirname "$_qrefp")")"
-    [ -n "$_qepics" ] || _qowner_sdlc=""
-    case "$_qowner_sdlc" in
-      "$_qepics"/*/.sdlc) ;;
-      *) echo "  ${_qs}: ${_qepic}'s pointer lock names '${_qref}', which is not another epic's lock in this Product — fix ref (a path to the owner epic's .sdlc/contract-lock.json) or inheritedFrom (the owner epic's ID) in ${_qlock} (the yad-change skill writes them)."; return 1 ;;
-    esac
-    _qowner_lock="${_qowner_sdlc}/$(basename "$_qref")"
-    if [ "$(basename "$_qref")" != "contract-lock.json" ] || [ ! -f "$_qowner_lock" ]; then
-      echo "  ${_qs}: ${_qepic}'s pointer lock names '${_qref}', and there is no lock there — fix ref (a path to the owner epic's .sdlc/contract-lock.json) or inheritedFrom (the owner epic's ID) in ${_qlock} (the yad-change skill writes them)."; return 1
-    fi
-    if [ "$(lock_hash "$_qowner_lock")" != "$current" ]; then
-      echo "  ${_qs}: ${_qepic}'s pointer lock copies ${current:0:12}…, but its owner now locks another surface — re-copy the owner's hash (yad-change)."; return 1
-    fi
-    _qc="$(dirname "$_qowner_sdlc")/contract.md"
-  fi
-  if [ ! -f "$_qc" ]; then echo "  ${_qs}: ${_qc} is not there, so there is nothing to quote from — write that epic's contract.md in the Product and lock it (yad-architecture Step 5)."; return 1; fi
+  # (`inheritedFrom` / `ref`, yad-change) and no contract.md of its own: the surface is the owner's. The
+  # owner may hold a pointer too, so the gate follows the chain, as `yad doctor` does (#233) — only inside
+  # this Product's epics/, through no link, and only while each lock still holds the hash the one before
+  # it copied. An epic WITH its own contract.md re-authored its architecture and left the pointer fields
+  # behind: its own surface is read (review 2). `yad doctor` reads it too, and also still checks the
+  # pointer and warns about the leftover fields; the gate needs only the surface the quote is compared
+  # with, so it does not.
+  lock_walk "$_qs" "$_qepic" "$prod" || return 1
+  if [ ! -f "$_qc" ]; then echo "  ${_qs}: ${_qc} is not there${_wvia}, so there is nothing to quote from — write that epic's contract.md in the Product and lock it (yad-architecture Step 5)."; return 1; fi
   surface_lines "$_qc" > "$_yad_tmp/surface"
   _qh="$(sha256_hex < "$_yad_tmp/surface")" || _qh=""
   if [ -z "$_qh" ]; then echo "  ${_qs}: no sha256sum or shasum on this machine, so the lock cannot be checked — use a runner image with coreutils (sha256sum) or perl (shasum)."; return 1; fi
   if [ "$_qh" != "$current" ]; then
-    echo "  ${_qs}: the Product's contract.md no longer matches its lock (${_qh:0:12}… vs ${current:0:12}…) — re-lock it upstream (yad-architecture Step 5)."
+    echo "  ${_qs}: the Product's contract.md no longer matches its lock (${_qh:0:12}… vs ${current:0:12}…)${_wvia} — re-lock it upstream (yad-architecture Step 5)."
     return 1
   fi
   while IFS= read -r -d '' _f; do

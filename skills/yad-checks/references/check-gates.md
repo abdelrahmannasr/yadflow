@@ -183,7 +183,14 @@ Every gate stops on its failure except **risk-map**, which is advisory: there a 
       so the lines are compared with the **locked** text, not a later edit. A change-epic that inherits
       its architecture has a **pointer lock** (`inheritedFrom` / `ref`) and no `contract.md`: the owner's
       `contract.md` is read instead, only inside the Product's `epics/`, and only while the owner's lock
-      still holds the copied hash. An epic that re-authored its architecture and kept the pointer fields
+      still holds the copied hash. The owner's lock may be a pointer too, so the gate follows the chain
+      the way `yad doctor` does (#233): each `ref` must be exactly another epic's
+      `epics/<EP-id>/.sdlc/contract-lock.json`, no epic folder, `.sdlc` folder, lock or `contract.md` on
+      the way may be a link, no loop, at most 8 hops, every hash equal to the next, and the last
+      epic's `contract.md` must hash to the lock. A broken chain fails with a reason naming the hop
+      (`hop N: EP-a → EP-b …`). The gate reads a lock by its text, so it reads one only when the
+      text is one JSON object (`{` … `}`) with no backslash, names `hash`, `ref` and `inheritedFrom`
+      at most once each, and holds `"hash": "sha256:<64 hex>"`; `yad doctor` refuses the same locks. An epic that re-authored its architecture and kept the pointer fields
       has its own `contract.md`, and that is read (`yad doctor` reads it too, and also warns about the
       leftover fields);
     - no slice file is deleted (a deletion changes the surface);
