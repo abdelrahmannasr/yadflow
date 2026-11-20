@@ -22,7 +22,7 @@
 //      marker would strand the PR's required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWithRebase } from './lib.mjs';
+import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWithRebase, removeFile, removeDir } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
@@ -290,8 +290,8 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
 // `.sdlc/build-log/` dir was created just for it (now empty), drop that too. Best-effort — a non-empty
 // dir (pre-existing shards) or a benign rmdir race is ignored.
 function cleanupRetroShard(file) {
-  fs.rmSync(file, { force: true });
-  try { fs.rmdirSync(path.dirname(file)); } catch { /* not empty / already gone — leave it */ }
+  removeFile(file);
+  try { removeDir(path.dirname(file), { emptyOnly: true }); } catch { /* not empty / already gone — leave it */ }
 }
 
 export async function runCheckpoint(root, opts = {}) {

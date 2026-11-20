@@ -2006,3 +2006,44 @@ test('E125 b migrate --apply: a link put in the product level after the plan is 
     assert.ok(!thrown.message.includes(T), 'no absolute path');
   } finally { cleanup(T); }
 });
+
+// #248: the move deletes the old folder with `rmTree`, which checks no link. A linked `epics/` or a linked
+// product-level folder refuses the move before anything is copied or deleted, whether or not a Product root
+// is set, and at apply too (a folder made a link after the plan); nothing where the link points changes.
+test('#248 migrate 7 -> 8: a linked epics/ or product-level folder refuses the move, and nothing where it points changes', { skip: LINK_SKIP }, async () => {
+  const { planProductMove, applyProductMove } = await import('./migrate.mjs');
+  const snapshot = (dir) => Object.fromEntries(fs.readdirSync(dir, { recursive: true }).sort().map((f) => {
+    const p = path.join(dir, f);
+    return [f, fs.lstatSync(p).isFile() ? fs.readFileSync(p, 'utf8') : 'dir'];
+  }));
+  for (const linked of ['epics', LEGACY]) {
+    const { T } = await legacyProductLevel();
+    const outside = `${T}-outside`;
+    const exit = process.exitCode;
+    try {
+      // The folder moves out of the Product, and a link to it stands in its place.
+      fs.renameSync(path.join(T, linked), outside);
+      fs.symlinkSync(outside, path.join(T, linked));
+      const before = snapshot(outside);
+      const said = new RegExp(`^${linked.replace('/', '\\/')} is a link, so yad did not move epics/EP-discovery/ to foundation/ \\(it moves files only through real folders\\) — remove the link`);
+      const p = planProductMove(T);
+      assert.equal(p.action, 'unreadable', linked);
+      assert.match(p.detail, said);
+      // As the CLI runs it, with the Product root set (the per-file rows are then refused through the link too).
+      const { setProductRoot } = await import('./lib.mjs');
+      setProductRoot(T);
+      try { await grabOut(() => runMigrate(T, { apply: true })); } finally { setProductRoot(null); }
+      assert.equal(process.exitCode, 1, 'the run fails, as for a linked ledger file');
+      // A move planned while the folder was real is stopped at apply, before the first copy.
+      fs.rmSync(path.join(T, linked));
+      fs.renameSync(outside, path.join(T, linked));
+      const move = planProductMove(T);
+      assert.equal(move.action, 'move');
+      fs.renameSync(path.join(T, linked), outside);
+      fs.symlinkSync(outside, path.join(T, linked));
+      assert.throws(() => applyProductMove(T, move), (e) => /^nothing was moved — /.test(e.message) && said.test(e.message.slice('nothing was moved — '.length)));
+      assert.deepEqual(snapshot(outside), before, `${linked}: nothing where the link points was copied, written or deleted`);
+      assert.equal(fs.existsSync(path.join(T, 'foundation')), false, 'nothing was copied into foundation/');
+    } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
+  }
+});

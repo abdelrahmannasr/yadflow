@@ -15,7 +15,7 @@
 // (see "ledger locking" below).
 import fs from 'node:fs';
 import path from 'node:path';
-import { readJSON, readJSONStrict, writeJSON } from './lib.mjs';
+import { readJSON, readJSONStrict, writeJSON, removeFile } from './lib.mjs';
 import { epicFiles } from './manifest.mjs';
 import { err } from './errors.mjs';
 
@@ -364,7 +364,7 @@ function fold(epicDir, { foldedPath, dir, arr, isTrust }, pick, { dryRun = false
   const deleted = [];
   for (const s of toFold) {
     const p = path.join(dir, s.name);
-    fs.rmSync(p, { force: true });
+    removeFile(p);
     deleted.push(p);
   }
   return { folded: toFold.length, remaining: shards.length - toFold.length, deleted };

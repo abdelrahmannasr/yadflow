@@ -15,9 +15,8 @@
 // the skip. Either way the step stays VISIBLE and auditable — marked with a recorded reason (and
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
-import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, hand, fail, readJSON, readJSONStrict, warn, writeJSON } from './lib.mjs';
+import { ok, info, hand, fail, readJSON, readJSONStrict, warn, writeJSON, removeFile } from './lib.mjs';
 import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
@@ -170,7 +169,7 @@ export async function runLaneSkip(root, { epic, story, repo, reason, undo = fals
   // so a story renamed or removed after the skip can still have its skip undone (E39 review).
   if (undo) {
     const { buildState, empty } = unskipLane(current, { story, repo });
-    if (empty) fs.rmSync(file);
+    if (empty) removeFile(file, { within: root, force: false });
     else writeJSON(file, buildState);
     if (reason != null && reason !== true) info('--reason is not used when un-skipping: the skip record is removed with the skip');
     ok(`${story} / ${repo} un-skipped — the lane is owed again`);

@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { c, emitJSON, fail, forTerminal, hand, info, isPlainObject, log, ok, refuse, run, warn, writeFileAtomic } from './lib.mjs';
+import { c, emitJSON, fail, forTerminal, hand, info, isPlainObject, log, ok, refuse, run, warn, writeFileAtomic, removeFile } from './lib.mjs';
 import { err } from './errors.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { buildIndex, indexHash, readInput } from './product-index.mjs';
@@ -233,7 +233,7 @@ export function buildRepoGraph(root, repo, { runner = run, env = process.env, bi
   // The list git holds is NUL-separated; kept sorted and LF-separated, so it hashes the same everywhere.
   const files = ls.ok ? [...new Set([...ls.stdout.split('\0').filter(Boolean).filter((f) => fs.existsSync(path.join(repo.target, f))), ...g.nodes.map((n) => (isPlainObject(n) && typeof n.source_file === 'string' ? posix(n.source_file) : null)).filter(Boolean)])].sort() : null;
   if (files) writePlain(dir, 'files.txt', `${files.join('\n')}\n`, { within: root });
-  else fs.rmSync(path.join(dir, 'files.txt'), { force: true });
+  else removeFile(path.join(dir, 'files.txt'), { within: root });
   const meta = { head, graphifyVersion: g.graphifyVersion, schemaVersion: g.schemaVersion, builtAt: new Date().toISOString() };
   writePlain(dir, 'meta.json', `${JSON.stringify(meta, null, 2)}\n`, { within: root });
   return { ok: true, nodes: g.nodes.length, edges: g.edges.length, ...(excluded ? {} : { warning: 'graphify-out/ could not be added to the repo\'s .git/info/exclude — git may show it' }) };

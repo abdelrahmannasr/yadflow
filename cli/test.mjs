@@ -2035,6 +2035,147 @@ test('#214: copyFile and copyDir refuse a destination under a linked folder of t
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #248: a delete of a team file goes through removeFile / removeDir, which refuse a linked folder on the way.
+test('#248 removeFile and removeDir refuse a path under a linked folder (Product or { within }), and delete nothing where it points', { skip: E125B_SKIP }, async () => {
+  const { removeFile, removeDir } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248a-')));
+  try {
+    const P = path.join(T, 'product');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'a.json'), 'theirs');
+    fs.writeFileSync(path.join(outside, 'sub', 'b.md'), 'theirs');
+    fs.mkdirSync(path.join(outside, 'empty'));
+    fs.mkdirSync(path.join(P, 'epics', 'EP-x'), { recursive: true });
+    fs.symlinkSync(outside, path.join(P, 'epics', 'EP-x', 'reviews'));
+    const before = treeOf(outside);
+    const refused = (e) => e.code === 'YAD-STATE-001' && e.folder === 'epics/EP-x/reviews'
+      && /^epics\/EP-x\/reviews is a link, so yad did not delete epics\/EP-x\/reviews\//.test(e.message) && /git rm <folder>/.test(e.hint || '');
+    const under = (...p) => path.join(P, 'epics', 'EP-x', 'reviews', ...p);
+    setProductRoot(P);
+    try {
+      assert.throws(() => removeFile(under('a.json')), refused);
+      assert.throws(() => removeDir(under('sub')), refused);
+      assert.throws(() => removeDir(under('empty'), { emptyOnly: true }), refused);
+      assert.throws(() => removeFile(under('sub', 'b.md'), { within: P }), refused);
+    } finally { setProductRoot(null); }
+    // No Product root set: { within } alone (a code repo's folder) is checked the same way.
+    assert.throws(() => removeDir(under('sub'), { within: P }), refused);
+    assert.doesNotThrow(() => removeFile(under('a.json')), 'outside every root it names, a path is not checked (as a write)');
+    fs.writeFileSync(path.join(outside, 'a.json'), 'theirs');
+    assert.deepEqual(treeOf(outside), before, 'nothing deleted in the folder the link points at');
+
+    // A link AT the path is removed as a link: what it points at stays, for a file and for a folder.
+    const R = path.join(T, 'repo');
+    fs.mkdirSync(R);
+    fs.symlinkSync(path.join(outside, 'a.json'), path.join(R, 'file-link'));
+    fs.symlinkSync(path.join(outside, 'sub'), path.join(R, 'dir-link'));
+    fs.symlinkSync(path.join(outside, 'empty'), path.join(R, 'empty-link'));
+    removeFile(path.join(R, 'file-link'), { within: R });
+    removeDir(path.join(R, 'dir-link'), { within: R });
+    assert.throws(() => removeDir(path.join(R, 'empty-link'), { within: R, emptyOnly: true }), /ENOTDIR/, 'rmdir never follows a last link');
+    assert.deepEqual(fs.readdirSync(R), ['empty-link']);
+    assert.deepEqual(treeOf(outside), before, 'a link at the path is removed, never what it points at');
+
+    // Real folders: deleted as before. A missing path is fine, unless force is off or the folder must be empty.
+    fs.mkdirSync(path.join(R, 'd', 'e'), { recursive: true });
+    fs.writeFileSync(path.join(R, 'd', 'f.json'), '{}');
+    removeFile(path.join(R, 'd', 'f.json'), { within: R });
+    assert.throws(() => removeDir(path.join(R, 'd'), { within: R, emptyOnly: true }), /ENOTEMPTY|EEXIST/);
+    removeDir(path.join(R, 'd', 'e'), { within: R, emptyOnly: true });
+    removeDir(path.join(R, 'd'), { within: R, emptyOnly: true });
+    fs.mkdirSync(path.join(R, 'tree', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(R, 'tree', 'x', 'y'), 'y');
+    removeDir(path.join(R, 'tree'), { within: R });
+    assert.deepEqual(fs.readdirSync(R), ['empty-link']);
+    assert.doesNotThrow(() => removeFile(path.join(R, 'gone.json'), { within: R }));
+    assert.doesNotThrow(() => removeDir(path.join(R, 'gone'), { within: R }));
+    assert.throws(() => removeFile(path.join(R, 'gone.json'), { within: R, force: false }), /ENOENT/);
+    assert.throws(() => removeDir(path.join(R, 'gone'), { within: R, emptyOnly: true }), /ENOENT/);
+    fs.mkdirSync(path.join(R, 'a-folder'));
+    assert.throws(() => removeFile(path.join(R, 'a-folder'), { within: R }), (e) => e.code === 'ERR_FS_EISDIR', 'removeFile never removes a folder');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #248: yad check --fix removes a hook script it no longer wires (capture turned off; the Cursor guard once Cursor
+// is no longer a target). Under a `hooks/` committed as a link, that removal is a row that deletes nothing and
+// says why (as a refused rename is), so the run goes on, and the file where the link points stays — as the
+// Product (setProductRoot) and as a folder named only by { within } (the planner's own `root`).
+test('#248 a hook script yad unwires under a linked hooks/ folder is a refused row that deletes nothing, and what the link points at stays', { skip: E125B_SKIP }, async () => {
+  const { orphanCaptureHookActions, orphanHookActions } = await import('./plan.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248b-')));
+  try {
+    for (const productRoot of [true, false]) {
+      const P = path.join(T, `product-${productRoot}`);
+      const outside = path.join(T, `outside-${productRoot}`);
+      fs.mkdirSync(outside);
+      for (const f of ['yad-capture.mjs', 'ledger-guard-cursor.mjs']) fs.writeFileSync(path.join(outside, f), 'their own script');
+      fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(P, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified', default_branch: 'main', capture: false }));
+      fs.symlinkSync(outside, path.join(P, 'hooks'));
+      const before = treeOf(outside);
+      if (productRoot) setProductRoot(P);
+      try {
+        const acts = [...orphanCaptureHookActions(P, ['.claude']), ...orphanHookActions(P, ['.claude'])].filter((a) => a.item.startsWith('hooks/'));
+        assert.deepEqual(acts.map((a) => [a.item, a.status, a.writesNothing, a.paths]).sort(), [
+          ['hooks/ledger-guard-cursor.mjs (removed)', 'modified', true, []],
+          ['hooks/yad-capture.mjs (removed)', 'modified', true, []],
+        ], `productRoot ${productRoot}`);
+        for (const a of acts) {
+          assert.match(a.refused, /^is under hooks, a linked folder, so yad did not delete it — remove the link/, a.item);
+          a.apply();
+        }
+      } finally { setProductRoot(null); }
+      assert.deepEqual(treeOf(outside), before, `nothing deleted where the link points (productRoot ${productRoot})`);
+      // A real hooks/ folder: the script is removed as before.
+      fs.rmSync(path.join(P, 'hooks'));
+      fs.mkdirSync(path.join(P, 'hooks'));
+      fs.writeFileSync(path.join(P, 'hooks', 'yad-capture.mjs'), 'x');
+      const real = orphanCaptureHookActions(P, ['.claude']).filter((x) => x.item.startsWith('hooks/'));
+      assert.deepEqual(real.map((a) => [a.status, !!a.writesNothing]), [['removed', false]]);
+      for (const a of real) a.apply();
+      assert.equal(fs.existsSync(path.join(P, 'hooks', 'yad-capture.mjs')), false);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #248: through the real runner. `yad check --fix` with capture turned off under a linked hooks/ names the
+// refused removal and goes on: the version stamp is written and the other fixes are applied.
+test('#248 yad check --fix goes on past a removal refused under a linked hooks/ folder, and deletes nothing there', { skip: E125B_SKIP }, async () => {
+  const { T } = scaffold();
+  // Everything the run prints, on stdout and stderr.
+  const said = async (fn) => {
+    const orig = [console.log, console.error];
+    const out = [];
+    console.log = console.error = (...a) => out.push(a.map(String).join(' '));
+    try { await fn(); } finally { [console.log, console.error] = orig; }
+    return out.join('\n');
+  };
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-248c-out-'));
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    await said(() => reconcile(T, { fix: true }));
+    assert.ok(fs.existsSync(path.join(T, 'hooks/yad-capture.mjs')), 'capture is wired first');
+    // hooks/ becomes a link to a folder outside, holding the same script; capture is then turned off.
+    fs.cpSync(path.join(T, 'hooks'), outside, { recursive: true });
+    fs.rmSync(path.join(T, 'hooks'), { recursive: true });
+    fs.symlinkSync(outside, path.join(T, 'hooks'));
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main', capture: false }));
+    const before = treeOf(outside);
+    fs.rmSync(path.join(T, '.sdlc/cli-version.json'));
+    fs.rmSync(path.join(T, '.claude/skills/yad-epic'), { recursive: true });
+    setProductRoot(T);
+    let r;
+    let out;
+    try { out = await said(async () => { r = await reconcile(T, { fix: true }); }); } finally { setProductRoot(null); }
+    assert.match(out, /hooks\/yad-capture\.mjs \(removed\) is under hooks, a linked folder, so yad did not delete it/);
+    assert.deepEqual(treeOf(outside), before, 'nothing deleted where the link points');
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/cli-version.json')), 'the run went on to write the version stamp');
+    assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')), 'and the other fixes');
+    assert.ok(r.applied > 0);
+  } finally { for (const d of [T, outside]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
 // #214 review: a caller that names the file itself names the linked folder too.
 test('#214: migrate and the local setup script name the linked folder a file is under', { skip: E125B_SKIP }, async () => {
   const { describeDrift } = await import('./migrate.mjs');
@@ -29091,6 +29232,75 @@ test('#235 b only the listed files write with plain fs, each as often as listed'
     assert.ok(fs.existsSync(path.join(ROOT, a.file)), `${a.file}: an entry for a file that is gone`);
     const found = hits.get(a.file) || [];
     assert.equal(found.length, a.count, `${a.file}: ${found.length} plain writes, ${a.count} listed — ${helpers}; or, for one that is not the team's, update the entry and its reason:\n${[...new Set(found)].join('\n')}`);
+  }
+});
+
+// ---- #248: a team file is deleted only through the safe helpers (EP-review-followups-S04) --------------
+
+// The write guard above, for deletes. A plain `fs.rmSync` through a folder the team committed as a link
+// removes files where the link points. The helpers in cli/lib.mjs (`removeFile`, `removeDir`) refuse a
+// linked folder on the way, as a write does. So outside cli/lib.mjs an `rmSync`, `unlinkSync` or `rmdirSync`
+// call, as `fs.x(`, `nodeFs.x(` or a bare `x(`, is only for a path that is not the team's, in a file listed
+// below with its reason. `count` pins how many such calls the file has (every call on a line counts), so a
+// NEW delete in a listed file fails too. The walk is the read guards' own (`engineSources`, cli/ only). A
+// comment line is prose and is not counted. Not seen here: `fs.rm`, `fs.unlink`, `fs.promises.rm`, a delete
+// reached through another name, and `rmTree` (cli/lib.mjs: it checks nothing): review catches those shapes.
+// `rmTree`'s callers are checked by hand: cli/migrate.mjs (`applyProductMove`) refuses a linked folder on the
+// way before its first copy (`linkedMoveFolder`, #248), so its `rmTree` calls remove only real folders. Counts are per file, so swapping one delete for another in the same file is
+// not caught; review catches that.
+const DIRECT_DELETE = /\b(?:rmSync|unlinkSync|rmdirSync)\(/g;
+const DIRECT_DELETE_ALLOWED = [
+  { file: 'cli/capture.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (the capture index)' },
+  { file: 'cli/epic-state.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (an artifact copied out of git, to hash it)' },
+  { file: 'cli/fold.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (the pathspec and message files)' },
+  { file: 'cli/ledger.mjs', count: 2, reason: 'the ledger\'s lock folder, made by this command with an exclusive mkdir and removed by an empty-only rmdir (1); a stale lock, by the same empty-only rmdir (1)' },
+  { file: 'cli/members.mjs', count: 2, reason: 'yad\'s own mkdtemp folders (a member commit\'s index; member files read from a git ref)' },
+  { file: 'cli/plan.mjs', count: 1, reason: 'the local setup notice script yad copied into the git folder (`--git-common-dir`), never committed' },
+  { file: 'cli/reports-dir.mjs', count: 7, reason: 'the reports folder beside the checkout (yad\'s own output): the catalog lock, a stale lock moved aside and the temp files beside a write (5); old reports and their side files, each proved inside the folder and removed as a file or a link (2)' },
+  { file: 'cli/run-checks.mjs', count: 6, reason: 'yad\'s own mkdtemp scratch folder and the Product copy in it (4); the Product copy this run wrote into the code repo, at a path whose folders were checked for links first (`readRecord`) and made by this run, and the empty folders it made on the way (2)' },
+  { file: 'cli/setup.mjs', count: 3, reason: 'yad\'s own mkdtemp Repomix folder (2); the temp file `placeFile` just made beside the pack, named by pid and time (1)' },
+  { file: 'cli/worktree.mjs', count: 3, reason: 'a link yad made itself in its own worktree, removed as the link only (never what it points at), after `isLinkTo` or right after making it' },
+];
+const deleteCalls = (line) => (/^\s*\/\//.test(line) ? 0 : (line.match(DIRECT_DELETE) || []).length);
+
+test('#248 the delete matcher sees each plain delete, every one on a line, and none of the safe helpers', () => {
+  for (const line of ['fs.rmSync(p)', 'rmSync(p, { force: true })', 'nodeFs.rmSync(p)', 'fs.unlinkSync(p)', 'unlinkSync(p)', 'fs.rmdirSync(d)', 'rmdirSync(d)',
+    'x = fs.rmSync( p, { recursive: true, force: true })', "apply: () => fs.rmSync(dest, { force: true }),"]) {
+    assert.equal(deleteCalls(line), 1, line);
+  }
+  assert.equal(deleteCalls('fs.rmSync(f); fs.rmdirSync(path.dirname(f));'), 2, 'two deletes on one line count twice');
+  assert.equal(deleteCalls('foo(); // fs.rmSync(x)'), 1, 'a delete after code on the line counts, even in a trailing comment');
+  for (const line of ['removeFile(p, { within: root })', 'removeDir(p, { within: root, emptyOnly: true })', 'rmTree(p)', 'fs.readFileSync(p)', 'fs.writeFileSync(p, s)',
+    '// fs.rmSync(p) in a comment', '  // `fs.rmdirSync` throws ENOTEMPTY', 'fs.rm(p, cb)', 'fs.unlink(p, cb)']) {
+    assert.equal(deleteCalls(line), 0, line);
+  }
+});
+
+test('#248 only the listed files delete with plain fs, each as often as listed', () => {
+  const allowed = new Map(DIRECT_DELETE_ALLOWED.map((a) => [a.file, a]));
+  const hits = new Map();
+  const offenders = [];
+  const sources = engineSources();
+  assert.ok(sources.some((f) => f.startsWith('cli/brain/')) && sources.some((f) => f.startsWith('cli/map/')), 'the subfolders are scanned');
+  for (const rel of sources) {
+    if (rel === 'cli/lib.mjs') continue;   // the safe helpers themselves live here
+    fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+      const n = deleteCalls(line);
+      if (!n) return;
+      const at = `${rel}:${i + 1}: ${line.trim()}`;
+      hits.set(rel, [...(hits.get(rel) || []), ...Array(n).fill(at)]);
+      if (!allowed.has(rel)) offenders.push(at);
+    });
+  }
+  const helpers = 'delete a team file with removeFile / removeDir (cli/lib.mjs), which refuse a linked folder';
+  assert.deepEqual(offenders, [], `${helpers}; or, for a path that is not the team's, list it in DIRECT_DELETE_ALLOWED with its reason`);
+  assert.ok(!allowed.has('cli/lib.mjs'), 'cli/lib.mjs is not scanned, so it needs no entry');
+  for (const a of DIRECT_DELETE_ALLOWED) {
+    assert.ok(a.reason, `${a.file}: every entry says why`);
+    assert.ok(a.count > 0, `${a.file}: an entry with count 0 — a file with no plain delete needs no entry`);
+    assert.ok(fs.existsSync(path.join(ROOT, a.file)), `${a.file}: an entry for a file that is gone`);
+    const found = hits.get(a.file) || [];
+    assert.equal(found.length, a.count, `${a.file}: ${found.length} plain deletes, ${a.count} listed — ${helpers}; or, for one that is not the team's, update the entry and its reason:\n${[...new Set(found)].join('\n')}`);
   }
 });
 

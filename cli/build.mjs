@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, refuseLinkedWrite, isPlainObject, exists, forTerminal } from './lib.mjs';
+import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, removeFile, refuseLinkedWrite, isPlainObject, exists, forTerminal } from './lib.mjs';
 import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
 import { DEFAULT_LIFECYCLE, laneOrder, laneAuthorSteps } from './lifecycle.mjs';
 import { epicFiles, PROJECT_FILES } from './manifest.mjs';
@@ -1273,7 +1273,7 @@ export async function buildDone(root, { story, today, fetch = true } = {}) {
   // The lanes first: a story file that could not be written (the usual cause) cannot be written back either.
   const restore = () => {
     // Written back through a new file and a rename (#235), the bytes as they were read and the file's mode kept.
-    if (laneText === null) fs.rmSync(ctx.file, { force: true }); else writeFileAtomic(ctx.file, laneText, { keepMode: true });
+    if (laneText === null) removeFile(ctx.file, { within: root }); else writeFileAtomic(ctx.file, laneText, { keepMode: true });
     try { if (fs.readFileSync(ctx.storyFile, 'utf8') !== storyText) writeFileAtomic(ctx.storyFile, storyText, { keepMode: true }); } catch { /* left as it was */ }
   };
   if (changedLanes || !ctx.buildState?.story) writeJSON(ctx.file, bs);

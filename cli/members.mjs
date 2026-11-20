@@ -44,7 +44,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readBlobsAt } from './git-read.mjs';
 
-import { c, log, ok, info, warn, fail, hand, run, readJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, readJSON, readPlainJSON, removeFile, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, forTerminal, isPlainObject, asset, inJSON, refuse as refuseJSON } from './lib.mjs';
 import { productConfigPath, isVerifiedLedger, SCHEMA_VERSION } from './manifest.mjs';
 import { LOGIN_RE, hostFromGitUrl, plainHost } from './platform.mjs';
 import { repoPathFromGitUrl, configuredGitUrl, httpStatus } from './protection.mjs';
@@ -826,7 +826,7 @@ export async function runMemberRemove(root, { login = null, reason = null, runne
   if (!fs.existsSync(path.join(root, rel))) return refuse(`no member file for ${forTerminal(who)} (${rel})`, '`yad member list` shows the members');
   const own = me && me.toLowerCase() === who.toLowerCase();
   if (!own && !(typeof reason === 'string' && reason.trim())) return refuse(`${who} is not you — removing someone else's member file needs --reason "<why>"`, `yad member remove ${who} --reason "<why>"`);
-  fs.rmSync(path.join(root, rel), { force: true });
+  removeFile(path.join(root, rel), { within: root });
   ok(`removed ${rel}${own ? '' : ` — reason: ${forTerminal(reason.trim())}`}`);
   hand(`commit the removal on its own${own ? '' : `, with the reason in the message: git commit -m "chore(product): remove team member ${who}" -m "Reason: ${forTerminal(reason.trim()).replace(/"/g, "'")}"`} — on a verified Product, in a PR of its own`);
   return { login: who, path: rel, removed: true, reason: own ? null : reason.trim() };

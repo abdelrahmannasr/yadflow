@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, MAX_PLAIN_BYTES, notPlainSaid, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree } from './lib.mjs';
+import { ask, c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, readPlainBytes, readPlainFile, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID, MAX_PLAIN_BYTES, notPlainSaid, warn, writeFileAtomic, writeJSON, writeProductConfig, emitJSON, collectWarning, cpMerge, rmTree, refuseLinkedWrite, LINKED_FOLDER_FIX } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
@@ -383,6 +383,9 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   if (!exists(ledgerOf(from, 'state.json'))) return null;
   const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [], reshape: [] };
   const refuse = (action, detail) => ({ ...base, action, detail });
+  // A linked folder on the way (#248) refuses the move before anything is read through it.
+  const linked = linkedMoveFolder(root, fromRel);
+  if (linked) return refuse('unreadable', linked);
 
   // `ci` is the gate bot asking (cli/gate.mjs `convertProductLevel`): on a verified Product it is the one
   // writer allowed to move the ledger, so for it — and only for it — this refusal is lifted. Every
@@ -457,6 +460,21 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   };
 }
 
+// A move copies the product level out of `epics/<id>/` into `foundation/`, beside a backup in `epics/`, and
+// then deletes the original with `rmTree`, which checks no link. Through a linked folder on the way (`epics/`,
+// the product level's own folder, `foundation/`, their `.sdlc/`) the copy would read and write, and the delete
+// remove, files outside the Product (#248). So such a move is refused, with the check every write makes
+// (`refuseLinkedWrite`), from the Product's folder whether or not a command has set it. The reason, or null.
+function linkedMoveFolder(root, fromRel) {
+  for (const dir of [fromRel, FOUNDATION_DIR]) {
+    try { refuseLinkedWrite(path.join(root, dir, '.sdlc', 'state.json'), root); } catch (e) {
+      if (!e?.folder) throw e;
+      return `${e.folder} is a link, so yad did not move ${fromRel}/ to ${FOUNDATION_DIR}/ (it moves files only through real folders) — ${LINKED_FOLDER_FIX}, then migrate`;
+    }
+  }
+  return null;
+}
+
 // Apply a planned move. Back up, copy, check, relabel, reshape — and only then remove the original.
 //
 // ANY FAILURE BEFORE THAT LAST STEP IS UNDONE COMPLETELY: the backup, every file copied into
@@ -470,6 +488,9 @@ export function planProductMove(root, { verified = false, ci = false, migrations
 // `backup: false` is for the gate bot. In CI the old folder is in git history, a `.yad-orig` copy would be
 // an untracked directory on a throwaway runner, and `yad migrate` is not there to add it to .gitignore.
 export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = cpMerge, backup: keepBackup = true } = {}) {
+  // Checked again before the first copy: a folder that became a link since the plan stops the move here.
+  const linked = linkedMoveFolder(root, move.from);
+  if (linked) throw new Error(`nothing was moved — ${linked}`);
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
   const backup = path.join(root, move.backup);
