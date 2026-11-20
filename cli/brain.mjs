@@ -104,8 +104,9 @@ function readPlain(base, rel, opts) {
 // and a committed link (`files.txt -> ~/.zshrc`) would take every name from the code repo (E176 review 2).
 // `writeFileAtomic` does both (a fresh temp name made with `wx`, then the rename), and it refuses a linked
 // folder between `within` and the file itself (#246), so a caller no longer has to check the folder first.
-// `within`: the Product root for the files under `.sdlc/brain/`; the page's own folder for the `--html` page.
-// The Product's own root is walked too whenever a command has settled it (`setProductRoot`).
+// `within`: the Product root for the files under `.sdlc/brain/`. The `--html` page (`writeOwnFile`) passes none:
+// a `within` equal to the file's own folder would check nothing, as the walk starts below it. The Product's
+// own root is walked too whenever a command has set it (`setProductRoot`), down to the file's last folder.
 export function writePlain(dir, name, data, { within } = {}) {
   writeFileAtomic(path.join(dir, name), data, { within });
 }

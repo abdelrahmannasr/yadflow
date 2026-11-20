@@ -16,6 +16,7 @@ import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { writePlain } from './brain.mjs';
+import { LINKED_FOLDER_FIX } from './lib.mjs';
 
 export const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 export const BASE_HEADERS = Object.freeze({
@@ -124,10 +125,13 @@ export function writeOwnFile(file, data) {
   if (st && !st.isFile()) return `${file} is not a plain file (a link or a folder) — name another path`;
   const dir = path.dirname(file);
   if (!fs.existsSync(dir)) return `the folder ${dir} does not exist`;
-  // The page's own folder is the person's choice, so it may be a link; a linked folder inside the Product, on
-  // the way to it, is refused like any other write there (#246), and named as a problem.
-  try { writePlain(dir, path.basename(file), data, { within: dir }); } catch (e) {
-    if (e?.code === 'YAD-STATE-001') return `${e.message} — name another path`;
+  // No `within`: the path is the person's, not a team folder. Only the Product root is walked, and only when the
+  // command has set it (`setProductRoot`). That walk checks every folder from the Product root down to the page,
+  // its own last folder too: with `mylink` a linked folder in the Product, `--html <Product>/mylink/page.html`
+  // is refused (#246) and named as a problem. Outside the Product, a linked folder on the way is the person's
+  // choice, and the page is written where it points.
+  try { writePlain(dir, path.basename(file), data); } catch (e) {
+    if (e?.code === 'YAD-STATE-001') return `${e.message} — name another path (or ${LINKED_FOLDER_FIX})`;
     throw e;
   }
   return null;

@@ -28964,6 +28964,33 @@ test('#246 writePlain refuses a linked .sdlc/brain/ folder and writes nothing th
   }
 });
 
+// `writeOwnFile` writes the `--html` page at the path the person names. Inside the Product (once a command set its
+// root) a linked folder on the way, the page's own folder too, is refused and comes back as a problem, never a
+// throw; outside the Product the same link is the person's choice and the page is written where it points.
+test('#246 writeOwnFile refuses a linked folder inside the Product as a problem, and writes nothing through it', { skip: E125B_SKIP }, async () => {
+  const { writeOwnFile } = await import('./local-page.mjs');
+  const { LINKED_FOLDER_FIX } = await import('./lib.mjs');
+  const P = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ownpage-')));
+  const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ownpage-other-')));
+  const page = path.join(P, 'mylink', 'page.html');
+  try {
+    fs.symlinkSync(other, path.join(P, 'mylink'));
+    setProductRoot(P);
+    try {
+      const problem = writeOwnFile(page, '<p>x</p>');
+      assert.equal(typeof problem, 'string', 'a problem, not a throw');
+      assert.match(problem, /^mylink is a link, so yad did not write mylink\/page\.html .* — name another path \(or /);
+      assert.ok(problem.includes(LINKED_FOLDER_FIX), 'the way out is named');
+      assert.deepEqual(fs.readdirSync(other), [], 'nothing written through the link');
+    } finally { setProductRoot(null); }
+    // With no Product root set, the folder is the person's own: the page goes where the link points.
+    assert.equal(writeOwnFile(page, '<p>x</p>'), null);
+    assert.equal(fs.readFileSync(path.join(other, 'page.html'), 'utf8'), '<p>x</p>');
+  } finally {
+    for (const d of [P, other]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // ---- #235 b: a team file is written only through the safe helpers (EP-safety-followups-S02) ------------
 
 // A file in the Product or a code repo is the team's: anyone who can commit there can put a link where yad
