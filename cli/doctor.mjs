@@ -1687,6 +1687,7 @@ export function themeChecks(checks, root) {
   const spellings = new Map();   // folded key -> the distinct spellings seen, in first-seen order
   const unreadable = [];
   const commented = [];
+  const wholeComment = [];   // `theme: #checkout-revamp` — the form `yad next` prints, which YAML reads as a comment
 
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!isValidEpicId(e)) continue;
@@ -1702,7 +1703,14 @@ export function themeChecks(checks, root) {
       continue;
     }
     const t = themeOf(fm);
-    if (!t) continue;
+    if (!t) {
+      // The reader cuts `theme: #checkout-revamp` to nothing (#618), as YAML does — but that is the form
+      // `yad next` prints, so it was almost certainly meant as the tag. Read the raw line to say so. Only
+      // a single `#word` is taken for a tag: `theme: # none yet` is a real comment, and says nothing.
+      const raw = rawFrontmatterValue(md, 'theme');
+      if (raw !== null && /^#+[^\s#]\S*$/.test(raw.replace(/^[ \t]+|[ \t]+$/g, ''))) wholeComment.push(`${e}: \`theme:${forTerminal(raw)}\``);
+      continue;
+    }
     // A `#` left inside the tag is almost always a comment that was not read as one: `readFrontmatter`
     // and the check gates' `fm_val` cut a `#` with a space before it (#618), but not one with none
     // (`checkout#note`) or one inside quotes, so it lands in the value. The tag IS read — it is not
@@ -1738,13 +1746,31 @@ export function themeChecks(checks, root) {
       'a theme is ONE free tag — a word or short phrase, in any language. A list is read as no theme at all, so the epic drops out of every grouping',
     );
   }
-  if (commented.length) {
+  // One row for both: a `#` left in the tag, and a tag that is wholly a comment.
+  if (commented.length || wholeComment.length) {
+    const said = [
+      commented.length && `${commented.length} epic(s) have a \`#\` inside the theme itself: ${some(commented, 3)}`,
+      wholeComment.length && `${wholeComment.length} epic(s) have a \`theme:\` that is only a comment, so they have no theme: ${some(wholeComment, 3)}`,
+    ].filter(Boolean);
+    const hints = [
+      commented.length && 'the frontmatter readers cut a `# comment` only when a space or tab comes before the `#` and it is outside quotes, so a `#` with none, or in quotes, and everything after it is part of the tag — the epic then groups only with epics carrying that exact text. Write the tag bare.',
+      wholeComment.length && 'In `theme: #tag` this whole value is a YAML comment (a `#` after a space starts one), so the epic is in no group — write the tag bare, without the `#`.',
+    ].filter(Boolean);
     check(
-      checks, 'theme:commented', 'shape', 'warn',
-      `${commented.length} epic(s) have a \`#\` inside the theme itself: ${some(commented, 3)}`,
-      'the frontmatter readers cut a `# comment` only when a space or tab comes before the `#` and it is outside quotes, so this `#` and everything after it is part of the tag — the epic then groups only with epics carrying that exact text. Write the tag bare. `yad next` and `yad thread` print a `#` in front of it, but that is decoration on the screen, not part of the value',
+      checks, 'theme:commented', 'shape', 'warn', said.join('; '),
+      `${hints.join(' ')} \`yad next\` and \`yad thread\` print a \`#\` in front of it, but that is decoration on the screen, not part of the value`,
     );
   }
+}
+
+// The raw text after `key:` on that key's last line in the first frontmatter block (the line the reader
+// keeps, since a later key wins), or null when there is none. For a report that must see what the
+// reader cut.
+function rawFrontmatterValue(file, key) {
+  const m = String(readPlainText(file) ?? '').match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const lines = m[1].split('\n').filter((l) => l.startsWith(`${key}:`));
+  return lines.length ? lines[lines.length - 1].slice(key.length + 1) : null;
 }
 
 // #354 — the design frames each story records (`design-frames: [id, …]`). The rule is `frameFindings` in
@@ -3178,7 +3204,7 @@ const globMatches = (glob, ref) => {
 // with a space or tab before it, outside quotes. `inline` is the text right after `key:`, untrimmed, so
 // `branches: # note` is empty and its `- item` lines are read instead.
 export const yamlList = (inline, childLines) => {
-  const v = stripFrontmatterComment(inline || '').trim();
+  const v = stripFrontmatterComment(inline || '').replace(/^[ \t]+|[ \t]+$/g, '');
   const items = v.startsWith('[') ? v.replace(/^\[/, '').replace(/\]$/, '').split(',') : v ? [v] : childLines.map((l) => stripFrontmatterComment(l.replace(/^\s*-/, '')));
   return items.map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 };

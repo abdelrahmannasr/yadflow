@@ -13349,7 +13349,8 @@ test('doctor theme: a theme in any script groups normally and is never called un
 
 test('doctor theme: a `#` left in the tag is reported as a comment, not as unreadable', async () => {
   // The readers cut a `#` with a space or tab before it (#618), so `theme: x # note` is plain `x` and
-  // `theme: #x` is no theme at all, as in YAML. A `#` they keep — one with no space before it, or one
+  // `theme: #x` is no theme at all, as in YAML. That second one is the form `yad next` prints, so it is
+  // reported too: a `theme:` that is only a comment. A real comment (`# none yet`) is not. A `#` they keep — one with no space before it, or one
   // inside quotes — is NOT unreadable: `themeOf` hands the value back verbatim, so the tag IS read and
   // does group, with the note attached. Calling that "nothing can read it" would send the reader
   // looking for a missing theme that is present but polluted.
@@ -13358,15 +13359,19 @@ test('doctor theme: a `#` left in the tag is reported as a comment, not as unrea
     'EP-e': { fm: 'kind: feature\ntheme: checkout-revamp # the big one' },   // cut: plain checkout-revamp
     'EP-d': { fm: 'kind: feature\ntheme: checkout-revamp' },
     'EP-f': { fm: 'kind: feature\ntheme: "##"' },     // symbols AND a `#` — the comment report wins
-    'EP-g': { fm: 'kind: feature\ntheme: #checkout-revamp' },                // a comment: no theme
+    'EP-g': { fm: 'kind: feature\ntheme: #checkout-revamp' },   // wholly a comment: no theme, and said
+    'EP-h': { fm: 'kind: feature\ntheme: # none yet' },           // a real comment: no theme, nothing said
   });
   const c = checks.find((x) => x.id === 'theme:commented');
   assert.equal(c.status, 'warn');
   assert.equal(c.section, 'shape');
   assert.match(c.message, /EP-c: `theme: checkout-revamp#the-big-one`/);
   assert.match(c.message, /EP-f: `theme: "##"`/, 'symbols AND a `#`: the comment report is the actionable one');
-  assert.doesNotMatch(c.message, /EP-e|EP-g/, 'a cut comment leaves nothing to report');
+  assert.match(c.message, /1 epic\(s\) have a `theme:` that is only a comment, so they have no theme: EP-g: `theme: #checkout-revamp`/);
+  assert.doesNotMatch(c.message, /EP-e|EP-h/, 'a cut comment after a tag, or a real comment, leaves nothing to report');
   assert.match(c.hint, /decoration on the screen/);
+  assert.match(c.hint, /this whole value is a YAML comment/);
+  assert.match(c.hint, /write the tag bare, without the `#`/);
   assert.equal(checks.find((x) => x.id === 'theme:unreadable'), undefined, 'it reads fine; it is just polluted');
   // …and it is NOT also called a spelling variant of the clean tag beside it, which would be true and
   // would name the wrong problem.
