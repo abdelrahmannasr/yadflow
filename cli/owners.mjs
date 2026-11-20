@@ -28,7 +28,7 @@
 // and this; two hooks at the same instant can lose an entry — one extra warning, never a broken file.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, warn, fail, hand, readJSON, writeJSON, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
+import { ok, info, warn, fail, hand, readJSON, writeJSON, removeFile, removeDir, readPlainJSON, NOT_PLAIN_FILE, FILE_TOO_BIG, TOO_BIG_SAID } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { STEPS, epicIds, epicRel, epicRoot, isPassed, isValidEpicId, stepStatus } from './epic-state.mjs';
 import { capturedEpic, gitIn, isOwnerPath, wipName, WIP_PREFIX } from './capture.mjs';
@@ -207,8 +207,8 @@ export async function runUnassign(root, { epic, step, force = false, env = proce
   if (prev.record && prev.record.owner !== me && !force) {
     return refuse(`${step} of ${epic} is assigned to ${who(prev.record)}, not you`, `talk to them first; to remove it anyway: yad unassign ${epic} ${step} --force`);
   }
-  fs.rmSync(file, { force: true });
-  try { fs.rmdirSync(path.dirname(file)); } catch { /* other assignments are still there */ }
+  removeFile(file, { within: root });
+  try { removeDir(path.dirname(file), { within: root, emptyOnly: true }); } catch { /* other assignments are still there */ }
   ok(`${step} of ${epic} is no longer assigned${prev.record ? ` (was ${who(prev.record)})` : ''}`);
   hand(`commit the removal of ${rel} so the team sees it`);
   return { epic, step, changed: true, removed: prev.record ? { owner: prev.record.owner, name: prev.record.name } : null, path: rel };
