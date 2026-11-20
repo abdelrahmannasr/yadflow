@@ -1122,8 +1122,8 @@ was never started, so its bases carry `boundHash: null` and no pointer-lock is w
 ## The pointer-lock — `contract-lock.json` in a change-epic
 
 When `architecture` is inherited, `yad epic new` writes a **derived** `contract-lock.json` carrying the
-parent's hash **verbatim** so `contract-check.sh` passes unchanged: it compares `hash`, and follows `ref` / `inheritedFrom` one hop to read the surface in the owner's `contract.md`. There is
-no `contract.md` in the child to edit, so the surface physically cannot drift. When the owner's lock is itself a pointer, the engine follows it to the epic that holds `contract.md`, and `inheritedFrom` / `ref` name that epic (flattened — one hop for every reader; #598).
+parent's hash **verbatim** so `contract-check.sh` passes unchanged: it compares `hash`, and follows `ref` / `inheritedFrom` to read the surface in the owner's `contract.md`, over every hop, with the walk `yad doctor` runs (#233). There is
+no `contract.md` in the child to edit, so the surface physically cannot drift. When the owner's lock is itself a pointer, the engine follows it to the epic that holds `contract.md`, and `inheritedFrom` / `ref` name that epic (flattened — one hop for every reader, including a gate copied before #233, which follows one hop only; #598).
 
 ```json
 { "artifact": "contract.md", "hash": "sha256:<parent hash, verbatim>", "lockedAt": "<date>",
