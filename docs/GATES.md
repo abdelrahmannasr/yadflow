@@ -129,7 +129,8 @@ two gates over the pushed commits: [verified-commits](#verified-commits) and
 [commit-message](#commit-message). This covers `yad update --push`, which pushes without a pull request.
 When the repo's trunk (its `default_branch` in yad's files) is not the platform's default branch, set the CI
 variable `YAD_TRUNK` to the trunk, and pushes to it are checked too (a repository variable on GitHub, a
-project or group CI/CD variable on GitLab). Unset, only the default branch is checked. `yad ci check`
+project or group CI/CD variable on GitLab). Unset, only the default branch is checked. On the Product the
+same variable also makes `yad-gate-sync` write gate advances to the trunk (#232). `yad ci check`
 names the value in its `trunk` row ([branch-protection.md](branch-protection.md#which-branch)).
 
 **When the PR text is edited** (title or description only), GitHub runs only `pr-title` and
