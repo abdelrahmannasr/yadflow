@@ -150,8 +150,9 @@ the whole rest of the line, so there a comment becomes part of the value and the
   two ways, because two spellings group as two themes). Leave the key empty when there is no group.
   Write ONE tag, never a list — `theme: [a, b]` is read as no theme at all — and never write a `#`:
   `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, but the `#` is decoration on the
-  screen, and anything from a `#` onward is kept as part of the value, so the epic then groups only
-  with epics carrying that exact text. Any language is fine. Set it NOW, while the epic
+  screen. Written into the file, `theme: #checkout-revamp` is a YAML comment, so the epic has no theme
+  at all, and a `#` with no space before it is kept as part of the tag, so the epic then groups only
+  with epics carrying that exact text (`yad doctor` warns on both). Any language is fine. Set it NOW, while the epic
   is being written: the epic review gate is bound to a hash of the file (all of it except the `status:` line), so adding a theme after
   that gate is approved drops the approval as stale and the step has to be approved again.
 
