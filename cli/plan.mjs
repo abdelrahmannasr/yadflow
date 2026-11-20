@@ -54,6 +54,17 @@ function destState(dest, within) {
     throw e;
   }
 }
+// The words of a refused row when any of `paths` is under a linked folder of the Product or of `within`, else
+// null (#235): a rename removes the old copy first, so it is checked at plan time, before anything is removed.
+function linkedOnTheWay(paths, within) {
+  for (const p of paths) {
+    try { refuseLinkedWrite(p, within); } catch (e) {
+      if (e?.folder) return `is under ${e.folder}, a linked folder, so yad did not write it — ${LINKED_FOLDER_FIX}, then re-run \`yad check --fix\``;
+      throw e;
+    }
+  }
+  return null;
+}
 // A file yad installs from its template. What stands at `dest` decides (#222), never read through:
 //   nothing there      'missing'
 //   a link             'missing', with `replacesLink`: `copyFile` puts the real file in the link's place (a rename
@@ -513,6 +524,8 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
         const oldDest = path.join(root, IDE_OPENCODE_DIR, `${old}.md`);
         const newDest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);
         if (!exists(oldDest)) continue;
+        const refusedMd = linkedOnTheWay([oldDest, newDest], root);
+        if (refusedMd) { actions.push({ scope: ide, item: `${old}.md → ${skill}.md`, status: 'modified', root, paths: [], writesNothing: true, refused: refusedMd, apply: () => {} }); continue; }
         actions.push({
           scope: ide,
           item: `${old}.md → ${skill}.md`,
@@ -529,6 +542,8 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
         const oldDest = path.join(root, ide, 'skills', old);
         const newDest = path.join(root, ide, 'skills', skill);
         if (!exists(oldDest)) continue;
+        const refusedDir = linkedOnTheWay([oldDest, newDest], root);
+        if (refusedDir) { actions.push({ scope: ide, item: `${old} → ${skill}`, status: 'modified', root, paths: [], writesNothing: true, refused: refusedDir, apply: () => {} }); continue; }
         actions.push({
           scope: ide,
           item: `${old} → ${skill}`,
@@ -617,6 +632,8 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
     if (!ownedByOldInstall(oldPath, marker)) continue;
     const w = wiring.find((x) => x.dest === newDest);
     if (!w) continue; // never delete a working file without a replacement to install
+    const refused = linkedOnTheWay([oldPath, path.join(baseRoot, newDest)], baseRoot);
+    if (refused) { actions.push({ scope, item: `${oldDest} → ${newDest}`, status: 'modified', root: baseRoot, paths: [], writesNothing: true, refused, apply: () => {} }); continue; }
     ledger ??= readManagedLedger(baseRoot);
     const recorded = ledger[oldDest];
     const ours = !!recorded && recorded === contentSha(oldPath);
@@ -1362,13 +1379,15 @@ function hookSettingsAction(root, adapter, merge = (obj) => mergeHookSettings(ob
 // text, not JSON: `mergeShared` puts the block into a file's text.
 function blockState(dest, opts, within) {
   let raw = null;
+  let why = null;
   try {
     const st = lstatIfPresent(dest);
     // A plain read (#222): a link put in the file's place after the `lstat` is refused, not followed.
     if (st) raw = st.isFile() ? readPlainFile(dest, { within }) : undefined;
-  } catch { raw = undefined; }
-  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission).
-  if (raw === undefined) return { raw, state: 'unreadable', refused: 'it is not a file yad can read' };
+  } catch (e) { raw = undefined; why = e; }
+  // Not a plain file yad can read (a folder, a symbolic link that could point anywhere, no permission), or one
+  // under a linked folder, which is named (#235).
+  if (raw === undefined) return { raw, state: 'unreadable', refused: `it ${notPlainSaid(why, 'is not a file yad can read')}` };
   const now = applyMarkedBlock(raw, opts);
   if (now.refused) return { raw, state: 'refused', refused: now.refused };
   // A file with no block is `missing` too: the BLOCK is missing. So `yad update` adds it only where it adds

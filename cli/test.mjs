@@ -2252,6 +2252,36 @@ test('#235: a code repo with a linked .sdlc is refused at plan time: the ledger 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #235 review (T09): a rename removes the old copy before it writes the new one, so a linked folder on either
+// side is a refused row at plan time, and the old copy stays where it is. (The skill renames get the same check;
+// a linked `.claude/skills` is already refused as an unsafe target before them.)
+test('#235: a legacy wired-file rename under a linked folder of a code repo is a refused row, and the old file is not removed', { skip: E125B_SKIP }, async () => {
+  const { legacyRepoActions } = await import('./plan.mjs');
+  const { LEGACY_MARKER } = await import('./manifest.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235g-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'workflows', 'sdlc-checks.yml'), `${LEGACY_MARKER}\nold\n`);
+    fs.symlinkSync(outside, path.join(R, '.github'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const rows = legacyRepoActions(P, { name: 'backend', path: '../backend', platform: 'github' });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].writesNothing, true);
+      assert.equal(rows[0].rename, undefined, 'not a rename, so it is never applied as one');
+      assert.match(rows[0].refused, /^is under \.github, a linked folder, so yad did not write it/);
+      rows[0].apply();
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'the old file stays where the link points');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
 // Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that
