@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, isPlainObject, exists, forTerminal } from './lib.mjs';
+import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, refuseLinkedWrite, isPlainObject, exists, forTerminal } from './lib.mjs';
 import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
 import { DEFAULT_LIFECYCLE, laneOrder, laneAuthorSteps } from './lifecycle.mjs';
 import { epicFiles, PROJECT_FILES } from './manifest.mjs';
@@ -723,6 +723,9 @@ export async function buildShip(root, { story, task, repo, pr, mergeCommit = nul
     };
   }
   if (followUp) return addFollowUp(root, ctx, original, ship, { story, task, repo });
+  // The story's status line is written after the ship record: a story under a linked folder is refused first
+  // (#235), so no ship is recorded for a story whose status cannot follow.
+  refuseLinkedWrite(ctx.storyFile);
   const res = writeShip(ctx.epicDir, ship);
   if (!res.written) shipRefused(res, { story, task, repo });
   // The story is in Build now (the skill's rule); `build done` sets it shipped once every task is.
