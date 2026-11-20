@@ -362,7 +362,9 @@ test('#599: on GitLab an unprotected trunk is told to untick "Protect variable";
   } finally { done(same); }
 });
 
-test('#599: the Product\'s trunk row says gate sync still follows the default branch; no CI, no row', () => {
+// #232: the gate sync follows YAD_TRUNK too, so on the Product the variable is the whole fix: one step, and
+// no word that the gate sync follows only the default branch.
+test('#599 #232: the Product\'s trunk row says the gate sync follows YAD_TRUNK too; no CI, no row', () => {
   for (const platform of ['github', 'gitlab']) {
     const w = workspace({ platform, product: { default_branch: 'testing' } });
     try {
@@ -371,9 +373,11 @@ test('#599: the Product\'s trunk row says gate sync still follows the default br
         : [...onBranch(gl('p'), 'testing'), ...gl('app')];
       const trunk = byId(check(w, calls).r, 'Product').trunk;
       assert.ok(trunk, `${platform}: a trunk row on the Product`);
-      assert.match(trunk.message, /, and the gate sync follows only main$/);
-      assert.equal(trunk.fix.steps.length, 2);
-      assert.match(trunk.fix.steps[1], /^On the Product the variable is not enough: yad-gate-sync, .*follows only the platform's default branch \(main\).*The simplest fix is to make testing the platform's default branch/);
+      assert.match(trunk.message, /^the trunk testing is not (GitHub|GitLab)'s default branch \(main\): the update guard checks a direct push to testing, and the gate sync moves a gate on after a review merges into it, only when a .*YAD_TRUNK is set to testing$/);
+      assert.doesNotMatch(trunk.message, /follows only/);
+      assert.equal(trunk.fix.steps.length, 1, 'the variable is the whole fix');
+      assert.match(trunk.fix.steps[0], /^If it is not set already: .*YAD_TRUNK, value testing/);
+      assert.ok(!trunk.fix.steps.some((x) => /not enough|default branch \(main\)/.test(x)), `${platform}: no step says the gate sync stays on main`);
     } finally { done(w); }
   }
   // A Product whose ledger is kept locally runs no yad CI, so it has no update guard and no row.

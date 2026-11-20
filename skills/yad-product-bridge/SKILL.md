@@ -158,6 +158,11 @@ person's to run, never an AI agent's: it pushes to the default branch (E158). (l
      case set the variable to a real tag. The variable lives in project settings, so it survives
      every `yad` sync. Single value only — `tags: [$VAR]` is one tag equal to the whole variable,
      not a comma-split.
+   - **A trunk that is not the default branch** (#232): when the Product's `default_branch` in
+     `.sdlc/product.json` is not GitLab's default branch, the person sets a `YAD_TRUNK` CI/CD variable
+     to it (project or group). The merge path then also runs on a push to that branch, and the sweep
+     checks out and pushes it. Keep the trunk protected, or untick "Protect variable". Unset, only the
+     default branch is followed. `yad ci check` shows a `trunk` warning naming the value.
    - **The Node line** (#364): the job runs `image: node:${YAD_NODE_VERSION}`, `22` by default; set a
      `YAD_NODE_VERSION` CI/CD variable to change it without editing the managed fragment. Leave
      **Protect variable** unticked on it and on `YAD_RUNNER_TAGS` unless only protected branches run
@@ -184,6 +189,9 @@ person's to run, never an AI agent's: it pushes to the default branch (E158). (l
    `yad gate status <epic>` after `git pull --ff-only` on the default branch): grant the push path (a branch-protection or ruleset setting), then re-run
    the workflow or run `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default
    branch (advisory `yad gate sync` cannot recover a bridge gate).
+   A trunk that is not GitHub's default branch (#232): the person sets a `YAD_TRUNK` repository variable to
+   the Product's `default_branch`, and the reconcile job checks out that branch instead (the merge job
+   already checks out the branch the review merged into). Unset, nothing changes.
 
 ## Hard rules
 

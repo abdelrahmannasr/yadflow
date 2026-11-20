@@ -56,6 +56,17 @@ guard checks the default branch only, as before. `yad ci check` shows a `trunk` 
 whose branch is not the platform's default. It cannot read the variable's value, so the warning says
 "if it is not set already".
 
+On the Product, the same variable also moves `yad-gate-sync` (the CI job that moves a gate on after its
+review merges) to the trunk (#232):
+
+- GitHub: the merge job already checks out the branch the review merged into. The 15-minute reconcile
+  job checks out the `YAD_TRUNK` branch instead of the default branch.
+- GitLab: the merge path also runs on a push to the `YAD_TRUNK` branch, and the scheduled sweep checks
+  out and pushes that branch instead of the default branch. Keep the trunk protected, or untick
+  "Protect variable": a protected variable is invisible to the pipelines of an unprotected branch.
+
+Unset or empty, the gate sync follows the default branch only, as before.
+
 ## GitHub
 
 GitHub has two ways to set rules: **rulesets** (Settings → Rules → Rulesets) and the older **classic

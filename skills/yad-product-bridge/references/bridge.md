@@ -222,6 +222,22 @@ other way — up through its first review PR/MR; see "the seed of a new epic" be
 | PR/MR closed **and merged** (the human act) | merge | `gate ci --branch <head> --pr <n> --merged` → re-read approvals, advance the step + flip the artifact `status:` **on the default branch** |
 | Schedule (`*/15`) | reconcile | Safety net: enumerate recently-**merged** `review/EP-*` PRs/MRs via the API and advance any not yet `done` (idempotent). Recovers a merge whose merge-time run failed transiently, and on GitLab also picks up a squash merge whose commit dropped the branch name (and a bare approval — GitLab fires no pipeline on one). **GitHub:** a scheduled workflow, automatic once committed. **GitLab:** a pipeline schedule with `SDLC_GATE_SYNC=true` (one-time setup) |
 
+**A trunk that is not the platform's default branch (#232).** When the Product's `default_branch` in
+`.sdlc/product.json` (for example `testing`) is not the platform's default, the person sets a CI variable
+`YAD_TRUNK` to it — a repository variable on GitHub, a project or group CI/CD variable on GitLab — in the
+settings, never in the wired files, which `yad update` rewrites. The update guard follows the same variable
+(#599). With it set:
+
+| Platform | Merge path | Scheduled sweep |
+|---|---|---|
+| GitHub | no change: it runs on every merged `review/EP-*` PR and checks out the branch the PR merged into | checks out the `YAD_TRUNK` branch instead of the default branch |
+| GitLab | a second rule also runs it on a push to the `YAD_TRUNK` branch whose commit names a review branch; it checks out the branch that was pushed | checks out and pushes the `YAD_TRUNK` branch instead of the default branch |
+
+`yad gate ci` pushes the advance to the trunk `.sdlc/product.json` names, so `YAD_TRUNK` names that same
+branch. Unset or empty, both jobs follow the default branch exactly as before. On GitLab, keep the trunk
+protected or untick "Protect variable": a protected variable reaches only the pipelines of protected
+branches. `yad ci check` shows a `trunk` warning naming the value; it cannot read the variable.
+
 **Which yadflow the wired job runs.** Both fragments resolve the version from a `YAD_VERSION` variable
 and fall back to the major the fragment ships with — `YAD_MAJOR` in its `yad-pin` block (`4` in this release):
 
@@ -253,8 +269,8 @@ What keeps a planted entry out is that the cached job never loads an entry a pul
   job keeps no cache: it runs in the PR's own cache scope, which that PR's runs can write, and it runs once
   per merge, so a cache would save it little. A Product workflow of your own that runs PR code with
   `pull_request_target` writes the default branch's caches too — do not add one.
-- **GitLab:** the push path runs only on the default branch; set the pipeline schedule on the default branch
-  too. Keep the default branch protected, and keep the default "separate caches for protected branches"
+- **GitLab:** the push path runs only on the default branch (and on the `YAD_TRUNK` branch when it is set);
+  set the pipeline schedule on the default branch too. Keep the default branch (and the trunk) protected, and keep the default "separate caches for protected branches"
   setting on, so an entry written on an unprotected branch never reaches it.
 
 The folder is never committed: `gate ci` stages only its own ledger paths. A Product that floats on the bare
