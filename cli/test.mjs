@@ -2082,6 +2082,63 @@ test('#214: a code repo inside the Product reached through a link is refused eve
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #235: the writers #214 left on plain `fs` — the status line in story and epic files, the gate's review records,
+// the stub epic.md `yad issues` makes, and the files yad writes into a code repo — refuse a linked folder too, with
+// the YAD-STATE-001 the helpers give, and write nothing where the link points.
+const LINKED_WRITE_235 = (folder) => (e) => e instanceof YadErrorPlain && e.code === 'YAD-STATE-001' && e.kind === 'link' && e.folder === folder
+  && e.message.startsWith(`${folder} is a link, so yad did not write `) && /^remove the link \(`git rm <folder>`\).*, then run the command again$/.test(e.hint);
+// A Product with one epic whose `linked` folder is a link to a folder outside it holding `files`.
+function linkedEpic235(T, linked, files) {
+  const P = path.join(T, 'product');
+  const outside = path.join(T, 'outside');
+  fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+  fs.mkdirSync(outside, { recursive: true });
+  for (const [f, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(outside, f)), { recursive: true }); fs.writeFileSync(path.join(outside, f), text); }
+  fs.mkdirSync(path.dirname(path.join(P, linked)), { recursive: true });
+  fs.symlinkSync(outside, path.join(P, linked));
+  return { P, outside };
+}
+
+test('#235: a code repo\'s own linked folder is refused for the files yad writes there ({ within } the repo)', { skip: E125B_SKIP }, async () => {
+  const { repoActions, recordManagedWrites } = await import('./plan.mjs');
+  const { copyFile, copyDir } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-235e-')));
+  try {
+    const P = path.join(T, 'product');
+    fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(P, '.sdlc', 'product.json'), '{}\n');
+    // The repo sits beside the Product, outside its folder: only `within` checks the repo's own folders.
+    const R = path.join(T, 'backend');
+    fs.mkdirSync(R);
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'theirs.sh'), 'theirs\n');
+    fs.symlinkSync(outside, path.join(R, 'checks'));
+    fs.symlinkSync(outside, path.join(R, '.sdlc'));
+    const before = treeOf(outside);
+    setProductRoot(P);
+    try {
+      const actions = repoActions(P, { name: 'backend', path: '../backend', platform: 'github' });
+      const checks = actions.filter((a) => a.item.startsWith('checks/'));
+      assert.ok(checks.length > 0);
+      for (const a of checks) {
+        assert.equal(a.writesNothing, true, a.item);
+        assert.match(a.refused, /^is under checks, a linked folder, so yad did not write it — remove the link/, a.item);
+      }
+      assert.throws(() => copyFile(path.join(outside, 'theirs.sh'), path.join(R, 'checks', 'x.sh'), { within: R }), LINKED_WRITE_235('checks'));
+      assert.throws(() => copyDir(path.join(P, '.sdlc'), path.join(R, 'checks', 'sub'), { within: R }), LINKED_WRITE_235('checks'));
+      assert.throws(() => writeJSON(path.join(R, '.sdlc', 'product-link.json'), { a: 1 }, { within: R }), LINKED_WRITE_235('.sdlc'));
+      // The provenance record of the repo, under its linked `.sdlc`.
+      const src = path.join(T, 'src.sh');
+      fs.writeFileSync(src, 'ours\n');
+      fs.mkdirSync(path.join(R, 'bin'));
+      fs.copyFileSync(src, path.join(R, 'bin', 'x.sh'));
+      assert.throws(() => recordManagedWrites([{ managed: { src, dest: path.join(R, 'bin', 'x.sh'), root: R } }]), LINKED_WRITE_235('.sdlc'));
+    } finally { setProductRoot(null); }
+    assert.deepEqual(treeOf(outside), before, 'nothing is written where the links point');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 const { readPlainJSON, readPlainFile, readPlainBytes, NOT_PLAIN_FILE } = await import('./lib.mjs');
 // Runs a module script in a child with a time limit, and returns the JSON it printed last: a read that
 // never ends (a link to /dev/zero) must fail the test, not freeze the whole run.
