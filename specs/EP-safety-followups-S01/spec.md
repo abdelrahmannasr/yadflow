@@ -34,6 +34,12 @@ never checked. An automated Build run with no person watching could write outsid
 - R7. A write that succeeds keeps the file's bytes (line endings, trailing newline) and, for a rewrite in place,
   its mode (`writeFileAtomic`'s new `keepMode` option).
 
+- R8. A write whose refusal would leave a run half applied is checked before the first change: a code repo's
+  linked `.sdlc` stops the repo plan at the ledger read and makes `product-link.json` a refused row; a legacy
+  rename under a linked folder is a refused row before the old copy is removed; `yad build ship` checks the
+  story file before the ship record; gate sync checks `reviews/` before the ledger; `yad sync-status` checks every
+  file of an epic before the first rewrite; the doc-site brand checks its three files before the first write.
+
 ## Out of scope
 
 Deletes through a linked folder (`fs.rmSync` in `cli/plan.mjs`). Reads that still use plain `fs` before a write
@@ -102,4 +108,30 @@ before the settings write. Then each plain-`fs` writer moves to `writeFileAtomic
 **Files:**
 - cli/toolbox.mjs
 - docs/CLI.md
+
+## T08 — Refuse a code repo's linked .sdlc at plan time: its ledger read and product-link.json
+**Files:**
+- cli/lib.mjs
+- cli/plan.mjs
+- cli/test.mjs
+
+## T09 — Make a legacy rename under a linked folder a refused row, and name the linked folder in a rules-block refusal
+**Files:**
+- cli/plan.mjs
+- cli/test.mjs
+
+## T10 — Check the story, reviews/ and the doc-site brand files before the first write in build ship, gate sync and docs brand
+**Files:**
+- cli/build.mjs
+- cli/gate.mjs
+- cli/docs-brand.mjs
+
+## T11 — Check every file of an epic before sync-status rewrites the first, and test applyKeepingOwn and keepMode
+**Files:**
+- cli/artifact-status.mjs
+- cli/test.mjs
+
+## T12 — Skip the read-only-folder build done test on Windows
+**Files:**
+- cli/test-build.mjs
 <!-- /yad:tasks -->

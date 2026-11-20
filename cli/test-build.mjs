@@ -446,7 +446,7 @@ test('yad build ship: an epic slug that reads like a task still matches its own 
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
-test('yad build done: a status write that fails puts the lanes back; another build-state file claiming the story is refused (#346 review 4)', { skip: (process.getuid && process.getuid() === 0) && 'root writes read-only files' }, () => {
+test('yad build done: a status write that fails puts the lanes back; another build-state file claiming the story is refused (#346 review 4)', { skip: (process.platform === 'win32' && 'a read-only folder does not stop a rename on Windows') || ((process.getuid && process.getuid() === 0) && 'root writes read-only files') }, () => {
   const { W, P, dir, sha } = workspace({ tasks: '- T01 one\n' });
   try {
     yad(P, 'skip', 'EP-l', 'EP-l-S01', '--repo', 'web', '--reason', 'no UI change');
