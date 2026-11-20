@@ -2164,6 +2164,21 @@ test('#235: yad gate comments refuses its review comments record under a linked 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('#235: the stub epic.md yad issues makes is refused under a linked epic folder or epics/, and nothing is written there', { skip: E125B_SKIP }, async () => {
+  const { writeStubEpic } = await import('./issues-write.mjs');
+  for (const [i, linked] of [[0, 'epics/EP-x-parent'], [1, 'epics']]) {
+    const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-235d${i}-`)));
+    try {
+      const { P, outside } = linkedEpic235(T, linked, {});
+      setProductRoot(P);
+      try {
+        assert.throws(() => writeStubEpic(P, 'EP-x-parent', 'EP-x', '2026-11-20'), LINKED_WRITE_235(linked));
+      } finally { setProductRoot(null); }
+      assert.deepEqual(treeOf(outside), {}, `${linked}: nothing is written where the link points`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
 test('#235: a code repo\'s own linked folder is refused for the files yad writes there ({ within } the repo)', { skip: E125B_SKIP }, async () => {
   const { repoActions, recordManagedWrites } = await import('./plan.mjs');
   const { copyFile, copyDir } = await import('./lib.mjs');

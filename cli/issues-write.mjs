@@ -6,7 +6,7 @@
 // The item must be read before anything is created. A failed write-back leaves the link in place and says so.
 import fs from 'node:fs';
 import path from 'node:path';
-import { run, readJSON, readPlainJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON } from './lib.mjs';
+import { run, readJSON, readPlainJSON, forTerminal, c, log, fail, hand, info, ok as said, warn, emitJSON, writeFileAtomic } from './lib.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { epicIds, epicRoot, isGenesisType, isValidEpicId, PRODUCT_EPICS, WORK_ITEM_TYPES } from './epic-state.mjs';
 import { addItemLabels, closeItem, commentOnItem, removeItemLabels } from './platform.mjs';
@@ -387,6 +387,13 @@ export function definiteParents(root, t, item, { self, runner = run }) {
   return { ids };
 }
 
+// The stub parent's epic.md: the same header the yad-stub skill writes, as a parent needs an epic.md. It names
+// only the ids, so the item's text stays on the platform. Written through a new file and a rename (#235): an
+// epic folder (or `epics/`) that is a link is refused with YAD-STATE-001, and nothing is written where it points.
+export function writeStubEpic(root, stubbed, epic, today) {
+  writeFileAtomic(path.join(epicRoot(root, stubbed), 'epic.md'), `---\nid: ${stubbed}\ntitle: Parent of ${epic}\nstatus: draft\nkind: feature\ntype: feature\nthread: ${stubbed}\ntheme:\nverified: false\nstub: backfill-pending\norigin: brownfield\nowner:\nrepos: []\ncreated: ${today}\n---\n\n## Feature (stub)\nAn anchor made so ${epic} can thread off it. Nothing is known about this feature yet: document it with the yad-backfill skill.\n`);
+}
+
 // `yad epic new <slug> --issue <ref>`.
 export async function runEpicNewFromIssue(root, { slug, issue, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false, now = Date.now(), env = process.env, runner = run } = {}) {
   const bail = bailer(json);
@@ -424,9 +431,7 @@ export async function runEpicNewFromIssue(root, { slug, issue, type = null, prof
       if (fs.existsSync(epicFiles(epicRoot(root, stubbed)).state) || fs.existsSync(path.join(epicRoot(root, stubbed), 'epic.md'))) return bail(`${stubbed} already exists`, `if it is this item's parent, pass --parent ${stubbed}`);
       const s = await runEpicNew(root, { slug: stubbed, stub: true, today, json: true, returnResult: true });
       if (!s?.ok) return bail(`the stub parent ${stubbed} could not be created: ${s?.error ?? 'unknown reason'}`, s?.hint);
-      // The same header the yad-stub skill writes: a parent needs an epic.md. It names only the ids, so the
-      // item's text stays on the platform.
-      fs.writeFileSync(path.join(epicRoot(root, stubbed), 'epic.md'), `---\nid: ${stubbed}\ntitle: Parent of ${epic}\nstatus: draft\nkind: feature\ntype: feature\nthread: ${stubbed}\ntheme:\nverified: false\nstub: backfill-pending\norigin: brownfield\nowner:\nrepos: []\ncreated: ${today}\n---\n\n## Feature (stub)\nAn anchor made so ${epic} can thread off it. Nothing is known about this feature yet: document it with the yad-backfill skill.\n`);
+      writeStubEpic(root, stubbed, epic, today);
       parentId = stubbed;
     }
   }
