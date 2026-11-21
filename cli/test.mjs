@@ -11262,6 +11262,23 @@ test('doctor: laneChecks fails a contradiction, and warns about no record, an un
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('checkpoint --retro-ship refuses a retired story, never pointing at yad unskip (#621)', async () => {
+  const { recordRetroShip } = await import('./checkpoint.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-retired-retro-'));
+  const prev = process.exitCode;
+  try {
+    // `in-build` by hand: retro-ship asks for it first, and a story can be moved there after it was retired.
+    laneEpic(T, {
+      stories: { 'EP-l-S01': ['api'] }, storyStatus: 'in-build',
+      buildState: { 'EP-l-S01': { story: 'EP-l-S01', retired: retiredRec, repos: { api: { status: 'skipped', record: { reason: 'retired: moved to another epic' } } } } },
+    });
+    const refused = grabSync(() => recordRetroShip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'api', today: '2026-11-21' }));
+    assert.match(refused, /EP-l-S01 is retired — a retired story was not built/);
+    assert.doesNotMatch(refused, /yad unskip/);
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-l/.sdlc/build-log')), false, 'no ship written');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('checkpoint --retro-ship refuses a skipped lane, and never lists one as still unrecorded (E39)', async () => {
   const { recordRetroShip } = await import('./checkpoint.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lane-retro-'));
@@ -17491,6 +17508,16 @@ test('shippedStories reads only frontmatter status:shipped', () => {
   const set = shippedStories(T, 'EP-demo');
   assert.ok(set.has('EP-demo-S01') && !set.has('EP-demo-S02'));
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shippedStories leaves out a retired story, even one whose status says shipped (#621)', () => {
+  const T = productWithShards({ 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'shipped' });
+  try {
+    const f = path.join(T, 'epics/EP-demo/.sdlc/build-state/EP-demo-S02.json');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify({ story: 'EP-demo-S02', retired: { reason: 'moved', by: 'sam', date: '2026-11-21' }, repos: {} }));
+    assert.deepEqual([...shippedStories(T, 'EP-demo')], ['EP-demo-S01']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, commits, and is idempotent', async () => {
