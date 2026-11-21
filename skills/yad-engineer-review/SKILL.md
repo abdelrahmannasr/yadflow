@@ -1,6 +1,6 @@
 ---
 name: yad-engineer-review
-description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver, who should not be the author; high risk / contract raise the full count, advisory, not enforced — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build step E: wire the AI review, record the engineer review, and record the ship once a person merges. Use when the user says "record the engineer review", "merge this task", or "wire the AI review".'
 ---
 
 # SDLC — Engineer Review & Merge (Build Step E)
@@ -9,7 +9,7 @@ description: 'Build Step E of the gated SDLC — AI review, engineer review, the
 out to production: an **AI first-pass** (advisory) and a **human engineer review** (the authority),
 then **ship** — merge, record the ship, and update the story state. This is the last Build step
 (build plan §E). It is a **human gate**, the same `advance: human` discipline as the Shape steps:
-**nothing auto-advances**; the engineer owns the merge.
+**nothing auto-advances**; the engineer owns the merge. To commit and open the PR/MR, use yad-ship.
 
 ## Conventions
 

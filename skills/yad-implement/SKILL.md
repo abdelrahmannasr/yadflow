@@ -1,6 +1,6 @@
 ---
 name: yad-implement
-description: 'Build Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (yad-run) may auto-run once the team sets `implement` to `advance: auto` (`yad dial`) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
+description: 'Build step B: implement one atomic task as a small diff on its own branch, inside the files the task declared. Use when the user says "implement task <id>" or after a story is spec''d.'
 ---
 
 # SDLC — Implement Task (Build Step B)

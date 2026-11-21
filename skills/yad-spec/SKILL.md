@@ -1,6 +1,6 @@
 ---
 name: yad-spec
-description: 'Build Step A of the gated SDLC. For one ready-for-build story and one of its repos, run the heavy Spec Kit ceremony ONCE (specify → clarify → plan → analyze → checklist → tasks) inside that code repo, writing specs/<story-id>/ in Spec Kit''s own layout. Drives /speckit.* as harness slash-commands when installed; authors the same files by hand and records speckit: not-installed when absent. References the locked contract — never re-invents the surface. Writes link.md back to the story. For a small story with no contract surface, offers a light spec (one spec.md with the plan and tasks) that a human confirms (#348). Never auto-advances. Use when the user says "spec story <id> in <repo>" or after a story is ready-for-build.'
+description: 'Build step A: for one story in one code repo, write the spec, plan and atomic tasks, within the locked contract. Use when the user says "spec story <id> in <repo>" or after a story is ready-for-build.'
 ---
 
 # SDLC — Author Spec (Build Step A)
