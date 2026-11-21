@@ -11,7 +11,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix, linkedHookSaid } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, retiredRecord, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, stripFrontmatterComment, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
+import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, retiredRecord, storyRetired, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, stripFrontmatterComment, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -2607,6 +2607,8 @@ export function phaseChecks(checks, root) {
 //                                              lane's own contradiction row, whose fix (`yad unskip`) a
 //                                              retired story refuses.
 //   story:<epic>:<story>:retired-no-record      warn — retired with no reason.
+//   stories:<epic>:all-retired                  warn — every story of the epic is retired, so nothing is
+//                                              left to ship and the epic can never seal.
 export function laneChecks(checks, root) {
   for (const e of epicIds(root)) {
     const epicDir = epicRoot(root, e);
@@ -2615,6 +2617,10 @@ export function laneChecks(checks, root) {
     let names;
     try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
     const stories = new Map(epicStories(epicDir).map((st) => [st.id, st]));
+    if (stories.size && [...stories.keys()].every((id) => storyRetired(epicDir, id))) {
+      check(checks, `stories:${e}:all-retired`, 'epics', 'warn', `${e}: every story is retired, so nothing is left to ship and the epic can never seal`,
+        'an epic where no story will be built is a question for its stories review: add the stories it still needs, or stop the epic there');
+    }
     let ships = [];
     try { ships = readShips(epicDir); } catch { /* an unreadable build-log is reported by the epic checks */ }
     for (const n of names) {

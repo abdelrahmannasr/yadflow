@@ -44,6 +44,7 @@ export async function runStoryRetire(root, { story, reason, today = null } = {})
   const current = readJSONStrict(file, null);
   const ships = readShips(epicDir);
   const others = epicStories(epicDir).filter((st) => st.id !== story);
+  const owed = others.filter((st) => !storyRetired(epicDir, st.id));
   const by = recordActor(root);
   const { buildState, already, lanes } = retireStory(current, {
     story, reason, by, date: today,
@@ -51,8 +52,9 @@ export async function runStoryRetire(root, { story, reason, today = null } = {})
     storiesPassed: ['done', 'satisfied'].includes(stepStatus(review)),
     storyStatus: typeof fm.status === 'string' ? fm.status : null,
     shipped: ships.some((sh) => sh.story === story),
-    othersOwed: others.filter((st) => !storyRetired(epicDir, st.id)).length,
-    anyShipped: others.some((st) => isFile(path.join(epicDir, 'stories', `${st.id}.md`)) && readFrontmatter(path.join(epicDir, 'stories', `${st.id}.md`)).status === 'shipped'),
+    othersOwed: owed.length,
+    // A retired story never counts as shipped here, even one whose status says so (`yad doctor` fails it).
+    anyShipped: owed.some((st) => isFile(path.join(epicDir, 'stories', `${st.id}.md`)) && readFrontmatter(path.join(epicDir, 'stories', `${st.id}.md`)).status === 'shipped'),
   });
   const rel = path.relative(root, file);
   if (already) {
