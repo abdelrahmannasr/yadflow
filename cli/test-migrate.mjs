@@ -2076,12 +2076,18 @@ test('#251 migrate --apply with no Product root set: a linked epics/ is an unrea
     assert.deepEqual(snapshotOf(outside), before, 'nothing where the link points was read into a backup or rewritten');
     // The files outside the link still migrate.
     assert.equal(read(path.join(T, '.sdlc/cli-version.json')).schemaVersion, ENGINE_SHAPE);
-  } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
+  } finally {
+    // lib.mjs has no getter for the Product root, so it goes back to the suite's baseline: every test that
+    // sets it ends with null (the #248 test above does the same).
+    setProductRoot(null);
+    process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('#251 migrate --apply with no Product root set: an epics/ made a link after the row was read is refused at the write', { skip: LINK_SKIP }, async () => {
   const { setProductRoot } = await import('./lib.mjs');
-  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
+  const original = '{\n  "currentStep": "epic"\n}\n';
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': original } });
   const aside = `${T}-aside`;
   const outside = `${T}-outside`;
   const rel = 'epics/EP-x/.sdlc/state.json';
@@ -2101,7 +2107,13 @@ test('#251 migrate --apply with no Product root set: an epics/ made a link after
     await assert.rejects(grabOut(() => runMigrate(T, { apply: true }, { migrations: swapping })), (e) => e?.code === 'YAD-STATE-001' && /epics/.test(e.message));
     assert.equal(calls, 2, 'the swap happened at the apply');
     assert.deepEqual(fs.readdirSync(outside), [], 'nothing was written through the link');
+    // The real file, moved aside with its folder, holds what it held, beside the backup the apply made first.
+    const real = path.join(aside, 'EP-x', '.sdlc');
+    assert.deepEqual(fs.readdirSync(real).sort(), ['state.json', 'state.json.yad-orig']);
+    assert.equal(fs.readFileSync(path.join(real, 'state.json'), 'utf8'), original, 'the state file is unchanged');
+    assert.equal(fs.readFileSync(path.join(real, 'state.json.yad-orig'), 'utf8'), original, 'and its backup holds the same bytes');
   } finally {
+    setProductRoot(null); // the suite's baseline, as in the test above
     cleanup(T);
     for (const d of [aside, outside]) fs.rmSync(d, { recursive: true, force: true });
   }

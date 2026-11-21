@@ -60,4 +60,9 @@ seam (R4). Both are skipped on Windows (`LINK_SKIP`).
 **Files:**
 - cli/migrate.mjs
 - cli/test-migrate.mjs
+
+## T02 — test: #251 tests reset the Product root and check the real state file
+**Files:**
+- cli/test-migrate.mjs
+- specs/EP-story-retire-S02/spec.md
 <!-- /yad:tasks -->
