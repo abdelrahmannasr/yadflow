@@ -2097,6 +2097,48 @@ test('#248 removeFile and removeDir refuse a path under a linked folder (Product
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #252: rmTree (a whole folder, read-only folders too) takes `within` like removeDir: a path under a linked
+// folder is refused and nothing where the link points is deleted. Without `within` it checks nothing, as before.
+test('#252 rmTree with { within } refuses a path under a linked folder and deletes nothing where it points', { skip: E125B_SKIP }, async () => {
+  const { rmTree } = await import('./lib.mjs');
+  const T = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-252-')));
+  try {
+    const P = path.join(T, 'product');
+    const outside = path.join(T, 'outside');
+    fs.mkdirSync(path.join(outside, 'EP-discovery', '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'EP-discovery', '.sdlc', 'state.json'), 'theirs');
+    fs.writeFileSync(path.join(outside, 'a.md'), 'theirs');
+    fs.mkdirSync(P);
+    fs.symlinkSync(outside, path.join(P, 'epics'));
+    const before = treeOf(outside);
+    const refused = (e) => e.code === 'YAD-STATE-001' && e.folder === 'epics'
+      && /^epics is a link, so yad did not delete epics\/EP-discovery /.test(e.message) && /git rm <folder>/.test(e.hint || '');
+    assert.throws(() => rmTree(path.join(P, 'epics', 'EP-discovery'), { within: P }), refused);
+    assert.throws(() => rmTree(path.join(P, 'epics', 'a.md'), { within: P }), (e) => e.code === 'YAD-STATE-001' && e.folder === 'epics');
+    assert.deepEqual(treeOf(outside), before, 'nothing deleted in the folder the link points at');
+
+    // A link AT the path is removed as the link; what it points at stays.
+    rmTree(path.join(P, 'epics'), { within: P });
+    assert.deepEqual(fs.readdirSync(P), []);
+    assert.deepEqual(treeOf(outside), before, 'a link at the path is removed, never what it points at');
+
+    // Real folders, read-only ones too: removed as before. A missing path is fine.
+    fs.mkdirSync(path.join(P, 'epics', 'EP-x', 'ro'), { recursive: true });
+    fs.writeFileSync(path.join(P, 'epics', 'EP-x', 'ro', 'f.json'), '{}');
+    fs.chmodSync(path.join(P, 'epics', 'EP-x', 'ro'), 0o500);
+    rmTree(path.join(P, 'epics', 'EP-x'), { within: P });
+    assert.deepEqual(fs.readdirSync(path.join(P, 'epics')), []);
+    assert.doesNotThrow(() => rmTree(path.join(P, 'gone'), { within: P }));
+
+    // Without `within` (and no Product root set) nothing is checked, as before: the delete guard below counts
+    // such calls outside cli/lib.mjs.
+    fs.rmdirSync(path.join(P, 'epics'));
+    fs.symlinkSync(outside, path.join(P, 'epics'));
+    rmTree(path.join(P, 'epics', 'a.md'));
+    assert.equal(fs.existsSync(path.join(outside, 'a.md')), false, 'no within: deleted through the link, as before');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // #248: yad check --fix removes a hook script it no longer wires (capture turned off; the Cursor guard once Cursor
 // is no longer a target). Under a `hooks/` committed as a link, that removal is a row that deletes nothing and
 // says why (as a refused rename is), so the run goes on, and the file where the link points stays — as the
@@ -29574,11 +29616,12 @@ test('#235 b only the listed files write with plain fs, each as often as listed'
 // below with its reason. `count` pins how many such calls the file has (every call on a line counts), so a
 // NEW delete in a listed file fails too. The walk is the read guards' own (`engineSources`, cli/ only). A
 // comment line is prose and is not counted. Not seen here: `fs.rm`, `fs.unlink`, `fs.promises.rm`, a delete
-// reached through another name, and `rmTree` (cli/lib.mjs: it checks nothing): review catches those shapes.
-// `rmTree`'s callers are checked by hand: cli/migrate.mjs (`applyProductMove`) refuses a linked folder on the
-// way before its first copy (`linkedMoveFolder`, #248), so its `rmTree` calls remove only real folders. Counts are per file, so swapping one delete for another in the same file is
-// not caught; review catches that.
-const DIRECT_DELETE = /\b(?:rmSync|unlinkSync|rmdirSync)\(/g;
+// reached through another name: review catches those shapes. `rmTree` (cli/lib.mjs) deletes a whole folder
+// and refuses a linked folder only when given `within` (#252): an `rmTree(` call counts here unless `within`
+// follows it on the same line (a call split over lines counts; one `within` on a line covers every
+// `rmTree(` before it there, which review catches). Counts are per file, so swapping one delete for another
+// in the same file is not caught; review catches that.
+const DIRECT_DELETE = /\b(?:rmSync|unlinkSync|rmdirSync)\(|\brmTree\((?![^\n]*\bwithin\b)/g;
 const DIRECT_DELETE_ALLOWED = [
   { file: 'cli/capture.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (the capture index)' },
   { file: 'cli/epic-state.mjs', count: 1, reason: 'yad\'s own mkdtemp folder (an artifact copied out of git, to hash it)' },
@@ -29595,12 +29638,14 @@ const deleteCalls = (line) => (/^\s*\/\//.test(line) ? 0 : (line.match(DIRECT_DE
 
 test('#248 the delete matcher sees each plain delete, every one on a line, and none of the safe helpers', () => {
   for (const line of ['fs.rmSync(p)', 'rmSync(p, { force: true })', 'nodeFs.rmSync(p)', 'fs.unlinkSync(p)', 'unlinkSync(p)', 'fs.rmdirSync(d)', 'rmdirSync(d)',
-    'x = fs.rmSync( p, { recursive: true, force: true })', "apply: () => fs.rmSync(dest, { force: true }),"]) {
+    'x = fs.rmSync( p, { recursive: true, force: true })', "apply: () => fs.rmSync(dest, { force: true }),", 'rmTree(p)', 'rmTree(path.join(root, rel));',
+    'rmTree(to, {', 'for (const p of list) rmTree(p);']) {
     assert.equal(deleteCalls(line), 1, line);
   }
   assert.equal(deleteCalls('fs.rmSync(f); fs.rmdirSync(path.dirname(f));'), 2, 'two deletes on one line count twice');
   assert.equal(deleteCalls('foo(); // fs.rmSync(x)'), 1, 'a delete after code on the line counts, even in a trailing comment');
-  for (const line of ['removeFile(p, { within: root })', 'removeDir(p, { within: root, emptyOnly: true })', 'rmTree(p)', 'fs.readFileSync(p)', 'fs.writeFileSync(p, s)',
+  for (const line of ['removeFile(p, { within: root })', 'removeDir(p, { within: root, emptyOnly: true })', 'rmTree(p, { within: root })',
+    'for (const p of [...created].reverse()) rmTree(p, { within: root });', 'rmTree(path.join(root, rel), { within: root });', 'fs.readFileSync(p)', 'fs.writeFileSync(p, s)',
     '// fs.rmSync(p) in a comment', '  // `fs.rmdirSync` throws ENOTEMPTY', 'fs.rm(p, cb)', 'fs.unlink(p, cb)']) {
     assert.equal(deleteCalls(line), 0, line);
   }
@@ -29622,7 +29667,7 @@ test('#248 only the listed files delete with plain fs, each as often as listed',
       if (!allowed.has(rel)) offenders.push(at);
     });
   }
-  const helpers = 'delete a team file with removeFile / removeDir (cli/lib.mjs), which refuse a linked folder';
+  const helpers = 'delete a team file with removeFile / removeDir, or rmTree with { within } (cli/lib.mjs), which refuse a linked folder';
   assert.deepEqual(offenders, [], `${helpers}; or, for a path that is not the team's, list it in DIRECT_DELETE_ALLOWED with its reason`);
   assert.ok(!allowed.has('cli/lib.mjs'), 'cli/lib.mjs is not scanned, so it needs no entry');
   for (const a of DIRECT_DELETE_ALLOWED) {
