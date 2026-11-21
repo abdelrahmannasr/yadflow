@@ -11262,6 +11262,38 @@ test('doctor: laneChecks fails a contradiction, and warns about no record, an un
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor: a retired story with a ship or started work fails once, and one with no reason warns (#621)', async () => {
+  const { laneChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-retired-doctor-'));
+  try {
+    const sk = { status: 'skipped', record: { reason: 'retired: moved', by: 'sam', date: '2026-11-21' } };
+    laneEpic(T, {
+      stories: { 'EP-l-S01': ['api', 'web'], 'EP-l-S02': ['api'], 'EP-l-S03': ['api'], 'EP-l-S04': ['api'] },
+      buildState: {
+        'EP-l-S01': { story: 'EP-l-S01', retired: retiredRec, repos: { api: sk, web: sk } },
+        'EP-l-S02': { story: 'EP-l-S02', retired: retiredRec, repos: { api: sk } },
+        'EP-l-S03': { story: 'EP-l-S03', retired: retiredRec, repos: { api: { ...sk, steps: [{ id: 'spec', status: 'in_progress' }] } } },
+        'EP-l-S04': { story: 'EP-l-S04', retired: { by: 'sam' }, repos: { api: sk } },
+      },
+      ships: [{ story: 'EP-l-S02', repo: 'api' }],
+    });
+    const checks = [];
+    laneChecks(checks, T);
+    const by = Object.fromEntries(checks.map((x) => [x.id, x]));
+    assert.deepEqual(Object.keys(by).sort(), [
+      'story:EP-l:EP-l-S02:retired-contradiction',
+      'story:EP-l:EP-l-S03:retired-contradiction',
+      'story:EP-l:EP-l-S04:retired-no-record',
+    ], 'the healthy retired story (S01) says nothing, and no lane contradiction is said beside the story one');
+    assert.equal(by['story:EP-l:EP-l-S02:retired-contradiction'].status, 'fail');
+    assert.match(by['story:EP-l:EP-l-S02:retired-contradiction'].message, /EP-l-S02 is retired, but a ship is recorded for it in api/);
+    assert.match(by['story:EP-l:EP-l-S03:retired-contradiction'].message, /EP-l-S03 is retired, but work has started in api/);
+    assert.match(by['story:EP-l:EP-l-S03:retired-contradiction'].hint, /take the `retired` record and its skipped lanes out/);
+    assert.doesNotMatch(by['story:EP-l:EP-l-S03:retired-contradiction'].hint, /yad unskip/);
+    assert.equal(by['story:EP-l:EP-l-S04:retired-no-record'].status, 'warn');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('checkpoint --retro-ship refuses a retired story, never pointing at yad unskip (#621)', async () => {
   const { recordRetroShip } = await import('./checkpoint.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-retired-retro-'));
