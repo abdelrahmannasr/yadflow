@@ -22153,7 +22153,11 @@ const E52 = { ...(await import('./epic-state.mjs')), ...(await import('./manifes
 // never reused for other content.
 const CATALOGUE_VERSIONS = [
   [1, '812f9dfb98ecda14'],
+  [2, 'c4db1526d3bdae88'],
 ];
+
+// Declared before the test that uses it, so it is set however soon the runner starts that test.
+const isCalendarDayE52 = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 test('E52: every catalogue entry is well formed and vetted, and each version names one list', () => {
   assert.ok(RECOMMENDATIONS.length >= 6, 'the catalogue recommends skills for several steps');
@@ -22173,8 +22177,6 @@ test('E52: every catalogue entry is well formed and vetted, and each version nam
   // A record is never newer than the day the list was read through.
   for (const r of RECOMMENDATIONS) assert.ok(r.vetted.on <= CATALOGUE.checked, `${r.step}:${r.skill} vetted after the catalogue's checked day`);
 });
-
-const isCalendarDayE52 = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 test('E52: a malformed entry is named, sentence by sentence', () => {
   const good = RECOMMENDATIONS[0];
