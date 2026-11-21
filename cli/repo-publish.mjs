@@ -154,21 +154,30 @@ export function buildCodeMapMessage({ label, author, basenames = [] }) {
 
 // Commit the tracked code-context (and, with push, push it) on the Product's default branch. Mirrors
 // `runCheckpoint`. Never throws; sets process.exitCode on a hard error so the CLI reports failure.
-export async function publishCodeContext(root, { push = false, allowBranch = false, name = null } = {}) {
-  if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
+// The branch `yad repo refresh --push` commits on, or null when it may not (not a git repo, not the Product,
+// or the default-branch guard refused — each has printed why and set the exit code). `runRepo` calls it
+// BEFORE the refresh writes the packs and the registry (#632), so a refused branch leaves the Product as it
+// was, and hands the answer to `publishCodeContext` as `target`.
+export function publishTarget(root, { allowBranch = false } = {}) {
+  if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return null; }
   if (!exists(productConfigPath(root))) {
     fail('no .sdlc/product.json — --push publishes the Product code-context; run it from the Product');
     process.exitCode = 1;
-    return;
+    return null;
   }
+  const git = productGit(root);
+  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
+  return guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push', root }) ? { git, branch } : null;
+}
 
+// `target`: what `publishTarget` answered, when the caller checked the branch first; else it is checked here.
+export async function publishCodeContext(root, { push = false, allowBranch = false, name = null, target } = {}) {
+  const t = target === undefined ? publishTarget(root, { allowBranch }) : target;
+  if (!t) return;
+  const { git, branch } = t;
   const { productConfig, repos } = loadProduct(root);
   const registry = { repos: repos || [] };
-  const git = productGit(root);
-
-  const defaultBranch = resolveDefaultBranch(git, productConfig);
-  const branch = branchToCommitOn(root, git, defaultBranch);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad repo refresh --push', root })) return;
 
   // Stage the EXPLICIT allowlist (code-maps + registry), scoped so an unrelated pre-staged file is never
   // swept in and the user's index is left untouched — mirrors `runCheckpoint`. NEVER `git add -A` and

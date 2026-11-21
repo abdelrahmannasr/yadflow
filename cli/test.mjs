@@ -17987,6 +17987,34 @@ test('publishCodeContext: commits chore(product) code-context, pushes to origin/
   }
 });
 
+// #632: `yad repo refresh --push` checks the branch before it writes the packs and the registry, so a refused
+// branch leaves the Product as it was. The repo here is not cloned, so nothing is packed and the registry is
+// all the refresh writes (re-serialized from the compact form it was committed in).
+test('#632 repo refresh --push off the default branch writes nothing, and the same command then publishes on it', async () => {
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'gone', path: 'demo/gone', platform: 'github', default_branch: 'main', codeMap: '.sdlc/code-context/gone/code-map.md' }] }));
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'registry');
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    let r;
+    await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
+    assert.deepEqual([r.refreshed, r.published], [0, null]);
+    assert.equal(git(T, 'status', '--porcelain').toString(), '', 'the registry is not rewritten');
+    git(T, 'checkout', '-q', 'main');
+    process.exitCode = 0;
+    await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.published?.committed, r.published?.pushed], [true, true]);
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(product\): sync code-context/);
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('publishCodeContext: a named refresh publishes only that repo\'s code-map, not others', async () => {
   const prev = process.exitCode;
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
