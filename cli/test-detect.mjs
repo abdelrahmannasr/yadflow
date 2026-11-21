@@ -714,6 +714,103 @@ test('E87: every skill a tool names quotes its fallback word for word, and no ot
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+// #244: a skill that runs `yad` starts with a block that says it needs the `yad` command, and what to do when
+// it is missing — written from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs, as the E87 section is.
+const { YAD_CLI_BEGIN, YAD_CLI_END, YAD_CLI_LINES, YAD_CLI_MENTIONS_ONLY, ownLines, skillRunsYad, syncSkillYadCli, withYadCliBlock, yadCliBlock, yadCliBlockOf } = await import('./skill-yad-cli.mjs');
+
+test('#244: the block checks for yad, says how to install it or use npx, and why the CLI is needed', () => {
+  const b = yadCliBlock();
+  assert.ok(b.startsWith(`${YAD_CLI_BEGIN}\n`) && b.endsWith(`\n${YAD_CLI_END}`));
+  assert.match(b, /`command -v yad`/, 'the check');
+  assert.match(b, /`npm install -g yadflow@latest`/, 'the install');
+  assert.match(b, /`npx -y yadflow@4 …`/, 'the way without the install');
+  assert.match(b, /the CLI is what enforces the approvals/, 'why');
+  assert.match(b, /Before its first `yad …` command/, 'the stop is before a yad command, so npx steps still run');
+  assert.doesNotMatch(b, /\n\n\n/, 'no double blank line');
+  assert.equal(YAD_CLI_LINES[0], '');
+  assert.equal(YAD_CLI_LINES.at(-1), '');
+});
+
+test('#244: a skill runs yad when its own words name a yad command — not its frontmatter, a generated block or the E87 section', () => {
+  assert.equal(skillRunsYad('s', '# S\n\nRun `yad guide --json`.\n'), true, 'inline code');
+  assert.equal(skillRunsYad('s', '# S\n\n```bash\n$ yad next\n```\n'), true, 'a code block line');
+  assert.equal(skillRunsYad('s', '# S\n\n```bash\n  yad gate status EP-x\n```\n'), true, 'indented');
+  assert.equal(skillRunsYad('s', '# S\n\nSee `yad-status` and the yad CLI.\n'), false, 'a skill name or a bare word is not a command');
+  assert.equal(skillRunsYad('s', '# S\n\nRun `npx -y yadflow@4 new acme`.\n'), false, 'npx runs without the install');
+  assert.equal(skillRunsYad('s', "---\nname: s\ndescription: 'run `yad next`'\n---\n\n# S\n\nnothing\n"), false, 'the frontmatter');
+  assert.equal(skillRunsYad('s', '# S\n\n<!-- generated: brain — x -->\nrun `yad brain status`\n<!-- end: brain -->\n'), false, 'a generated block');
+  assert.equal(skillRunsYad('s', `# S\n\n${yadCliBlock()}\n`), false, 'the block itself');
+  assert.equal(skillRunsYad('s', `# S\n\n${SKILL_FALLBACK_HEADING}\n\nrun \`yad toolbox list --json\`\n\n${SKILL_FALLBACK_END}\n\n## Steps\n`), false, 'the E87 section');
+  assert.equal(skillRunsYad('s', `# S\n\n${SKILL_FALLBACK_HEADING}\n\nx\n\n${SKILL_FALLBACK_END}\n\nRun \`yad next\`.\n`), true, 'words after a region count');
+  assert.equal(skillRunsYad('s', '# S\r\n\r\nRun `yad next`.\r\n'), true, 'CRLF');
+  assert.equal(skillRunsYad('s', '---\nname: s\nRun `yad next`\n'), false, 'an unclosed frontmatter is all frontmatter');
+  for (const s of Object.keys(YAD_CLI_MENTIONS_ONLY)) assert.equal(skillRunsYad(s, '# S\n\nRun `yad next`.\n'), false, s);
+  assert.deepEqual(ownLines('# S\n<!-- generated: x -->\nin\n<!-- end: x -->\nout'), ['# S', 'out']);
+});
+
+test('#244: the block goes right after the `# ` title, past the frontmatter and any code fence, and keeps CRLF', () => {
+  const block = yadCliBlock();
+  const fm = '---\nname: s\ndescription: d\n---\n';
+  assert.equal(withYadCliBlock(`${fm}\n# S\n\nRun \`yad next\`.\n`, true).text, `${fm}\n# S\n\n${block}\n\nRun \`yad next\`.\n`);
+  assert.equal(withYadCliBlock('# S\nRun `yad next`.\n', true).text, `# S\n\n${block}\n\nRun \`yad next\`.\n`, 'a blank line is added below');
+  assert.equal(withYadCliBlock('```md\n# not this\n```\n# S\n\nx\n', true).text, `\`\`\`md\n# not this\n\`\`\`\n# S\n\n${block}\n\nx\n`, 'a title in a fence is skipped');
+  assert.equal(withYadCliBlock('~~~\n```\n# not this\n~~~\n# S\n', true).text, `~~~\n\`\`\`\n# not this\n~~~\n# S\n\n${block}\n`, 'a fence closes only with its own mark');
+  assert.equal(withYadCliBlock('# S\r\n\r\nx\r\n', true).text, `# S\n\n${block}\n\nx\n`.replace(/\n/g, '\r\n'), 'CRLF kept');
+  for (const t of ['## Only a section\n\nx\n', '---\nname: s\n# S\n', '```\n# S\n```\n']) {
+    const r = withYadCliBlock(t, true);
+    assert.equal(r.text, t, JSON.stringify(t));
+    assert.match(r.refused, /no `# ` title line/);
+  }
+  assert.deepEqual(withYadCliBlock('# S\n\nx\n', false), { text: '# S\n\nx\n', refused: null }, 'no block wanted, none there');
+});
+
+test('#244: the sync writes, rewrites and removes the block, and refuses markers it cannot trust', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-244-'));
+  try {
+    const block = yadCliBlock();
+    const old = `${YAD_CLI_BEGIN}\n\nold words\n\n${YAD_CLI_END}`;
+    const put = (s, text) => { fs.mkdirSync(path.join(dir, s), { recursive: true }); fs.writeFileSync(path.join(dir, s, 'SKILL.md'), text); };
+    const get = (s) => fs.readFileSync(path.join(dir, s, 'SKILL.md'), 'utf8');
+    fs.mkdirSync(path.join(dir, 'sdlc')); // a folder with no SKILL.md is not a skill
+    put('runs', '---\nname: runs\ndescription: d\n---\n\n# Runs\n\nRun `yad guide --json`.\n');
+    put('quiet', "---\nname: quiet\ndescription: 'names `yad next`'\n---\n\n# Quiet\n\nNo command here.\n");
+    put('gone', `# Gone\n\n${old}\n\nNo command here.\n`);
+    put('stale', `# Stale\n\n${old}\n\nRun \`yad next\`.\n`);
+    put('crlf', `# Crlf\n\n${old}\n\nRun \`yad next\`.\n`.replace(/\n/g, '\r\n'));
+    const twice = `# Twice\n\n${old}\n\n${old}\n\nRun \`yad next\`.\n`;
+    put('twice', twice);
+    const backwards = `# Backwards\n\n${YAD_CLI_END}\n${YAD_CLI_BEGIN}\n\nNo command here.\n`;
+    put('backwards', backwards);
+    const notitle = 'Run `yad next`.\n';
+    put('notitle', notitle);
+    put('yad-connect-docs', '# Docs\n\nyad-docs drives `yad docs deploy`.\n');
+    const before = fs.readdirSync(dir).filter((s) => s !== 'sdlc').map(get);
+    const stale = ['crlf', 'gone', 'runs', 'stale'];
+    const refused = (r) => r.refused.map((x) => x.skill);
+    const c = syncSkillYadCli(dir, { check: true });
+    assert.deepEqual([c.stale, c.wrote, refused(c)], [stale, [], ['backwards', 'notitle', 'twice']], 'check names what a write would change or refuse');
+    assert.match(c.refused.find((x) => x.skill === 'twice').reason, /exactly one line/);
+    assert.match(c.refused.find((x) => x.skill === 'notitle').reason, /no `# ` title/);
+    assert.deepEqual(fs.readdirSync(dir).filter((s) => s !== 'sdlc').map(get), before, 'check writes nothing');
+    const w = syncSkillYadCli(dir);
+    assert.deepEqual([w.stale, w.wrote, refused(w)], [stale, stale, ['backwards', 'notitle', 'twice']]);
+    assert.equal(get('runs'), `---\nname: runs\ndescription: d\n---\n\n# Runs\n\n${block}\n\nRun \`yad guide --json\`.\n`);
+    assert.equal(yadCliBlockOf(get('runs')), block);
+    assert.equal(get('quiet'), "---\nname: quiet\ndescription: 'names `yad next`'\n---\n\n# Quiet\n\nNo command here.\n", 'a skill that runs no yad gets none');
+    assert.equal(get('gone'), '# Gone\n\nNo command here.\n', 'a skill that stopped running yad loses it, and its blank line');
+    assert.equal(get('stale'), `# Stale\n\n${block}\n\nRun \`yad next\`.\n`, 'rewritten in place');
+    assert.equal(get('crlf'), `# Crlf\n\n${block}\n\nRun \`yad next\`.\n`.replace(/\n/g, '\r\n'), 'CRLF kept');
+    assert.equal(get('twice'), twice, 'refused: left as it is');
+    assert.equal(get('backwards'), backwards);
+    assert.equal(get('notitle'), notitle);
+    assert.equal(get('yad-connect-docs'), '# Docs\n\nyad-docs drives `yad docs deploy`.\n', 'a skill that only names a command another runs');
+    const again = syncSkillYadCli(dir, { check: true });
+    assert.deepEqual(again.stale, [], 'a second run changes nothing');
+    assert.equal(yadCliBlockOf('# S\n'), null);
+    assert.deepEqual(syncSkillYadCli(path.join(dir, 'none')), { stale: [], wrote: [], refused: [] }, 'no skills folder');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('E87: the section says when to use each tool, its fallback, and what to record', () => {
   assert.equal(skillFallbackSection('yad-epic'), null, 'a skill no tool names gets no section');
   const spec = skillFallbackSection('yad-spec');
