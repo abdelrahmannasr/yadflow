@@ -1,6 +1,6 @@
 ---
 name: yad-guide
-description: 'The yadflow rules for an AI coding agent, and how to run the whole lifecycle from the chat. Load it before ANY yadflow work, and again after a context reset. Every step goes the same way: run `yad guide --json`, tell the person what the step is for (mandatory or skippable, who does it, the skill or tool you will use), do the agent''s part, and hand the person''s part over with the exact command or steps, then confirm by reading — never on their word alone. Holds the classes of every yad command (what you run without asking, what you ask about every time, what only the person runs), the human-only acts (approvals and merges, logins, secrets, signing keys, platform settings), the push rules (never a force push), how to keep the install current (`yad update --open-pr`), and how to report a yadflow bug or idea with `yad report` after the person''s yes. Use when the user says "set up yadflow", "what is next", "run yadflow", "guide me", or starts any yadflow step.'
+description: 'The yadflow rules for an AI agent: load it before any yadflow work and after a context reset. Use when the user says "set up yadflow", "what is next", "run yadflow", "guide me", or starts any yadflow step.'
 ---
 
 # yad — the guide for AI coding agents

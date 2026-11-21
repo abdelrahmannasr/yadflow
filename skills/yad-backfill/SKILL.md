@@ -1,6 +1,6 @@
 ---
 name: yad-backfill
-description: 'Build Step G of the gated SDLC — backfill: generate specs for already-built features in an existing repo so new work does not break them. Confirm Repomix (run through `yad repo pack`, which runs npx repomix@1.18.1 safely), pack ONE feature at a time (compress + git logs, secret-scan), feed it to AI with a "describe what exists, do not invent" prompt, and write a DRAFT spec marked unverified. Require human approval (reuse yad-review-gate) before the spec counts as real. Boundary is auto-proposed from the project convention and human-confirmed. A change is blocked only until the features IT touches have approved specs. The `promote` action flips a brownfield stub epic (minted by yad-stub, so defects could thread off it) to a real, verified feature epic once its backfill spec is approved. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
+description: 'Draft specs for already-built features, one at a time, for a person to approve; promote a stub epic. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
 ---
 
 # SDLC — Backfill (existing-code specs)

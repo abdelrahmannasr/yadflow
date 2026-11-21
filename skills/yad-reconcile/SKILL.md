@@ -1,6 +1,6 @@
 ---
 name: yad-reconcile
-description: 'Phase 6 maintenance/CI — the change reconciler (mirrors yad-docs-sync; NEVER a gate). Detects post-lock DRIFT and ORPHANS across feature threads: shipped code or a repo HEAD advance (the repos.json syncedHead-vs-current-HEAD rule) with NO owning change-epic in any thread, a broken lineage (cycle, missing parent, or a thread cache that disagrees with the computed root), and open hotfix reconcile debt — reporting which thread drifted and WHY. `check` (default, read-only) reports; `refresh` points the human at opening a reconcile change-epic with yad-change (never silent); `wire` commits an advisory CI job ([skip ci] + concurrency) that runs the check on push. The hard merge BLOCK is the lineage-check / epic-open / reconcile-debt CI gates — this only DISCOVERS. Use when the user says "reconcile the changes", "check for thread drift", "is anything shipped without an epic", or "find open hotfix debt".'
+description: 'Find drift across feature threads: shipped code with no epic, broken lineage, open hotfix debt. Never a gate. Use when the user says "reconcile the changes", "check for thread drift", "is anything shipped without an epic", or "find open hotfix debt".'
 ---
 
 # SDLC — Change Reconciler (Phase 6, the drift/orphan sweep)
