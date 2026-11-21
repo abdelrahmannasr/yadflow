@@ -100,6 +100,23 @@ test('the roll-up: tasks, branches, stories and epics get the prototype\'s state
   assert.equal(JSON.stringify(m).includes('subject'), false, 'no commit subject is carried');
 });
 
+test('a retired story is owed nothing: it says so, and the epic is finished once the rest shipped (#621)', () => {
+  const i = baseInputs();
+  i.stories.find((s) => s.id === 'EP-login-S02').retired = true;
+  i.branches = i.branches.filter((b) => !b.name.includes('EP-login-S02'));
+  const m = mapModel(i, { now: NOW });
+  const s02 = m.stories.find((s) => s.id === 'EP-login-S02');
+  assert.deepEqual([s02.state, s02.stateLabel, s02.retired], ['planned', 'Retired — will not be built', true]);
+  assert.equal('retired' in m.stories.find((s) => s.id === 'EP-login-S01'), false, 'no key unless retired');
+  const e = m.epics.find((x) => x.id === 'EP-login');
+  assert.deepEqual([e.state, e.storyCount, e.storiesShipped, e.storiesRetired], ['live', 1, 1, 1]);
+  // Every story retired: nothing was built, so the epic is not finished.
+  const none = baseInputs();
+  none.stories = none.stories.map((s) => (s.epic === 'EP-solo' ? { ...s, status: 'approved', retired: true } : s));
+  none.tasks = none.tasks.filter((t) => t.epic !== 'EP-solo');
+  assert.notEqual(mapModel(none, { now: NOW }).epics.find((x) => x.id === 'EP-solo').state, 'merged');
+});
+
 test('a task in a repo not on this machine is shipped but unchecked; one not registered says so', () => {
   const i = baseInputs();
   i.tasks.push({ story: 'EP-login-S01', epic: 'EP-login', task: 'T02', repo: 'web', builder: null, reviewers: [], reach: null },
@@ -240,6 +257,16 @@ test('gathering: read-only git finds Production, where each ship reached, and wh
     const m = mapModel(inputs, { now: NOW });
     assert.equal(m.stories.find((s) => s.id === 'EP-login-S02').state, 'active');
     assert.equal(git(api, ['for-each-ref', '--format=%(refname) %(objectname)']), before, 'nothing in the repo changed');
+  } finally { done(ws); }
+});
+
+test('gathering: a story its build-state retires is marked retired (#621)', () => {
+  const { ws, root } = workspace();
+  try {
+    put(path.join(root, 'epics/EP-login/.sdlc/build-state/EP-login-S02.json'), { story: 'EP-login-S02', retired: { reason: 'moved', by: 'kit', date: '2026-11-21' }, repos: {} });
+    const { inputs } = gatherMap(root, { now: NOW });
+    assert.equal(inputs.stories.find((s) => s.id === 'EP-login-S02').retired, true);
+    assert.equal('retired' in inputs.stories.find((s) => s.id === 'EP-login-S01'), false);
   } finally { done(ws); }
 });
 
