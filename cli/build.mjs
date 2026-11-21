@@ -17,7 +17,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { ok, info, hand, warn, run, readJSON, readJSONStrict, writeJSON, writeFileAtomic, removeFile, refuseLinkedWrite, isPlainObject, exists, forTerminal } from './lib.mjs';
-import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
+import { epicIds, epicRoot, epicRel, epicStories, loadLedger, stepStatus, laneStarted, retiredRecord, storyRetired, isPassed, readFrontmatter, parseFrontmatter, nextAction, loadAutomation, effectiveAdvance, effectiveAction } from './epic-state.mjs';
 import { DEFAULT_LIFECYCLE, laneOrder, laneAuthorSteps } from './lifecycle.mjs';
 import { epicFiles, PROJECT_FILES } from './manifest.mjs';
 import { err } from './errors.mjs';
@@ -309,10 +309,18 @@ function storyContext(root, story) {
   if (!entry) throw err(CODE, `no story ${story} under ${epicRel(epic)}/stories/`, 'check the story id');
   const review = ledger.state.steps.find((s) => s?.id === 'stories-review');
   const file = path.join(epicFiles(epicDir).buildStateDir, `${story}.json`);
+  const buildState = readJSONStrict(file, null);
+  // A RETIRED story (#621) owes no Build work, so every Build write refuses it here — before a lane's own
+  // "is skipped" refusal, whose fix (`yad unskip`) a retired story refuses too.
+  const retired = retiredRecord(buildState);
+  if (retired) {
+    const why = typeof retired.reason === 'string' && retired.reason.trim() ? ` (${forTerminal(retired.reason)})` : '';
+    throw err(CODE, `${story} is retired${why}, so it owes no Build work`, `a retired story is not built — \`yad next ${epic}\` shows what is still owed`);
+  }
   return {
     epic, epicDir, entry, file, ledger,
     storiesPassed: ['done', 'satisfied'].includes(stepStatus(review)),
-    buildState: readJSONStrict(file, null),
+    buildState,
     storyFile: storyFileOf(epicDir, story),
   };
 }
@@ -1289,7 +1297,11 @@ export async function buildDone(root, { story, today, fetch = true } = {}) {
     throw err(CODE, `could not set status: shipped in ${path.relative(ctx.epicDir, ctx.storyFile)}`, 'make it one plain `status:` line (with LF line endings), then run this again');
   }
   ok(`${story} is shipped${changedLanes ? ` — ${REVIEW_STEP} closed in ${changedLanes} lane${changedLanes > 1 ? 's' : ''}` : ''}`);
-  if (sealedEpic(root, ctx.epic)) info(`${ctx.epic} is now sealed: every story shipped — new work there needs a change epic (yad-change)`);
+  if (sealedEpic(root, ctx.epic)) {
+    // A retired story (#621) does not hold the seal open, so the line says it is part of "every".
+    const retired = epicStories(ctx.epicDir).some((st) => storyRetired(ctx.epicDir, st.id));
+    info(`${ctx.epic} is now sealed: every story ${retired ? 'is shipped or retired' : 'shipped'} — new work there needs a change epic (yad-change)`);
+  }
   hand('commit with `yad checkpoint --push`');
   return { story, shipped: true, changed: changedLanes > 0 || !!moved.changed, lanesClosed: changedLanes };
 }

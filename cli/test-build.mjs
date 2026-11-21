@@ -84,6 +84,39 @@ function workspace({ tasks = '# Tasks\n\n- [ ] T01 — create the order\n- [ ] T
 const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const status = (dir) => (fs.readFileSync(path.join(dir, 'stories/EP-l-S01.md'), 'utf8').match(/^status:\s*(\S+)/m) || [])[1];
 
+// A second story, retired the way `yad story retire` writes it (#621): every Build write refuses it, and the
+// epic seals once the other story ships.
+test('yad build refuses a retired story, and done on the other story seals the epic (#621)', () => {
+  const { W, P, dir, sha } = workspace();
+  try {
+    const sk = { status: 'skipped', record: { reason: 'retired: moved to EP-next', by: 'sam', date: '2026-11-21' } };
+    write(P, {
+      'epics/EP-l/stories/EP-l-S02.md': '---\nid: EP-l-S02\nepic: EP-l\nstatus: approved\nrepos: [api]\n---\n# S02\n',
+      'epics/EP-l/.sdlc/build-state/EP-l-S02.json': `${JSON.stringify({ story: 'EP-l-S02', retired: { reason: 'moved to EP-next', by: 'sam', date: '2026-11-21' }, repos: { api: sk } }, null, 2)}\n`,
+    });
+    for (const args of [['start', 'EP-l-S02', '--repo', 'api'], ['step', 'EP-l-S02', '--repo', 'api', 'spec', 'in_progress'],
+      ['trust', 'EP-l-S02', '--repo', 'api', 'spec', '--verdict', 'approved-unchanged'],
+      ['ship', 'EP-l-S02', '--task', 'T01', '--repo', 'api', '--merge-commit', sha.T01], ['done', 'EP-l-S02']]) {
+      const r = yad(P, 'build', ...args);
+      assert.equal(r.code, 1, `${args[0]}: ${r.out}`);
+      assert.match(r.out, /EP-l-S02 is retired \(moved to EP-next\), so it owes no Build work/, args[0]);
+      assert.doesNotMatch(r.out, /yad unskip/, args[0]);
+    }
+    assert.equal(fs.readdirSync(path.join(dir, '.sdlc')).includes('build-log'), false, 'no ship was written');
+
+    // S01 ships in api (web is skipped): done seals the epic, the retired S02 owed nothing.
+    const done = ['spec', 'tasks', 'implement', 'checks'].map((id) => ({ id, status: 'done' }));
+    write(P, { 'epics/EP-l/.sdlc/build-state/EP-l-S01.json': JSON.stringify({ story: 'EP-l-S01', repos: {
+      api: { currentStep: 'engineer-review', steps: [...done, { id: 'engineer-review', status: 'todo', locked: true }] },
+      web: { status: 'skipped', record: { reason: 'no UI change', by: 'sam', date: '2026-11-21' } },
+    } }) });
+    for (const t of ['T01', 'T02']) assert.equal(yad(P, 'build', 'ship', 'EP-l-S01', '--task', t, '--repo', 'api', '--merge-commit', sha[t]).code, 0);
+    const r = yad(P, 'build', 'done', 'EP-l-S01');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /EP-l is now sealed: every story is shipped or retired/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad build: start → step → trust → ship → done, and every reader agrees the story shipped (#346)', () => {
   const { W, P, dir, sha } = workspace();
   try {
