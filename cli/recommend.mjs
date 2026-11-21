@@ -34,7 +34,7 @@ import { TOOLBOX, isCalendarDay, vettingProblems } from './toolbox.mjs';
 
 // The list's own version and the day it was last read through as a whole. Move `version` whenever an
 // entry is added, removed or changed — the test names the new digest to record beside it.
-export const CATALOGUE = Object.freeze({ version: 2, checked: '2026-11-21' });
+export const CATALOGUE = Object.freeze({ version: 2, checked: '2026-10-03' });
 
 const VETTED_ON = '2026-10-03';
 
@@ -71,8 +71,8 @@ const MATT = Object.freeze({
   note: 'Named as the mattpocock-skills plugin calls it (<plugin>:<name>): a plugin is the one install route the toolbox lists for this pool.',
 });
 // diagnosing-bugs was read at the same tag later (#242), so its record is the pool's with its own date:
-// re-dating the shared record would claim every mattpocock entry was read again. CATALOGUE.checked moves
-// with it, since no record may be newer than the day the list was last checked.
+// re-dating the shared record would claim every mattpocock entry was read again. CATALOGUE.checked stays
+// on the last read of the whole list, so this row is newer than it (the E52 test allows that).
 const MATT_DEBUG = Object.freeze({ ...MATT, on: '2026-11-21' });
 const B = 'https://github.com/bmad-code-org/BMAD-METHOD/blob/v6.12.0/src';
 const E = 'https://github.com/affaan-m/ECC/blob/v2.2.3/skills';
