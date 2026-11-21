@@ -25,8 +25,8 @@ the guide never shows the `implement` or `checks` recommendations at all.
   `disable-model-invocation`; the LICENSE at that tag is MIT). Its `vetted` record is the pool's record
   with its own date: `{ ...MATT, on: '2026-11-21' }` — the shared 2026-10-03 date is not re-used.
 - R2. `CATALOGUE.version` moves from 1 to 2, and the test that holds each version to one digest records
-  the new digest. `CATALOGUE.checked` moves to 2026-11-21: the E52 test holds that no record is newer
-  than the day the list was last checked.
+  the new digest. `CATALOGUE.checked` stays on 2026-10-03, the last read of the whole list. The E52 test
+  allows a row vetted after it, but not in the future and not more than 180 days after it.
 - R3. The `implement` row `mattpocock-skills:tdd` stays as it is.
 - R4. Each row of `step.skills.recommended` in `yad guide --json` gains `installed`: `true` or `false` from
   `installedSkillNames` (`cli/skill.mjs`) and the same `names.has(r.skill)` test `recommendRows` uses, or
@@ -60,6 +60,7 @@ the guide never shows the `implement` or `checks` recommendations at all.
 - Q: `installed` when detection cannot read the folders? → A: `null`, as `yad skill recommend` does.
 - Q: May the agent go on through tasks, implement and checks? → A: yes, recorded `--via auto` and `--ran-by machine`; it stops before any PR.
 - Q: Where does "offer only skills with `installed: true`" go? → A: the hand-written loop in `skills/yad-guide/SKILL.md`, step 3.
+- Q: `CATALOGUE.checked` when one row is read later? → A: it stays on the last whole read (2026-10-03); the E52 test allows a newer row, not in the future and within 180 days of it (code review).
 
 ## Plan
 
