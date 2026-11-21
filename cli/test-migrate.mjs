@@ -2047,3 +2047,62 @@ test('#248 migrate 7 -> 8: a linked epics/ or product-level folder refuses the m
     } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
   }
 });
+
+// #251: every per-file read and write of `yad migrate --apply` is checked from the Product's own folder
+// (`within: root`), so a linked folder is refused even when no command has set the Product root (a test, a
+// future command). Before, the refusal came only from the global root, and without it the rows were read
+// and written through the link, into the folder it points at.
+const snapshotOf = (dir) => Object.fromEntries(fs.readdirSync(dir, { recursive: true }).sort().map((f) => {
+  const p = path.join(dir, f);
+  return [f, fs.lstatSync(p).isFile() ? fs.readFileSync(p, 'utf8') : 'dir'];
+}));
+
+test('#251 migrate --apply with no Product root set: a linked epics/ is an unreadable row, and nothing lands where it points', { skip: LINK_SKIP }, async () => {
+  const { setProductRoot } = await import('./lib.mjs');
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
+  const outside = `${T}-outside`;
+  const exit = process.exitCode;
+  try {
+    setProductRoot(null);
+    fs.renameSync(path.join(T, 'epics'), outside);
+    fs.symlinkSync(outside, path.join(T, 'epics'));
+    const before = snapshotOf(outside);
+    const res = await grabOut(() => runMigrate(T, { apply: true }));
+    assert.match(res, /epics/);
+    assert.equal(process.exitCode, 1, 'the run fails, as for a linked ledger file');
+    const row = rowFor(planMigration(T).rows, path.join('epics', 'EP-x', '.sdlc', 'state.json'));
+    assert.equal(row.action, 'unreadable');
+    assert.equal(row.folder, 'epics');
+    assert.deepEqual(snapshotOf(outside), before, 'nothing where the link points was read into a backup or rewritten');
+    // The files outside the link still migrate.
+    assert.equal(read(path.join(T, '.sdlc/cli-version.json')).schemaVersion, ENGINE_SHAPE);
+  } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('#251 migrate --apply with no Product root set: an epics/ made a link after the row was read is refused at the write', { skip: LINK_SKIP }, async () => {
+  const { setProductRoot } = await import('./lib.mjs');
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
+  const aside = `${T}-aside`;
+  const outside = `${T}-outside`;
+  const rel = 'epics/EP-x/.sdlc/state.json';
+  // The first step runs on this file once at the plan and once at the apply, after its backup and before its
+  // write: on that second call `epics/` is swapped for a link to an empty folder outside the Product.
+  let calls = 0;
+  const swapping = [{ ...MIGRATIONS[0], apply: (o, ctx) => {
+    if (ctx?.rel === rel && ++calls === 2) {
+      fs.renameSync(path.join(T, 'epics'), aside);
+      fs.mkdirSync(outside);
+      fs.symlinkSync(outside, path.join(T, 'epics'));
+    }
+    return MIGRATIONS[0].apply(o, ctx);
+  } }, ...MIGRATIONS.slice(1)];
+  try {
+    setProductRoot(null);
+    await assert.rejects(grabOut(() => runMigrate(T, { apply: true }, { migrations: swapping })), (e) => e?.code === 'YAD-STATE-001' && /epics/.test(e.message));
+    assert.equal(calls, 2, 'the swap happened at the apply');
+    assert.deepEqual(fs.readdirSync(outside), [], 'nothing was written through the link');
+  } finally {
+    cleanup(T);
+    for (const d of [aside, outside]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});

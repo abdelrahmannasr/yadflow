@@ -396,7 +396,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   const read = {};
   for (const name of LEDGER_NAMES) {
     if (!exists(ledgerOf(from, name))) continue;
-    const raw = readRaw(ledgerOf(from, name));
+    const raw = readRaw(ledgerOf(from, name), root);
     const wantsArray = name !== 'state.json';
     if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
       return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : raw.notPlain ? raw.error : raw.tooBig ? TOO_BIG_SAID : 'does not parse'} — ${raw.notPlain ? NOT_PLAIN_FIX : raw.tooBig ? TOO_BIG_FIX : 'fix or restore it first'}`);
@@ -442,7 +442,7 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   // these files cannot differ from what `planMigration` would say about them after the move.
   const reshape = [];
   for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
-    const raw = readRaw(path.join(from, f));
+    const raw = readRaw(path.join(from, f), root);
     if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} ${raw.notPlain ? `${raw.error} — ${NOT_PLAIN_FIX}` : raw.tooBig ? `${TOO_BIG_SAID} — ${TOO_BIG_FIX}` : 'does not parse — fix or restore it first'}`);
     if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
     const rel = path.join(FOUNDATION_DIR, f);
@@ -511,7 +511,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     // and `runMigrate` prints this one and puts it in the --json answer.
     // A file too big to read (#215) is named the same way.
     const plainJSON = (file) => {
-      try { return readPlainJSON(file); } catch (e) {
+      try { return readPlainJSON(file, { within: root }); } catch (e) {
         const rel = path.relative(root, file).split(path.sep).join('/');
         if (e?.code === FILE_TOO_BIG) throw Object.assign(new Error(`${rel} ${TOO_BIG_SAID}`), { code: FILE_TOO_BIG, size: e.size, limit: e.limit });
         if (e?.code !== NOT_PLAIN_FILE) throw e;
@@ -522,7 +522,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     const relabel = (file, canonical) => {
       if (!exists(file)) return;
       const list = plainJSON(file);
-      writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
+      writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))), { within: root });
     };
     relabel(f.approvals, canonicalApprovals);
     relabel(f.comments, canonicalComments);
@@ -531,7 +531,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
     for (const rel of move.reshape || []) {
       const file = path.join(root, rel);
       const { obj, version } = applyMigrations(plainJSON(file), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
-      writeJSON(file, stamped(obj, version));
+      writeJSON(file, stamped(obj, version), { within: root });
     }
   } catch (e) {
     // rmTree: a folder this copy made may carry a read-only mode copied from the source.
@@ -590,10 +590,10 @@ function withDials(steps) {
 // like a file that does not parse, and never followed (it could point outside the Product, or at a device
 // whose read never ends). A missing file says so in `error`, as before. A file too big to read (#215) is
 // `tooBig`, refused like a file that does not parse; its `error` names no path (the row names the file).
-function readRaw(file) {
+function readRaw(file, root) {
   let text;
   try {
-    text = readPlainFile(file);
+    text = readPlainFile(file, { within: root });
   } catch (e) {
     // Under a linked folder (#214), the row names the folder.
     if (e?.code === NOT_PLAIN_FILE) return { ok: false, notPlain: true, error: notPlainSaid(e, NOT_PLAIN_SAID), ...(e.folder ? { folder: e.folder } : {}) };
@@ -683,7 +683,7 @@ export function ensureBackupsIgnored(root) {
   // A plain file only (E125 b): the line is written back into this file, and a write through a link would
   // land wherever it points. A link or a folder there is left as it is, and named.
   let text;
-  try { text = readPlainFile(gi); } catch (e) {
+  try { text = readPlainFile(gi, { within: root }); } catch (e) {
     // A file too big to read (#215) is left as it is too: rewriting it would mean reading it whole.
     if (e?.code !== NOT_PLAIN_FILE && e?.code !== FILE_TOO_BIG) throw e;
     warn(`.gitignore ${e.code === FILE_TOO_BIG ? TOO_BIG_SAID : notPlainSaid(e, NOT_PLAIN_SAID)}, so \`${BACKUP_IGNORE_GLOB}\` was not added to it — add that line to the real file by hand, or the backups may be committed`);
@@ -694,7 +694,7 @@ export function ensureBackupsIgnored(root) {
   const body = lines.join('\n').replace(/\n*$/, '');
   const prefix = body ? `${body}\n\n` : '';
   // Through a new file and a rename (#235), keeping the file's mode.
-  writeFileAtomic(gi, `${prefix}${BACKUP_IGNORE_BLOCK.join('\n')}\n`, { keepMode: true });
+  writeFileAtomic(gi, `${prefix}${BACKUP_IGNORE_BLOCK.join('\n')}\n`, { keepMode: true, within: root });
   return true;
 }
 
@@ -803,7 +803,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     // project-relative paths spelled that way, and on Windows `path.relative` says `.sdlc\product.json`.
     const rel = path.relative(root, file).split(path.sep).join('/');
     if (moving && rel.startsWith(moving)) continue;
-    const raw = readRaw(file);
+    const raw = readRaw(file, root);
     if (!raw.ok) {
       rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error, ...(raw.folder ? { folder: raw.folder } : {}) });
       continue;
@@ -940,12 +940,12 @@ export const KEEP_CHOICES = ['product', 'hub'];
 
 // What differs, in words a person can check against the files: the top-level keys of an object, the
 // positions of an array. Never the values — they can be long, and the files are right there.
-export function describeDrift(aPath, bPath) {
+export function describeDrift(aPath, bPath, root) {
   let a; let b;
   // Plain reads (E125 b): a link or a folder is named as such, never followed.
   const said = (p, e) => [`${path.basename(p)} ${e?.code === NOT_PLAIN_FILE ? notPlainSaid(e, NOT_PLAIN_SAID) : e?.code === FILE_TOO_BIG ? TOO_BIG_SAID : 'does not parse'}`];
-  try { a = readPlainJSON(aPath); } catch (e) { return said(aPath, e); }
-  try { b = readPlainJSON(bPath); } catch (e) { return said(bPath, e); }
+  try { a = readPlainJSON(aPath, { within: root }); } catch (e) { return said(aPath, e); }
+  try { b = readPlainJSON(bPath, { within: root }); } catch (e) { return said(bPath, e); }
   const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
   if (isPlainObject(a) && isPlainObject(b)) {
     const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
@@ -963,15 +963,15 @@ export function describeDrift(aPath, bPath) {
   return ['the two files hold different kinds of value'];
 }
 
-const bytesOrNull = (abs) => { try { return readPlainBytes(abs); } catch { return null; } };
+const bytesOrNull = (abs, root) => { try { return readPlainBytes(abs, { within: root }); } catch { return null; } };
 
 // Every drifted pair under `root`, project-relative, with what differs.
 export function driftedPairs(root) {
   return productDriftPairs(root).map(({ canonical, legacy }) => {
-    const pair = { canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy)) };
+    const pair = { canonical, legacy, differences: describeDrift(path.join(root, canonical), path.join(root, legacy), root) };
     // What each name held when the difference was shown — not part of the report (not enumerable), but
     // `checkDrift` refuses a pair that has changed since, because it is not the pair the person chose for.
-    Object.defineProperty(pair, 'seen', { value: [canonical, legacy].map((rel) => bytesOrNull(path.join(root, rel))) });
+    Object.defineProperty(pair, 'seen', { value: [canonical, legacy].map((rel) => bytesOrNull(path.join(root, rel), root)) });
     return pair;
   });
 }
@@ -1014,12 +1014,12 @@ function checkDrift(root, pairs, keep) {
       }
     }
     const seen = pairs[i].seen;
-    const now = [pairs[i].canonical, pairs[i].legacy].map((rel) => bytesOrNull(path.join(root, rel)));
+    const now = [pairs[i].canonical, pairs[i].legacy].map((rel) => bytesOrNull(path.join(root, rel), root));
     if (now.some((b) => b === null)) throw err('YAD-STATE-008', `${from} or ${to} cannot be read — nothing was written`, 'check the two files can be read, then run `yad migrate --apply` again');
     if (seen && seen.some((b, j) => !b || !b.equals(now[j]))) {
       throw err('YAD-STATE-008', `${pairs[i].canonical} or ${pairs[i].legacy} changed since the difference was shown — nothing was written`, 'run `yad migrate` again to see the pair as it is now');
     }
-    try { readPlainJSON(src); } catch {
+    try { readPlainJSON(src, { within: root }); } catch {
       throw err('YAD-STATE-001', `${from} does not parse, so it cannot be the copy kept — nothing was written`, `fix it or restore it from git, or keep the other copy (--keep ${keep === 'product' ? 'hub' : 'product'})`);
     }
   }
@@ -1029,10 +1029,10 @@ function checkDrift(root, pairs, keep) {
 function settleDrift(root, pairs, keep) {
   const written = [];
   for (const { to, src, dst } of settlePlan(root, pairs, keep)) {
-    writeFileAtomic(backupPathFor(dst), readPlainBytes(dst));
+    writeFileAtomic(backupPathFor(dst), readPlainBytes(dst, { within: root }), { within: root });
     // The kept copy's exact bytes — the gates compare with `cmp -s` — written through a temporary file
     // and a rename, so a crash never leaves a half file.
-    writeFileAtomic(dst, readPlainBytes(src));
+    writeFileAtomic(dst, readPlainBytes(src, { within: root }), { within: root });
     written.push(to);
   }
   return written;
@@ -1139,7 +1139,7 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
     }
     for (const row of pending) {
       const file = path.join(root, row.file);
-      const raw = readRaw(file);
+      const raw = readRaw(file, root);
       if (!raw.ok) continue; // re-read defensively; an unreadable file is never in `pending` anyway
       // Back up first, always. Unlike the wiring copies in plan.mjs — which skip the backup when the
       // file's bytes are provably ours — a ledger has no provenance record, so there is nothing to
@@ -1148,7 +1148,7 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
       // not keep, and its only record. Its bytes now are the kept copy's, backed up under the other name.
       // Written through a temporary file and a rename (E125 b): a link already at the `.yad-orig` path (one a
       // committer forced in) is replaced, never written through, and a dangling one never creates its target.
-      if (!settledFiles.includes(row.file)) writeFileAtomic(backupPathFor(file), readPlainBytes(file));
+      if (!settledFiles.includes(row.file)) writeFileAtomic(backupPathFor(file), readPlainBytes(file, { within: root }), { within: root });
       // A mirrored row writes its partner too, so the partner needs a backup of its OWN pre-migration
       // bytes — taken here, before either write. Backing up only the row's file leaves the other name
       // rewritten with no way back, and on the NEXT shape bump its `.yad-orig` would be overwritten
@@ -1158,7 +1158,7 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
         const partnerFile = path.join(root, partnerRel);
         // Only a plain file is copied (E125 b): a link there is replaced by the write below, and the file it
         // points at is never read or touched.
-        if (fs.lstatSync(partnerFile, { throwIfNoEntry: false })?.isFile() && !settledFiles.includes(partnerRel)) writeFileAtomic(backupPathFor(partnerFile), readPlainBytes(partnerFile));
+        if (fs.lstatSync(partnerFile, { throwIfNoEntry: false })?.isFile() && !settledFiles.includes(partnerRel)) writeFileAtomic(backupPathFor(partnerFile), readPlainBytes(partnerFile, { within: root }), { within: root });
       }
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
@@ -1168,11 +1168,13 @@ export async function runMigrate(root, { apply = false, json = false, keep = nul
       // `writeProductConfig` puts it under both names, which is what actually creates
       // `.sdlc/product.json` for an upgrading project. Everything else is an ordinary write.
       if (isMirroredPath(row.file)) {
+        // `writeProductConfig` takes no `within`, so both of its names are checked from the Product's folder first.
+        for (const m of MIRRORED_FILES) for (const rel of [m.canonical, m.legacy]) refuseLinkedWrite(path.join(root, rel), root);
         for (const rel of writeProductConfig(root, stamped(obj, version))) {
           if (!written.includes(rel)) written.push(rel);
         }
       } else {
-        writeJSON(file, stamped(obj, version));
+        writeJSON(file, stamped(obj, version), { within: root });
         written.push(row.file);
       }
     }
