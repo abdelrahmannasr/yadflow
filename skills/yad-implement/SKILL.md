@@ -245,10 +245,11 @@ actually exercises the task's acceptance criterion** — the task is not done un
 demonstrably met (record the result in the Step 7 report).
 
 **Tests first when no TDD skill is bound (#242).** When no test-first skill runs before this one on
-`implement` (`yad skill list` shows what does; the catalogue's TDD picks are `mattpocock-skills:tdd` and
-`tdd-workflow`), work test first yourself: write or update a test for the task's acceptance criterion
-first, run it and see it fail for the reason the task is about, then write the code until it passes. A
-task with no behaviour a test can check (a doc, or a skill's text) says so in the Step 7 report instead.
+`implement`, or the bound one is not installed here (`yad skill list` shows what runs and whether it is
+installed; the catalogue's TDD picks are `mattpocock-skills:tdd` and `tdd-workflow`), work test first
+yourself: write or update a test for the task's acceptance criterion first, run it and see it fail for
+the reason the task is about, then write the code until it passes. A task with no behaviour a test can
+check (a doc, or a skill's text) says so in the Step 7 report instead.
 
 **File-boundary rule (hard):** if the implementation genuinely needs a file **not** in the declared
 list (in a Unity repo, a declared file's own `.meta`, and the `.meta` of a folder made for it, are part of it: see "In a Unity repo" in Step 3), **flag and STOP** — do not silently widen the diff. Report the extra file(s) needed so the
