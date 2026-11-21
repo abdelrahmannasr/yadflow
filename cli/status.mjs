@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, info, hand, readJSON, exists, forTerminal, stripAnsi, run } from './lib.mjs';
 import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
-import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, doneStepUnapproved, reviewAsItStands, loadSkillBindings, buildNextForRepo, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { epicRoot, epicStories, featureStatus, isPassed, loadLedger, doneStepUnapproved, reviewAsItStands, loadSkillBindings, buildNextForRepo, retiredRecord, stepStatus, isValidEpicId, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
 import { listEpics, epicAction, actionLine, skillPhrase, soloOf } from './next.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { repoSources } from './standup.mjs';
@@ -97,6 +97,9 @@ function hereOf(root, cwd, ledgers, views) {
   const here = { branch, task, story, epic, repo, followUp: !!followUpTask(branch), step: null, status: null, reason: null };
   if (!repo) return { ...here, why: 'this checkout is not a repo the Product registers' };
   const bs = (ledgers.get(epic)?.buildStates || []).find((b) => b?.story === story);
+  // A retired story (#621) is said as that, before its lanes: they are skipped only because it is retired.
+  const retired = retiredRecord(bs);
+  if (retired) return { ...here, why: `${story} is retired${typeof retired.reason === 'string' && retired.reason.trim() ? ` — ${retired.reason}` : ''}` };
   const lane = bs?.repos?.[repo];
   if (!lane || typeof lane !== 'object') return { ...here, why: `${story} has no Build lane in ${repo} yet` };
   // Only the steps that are steps: a `null` or a bare word in the list is not one (build-state is advisory).
