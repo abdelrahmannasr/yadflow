@@ -1357,8 +1357,12 @@ function skillDescriptionProblems(skillsDir) {
     const m = front && front[1].match(/^description:[ \t]*(.*)$/m);
     let v = m ? m[1].trim() : '';
     if (!v || /^[|>]/.test(v)) { problems.push(`${skill}: no one-line description`); continue; }
-    if (v.startsWith('\'')) v = v.slice(1, -1).replace(/''/g, '\'');
-    else if (v.startsWith('"')) v = JSON.parse(v);
+    if (v.startsWith('\'')) {
+      // A single-quoted YAML scalar ends with a quote, and a quote inside it is doubled.
+      const inner = v.length > 1 && v.endsWith('\'') ? v.slice(1, -1) : null;
+      if (inner === null || inner.replace(/''/g, '').includes('\'')) { problems.push(`${skill}: description is not a valid single-quoted string`); continue; }
+      v = inner.replace(/''/g, '\'');
+    } else if (v.startsWith('"')) v = JSON.parse(v);
     if (v.length > DESCRIPTION_MAX) problems.push(`${skill}: ${v.length} characters (at most ${DESCRIPTION_MAX})`);
     total += v.length;
   }
@@ -1368,7 +1372,8 @@ function skillDescriptionProblems(skillsDir) {
 
 test(`every yad-* skill has a one-line description of at most ${DESCRIPTION_MAX} characters, ${DESCRIPTIONS_TOTAL_MAX} in all`, () => {
   assert.deepEqual(skillDescriptionProblems(path.join(REPO, 'skills')), []);
-  // The check itself: a 301-character description, a missing one and a block one are each named.
+  // The check itself: a 301-character description, a missing one, a block one, an apostrophe that is not
+  // doubled and a missing closing quote are each named.
   const T = tmp();
   try {
     const skill = (name, front) => put(path.join(T, name, 'SKILL.md'), `---\nname: ${name}\n${front}---\n\n# ${name}\n`);
@@ -1377,11 +1382,15 @@ test(`every yad-* skill has a one-line description of at most ${DESCRIPTION_MAX}
     skill('yad-long', `description: '${'b'.repeat(DESCRIPTION_MAX - 1)}''s'\n`);
     skill('yad-none', '');
     skill('yad-block', 'description: |\n  two\n  lines\n');
+    skill('yad-badquote', 'description: \'the story\'s title\'\n');
+    skill('yad-unclosed', 'description: \'no closing quote\n');
     put(path.join(T, 'sdlc', 'config.yaml'), 'not a skill\n');
     assert.deepEqual(skillDescriptionProblems(T), [
+      'yad-badquote: description is not a valid single-quoted string',
       'yad-block: no one-line description',
       `yad-long: ${DESCRIPTION_MAX + 1} characters (at most ${DESCRIPTION_MAX})`,
       'yad-none: no one-line description',
+      'yad-unclosed: description is not a valid single-quoted string',
     ]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
