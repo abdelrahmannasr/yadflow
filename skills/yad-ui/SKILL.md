@@ -1,6 +1,6 @@
 ---
 name: yad-ui
-description: 'Shape step 5 of the gated SDLC. With the ux-designer, author ui-design.md and DESIGN.md for an approved architecture, driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring directly when not. Reads epic + architecture as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the UI design" or after the architecture gate passes.'
+description: 'Shape step: with the ux-designer, write the UI design for an approved architecture, for review. Use when the user says "author the UI design" or after the architecture gate passes.'
 ---
 
 # SDLC — Author UI Design (Shape step 5)
