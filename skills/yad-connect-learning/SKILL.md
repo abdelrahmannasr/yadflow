@@ -1,6 +1,6 @@
 ---
 name: yad-connect-learning
-description: 'Connects a learning/tutoring tool (DeepTutor, or another tool — pluggable) to the Product so the cross-cutting learning layer can tutor any team member, at any SDLC stage, in the context of what is being built. Registers the tool into the project-wide .sdlc/learning.json (local-user auth, no stored tokens), detecting whether the DeepTutor CLI is on PATH and degrading to harness-native tutoring (the harness model reading project artifacts) when it is not. Optionally builds a project knowledge base from the SDLC artifacts + secret-scanned code-maps so tutoring is grounded. Run at setup or any time the learning tool changes. Reusable, idempotent, refreshable. Use when the user says "connect DeepTutor", "connect a learning tool", "refresh the learning connection", or "list the learning connection".'
+description: 'Connect a learning tool so anyone can be tutored in the project''s context, or fall back to the agent. Use when the user says "connect DeepTutor", "connect a learning tool", "refresh the learning connection", or "list the learning connection".'
 ---
 
 # SDLC — Connect a Learning Tool (the cross-cutting learning layer)
