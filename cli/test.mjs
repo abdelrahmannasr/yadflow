@@ -11081,6 +11081,70 @@ test('a skipped lane is owed nothing: buildNextForRepo, the Build line, and feat
   assert.equal(featureStatus(L({ api: done }), { stories }), 'in-build', 'web has no lane, so it is still owed');
 });
 
+const retiredRec = { reason: 'moved to another epic', by: 'sam', date: '2026-11-21' };
+test('retireStory: the record, every lane it declares skipped, each refusal, and a repeat that changes nothing (#621)', async () => {
+  const { retireStory, retiredRecord, unskipLane } = await import('./epic-state.mjs');
+  const base = { story: 'EP-l-S01', reason: '  moved to another epic ', by: 'sam', date: '2026-11-21', declared: ['api', 'web'], storiesPassed: true, storyStatus: 'approved', othersOwed: 1 };
+  const refusal = (fn) => { try { fn(); } catch (e) { assert.equal(e.code, 'YAD-STATE-004'); return e.message; } assert.fail('expected a refusal'); };
+  const laneRec = { reason: 'retired: moved to another epic', by: 'sam', date: '2026-11-21' };
+
+  const { buildState, already, lanes } = retireStory(null, base);
+  assert.equal(already, false);
+  assert.deepEqual(lanes, ['api', 'web']);
+  assert.deepEqual(buildState, { story: 'EP-l-S01', retired: retiredRec, repos: { api: { status: 'skipped', record: laneRec }, web: { status: 'skipped', record: laneRec } } });
+  assert.deepEqual(retiredRecord(buildState), retiredRec);
+  // A lane already skipped keeps its own record; a seeded lane nobody began is replaced; a stray lane is left.
+  const seeded = { currentStep: 'spec', steps: [{ id: 'spec', status: 'todo' }] };
+  const mixed = retireStory({ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord }, api: seeded, mobile: seeded } }, base);
+  assert.deepEqual(mixed.lanes, ['api']);
+  assert.deepEqual(mixed.buildState.repos, { web: { status: 'skipped', record: laneRecord }, api: { status: 'skipped', record: laneRec }, mobile: seeded });
+
+  // A repeat changes nothing and keeps the first record — even with no reason given this time.
+  const again = retireStory(buildState, { ...base, reason: undefined, by: 'kim' });
+  assert.equal(again.already, true);
+  assert.equal(again.buildState, buildState);
+
+  assert.match(refusal(() => retireStory(null, { ...base, storiesPassed: false })), /stories review has not passed/);
+  assert.match(refusal(() => retireStory(null, { ...base, storyStatus: 'in-build' })), /has status: in-build/);
+  assert.match(refusal(() => retireStory(null, { ...base, storyStatus: 'shipped' })), /has status: shipped/);
+  assert.match(refusal(() => retireStory(null, { ...base, shipped: true })), /already has a ship recorded/);
+  assert.match(refusal(() => retireStory({ story: 'EP-l-S01', repos: { web: { steps: [{ id: 'spec', status: 'in_progress' }] } } }, base)), /work has started in EP-l-S01 \/ web/);
+  assert.match(refusal(() => retireStory({ story: 'EP-l-S01', repos: { web: { steps: [{ id: 'spec', status: 'blocked', record: { reason: 'vendor' } }] } } }, base)), /work has started/, 'a halt is work');
+  assert.match(refusal(() => retireStory([], base)), /is not a JSON object/);
+  assert.match(refusal(() => retireStory({ story: 'EP-l-S01', repos: ['web'] }, base)), /has a `repos` that is not an object/);
+  assert.match(refusal(() => retireStory(null, { ...base, othersOwed: 0 })), /last story its epic has left to build, and no story has shipped/);
+  assert.equal(retireStory(null, { ...base, othersOwed: 0, anyShipped: true }).already, false);
+  for (const reason of [undefined, true, '  ']) assert.match(refusal(() => retireStory(null, { ...base, reason })), /needs a reason/);
+
+  // There is no unretire: a lane skip cannot be taken back out of a retired story.
+  assert.match(refusal(() => unskipLane(buildState, { story: 'EP-l-S01', repo: 'web' })), /EP-l-S01 is retired, so its lanes stay skipped/);
+});
+
+test('a retired story is owed nothing: featureStatus ships the feature once another story shipped, and yad next carries the record (#621)', async () => {
+  const { nextAction, featureStatus, buildNextActions } = await import('./epic-state.mjs');
+  const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
+  const skipped = { status: 'skipped', record: { ...retiredRec, reason: 'retired: moved to another epic' } };
+  const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
+  const L = (...buildStates) => ({ state, approvals: [], comments: [], productPrs: [], buildStates });
+  const stories = [{ id: 'EP-l-S01', repos: ['api'] }, { id: 'EP-l-S02', repos: ['api', 'web'] }];
+  const s01 = { story: 'EP-l-S01', repos: { api: done } };
+  const s02 = { story: 'EP-l-S02', retired: retiredRec, repos: { api: skipped, web: skipped } };
+  assert.equal(featureStatus(L(s01, s02), { stories }), 'shipped');
+  // Retired, with a declared repo that has no lane on disk: still owed nothing.
+  assert.equal(featureStatus(L(s01, { ...s02, repos: { api: skipped } }), { stories }), 'shipped');
+  // Without the record, the same lanes owe web.
+  assert.equal(featureStatus(L(s01, { story: 'EP-l-S02', repos: { api: skipped } }), { stories }), 'in-build');
+  // Every story retired but one that has not shipped: not shipped.
+  assert.equal(featureStatus(L({ story: 'EP-l-S01', repos: { api: { currentStep: 'spec', steps: [{ id: 'spec', status: 'in_progress' }] } } }, s02), { stories }), 'in-build');
+  // Work in a retired story's lane keeps the feature in Build (yad doctor fails it).
+  assert.equal(featureStatus(L(s01, { ...s02, repos: { api: { status: 'skipped', steps: [{ id: 'spec', status: 'in_progress' }] }, web: skipped } }), { stories }), 'in-build');
+  assert.deepEqual(buildNextActions([s02])[0].retired, retiredRec);
+  assert.equal('retired' in buildNextActions([s01])[0], false, 'an entry gains no key unless the story is retired');
+  assert.equal(nextAction(L(s01, s02)).why, 'Build — every story/repo lane is shipped or skipped');
+});
+
 test('yad skip <epic> <story> --repo: writes the lane, refuses what E39 refuses, and unskip takes it back out (E39)', async () => {
   const { runLaneSkip } = await import('./skip.mjs');
   const { runNext } = await import('./next.mjs');

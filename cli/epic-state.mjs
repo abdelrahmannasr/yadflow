@@ -908,6 +908,9 @@ function buildShipped(builds, stories) {
   if (!lanes.some((lane) => lane.shipped) || !lanes.every((lane) => lane.shipped || lane.status === 'skipped')) return false;
   return stories.every((story) => {
     const b = builds.find((x) => x.story === story.id);
+    // A RETIRED story (#621) is owed nothing, even a repo it declares with no lane on disk; its lanes on
+    // disk are still read above, so one with work in it keeps the feature in Build.
+    if (b?.retired) return true;
     return !!b && story.repos.every((repo) => b.repos.some((lane) => lane.repo === repo));
   });
 }
@@ -1024,6 +1027,12 @@ export function skipLane(buildState, { story, repo, reason, by = null, date = nu
 // so the caller can remove a file the skip created rather than leave an empty one behind.
 export function unskipLane(buildState, { story, repo } = {}) {
   const repos = isPlainObject(buildState?.repos) ? buildState.repos : {};
+  // A retired story's lanes were skipped by the retirement (#621). Putting one back would leave a story
+  // that is retired and owes a lane at once, and there is no command that undoes a retirement yet.
+  if (retiredRecord(buildState)) {
+    throw err('YAD-STATE-004', `${story} is retired, so its lanes stay skipped`,
+      'a retired story owes no Build work; there is no command that puts a retired story back yet');
+  }
   if (!laneIsSkipped(repos[repo])) {
     throw err('YAD-STATE-004', `${story} / ${repo} is not skipped`, 'nothing to put back — see the lanes with `yad next <epic>`');
   }
@@ -1032,6 +1041,84 @@ export function unskipLane(buildState, { story, repo } = {}) {
   const next = { ...buildState, repos: rest };
   const empty = !Object.keys(rest).length && Object.keys(next).every((k) => ['story', 'repos', 'schemaVersion'].includes(k));
   return { buildState: next, empty };
+}
+
+// ---- retiring a whole story (#621) --------------------------------------------------------------
+// A story approved in the stories review that will not be built. Its build-state file records it at
+// the top, as `retired: { reason, by, date }`, and every lane it declares is skipped with the reason
+// (`retired: <why>`), so every reader that already counts a skipped lane as owed nothing reads the story
+// that way too. Not the story file, `state.json` or the approvals, for the reasons the lane skip gives:
+// the story file is under the stories-review fingerprint, and `state.json` is CI's on a verified Product.
+//
+// ONE predicate for every reader that asks "is this story retired?": the `retired` key at the top of
+// the file, when it is an object. A record with no reason still counts (it is `yad doctor`'s to warn
+// about); the `retired: ` words in a lane's reason never do — they are only what a person reads.
+export const retiredRecord = (buildState) => (isPlainObject(buildState) && isPlainObject(buildState.retired) ? buildState.retired : null);
+// The same question asked of an epic folder and a story id, for the readers that hold no build-state:
+// the epic seal, `yad tidy` and `yad map`. A file that cannot be read is not a retirement — the safe side,
+// since a story that reads as not retired is still owed.
+export function storyRetired(epicDir, story) {
+  return !!retiredRecord(readJSON(path.join(epicFiles(epicDir).buildStateDir, `${story}.json`), null));
+}
+
+// PURE: returns `{ buildState, already, lanes }` — `lanes` the repos this run skipped. The caller reads
+// the files and writes the result. Refusals throw YAD-STATE-004, checked in this order:
+//   - the stories review has not passed (`done` or `satisfied`): before that, delete the story instead
+//   - the build-state is not a lane map: refused, never overwritten
+//   - already retired: no change (before the reason, as a lane skip: a repeat keeps the first record)
+//   - the story is `in-build` or `shipped`, has a ship recorded, or has work started in any lane
+//   - it is the last story still owed, and no story has shipped: retiring it leaves an epic with
+//     nothing to build and nothing built
+//   - no reason
+// `othersOwed` counts the epic's other stories that are not retired; `anyShipped` says whether one of
+// them is `shipped` (its frontmatter, the signal the seal reads).
+export function retireStory(buildState, {
+  story, reason, by = null, date = null, declared = [], storiesPassed = false, storyStatus = null,
+  shipped = false, othersOwed = 0, anyShipped = false,
+} = {}) {
+  if (!storiesPassed) {
+    throw err('YAD-STATE-004', `the stories review has not passed, so ${story} is not approved yet — there is nothing to retire`,
+      `if ${story} will not be built, remove it from stories/ instead: nothing is approved yet, so that edit revokes nothing`);
+  }
+  if (buildState != null && !isPlainObject(buildState)) {
+    throw err('YAD-STATE-004', `build-state/${story}.json is not a JSON object`, 'fix the file by hand — nothing here overwrites content it cannot read');
+  }
+  if (isPlainObject(buildState) && 'repos' in buildState && !isPlainObject(buildState.repos)) {
+    throw err('YAD-STATE-004', `build-state/${story}.json has a \`repos\` that is not an object`, 'fix the file by hand — nothing here overwrites content it cannot read');
+  }
+  const bs = isPlainObject(buildState) ? buildState : { story, repos: {} };
+  const repos = isPlainObject(bs.repos) ? bs.repos : {};
+  if (retiredRecord(bs)) return { buildState: bs, already: true, lanes: [] };
+  if (storyStatus === 'in-build' || storyStatus === 'shipped') {
+    throw err('YAD-STATE-004', `${story} has status: ${storyStatus}, so it is past the point where it can be retired`,
+      storyStatus === 'shipped' ? 'a shipped story was built — there is nothing to retire' : 'Build has started on it; finish it, or change it through a change epic (yad-change)');
+  }
+  if (shipped) {
+    throw err('YAD-STATE-004', `${story} already has a ship recorded`, 'a story with a ship was built, at least in part — there is nothing to retire');
+  }
+  const started = Object.keys(repos).sort().filter((r) => laneStarted(repos[r]));
+  if (started.length) {
+    throw err('YAD-STATE-004', `work has started in ${started.map((r) => `${story} / ${r}`).join(', ')}`,
+      'retiring says the story will not be built, and work in it says otherwise; finish it, or clear the work with yad-run first');
+  }
+  if (othersOwed < 1 && !anyShipped) {
+    throw err('YAD-STATE-004', `${story} is the last story its epic has left to build, and no story has shipped`,
+      'an epic where no story will be built is a question for its stories review, not a retirement');
+  }
+  if (reason == null || reason === true || !String(reason).trim()) {
+    throw err('YAD-STATE-004', 'retiring a story needs a reason', `yad story retire ${story} --reason "<why it will not be built>"`);
+  }
+  const record = stepRecord({ reason, by, date });
+  const lanes = declared.filter((r) => !laneIsSkipped(repos[r]));
+  const laneRecord = stepRecord({ reason: `retired: ${record.reason}`, by, date });
+  return {
+    buildState: {
+      ...bs, story: bs.story || story, retired: record,
+      repos: { ...repos, ...Object.fromEntries(lanes.map((r) => [r, { status: 'skipped', record: { ...laneRecord } }])) },
+    },
+    already: false,
+    lanes,
+  };
 }
 
 // The two spellings of the product level. `foundation` is the one this release writes; `discovery` is
@@ -3702,6 +3789,9 @@ export function buildNextForRepo(repoState = {}, { bindings = null } = {}) {
 export function buildNextActions(buildStates = [], { bindings = null } = {}) {
   return buildStates.map((bs) => ({
     story: bs.story || null,
+    // A retired story (#621) carries its record, so `yad next` can say so; the key is added ONLY then,
+    // which keeps every other entry byte-identical to the frozen v3 output (`cli/test-golden.mjs`).
+    ...(retiredRecord(bs) ? { retired: retiredRecord(bs) } : {}),
     repos: Object.keys(bs.repos || {}).sort()
       .map((repo) => ({ repo, ...buildNextForRepo(bs.repos[repo], { bindings }) })),
   }));
