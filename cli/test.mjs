@@ -18015,6 +18015,28 @@ test('#632 repo refresh --push off the default branch writes nothing, and the sa
   }
 });
 
+test('#632 repo refresh --push --allow-branch on a side branch writes, commits and pushes to origin/<side>', async () => {
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'gone', path: 'demo/gone', platform: 'github', default_branch: 'main', codeMap: '.sdlc/code-context/gone/code-map.md' }] }));
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'registry');
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    let r;
+    const out = await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, allowBranch: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.published?.committed, r.published?.pushed], [true, true]);
+    assert.equal((out.match(/--allow-branch: committing on/g) || []).length, 1, 'the guard runs once');
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(product\): sync code-context/);
+    assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(productBare, 'rev-parse', 'wip/side').toString().trim(), 'pushed to its own branch');
+    assert.equal(git(productBare, 'branch', '--list', 'main').toString().trim(), '', 'never to the default branch');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('publishCodeContext: a named refresh publishes only that repo\'s code-map, not others', async () => {
   const prev = process.exitCode;
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
@@ -34813,6 +34835,22 @@ for (const verified of [false, true]) {
     } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
   });
 }
+
+test('#632 gate reopen --push --allow-branch on a side branch writes, commits and pushes to origin/<side>', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = productForReopen();
+  try {
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    const r = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true, allowBranch: true });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.currentStep, r.committed, r.pushed], ['architecture', true, true]);
+    assert.ok(r.written.includes('epics/EP-x/.sdlc/state.json'));
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): reopen EP-x\/architecture/);
+    assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(bare, 'rev-parse', 'wip/side').toString().trim(), 'pushed to its own branch');
+    assert.notEqual(git(bare, 'rev-parse', 'main').toString().trim(), git(bare, 'rev-parse', 'wip/side').toString().trim(), 'never to the default branch');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
 
 // #245: the reopen stages and commits the files it lowered by their literal names. A story named `*.md` is lowered
 // with the walk-back; as a plain pathspec its name also matched a person's unstaged edit of a file beside it.

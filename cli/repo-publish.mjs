@@ -173,6 +173,7 @@ export function publishTarget(root, { allowBranch = false } = {}) {
 
 // `target`: what `publishTarget` answered, when the caller checked the branch first; else it is checked here.
 export async function publishCodeContext(root, { push = false, allowBranch = false, name = null, target } = {}) {
+  // `undefined`: not passed, so the branch is checked here; `null`: the caller's check refused, so nothing is published.
   const t = target === undefined ? publishTarget(root, { allowBranch }) : target;
   if (!t) return;
   const { git, branch } = t;

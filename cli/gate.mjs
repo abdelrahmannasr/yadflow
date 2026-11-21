@@ -1701,7 +1701,9 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { epic, closed: [], dryRun, written: false, committed: false, pushed: false }; }
   for (const v of violations) warn(`${v.message} [${v.code}]`);
 
-  // Read leniently: a repair heals a broken ledger, and a broken hub.json must not stop it (E18).
+  // Read leniently: a repair heals a broken ledger, and a broken hub.json must not stop it (E18). That holds
+  // only without --push: with it, `branchForPush` loads the Product strictly before any write, so a broken
+  // hub.json refuses the run with nothing written.
   const closed = repairState(ledger.state, { by: closingActor(root, readJSON(productConfigPath(root), null)), date: today });
   // The --json answer (E1): what this run did, so a dry run and a real one never read the same.
   const did = (written, committed = false, pushed = false) => ({ epic, closed, dryRun, written, committed, pushed });
