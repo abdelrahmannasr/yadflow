@@ -85,4 +85,10 @@ stayed on disk, is rewritten to the new behaviour; new tests beside the reopen a
 **Files:**
 - docs/CLI.md
 - skills/yad-product-bridge/references/bridge.md
+
+## T04 — test and comments from the review
+**Files:**
+- cli/test.mjs
+- cli/repo-publish.mjs
+- cli/gate.mjs
 <!-- /yad:tasks -->
