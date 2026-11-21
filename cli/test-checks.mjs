@@ -4395,15 +4395,50 @@ test('epic-open gate: a retired story is owed nothing, and the gate and sealedEp
       bs(v);
       const r = runGate(EPIC_OPEN, T);
       assert.equal(r.code, sealed ? 1 : 0, `${why}: ${r.out}`);
-      assert.match(r.out, sealed ? /targets SEALED epic EP-demo/ : /epic is open — has unshipped stories/, why);
+      assert.match(r.out, sealed ? /targets SEALED epic EP-demo \(all stories shipped or retired\)/ : /epic is open — has unshipped stories/, why);
       assert.equal(sealedEpic(productConfig, 'EP-demo'), sealed, `sealedEpic agrees: ${why}`);
+    }
+    // The shell reads only the shape yad writes (two-space indent, one key per line). A record written
+    // another way — on one line, or indented with a tab — reads as not retired: the story is still owed,
+    // so the epic stays open. (sealedEpic parses the JSON, so it reads both as retired.)
+    const raw = (text) => fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-demo-S02.json'), text);
+    for (const [why, text] of [
+      ['minified', '{"story":"EP-demo-S02","retired":{"reason":"moved"},"repos":{}}\n'],
+      ['tab-indented', '{\n\t"story": "EP-demo-S02",\n\t"retired": {\n\t\t"reason": "moved"\n\t},\n\t"repos": {}\n}\n'],
+    ]) {
+      raw(text);
+      const r = runGate(EPIC_OPEN, T);
+      assert.equal(r.code, 0, `${why}: ${r.out}`);
+      assert.match(r.out, /epic is open — has unshipped stories/, why);
     }
     // Every story retired, none shipped: nothing was built, so the epic is open.
     fs.writeFileSync(path.join(dir, 'stories/EP-demo-S01.md'), linkMd({ story: 'EP-demo-S01', status: 'approved' }) + '\n# EP-demo-S01\n');
     fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-demo-S01.json'), `${JSON.stringify({ story: 'EP-demo-S01', retired: { reason: 'x' }, repos: {} }, null, 2)}\n`);
     bs({ story: 'EP-demo-S02', retired: { reason: 'x' }, repos: {} });
-    assert.equal(runGate(EPIC_OPEN, T).code, 0);
+    // The commit names S01, now retired, so the gate fails on that — never on a seal.
+    const all = runGate(EPIC_OPEN, T);
+    assert.equal(all.code, 1, all.out);
+    assert.match(all.out, /names EP-demo-S01, which is retired/);
+    assert.doesNotMatch(all.out, /SEALED/);
     assert.equal(sealedEpic(productConfig, 'EP-demo'), false);
+  } finally {
+    fs.rmSync(productConfig, { recursive: true, force: true });
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('epic-open gate: a change whose Task trailer names a retired story fails — it owes no Build work (#621 review)', () => {
+  const T = scaffoldRepo();
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  try {
+    const dir = seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'approved', 'EP-demo-S02': 'approved' } });
+    fs.mkdirSync(path.join(dir, '.sdlc/build-state'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-demo-S01.json'), `${JSON.stringify({ story: 'EP-demo-S01', retired: { reason: 'moved', by: 'sam', date: '2026-11-21' }, repos: {} }, null, 2)}\n`);
+    linkedCommit(T, productConfig);   // Task: EP-demo-S01-T01
+    const r = runGate(EPIC_OPEN, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL \[epic-open\]: .* names EP-demo-S01, which is retired \(it will not be built, so it owes no Build work\)/);
+    assert.doesNotMatch(r.out, /SEALED/, 'the epic is open: S02 is still owed');
   } finally {
     fs.rmSync(productConfig, { recursive: true, force: true });
     fs.rmSync(T, { recursive: true, force: true });

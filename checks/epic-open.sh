@@ -635,8 +635,17 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
+  # A RETIRED story (#621, `yad story retire`) will not be built, so a change that names it is refused —
+  # it owes no Build work. Checked before the seal: the story is what the trailer names.
+  if story_retired "$ep_dir" "$story"; then
+    echo "FAIL [epic-open]: ${short} ${task} names ${story}, which is retired (it will not be built, so it owes no Build work)."
+    echo "  -> Link the change to a story that is still owed (its Task trailer), or, if ${story} must be built after all,"
+    echo "     add the work as a new story through the stories review or a change-epic (yad-change)."
+    rc=1
+    continue
+  fi
   if epic_sealed "$ep_dir"; then
-    echo "FAIL [epic-open]: ${short} ${task} targets SEALED epic ${epic} (all stories shipped)."
+    echo "FAIL [epic-open]: ${short} ${task} targets SEALED epic ${epic} (all stories shipped or retired)."
     echo "  -> New behaviour cannot mutate a shipped epic. Open a threaded change-epic with yad-change"
     echo "     (type change|defect|hotfix, parent: ${epic}) and implement against ITS stories instead."
     rc=1
