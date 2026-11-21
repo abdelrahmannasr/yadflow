@@ -150,6 +150,9 @@ Run yadflow here: run `npx -y yadflow@4 guide --json` and follow the yad-guide r
 The rules call the command `yad`. Install it once (`npm install -g yadflow`) so `yad …` works; without it
 the agent runs `npx yadflow …`, which Claude Code asks you to allow each time.
 
+yadflow skills need the `yad` CLI, because the CLI enforces approvals. Each skill that runs `yad` checks for it
+first, and stops with the install command when it is missing.
+
 In a folder with no Product yet, the agent asks you the setup questions in the chat: solo or team, new
 or existing code, where the Product lives, which repos to connect, and the others. You can tell it to
 take the defaults. It then runs `new`, `init` or `setup` with your answers. If it misses one, yad refuses
