@@ -16,6 +16,7 @@
 // the action from `nextAction` (the same answer `yad next --json` gives, whose keys are frozen), and
 // where the person is from `yad status`. Text from the Product's own files passes through `forTerminal`:
 // it reaches a model, and a control character there is never wanted.
+import os from 'node:os';
 import path from 'node:path';
 import { c, log, info, hand, readJSON, readPlainFile, forTerminal, exists } from './lib.mjs';
 import { VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
@@ -24,6 +25,7 @@ import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLed
 import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand } from './recommend.mjs';
+import { installedSkillNames } from './skill.mjs';
 import { TOOLBOX, parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit } from './productcommit.mjs';
 import { updateTargets } from './update-commit.mjs';
@@ -287,7 +289,7 @@ function stepBlock(a, state, ctx = {}) {
     why: clean(a.why ?? null),
     skills: {
       bound: skills,
-      recommended: facts && !facts.gate ? recommendationsFor(authorId).map((r) => ({ skill: r.skill, why: r.reason, bind: bindCommand(r), decidedBy: 'human' })) : [],
+      recommended: facts && !facts.gate ? recommendedRows(a, authorId, ctx) : [],
     },
     tools,
     ...(a.parallel ? { parallel: { step: clean(a.parallel.step), skill: clean(a.parallel.skill ?? null), artifact: clean(a.parallel.artifact ?? null) } } : {}),
@@ -295,6 +297,20 @@ function stepBlock(a, state, ctx = {}) {
     ...(Array.isArray(a.debt) && a.debt.length ? { debt: a.debt.map((d) => ({ step: clean(d?.step ?? null), status: clean(d?.status ?? null) })) } : {}),
     ...(a.builds ? { lanes: lanesOf(a) } : {}),
   };
+}
+
+// The catalogue's picks for the step (E52), each with the step it is for and whether it is installed here
+// (#242): `installed` is what `yad skill recommend` answers, `null` when `yad detect` could not look. In
+// Build the step is the loop itself, so the picks are those of the step each open lane is on, each step
+// once, in lane order. Detection reads the skill folders, so it runs only when there is a pick to mark.
+function recommendedRows(a, authorId, ctx) {
+  const steps = a.kind === 'build'
+    ? [...new Set((a.builds || []).flatMap((b) => (b.repos || []).filter((r) => !r.shipped && r.status !== 'skipped').map((r) => r.step)))]
+    : [authorId];
+  const picks = steps.filter((s) => typeof s === 'string').flatMap((s) => recommendationsFor(s));
+  if (!picks.length) return [];
+  const names = ctx.root ? installedSkillNames(ctx.root, { home: ctx.home ?? os.homedir() }) : null;
+  return picks.map((r) => ({ step: r.step, skill: r.skill, why: r.reason, bind: bindCommand(r), installed: names ? names.has(r.skill) : null, decidedBy: 'human' }));
 }
 
 // Each Build lane: its step's facts, and whether a person moves it on (the epic's `advance` dial).
@@ -439,7 +455,7 @@ const thenFor = (person, epic) => (person.some((p) => p.verify)
 
 // Build the guide. `root` is the Product, or null when there is none here. `cwd` is where the agent is.
 // `productElsewhere`: no Product here, but one is a `cd` away (bin/yad.mjs finds it).
-export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), runner, productElsewhere = null } = {}) {
+export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), runner, productElsewhere = null, home = os.homedir() } = {}) {
   // `preapproved` (E167): what the agent guard lets run with no permission prompt, and what it never does.
   const base = { guideVersion: GUIDE_VERSION, rules: RULES, humanOnly: HUMAN_ONLY_ACTS, never: NEVER, preapproved: PREAPPROVED };
   if (!root && productElsewhere) {
@@ -462,7 +478,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   // Upkeep rides every answer about this Product until it is done.
   base.upkeep = upkeepFor(install, { platform, root });
 
-  const ctx = { verified, platform, solo };
+  const ctx = { verified, platform, solo, root, home };
   const chosen = epic ?? m.here?.epic ?? null;
   if (chosen) {
     if (!isValidEpicId(chosen) || !exists(path.join(epicRoot(root, chosen), '.sdlc', 'state.json'))) {
@@ -503,7 +519,7 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
       person: [{ act: 'choose', why: 'several epics are open; which to work on is the person\'s call', steps: ['Pick the epic to work on.'], commands: [], verify: null }],
       then: 'run `yad guide <epic> --json` for the epic the person picked' };
   }
-  if (open.length === 1) return buildGuide(root, { epic: open[0].epic, cwd, runner });
+  if (open.length === 1) return buildGuide(root, { epic: open[0].epic, cwd, runner, home });
   // Nothing open: the Foundation (optional) or the first epic.
   const brownfield = productConfig?.profile?.codebase === 'brownfield';
   const hasFoundation = epicIds(root).some((id) => PRODUCT_EPICS.includes(id));
