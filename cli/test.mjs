@@ -11239,6 +11239,28 @@ test('yad story retire: writes the record and the skipped lanes, touches nothing
   } finally { fs.rmSync(B, { recursive: true, force: true }); }
 });
 
+test('yad story retire from the command line: --json answers the record, a refusal is JSON too, and --help lists it (#621)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-retire-cli-'));
+  try {
+    laneEpic(T, { stories: { 'EP-l-S01': ['api', 'web'], 'EP-l-S02': ['api'] } });
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/product.json'), '{}');
+    const run = (...args) => spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' });
+    const r = run('story', 'retire', 'EP-l-S01', '--reason', 'moved to another epic', '--json');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.deepEqual([j.ok, j.command, j.story, j.changed, j.lanes, j.record.reason], [true, 'story retire', 'EP-l-S01', true, ['api', 'web'], 'moved to another epic']);
+    const no = run('story', 'retire', 'EP-l-S02', '--reason', 'x', '--json');
+    assert.equal(no.status, 1);
+    assert.deepEqual([JSON.parse(no.stdout).ok, JSON.parse(no.stdout).code], [false, 'YAD-STATE-004']);
+    assert.match(JSON.parse(no.stdout).error, /last story its epic has left to build/);
+    const extra = yadRun(T, 'story', 'retire', 'EP-l-S02', 'moved', 'away');
+    assert.equal(extra.code, 1);
+    assert.match(extra.out, /quote a reason of more than one word/);
+    assert.match(yadRun(T, '--help').out, /yad story retire <story> --reason <text>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad skip <epic> <story> --repo: writes the lane, refuses what E39 refuses, and unskip takes it back out (E39)', async () => {
   const { runLaneSkip } = await import('./skip.mjs');
   const { runNext } = await import('./next.mjs');
