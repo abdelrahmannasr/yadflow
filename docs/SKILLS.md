@@ -1,4 +1,4 @@
-# Agent skills (all 41)
+# Agent skills (all 42)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -72,6 +72,11 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   request, and can wire a CI job that builds and deploys every site on push. That job builds only what is
   committed, so regenerating a stale site stays a person's `refresh`. Generalizes the rule that feature
   work must hand-update the docs.
+- **`yad-brand`** — Makes every page yadflow generates (the docs sites, the reports) use the Product's own
+  design system: its logo, colours and fonts. It fills the one brand file, `.sdlc/brand.json`, from a
+  machine-readable `DESIGN.md` (`yad brand init`), or by reading a prose `DESIGN.md`, a design folder or a
+  connected design tool. It never invents a colour: a role it cannot find is left out and named, and
+  yadflow's own value is used. Then `yad brand check` shows the result. Not a gated step.
 
 ## The learning layer (cross-cutting — any member, any stage)
 

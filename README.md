@@ -19,7 +19,7 @@ where it matters.
 
 - **The `yad` command-line tool.** It is written in Node and has no dependencies. It sets up a
   project, tells you the next action, runs reviews, and reads the project history.
-- **41 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
+- **42 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
   such as "write the architecture". The skills run in Claude Code, Codex CLI, Cursor, Gemini CLI,
   GitHub Copilot, Zencoder and opencode.
 - **Plain files in git.** Every plan, decision, approval and link lives as a readable file in a
@@ -327,7 +327,7 @@ The record is worth trusting because people approve what goes into it.
   - [working together: capture, claims, owners, fold](docs/CLI.md#working-together-capture-claims-owners-and-fold)
   - [troubleshooting and error codes](docs/CLI.md#troubleshooting-yad-doctor--error-codes)
   - [every CI gate: rules, exemptions and failures](docs/GATES.md)
-  - [all 41 skills](docs/SKILLS.md)
+  - [all 42 skills](docs/SKILLS.md)
   - [the by-hand walkthrough](docs/WALKTHROUGH.md)
 - **Upgrade:** [staying up to date](docs/CLI.md#staying-up-to-date) ·
   [upgrading to 4.0](docs/migrations/upgrading-to-4.md) ·
