@@ -76,6 +76,9 @@ in the shape every reader expects (#346).
 it**: stop, report the recorded `record.reason`, and point at `yad unskip <epic> <story> --repo <repo>` if
 the lane is owed after all. **Never write a Build step as `skipped` or `deferred`**: a lane is skipped
 whole or not at all, and `yad doctor` reports a single step set aside.
+ If the file has a top-level **`retired`** record (engine #621: `yad story retire <story> --reason "<why>"`
+set the whole story aside), **do not drive any lane of it**: stop, report `retired.reason`, and say that
+the story will not be built. Every `yad build` write refuses it, and there is no command that puts it back.
 
 Also read **which skill runs each step** — `yad skill list --epic <epic> --json`, whose `steps[]` gives
 each step id its `skills` array. Always pass `--epic`: a project may bind a step for one route only
