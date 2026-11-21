@@ -7179,18 +7179,27 @@ test('gate repair --push commits ONLY state.json to the default branch and pushe
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('gate repair --push refuses off the default branch unless --allow-branch', async () => {
+test('gate repair --push off the default branch is refused before it writes, so the same command then works on it (#632)', async () => {
   const prev = process.exitCode;
-  const { T, statePath } = productWithStrandedEpic();
+  const { T, bare, statePath } = productWithStrandedEpic();
   try {
     git(T, 'checkout', '-q', '-b', 'wip/side');
     process.exitCode = 0;
-    await gateRepair(T, { epic: 'EP-x', push: true });
+    const r = await gateRepair(T, { epic: 'EP-x', push: true });
     assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
-    // the heal itself still landed on disk; only the commit was withheld
-    assert.equal(JSON.parse(fs.readFileSync(statePath)).steps[0].status, 'done');
+    assert.deepEqual([r.written, r.committed, r.pushed], [false, false, false], 'the --json answer says nothing was written');
+    assert.equal(git(T, 'status', '--porcelain').toString(), '', 'the refusal leaves the Product as it was');
+    assert.equal(JSON.parse(fs.readFileSync(statePath)).steps[0].status, 'in_progress', 'the stranded step is still there to repair');
     assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'seed', 'nothing committed');
-  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+    // On the default branch the same command finds the step and commits the repair.
+    git(T, 'checkout', '-q', 'main');
+    process.exitCode = 0;
+    const again = await gateRepair(T, { epic: 'EP-x', push: true });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([again.closed, again.written, again.committed, again.pushed], [['stories'], true, true, true]);
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): repair epic state/);
+    assert.equal(git(T, 'status', '--porcelain').toString(), '');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
 
 test('gate status counts only non-stale approvals after an artifact change', async () => {
@@ -34748,6 +34757,34 @@ test('#322 gate reopen --push commits exactly what it wrote, on a verified Produ
     assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(T, 'rev-parse', 'origin/main').toString().trim());
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
+
+// #632: with --push the branch is checked before anything is written. A refused branch used to leave the walk-back
+// on disk, uncommitted, and the re-run on the default branch then refused: the step already read as reopened.
+for (const verified of [false, true]) {
+  test(`#632 gate reopen --push off the default branch writes nothing, and the same command then works on it${verified ? ' (a verified Product)' : ''}`, async () => {
+    const prev = process.exitCode;
+    const { T, bare, ep } = productForReopen({ verified });
+    try {
+      git(T, 'checkout', '-q', '-b', 'wip/side');
+      const before = fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8');
+      process.exitCode = 0;
+      const r = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true });
+      assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
+      assert.deepEqual([r.written, r.committed, r.pushed], [[], false, false], 'the --json answer says nothing was written');
+      assert.equal(git(T, 'status', '--porcelain').toString(), '', 'no ledger, record or story status line is changed');
+      assert.equal(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'), before);
+      assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'seed', 'nothing committed');
+      git(T, 'checkout', '-q', 'main');
+      process.exitCode = 0;
+      const again = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true });
+      assert.equal(process.exitCode, 0);
+      assert.deepEqual([again.currentStep, again.committed, again.pushed], ['architecture', true, true]);
+      assert.ok(again.written.includes('epics/EP-x/architecture.md'));
+      assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): reopen EP-x\/architecture — auth changed \[skip ci\]$/);
+      assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(T, 'rev-parse', 'origin/main').toString().trim());
+    } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+  });
+}
 
 // #245: the reopen stages and commits the files it lowered by their literal names. A story named `*.md` is lowered
 // with the walk-back; as a plain pathspec its name also matched a person's unstaged edit of a file beside it.

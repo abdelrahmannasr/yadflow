@@ -1671,6 +1671,17 @@ export function buildRepairMessage({ epic, steps }) {
   return `${subject}\n\nEpic: ${epic}\nClosed: ${steps.join(', ')}\nReason: YAD-STATE-005 — author step(s) left behind a completed review gate`;
 }
 
+// With --push, the branch a gate command commits on — checked BEFORE the command writes anything (#632), so a
+// refused branch leaves the Product as it was. Null when the default-branch guard refuses (it has printed why
+// and set the exit code); else the git runner, the branch and the default branch.
+function branchForPush(root, { allowBranch, cmd }) {
+  preflightGuardReadiness(root);
+  const git = productGit(root);
+  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
+  const branch = branchToCommitOn(root, git, defaultBranch);
+  return guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd, root }) ? { git, branch, defaultBranch } : null;
+}
+
 // `yad gate repair <epic>` — heal the chain inconsistency `doctor` reports as YAD-STATE-005: an author
 // step stranded at in_progress behind a review gate that already advanced (issue #131). A pre-fix
 // `gate sync` could leave this, and it never self-heals — sync skips a step that is already `done` — so
@@ -1695,6 +1706,12 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   // The --json answer (E1): what this run did, so a dry run and a real one never read the same.
   const did = (written, committed = false, pushed = false) => ({ epic, closed, dryRun, written, committed, pushed });
   if (dryRun) { info('dry run — nothing written'); return did(false); }
+  // With --push the branch is checked BEFORE the write (#632): a refused branch must leave the Product as it
+  // was, or the repaired state.json sits uncommitted there and a re-run on the default branch finds nothing
+  // to repair, so the fix is never committed.
+  const target = push ? branchForPush(root, { allowBranch, cmd: 'yad gate repair' }) : null;
+  if (push && !target) return did(false);
+  const { git, branch, defaultBranch } = target ?? {};
   writeState(ledger.files.state, ledger.state);
   // Lenient, as above: a broken hub.json reads as a local Product, and must not stop the repair. With
   // --push the rebuild happens in `stageIndexIfClean` below, which checks the commit will hold what it
@@ -1709,13 +1726,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
     return did(true);
   }
 
-  // --- publish: narrow, default-branch-only commit of the one repaired file ---
-  preflightGuardReadiness(root);
-  const git = productGit(root);
-  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
-  const branch = branchToCommitOn(root, git, defaultBranch);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair', root })) return did(true);
-
+  // --- publish: narrow, default-branch-only commit of the one repaired file (the branch was checked above) ---
   const spec = path.relative(root, ledger.files.state);
   if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return did(true); }
   if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return did(true); }
@@ -1865,6 +1876,12 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
     process.exitCode = 1;
     return answer();
   }
+  // With --push the branch is checked BEFORE any write (#632): a refused branch must leave the Product as it
+  // was, or the walk-back sits uncommitted there and a re-run on the default branch refuses, the step
+  // already reading as reopened.
+  const target = push ? branchForPush(root, { allowBranch, cmd: 'yad gate reopen' }) : null;
+  if (push && !target) return answer();
+  const { git, branch, defaultBranch } = target ?? {};
 
   writeState(ledger.files.state, r.state);
   writeJSON(ledger.files.approvals, canonicalApprovals(r.approvals));
@@ -1883,11 +1900,6 @@ export async function gateReopen(root, { epic, step, reason, push = false, allow
     hand(`commit ${written.join(', ')} (or re-run with --push)`);
     return answer({ written });
   }
-  preflightGuardReadiness(root);
-  const git = productGit(root);
-  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).productConfig);
-  const branch = branchToCommitOn(root, git, defaultBranch);
-  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate reopen', root })) return answer({ written });
   // Only the files this run wrote, and only those git sees (a legacy mirror never committed is left out).
   // Every pathspec is literal (#245): a lowered story named `*.md` stages and commits only itself.
   const lit = (...args) => git('--literal-pathspecs', ...args);
