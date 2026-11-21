@@ -21,13 +21,15 @@ the guard and could delete through a linked folder into files outside the Produc
   `linkedMoveFolder` is not deleted through.
 - R3. The delete guard's matcher also counts an `rmTree(` call that has no `within` after it on the same line.
   No file needs an allowlist entry for it today. The matcher self-test covers counted and uncounted shapes.
+- R4. A delete refused in `applyProductMove`'s undo (a folder made a link after `linkedMoveFolder`) does not stop
+  the rest of the undo, and the error still starts `nothing was moved — <why>` and names the refused delete. A
+  refused delete of the old folder after a finished copy says the new folder was written and the old one left.
+  `rmTree` given an options object checks the Product's folder even when `within` is undefined.
 
 ## Out of scope
 
 - `cpMerge` (`cli/lib.mjs`), which copies and takes no `within`.
 - The three `readJSON` reads in `cli/migrate.mjs` that take no `within` (noted in the S02 review).
-- A cleanup in `applyProductMove`'s failure path that is refused (a folder made a link mid-run) now throws that
-  refusal instead of the original error; the move stops either way and deletes nothing through the link.
 
 ## Clarifications
 
@@ -57,5 +59,11 @@ comment and the self-test lines change. The comment in `cli/test-migrate.mjs` ab
 
 ## T02 — docs: say rmTree takes within in the #248 migrate test comment
 **Files:**
+- cli/test-migrate.mjs
+
+## T03 — Keep the move's undo and its error when a delete is refused; check the Product with any rmTree options
+**Files:**
+- cli/lib.mjs
+- cli/migrate.mjs
 - cli/test-migrate.mjs
 <!-- /yad:tasks -->
