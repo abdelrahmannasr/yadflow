@@ -30,7 +30,8 @@ the guide never shows the `implement` or `checks` recommendations at all.
 - R3. The `implement` row `mattpocock-skills:tdd` stays as it is.
 - R4. Each row of `step.skills.recommended` in `yad guide --json` gains `installed`: `true` or `false` from
   `installedSkillNames` (`cli/skill.mjs`) and the same `names.has(r.skill)` test `recommendRows` uses, or
-  `null` when detection could not look, as `yad skill recommend` does. Detection runs only when the step has at least one
+  `null` when detection could not look, as `yad skill recommend` does. Each row also carries `bound`:
+  `true` when the step's binding chain on the epic's route already runs the pick (code review). Detection runs only when the step has at least one
   recommendation. `buildGuide` takes a `home` option (default `os.homedir()`) so tests are hermetic.
 - R5. In Build, `step.skills.recommended` lists the recommendations for each step an open lane is on
   (not shipped, not skipped), once per step, in lane order; each row also carries `step`. Every other step's rows carry `step` too (the step they were read for).
