@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readJSON } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
-import { epicIds, epicRoot, loadLedger, readFrontmatter, stripFrontmatterComment, FOUNDATION_EPIC } from './epic-state.mjs';
+import { epicIds, epicRoot, loadLedger, readFrontmatter, retiredRecord, stripFrontmatterComment, FOUNDATION_EPIC } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
 import { readRegistry, judgeRepo, runnable } from './workspace.mjs';
 import { readOwners } from './owners.mjs';
@@ -132,7 +132,8 @@ export function makeResolver(members = []) {
 //   product { name, branch, sha, behind, fetchedAt }   staleDays   groups [{id,label,pattern?}]   members [...]
 //   epics [{ id, title, type, currentStep, createdAt, owner, parent, repos, steps:[{id,status}], onMain,
 //            sourceBranch?, stepOwners:{step:name}, approvals:[{step, approver}] }]
-//   stories [{ id, epic, title, status, owner, repos, build:{repo:{currentStep, steps:[{id,status}]}} }]
+//   stories [{ id, epic, title, status, owner, repos, build:{repo:{currentStep, steps:[{id,status}]}}, retired? }]
+//            (`retired: true` only for a story its build-state retires, #621)
 //   tasks [{ story, epic, task, repo, branch, pr, mergeCommit, shippedAt, reviewers:[], builder?,
 //            reach: { found, prod, integ, via? } | null }]
 //   repos [{ name, available, integrationBranch, productionBranch, productionGuessed, waitingCommits,
@@ -214,7 +215,10 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
     const out = { id: s.id, epic: s.epic, short: (/-(S\d+)$/.exec(s.id) || [])[1] || s.id, title: s.title || '', status: s.status || 'unknown',
       repos: asList(s.repos), build: s.build || {}, taskCount: mine.length, tasksLive: mine.filter((t) => t.state === 'live').length, roles: { owner: resolve(s.owner) } };
     role(out.roles.owner, 'owner');
-    if (s.status === 'shipped') {
+    // A RETIRED story (#621) will not be built: it keeps the `planned` colour and says why it is not moving.
+    if (s.retired) {
+      out.retired = true; out.state = 'planned'; out.stateLabel = 'Retired — will not be built';
+    } else if (s.status === 'shipped') {
       out.state = mine.length && mine.every((t) => t.state === 'live') ? 'live' : 'merged';
       out.verified = mine.length > 0 && mine.every((t) => t.verified);
       out.stateLabel = out.state === 'live' ? 'Shipped and in Production' : 'Shipped, waiting for release';
@@ -228,8 +232,11 @@ export function mapModel(inputs, { anonymous = false, previous = null, now = Dat
 
   // Epics.
   for (const e of epics) {
-    const mine = stories.filter((s) => s.epic === e.id);
+    const all = stories.filter((s) => s.epic === e.id);
+    // A retired story is owed nothing (#621): the epic's counts and its finished states read the rest.
+    const mine = all.filter((s) => !s.retired);
     e.storyCount = mine.length;
+    if (all.length > mine.length) e.storiesRetired = all.length - mine.length;
     e.storiesShipped = mine.filter((s) => s.status === 'shipped').length;
     e.taskCount = tasks.filter((t) => t.epic === e.id).length;
     const owner = resolve(e.owner);
@@ -467,6 +474,7 @@ function epicFromTree(root, id) {
   for (const b of Object.values(led.buildStates || {})) {
     const s = stories.find((x) => x.id === b?.story);
     if (!s) continue;
+    if (retiredRecord(b)) s.retired = true;
     for (const [repo, v] of Object.entries(b.repos || {})) s.build[repo] = { currentStep: v?.currentStep || null, steps: (v?.steps || []).map((x) => ({ id: x.id, status: x.status })) };
   }
   const ships = readShips(dir);
@@ -487,7 +495,7 @@ function epicFromTree(root, id) {
 function epicFromRef(runner, root, ref, id) {
   const files = listTreeAt(root, ref, [`epics/${id}`], { runner });
   if (!files.some((f) => f.endsWith('/.sdlc/state.json'))) return null;
-  const want = files.filter((f) => /\/\.sdlc\/state\.json$|\/epic\.md$|\/stories\/[^/]+\.md$|\/\.sdlc\/build-log\.json$|\/\.sdlc\/build-log\/[^/]+\.json$/.test(f));
+  const want = files.filter((f) => /\/\.sdlc\/state\.json$|\/epic\.md$|\/stories\/[^/]+\.md$|\/\.sdlc\/build-log\.json$|\/\.sdlc\/build-log\/[^/]+\.json$|\/\.sdlc\/build-state\/[^/]+\.json$/.test(f));
   const got = readFilesAt(root, ref, want, { runner });
   const base = `epics/${id}/`;
   const state = json(got.get(`${base}.sdlc/state.json`)) || {};
@@ -502,6 +510,12 @@ function epicFromRef(runner, root, ref, id) {
       stories.push({ id: s.id || path.posix.basename(f, '.md'), epic: id, title: storyTitle(text), status: s.status || 'unknown', owner: s.owner || null, repos: asList(s.repos), build: {} });
     } else if (/\/build-log\.json$/.test(f)) { for (const t of json(text)?.ships || []) addShip(t); }
     else if (/\/build-log\//.test(f)) addShip(json(text));
+  }
+  // A story retired on that branch (#621), read from its build-state the way the working tree is read.
+  for (const f of want.filter((x) => /\/\.sdlc\/build-state\//.test(x))) {
+    const b = json(got.get(f));
+    const s = stories.find((x) => x.id === b?.story);
+    if (s && retiredRecord(b)) s.retired = true;
   }
   return {
     epic: { id, title: fm.title || heading(epicMd) || null, type: state.type || fm.type || null, currentStep: state.currentStep || null, createdAt: state.createdAt || null,

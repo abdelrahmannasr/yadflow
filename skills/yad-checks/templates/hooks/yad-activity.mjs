@@ -60,7 +60,7 @@ export const YAD_COMMANDS = Object.freeze([
   'repo refresh', 'repo sync', 'report', 'reports list', 'reports open', 'reports prune', 'review cards', 'review chat', 'review context', 'review nudge',
   'review reconcile', 'review trailer', 'review walkthrough', 'risk-map check', 'risk-map draft', 'roster',
   'run checks', 'scan file', 'setup', 'ship', 'signing check', 'skill bind', 'skill list', 'skill recommend',
-  'skill unbind', 'skip', 'standup', 'status', 'story frames', 'sync-status', 'thread', 'tidy up',
+  'skill unbind', 'skip', 'standup', 'status', 'story frames', 'story retire', 'sync-status', 'thread', 'tidy up',
   'toolbox add', 'toolbox check', 'toolbox connect', 'toolbox list', 'toolbox remove', 'unassign', 'unblock',
   'undefer', 'unkill', 'unskip', 'update', 'usage', 'worktree add', 'worktree list', 'worktree remove',
 ]);

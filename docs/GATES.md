@@ -524,7 +524,8 @@ change epic that threads to it.
 | `<link.md> names no product-repo, and no .sdlc/product-link.json on <base> names the Product. …` | Set `product-repo` in `link.md` (the `yad-spec` skill writes it), or run `yad check --fix --push` from the Product to write the record into this repo. |
 | [Where the Product is read from](#where-the-product-is-read-from) messages | See that table. |
 | `-> epic <epic> does not exist in the product repo (orphan story link). …` | Fix the story id, or merge the epic's Shape review PRs into the Product first. |
-| `targets SEALED epic <epic> (all stories shipped).` | Open a change epic with the `yad-change` skill (type `change`, `defect` or `hotfix`, `parent: <epic>`), and implement against its stories. |
+| `names <story>, which is retired (it will not be built, so it owes no Build work).` | `yad story retire` set the story aside. Link the change to a story that is still owed, or add the work as a new story (the stories review, or a change epic with the `yad-change` skill). |
+| `targets SEALED epic <epic> (all stories shipped or retired).` | Open a change epic with the `yad-change` skill (type `change`, `defect` or `hotfix`, `parent: <epic>`), and implement against its stories. A retired story does not keep an epic open. |
 
 ## reconcile-debt
 

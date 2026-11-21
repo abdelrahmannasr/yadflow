@@ -28,7 +28,7 @@ import { loadProduct } from './gate.mjs';
 import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, blobChangeIsYads, blobAt, recheckBeforePush } from './productcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
-import { readFrontmatter, declaredRepos } from './epic-state.mjs';
+import { readFrontmatter, declaredRepos, retiredRecord } from './epic-state.mjs';
 
 // The machine-written Build ledgers, relative to an epic's dir. The two append-only logs are
 // shard-then-fold (cli/ledger.mjs): each is a folded file PLUS a shard dir of loose per-entry files —
@@ -214,10 +214,18 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   // Read STRICTLY: a corrupt file would otherwise read as "nothing skipped" and let a permanent ship be
   // recorded over a skip — the same refusal to guess this function makes for a corrupt build-log (E39 review).
   let laneRepos;
-  try { laneRepos = readJSONStrict(path.join(epicDir, '.sdlc', 'build-state', `${story}.json`), null)?.repos; }
+  let laneState;
+  try { laneState = readJSONStrict(path.join(epicDir, '.sdlc', 'build-state', `${story}.json`), null); laneRepos = laneState?.repos; }
   catch (e) {
     fail(`could not read ${story}'s build-state — ${e.message}`);
     hand('a ship is permanent audit evidence, so it is not recorded while the lane state cannot be read — fix the file, then re-run');
+    return { ok: false };
+  }
+  // A RETIRED story (#621) was not built, and its lanes cannot be put back with `yad unskip`, so it is said
+  // before the lane's own refusal, whose fix is that command.
+  if (retiredRecord(laneState)) {
+    fail(`${story} is retired — a retired story was not built, so it has no ship to record`);
+    hand('a retired story owes no Build work; there is no command that puts a retired story back');
     return { ok: false };
   }
   const skipped = new Set(laneRepos && typeof laneRepos === 'object'

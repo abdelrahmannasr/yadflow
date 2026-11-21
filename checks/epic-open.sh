@@ -478,7 +478,18 @@ resolve_product() {
   esac
 }
 
-# Is the epic SEALED? true iff it has >=1 story and EVERY stories/*.md frontmatter status is `shipped`.
+# Is the epic SEALED? true iff EVERY stories/*.md frontmatter status is `shipped`, apart from a RETIRED
+# story (#621: its .sdlc/build-state/<story>.json has a top-level `"retired": { … }` record, which
+# `yad story retire` writes), and at least one story really shipped. The record is found by its key and
+# an object after it, at the top level — never the bare word, which a lane's reason (`retired: <why>`)
+# holds, nor a repo named `retired` one level down. No jq here, so this is a line match on the shape yad
+# writes (two-space indent, one key per line); a file written another way reads as not retired, the side
+# where the story is still owed.
+story_retired() {
+  bs="$1/.sdlc/build-state/$2.json"
+  [ -f "$bs" ] || return 1
+  grep -Eq '^  "retired"[[:space:]]*:[[:space:]]*[{]' "$bs"
+}
 epic_sealed() {
   ep_dir="$1"
   sdir="${ep_dir}/stories"
@@ -486,6 +497,7 @@ epic_sealed() {
   found=0
   for f in "$sdir"/*.md; do
     [ -e "$f" ] || continue
+    story_retired "$ep_dir" "$(basename "$f" .md)" && continue
     found=1
     st="$(fm_val status "$f")"
     [ "$st" = "shipped" ] || return 1
@@ -623,8 +635,17 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
+  # A RETIRED story (#621, `yad story retire`) will not be built, so a change that names it is refused —
+  # it owes no Build work. Checked before the seal: the story is what the trailer names.
+  if story_retired "$ep_dir" "$story"; then
+    echo "FAIL [epic-open]: ${short} ${task} names ${story}, which is retired (it will not be built, so it owes no Build work)."
+    echo "  -> Link the change to a story that is still owed (its Task trailer), or, if ${story} must be built after all,"
+    echo "     add the work as a new story through the stories review or a change-epic (yad-change)."
+    rc=1
+    continue
+  fi
   if epic_sealed "$ep_dir"; then
-    echo "FAIL [epic-open]: ${short} ${task} targets SEALED epic ${epic} (all stories shipped)."
+    echo "FAIL [epic-open]: ${short} ${task} targets SEALED epic ${epic} (all stories shipped or retired)."
     echo "  -> New behaviour cannot mutate a shipped epic. Open a threaded change-epic with yad-change"
     echo "     (type change|defect|hotfix, parent: ${epic}) and implement against ITS stories instead."
     rc=1

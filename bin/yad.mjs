@@ -401,6 +401,13 @@ ${c.bold('Build helpers')}
   yad story frames <story> [--json]    Show the design frames a story records (its design-frames
                                        list), with each frame's name, platform and link from the
                                        epic's design-links.json; warns on an ID it cannot find
+  yad story retire <story> --reason <text> [--json]
+                                       Retire an approved story that will not be built (#621): records
+                                       it in build-state/<story>.json and skips each lane it declares;
+                                       commit it with yad checkpoint --push. The epic seals once the
+                                       other stories ship. Refused before the stories review passes,
+                                       once the story is in-build or shipped, has a ship or started
+                                       work, and for the last story left when none has shipped
   yad build start <story> --repo <r>   ${c.dim('(on the Product)')} Begin a story's Build lane in one repo
   yad build step <story> --repo <r> <step> in_progress|in_review|done|blocked [--reason <text>] [--run <uid>] [--via auto|human] [--task <T>]
                                        Move the lane's current step; done records how it closed.
@@ -750,7 +757,7 @@ const ACTIONS = {
   repo: { known: ['list', 'refresh', 'pack', 'sync', 'clone', 'preview'], default: 'list' },
   'risk-map': { known: ['check', 'draft'], default: 'check' },
   codeowners: { known: ['check'], default: 'check' },
-  story: { known: ['frames'] },
+  story: { known: ['frames', 'retire'] },
   docs: { known: ['list', 'build', 'deploy', 'sync', 'brand'], default: 'list' },
   reconcile: { known: ['check', 'refresh', 'wire'] },
   hook: { known: ['ledger-guard', 'agent-guard'] },
@@ -798,6 +805,8 @@ function writesProduct(cmd, o) {
   if (cmd === 'local-setup') return action === 'add' || action === 'remove';
   // `brand init` writes the Product's .sdlc/brand.json: only into a Product found (review 1).
   if (cmd === 'brand') return action === 'init';
+  // `story retire` writes the story's build-state (#621).
+  if (cmd === 'story') return action === 'retire';
   if (cmd === 'dial') return o.to !== undefined;
   if (cmd === 'member') return o._[1] === 'add' || o._[1] === 'remove';
   if (cmd === 'worktree') return o._[1] === 'add' || o._[1] === 'remove';
@@ -1623,9 +1632,12 @@ async function main() {
       break;
     }
     case 'story': {
-      if (o._.length > 3) { refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, 'use: yad story frames <story-id> — one story at a time'); break; }
       const [, action, story] = o._;
-      result = await commands.runStory(o.dir, { action, story, json: o.json });
+      if (o._.length > 3) {
+        refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, action === 'retire' ? 'use: yad story retire <story-id> --reason "<why>" — one story at a time; quote a reason of more than one word' : 'use: yad story frames <story-id> — one story at a time');
+        break;
+      }
+      result = await commands.runStory(o.dir, { action, story, json: o.json, reason: o.reason, today });
       break;
     }
     case 'roster':

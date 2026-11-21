@@ -27,6 +27,7 @@ import { epicRoot, parseFrontmatter } from './epic-state.mjs';
 import { STORY_RE, storyEpic } from './build.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { reachFor } from './toolbox.mjs';
+import { runStoryRetire } from './story-retire.mjs';
 
 export const FRAMES_KEY = 'design-frames';
 export const DESIGN_LINKS_FILE = path.join('.sdlc', 'design-links.json');
@@ -267,10 +268,12 @@ export function allStoryFrames(root, epicIds) {
 
 // `yad story frames <story> [--json]`. Read only: it prints the story's frames and every finding as a
 // warning, and exits 1 only for a refusal (an unknown action, a word that is not a story id, a story
-// with no file).
-export async function runStory(root, { action, story, json = false } = {}) {
+// with no file). `yad story retire` (#621) is its own module; it is routed from here, so both actions
+// of `yad story` have one entry point.
+export async function runStory(root, { action, story, json = false, reason, today } = {}) {
+  if (action === 'retire') return runStoryRetire(root, { story, reason, today });
   if (action !== 'frames') {
-    refuse(action ? `unknown action: ${forTerminal(action)}` : 'yad story needs an action', 'use: yad story frames <story-id> [--json]', { json });
+    refuse(action ? `unknown action: ${forTerminal(action)}` : 'yad story needs an action', 'use: yad story frames <story-id> [--json], or yad story retire <story-id> --reason "<why>"', { json });
     return { ok: false };
   }
   let r;

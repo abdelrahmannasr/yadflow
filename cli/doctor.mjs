@@ -11,7 +11,7 @@ import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, mirrorDrift, PROJECT_FILES, MOD
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor, agentFilesState, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand, gitHookState, localSetupNoticeStates, localSetupNoticeAdvice, noticeCopyState, legacyModuleActions, legacyProductActions, renamedNameHits, PRODUCT_CHECK_WORKFLOWS, productProfileEffect, workflowsPassingProduct, productGateBlockers, oldProfileAdvice, gateProfileFix, linkedHookSaid } from './plan.mjs';
 import { hasSiblingRepo, workspaceFileState, WORKSPACE_FILE } from './find-product.mjs';
 import { planMigration } from './migrate.mjs';
-import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, stripFrontmatterComment, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
+import { ACTION_DIALS, ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, retiredRecord, storyRetired, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, stripFrontmatterComment, resolveThread, stateInvariants, contractSurfaceHash, resolveContractLock, describeLockBreak, doneStepUnapproved, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, stepsReadingBinding, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES, productDriftPairs } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -2601,6 +2601,14 @@ export function phaseChecks(checks, root) {
 //   …:step-set-aside                           warn — one Build step `skipped` or `deferred` inside a lane.
 //                                              `buildNextForRepo` walks past a passed step, so this would
 //                                              read as done work nobody did.
+// A whole story may be RETIRED (#621, `yad story retire`), which skips each lane it declares. Two more:
+//   story:<epic>:<story>:retired-contradiction  fail — retired, yet a ship is recorded or work started in
+//                                              one of its lanes. Said once for the story, in place of the
+//                                              lane's own contradiction row, whose fix (`yad unskip`) a
+//                                              retired story refuses.
+//   story:<epic>:<story>:retired-no-record      warn — retired with no reason.
+//   stories:<epic>:all-retired                  warn — every story of the epic is retired, so nothing is
+//                                              left to ship and the epic can never seal.
 export function laneChecks(checks, root) {
   for (const e of epicIds(root)) {
     const epicDir = epicRoot(root, e);
@@ -2609,12 +2617,31 @@ export function laneChecks(checks, root) {
     let names;
     try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
     const stories = new Map(epicStories(epicDir).map((st) => [st.id, st]));
+    if (stories.size && [...stories.keys()].every((id) => storyRetired(epicDir, id))) {
+      check(checks, `stories:${e}:all-retired`, 'epics', 'warn', `${e}: every story is retired, so nothing is left to ship and the epic can never seal`,
+        'an epic where no story will be built is a question for its stories review: add the stories it still needs, or stop the epic there');
+    }
     let ships = [];
     try { ships = readShips(epicDir); } catch { /* an unreadable build-log is reported by the epic checks */ }
     for (const n of names) {
       const bs = readJSON(path.join(bsDir, n), null);
       if (!isPlainObject(bs) || !isPlainObject(bs.repos)) continue;
       const storyId = typeof bs.story === 'string' && bs.story ? bs.story : n.replace(/\.json$/, '');
+      const retired = retiredRecord(bs);
+      if (retired) {
+        const sid = (kind) => `story:${e}:${storyId}:${kind}`;
+        const shippedIn = [...new Set(ships.filter((sh) => sh.story === storyId).map((sh) => sh.repo))].sort();
+        const startedIn = Object.keys(bs.repos).sort().filter((r) => laneStarted(bs.repos[r]));
+        if (shippedIn.length || startedIn.length) {
+          check(checks, sid('retired-contradiction'), 'epics', 'fail',
+            `${e}: ${storyId} is retired, but ${shippedIn.length ? `a ship is recorded for it in ${shippedIn.join(', ')}` : `work has started in ${startedIn.join(', ')}`}`,
+            `decide which is true: if ${storyId} is being built, take the \`retired\` record and its skipped lanes out of build-state/${n}; if it really will not be built, remove the work and the ship records for it`);
+        }
+        if (!isStepRecord(retired)) {
+          check(checks, sid('retired-no-record'), 'epics', 'warn', `${e}: ${storyId} is retired with no recorded reason`,
+            `a retirement is an audit trail only with its reason — add \`"reason"\` to the \`retired\` record in build-state/${n}`);
+        }
+      }
       for (const [repo, lane] of Object.entries(bs.repos)) {
         if (!isPlainObject(lane)) continue;
         const where = `${e}: ${storyId} / ${repo}`;
@@ -2623,7 +2650,7 @@ export function laneChecks(checks, root) {
         if (lane.status === 'skipped') {
           const shipped = ships.some((sh) => sh.story === storyId && sh.repo === repo);
           const started = laneStarted(lane);   // an unknown status word counts as started (E39 review)
-          if (shipped || started) {
+          if ((shipped || started) && !retired) {
             check(checks, id('contradiction'), 'epics', 'fail',
               `${where} is skipped, but ${shipped ? 'a ship is recorded for it' : 'work has started in it'}`,
               `decide which is true: if the lane is owed, put it back with \`yad unskip ${e} ${storyId} --repo ${repo}\`; if it really needs no change, remove the work from build-state/${n}`);

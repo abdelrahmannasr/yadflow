@@ -15,16 +15,20 @@ import { platformLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, recheckBeforePush } from './productcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
-import { epicRoot, isValidEpicId, readFrontmatter } from './epic-state.mjs';
+import { epicRoot, isValidEpicId, readFrontmatter, storyRetired } from './epic-state.mjs';
 
 // Story ids in an epic whose frontmatter `status` is `shipped` — the terminal, safe-to-fold signal
-// (`yad-engineer-review` sets it once every task in the story has a ship record).
+// (`yad-engineer-review` sets it once every task in the story has a ship record). A RETIRED story (#621)
+// is never folded, even one whose status says shipped: the two contradict each other (`yad doctor`
+// reports it), and a fold is a rewrite that cannot be taken back.
 export function shippedStories(root, epic) {
-  const dir = path.join(epicRoot(root, epic), 'stories');
+  const epicDir = epicRoot(root, epic);
+  const dir = path.join(epicDir, 'stories');
   const set = new Set();
   if (!exists(dir)) return set;
   for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.md'))) {
-    if (readFrontmatter(path.join(dir, name)).status === 'shipped') set.add(name.replace(/\.md$/, ''));
+    const id = name.replace(/\.md$/, '');
+    if (readFrontmatter(path.join(dir, name)).status === 'shipped' && !storyRetired(epicDir, id)) set.add(id);
   }
   return set;
 }

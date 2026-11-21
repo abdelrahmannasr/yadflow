@@ -295,6 +295,33 @@ test('sealedEpic + openDebtOnThread + threadSummary reflect ship + debt state', 
   assert.ok(s.nodes.find((n) => n.id === 'EP-gen').sealed);
 });
 
+test('sealedEpic: a retired story is owed nothing, but at least one story must have shipped (#621)', () => {
+  const T = productConfig();
+  const retire = (id, story, bs = { story, retired: { reason: 'moved', by: 'sam', date: '2026-11-21' }, repos: {} }) => {
+    const f = path.join(T, 'epics', id, '.sdlc/build-state', `${story}.json`);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, typeof bs === 'string' ? bs : JSON.stringify(bs, null, 2));
+  };
+  writeEpic(T, 'EP-ret', { kind: 'feature', thread: 'EP-ret' }, { stories: ['shipped', 'approved'] });
+  assert.equal(sealedEpic(T, 'EP-ret'), false, 'S02 is still owed');
+  retire('EP-ret', 'EP-ret-S02');
+  assert.equal(sealedEpic(T, 'EP-ret'), true, 'S02 retired, S01 shipped: sealed');
+  // A record with no reason still retires the story (yad doctor warns about it).
+  retire('EP-ret', 'EP-ret-S02', { story: 'EP-ret-S02', retired: {}, repos: {} });
+  assert.equal(sealedEpic(T, 'EP-ret'), true);
+  // Only the top-level key counts: a lane reason or a repo named "retired" does not.
+  retire('EP-ret', 'EP-ret-S02', { story: 'EP-ret-S02', repos: { retired: { status: 'skipped', record: { reason: 'retired' } } } });
+  assert.equal(sealedEpic(T, 'EP-ret'), false);
+  retire('EP-ret', 'EP-ret-S02', { story: 'EP-ret-S02', retired: 'yes', repos: {} });
+  assert.equal(sealedEpic(T, 'EP-ret'), false, 'a record that is not an object is not a retirement');
+  retire('EP-ret', 'EP-ret-S02', '{ not json');
+  assert.equal(sealedEpic(T, 'EP-ret'), false, 'a file that does not parse is not a retirement');
+  // Every story retired and none shipped: nothing was built, so not sealed.
+  writeEpic(T, 'EP-none', { kind: 'feature', thread: 'EP-none' }, { stories: ['approved'] });
+  retire('EP-none', 'EP-none-S01');
+  assert.equal(sealedEpic(T, 'EP-none'), false);
+});
+
 test('E125 (c): yad thread prints an open debt reason and an epic theme from the Product cleaned', async () => {
   const T = productConfig();
   try {

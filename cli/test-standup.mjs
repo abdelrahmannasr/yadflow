@@ -860,6 +860,11 @@ test('#349 review 1: finished is the engine\'s shipped rule, a bad lane is skipp
     assert.equal(St.buildStatus(T, { cwd: api, fetch: false }).here.why, 'the lane in api has no steps yet');
     put(path.join(dir, '.sdlc/build-state/EP-pay-S02.json'), { story: 'EP-pay-S02', repos: { api: { status: 'skipped', record: { reason: 'no API change' } } } });
     assert.equal(St.briefLines(St.buildStatus(T, { cwd: api, fetch: false }))[0], 'here: EP-pay-S02 T01 in api — the lane is skipped in api — no API change');
+    // A retired story (#621) is said as retired, and with S01 shipped the epic is finished.
+    put(path.join(dir, '.sdlc/build-state/EP-pay-S02.json'), { story: 'EP-pay-S02', retired: { reason: 'moved to EP-next', by: 'sam', date: '2026-11-21' }, repos: { api: { status: 'skipped', record: { reason: 'retired: moved to EP-next' } } } });
+    const retired = St.buildStatus(T, { cwd: api, fetch: false });
+    assert.equal(St.briefLines(retired)[0], 'here: EP-pay-S02 T01 in api — EP-pay-S02 is retired — moved to EP-next');
+    assert.deepEqual([retired.epics.length, retired.finished], [0, 1], 'S01 shipped and S02 retired: the epic is finished');
     // A value from a shared file with a control character reaches the terminal as plain text.
     put(path.join(dir, '.sdlc/build-state/EP-pay-S02.json'), { story: 'EP-pay-S02', repos: { api: { currentStep: 'spec', steps: [{ id: 'spec', status: 'blocked', record: { reason: 'wait\u001b]0;owned\u0007\u009b31m' } }] } } });
     const lines = St.briefLines(St.buildStatus(T, { cwd: api, fetch: false }));

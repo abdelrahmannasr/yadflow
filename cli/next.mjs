@@ -119,7 +119,14 @@ function printOwner(owners, step) {
 const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
 
 // Every per-repo lane across the build, flattened with its story id attached.
-const buildLanes = (builds = []) => builds.flatMap((b) => b.repos.map((r) => ({ ...r, story: b.story })));
+// A retired story's record rides on each of its lanes (#621), so a lane line can say "retired" rather
+// than "skipped"; added only when there is one.
+const buildLanes = (builds = []) => builds.flatMap((b) => b.repos.map((r) => ({ ...r, story: b.story, ...(b.retired ? { retired: b.retired } : {}) })));
+// " (N retired)", said beside a Build summary only when a story is retired (#621).
+const retiredNote = (builds = []) => {
+  const n = builds.filter((b) => b.retired).length;
+  return n ? ` (${n} ${n === 1 ? 'story' : 'stories'} retired)` : '';
+};
 
 // The dial note for a build lane: an `advance: auto` lane is driven by yad-run; everything else stops
 // for a human (the locked engineer-review always does).
@@ -176,8 +183,10 @@ function printBuildLanes(builds, automation = null) {
   for (const lane of buildLanes(builds)) {
     const where = `${c.cyan(lane.story || '(story)')} / ${c.bold(lane.repo)}`;
     if (lane.shipped) { log(`    ${where} ${c.green('— shipped ✓')}`); continue; }
+    // A lane of a RETIRED story (#621): the story will not be built, and its own reason is the one to show.
+    if (lane.retired && lane.status === 'skipped') { log(`    ${where} ${c.dim(`— retired${typeof lane.retired.reason === 'string' && lane.retired.reason.trim() ? `: ${forTerminal(lane.retired.reason)}` : ''}`)}`); continue; }
     // A lane skipped whole (E39): nothing to drive, and the reason is the point of the record.
-    if (lane.status === 'skipped') { log(`    ${where} ${c.dim(`— skipped (N/A)${lane.record?.reason ? `: ${lane.record.reason}` : ''}`)}`); continue; }
+    if (lane.status === 'skipped') { log(`    ${where} ${c.dim(`— skipped (N/A)${lane.record?.reason ? `: ${forTerminal(String(lane.record.reason))}` : ''}`)}`); continue; }
     // No resolvable next skill (an empty/half-seeded build-state file): show it as not-started, no ▸.
     if (!lane.skill) { log(`    ${where} ${c.dim('— not started yet (no build steps recorded)')}`); continue; }
     log(`    ${where} ${c.dim('—')} ${c.bold(lane.step)}  (${dialNote(lane, automation)})`);
@@ -219,10 +228,11 @@ export function actionLine(a, { solo, bindings = null, verified = false } = {}) 
         if (open.length) {
           // Headline the first lane with a resolvable next skill; if none, the half is started but unspecced.
           const first = open.find((r) => r.skill);
-          if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
-          return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}`)}`;
+          const retired = retiredNote(a.builds);
+          if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet${retired}`);
+          return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}${retired}`)}`;
         }
-        if (all.some((r) => r.shipped)) return c.dim(all.some((r) => r.status === 'skipped') ? 'Build — every lane shipped or skipped' : 'Build — every lane shipped');
+        if (all.some((r) => r.shipped)) return c.dim(`${all.some((r) => r.status === 'skipped') ? 'Build — every lane shipped or skipped' : 'Build — every lane shipped'}${retiredNote(a.builds)}`);
         // Every recorded lane is SKIPPED and none shipped (E39 review): a skip written before Build began
         // creates the build-state file on its own. Build has not started, so fall through to the yad-run hint.
       }
