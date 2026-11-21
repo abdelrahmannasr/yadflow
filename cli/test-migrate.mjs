@@ -2007,7 +2007,7 @@ test('E125 b migrate --apply: a link put in the product level after the plan is 
   } finally { cleanup(T); }
 });
 
-// #248: the move deletes the old folder with `rmTree`, which checks no link. A linked `epics/` or a linked
+// #248: the move deletes the old folder with `rmTree` (given `within` since #252). A linked `epics/` or a linked
 // product-level folder refuses the move before anything is copied or deleted, whether or not a Product root
 // is set, and at apply too (a folder made a link after the plan); nothing where the link points changes.
 test('#248 migrate 7 -> 8: a linked epics/ or product-level folder refuses the move, and nothing where it points changes', { skip: LINK_SKIP }, async () => {
