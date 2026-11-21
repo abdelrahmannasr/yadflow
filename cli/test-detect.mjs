@@ -718,6 +718,42 @@ test('E87: every skill a tool names quotes its fallback word for word, and no ot
 // it is missing — written from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs, as the E87 section is.
 const { YAD_CLI_BEGIN, YAD_CLI_END, YAD_CLI_LINES, YAD_CLI_MENTIONS_ONLY, ownLines, skillRunsYad, syncSkillYadCli, withYadCliBlock, yadCliBlock, yadCliBlockOf } = await import('./skill-yad-cli.mjs');
 
+// #244: held in both directions over the real skills, as E87 is: a skill that runs `yad` has the block word for
+// word, right after its `# ` title; a skill that runs none has no block. `node scripts/skill-yad-cli.mjs`
+// rewrites them after a wording change.
+test('#244: every skill that runs yad starts with the yad-cli block word for word, and no other skill has it', () => {
+  const skills = fs.readdirSync(path.join(ROOT, 'skills')).filter((s) => fs.existsSync(path.join(ROOT, 'skills', s, 'SKILL.md')));
+  const block = yadCliBlock();
+  const without = [];
+  for (const s of skills) {
+    const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    if (!skillRunsYad(s, text)) {
+      without.push(s);
+      assert.equal(yadCliBlockOf(text), null, `skills/${s}/SKILL.md has the yad-cli block, but runs no yad command — run node scripts/skill-yad-cli.mjs`);
+      continue;
+    }
+    assert.equal(yadCliBlockOf(text), block, `skills/${s}/SKILL.md: the yad-cli block matches cli/skill-yad-cli.mjs — run node scripts/skill-yad-cli.mjs`);
+    assert.equal(lines.filter((l) => l === YAD_CLI_BEGIN).length, 1, `skills/${s}/SKILL.md: one block`);
+    // Right after the title, and below the frontmatter, so the description is never touched.
+    const title = lines.findIndex((l, i) => i > lines.indexOf('---', 1) && /^# \S/.test(l));
+    assert.ok(title > 0, `skills/${s}/SKILL.md has a # title below its frontmatter`);
+    assert.deepEqual(lines.slice(title + 1, title + 3), ['', YAD_CLI_BEGIN], `skills/${s}/SKILL.md: the block is right after the # title`);
+  }
+  // The skills that run no yad, each for a reason the rule or YAD_CLI_MENTIONS_ONLY gives.
+  assert.deepEqual(without.sort(), ['yad-connect-docs', 'yad-learn']);
+  for (const s of Object.keys(YAD_CLI_MENTIONS_ONLY)) {
+    const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
+    assert.ok(ownLines(text).some((l) => /`yad [a-z]/.test(l)), `${s} still names a yad command; drop it from YAD_CLI_MENTIONS_ONLY if not`);
+  }
+  // yad-guide still starts a workspace before `yad` is installed.
+  const guide = fs.readFileSync(path.join(ROOT, 'skills', 'yad-guide', 'SKILL.md'), 'utf8');
+  for (const cmd of ['npx -y yadflow@4 new', 'npx -y yadflow@4 join', 'npx -y yadflow@4 member add']) assert.ok(guide.includes(cmd), cmd);
+  // The rewriting script agrees: nothing to change.
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'skill-yad-cli.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 test('#244: the block checks for yad, says how to install it or use npx, and why the CLI is needed', () => {
   const b = yadCliBlock();
   assert.ok(b.startsWith(`${YAD_CLI_BEGIN}\n`) && b.endsWith(`\n${YAD_CLI_END}`));

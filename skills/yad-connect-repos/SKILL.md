@@ -5,6 +5,17 @@ description: 'Connects code repos to the Product so the front/"brain" phases are
 
 # SDLC — Connect Code Repos (make the brain code-aware)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `Get-Command yad`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when `command -v yad` prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** Give the front/"brain" phases (`yad-epic` → `-architecture` → `-ui` → `-stories`)
 full context about what **already exists** in the code, so the AI does not author a contract, UI, or
 stories that contradict or duplicate what is built. This skill **connects** code repos to the Product and caches an AI-readable picture of each. It is the product → code half of the 2-way link (the

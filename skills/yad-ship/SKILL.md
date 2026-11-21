@@ -5,6 +5,17 @@ description: 'Build helper of the gated SDLC — commit AND open the task PR/MR 
 
 # SDLC — Commit + Open PR/MR (Build helper)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `Get-Command yad`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when `command -v yad` prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** Do the two routine Build hand-actions for ONE atomic task in a single step — **commit by
 convention, then open the task PR/MR** — so an implemented diff becomes a reviewable PR/MR without two
 separate invocations. It is a thin wrapper over `yad-commit` and `yad-open-pr`; it holds no logic of

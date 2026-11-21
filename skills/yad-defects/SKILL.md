@@ -5,6 +5,17 @@ description: 'Phase 6 output enrichment (never a gate) — the quality-gap repor
 
 # SDLC — Quality-Gap Report (Phase 6, output enrichment)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `Get-Command yad`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when `command -v yad` prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** Turn the thread's defects into a **systemic quality signal**. Because every defect is a
 first-class `defect`-type change-epic carrying an `escape_stage` (the gate that *should* have caught it)
 and a `root_cause`, this report can show not just *what* broke but *where the SDLC let it through* — so

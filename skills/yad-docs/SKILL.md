@@ -5,6 +5,17 @@ description: 'Generates the per-epic interactive documentation site — a vendor
 
 # SDLC — Author the Interactive Docs Site (per-epic, output enrichment)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `Get-Command yad`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when `command -v yad` prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** Turn an epic's approved artifacts into a **living, interactive documentation site** — a
 vendored React 19 + Vite 7 + Tailwind v4 SPA with an animated **flow canvas** (system components on a
 canvas, animated messages, playback, a system-logs terminal, a right detail panel) and **role-based
