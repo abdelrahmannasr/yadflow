@@ -25,7 +25,8 @@ the guide never shows the `implement` or `checks` recommendations at all.
   `disable-model-invocation`; the LICENSE at that tag is MIT). Its `vetted` record is the pool's record
   with its own date: `{ ...MATT, on: '2026-11-21' }` — the shared 2026-10-03 date is not re-used.
 - R2. `CATALOGUE.version` moves from 1 to 2, and the test that holds each version to one digest records
-  the new digest. `CATALOGUE.checked` stays: it says when the whole list was read, and only one row was.
+  the new digest. `CATALOGUE.checked` moves to 2026-11-21: the E52 test holds that no record is newer
+  than the day the list was last checked.
 - R3. The `implement` row `mattpocock-skills:tdd` stays as it is.
 - R4. Each row of `step.skills.recommended` in `yad guide --json` gains `installed`: `true` or `false` from
   `installedSkillNames` (`cli/skill.mjs`) and the same `names.has(r.skill)` test `recommendRows` uses, or
