@@ -186,7 +186,7 @@ function printBuildLanes(builds, automation = null) {
     // A lane of a RETIRED story (#621): the story will not be built, and its own reason is the one to show.
     if (lane.retired && lane.status === 'skipped') { log(`    ${where} ${c.dim(`— retired${typeof lane.retired.reason === 'string' && lane.retired.reason.trim() ? `: ${forTerminal(lane.retired.reason)}` : ''}`)}`); continue; }
     // A lane skipped whole (E39): nothing to drive, and the reason is the point of the record.
-    if (lane.status === 'skipped') { log(`    ${where} ${c.dim(`— skipped (N/A)${lane.record?.reason ? `: ${lane.record.reason}` : ''}`)}`); continue; }
+    if (lane.status === 'skipped') { log(`    ${where} ${c.dim(`— skipped (N/A)${lane.record?.reason ? `: ${forTerminal(String(lane.record.reason))}` : ''}`)}`); continue; }
     // No resolvable next skill (an empty/half-seeded build-state file): show it as not-started, no ▸.
     if (!lane.skill) { log(`    ${where} ${c.dim('— not started yet (no build steps recorded)')}`); continue; }
     log(`    ${where} ${c.dim('—')} ${c.bold(lane.step)}  (${dialNote(lane, automation)})`);
