@@ -2007,7 +2007,7 @@ test('E125 b migrate --apply: a link put in the product level after the plan is 
   } finally { cleanup(T); }
 });
 
-// #248: the move deletes the old folder with `rmTree`, which checks no link. A linked `epics/` or a linked
+// #248: the move deletes the old folder with `rmTree` (given `within` since #252). A linked `epics/` or a linked
 // product-level folder refuses the move before anything is copied or deleted, whether or not a Product root
 // is set, and at apply too (a folder made a link after the plan); nothing where the link points changes.
 test('#248 migrate 7 -> 8: a linked epics/ or product-level folder refuses the move, and nothing where it points changes', { skip: LINK_SKIP }, async () => {
@@ -2046,6 +2046,31 @@ test('#248 migrate 7 -> 8: a linked epics/ or product-level folder refuses the m
       assert.equal(fs.existsSync(path.join(T, 'foundation')), false, 'nothing was copied into foundation/');
     } finally { process.exitCode = exit ?? 0; cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
   }
+});
+
+// #252: a folder that becomes a link after the move's first check (here, while the copy runs) is not deleted
+// through by the undo: the refused delete is named, the rest of the undo still runs, and the error still says
+// why the move failed.
+test('#252 migrate 7 -> 8: an epics/ made a link during a failed move is not deleted through by the undo', { skip: LINK_SKIP }, async () => {
+  const { planProductMove, applyProductMove } = await import('./migrate.mjs');
+  const { T } = await legacyProductLevel();
+  const outside = `${T}-outside`;
+  try {
+    const move = planProductMove(T);
+    assert.equal(move.action, 'move');
+    let before;
+    const copy = (src, dest, created) => {
+      cpMerge(src, dest, created);
+      if (!dest.endsWith('foundation')) return;
+      fs.renameSync(path.join(T, 'epics'), outside);
+      fs.symlinkSync(outside, path.join(T, 'epics'));
+      before = snapshotOf(outside);
+      throw new Error('boom');
+    };
+    assert.throws(() => applyProductMove(T, move, { copy }), (e) => /^nothing was moved — boom \(and the undo was refused: epics is a link, so yad did not delete epics\/EP-discovery\.yad-orig /.test(e.message));
+    assert.deepEqual(snapshotOf(outside), before, 'nothing deleted where the link points (the backup stays there)');
+    assert.equal(fs.existsSync(path.join(T, 'foundation')), false, 'the undo still removed foundation/');
+  } finally { cleanup(T); fs.rmSync(outside, { recursive: true, force: true }); }
 });
 
 // #251: every per-file read and write of `yad migrate --apply` is checked from the Product's own folder

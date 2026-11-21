@@ -461,10 +461,12 @@ export function planProductMove(root, { verified = false, ci = false, migrations
 }
 
 // A move copies the product level out of `epics/<id>/` into `foundation/`, beside a backup in `epics/`, and
-// then deletes the original with `rmTree`, which checks no link. Through a linked folder on the way (`epics/`,
+// then deletes the original with `rmTree`. Through a linked folder on the way (`epics/`,
 // the product level's own folder, `foundation/`, their `.sdlc/`) the copy would read and write, and the delete
 // remove, files outside the Product (#248). So such a move is refused, with the check every write makes
 // (`refuseLinkedWrite`), from the Product's folder whether or not a command has set it. The reason, or null.
+// Each `rmTree` here passes `within: root` too (#252), so a folder that became a link after this check is not
+// deleted through.
 function linkedMoveFolder(root, fromRel) {
   for (const dir of [fromRel, FOUNDATION_DIR]) {
     try { refuseLinkedWrite(path.join(root, dir, '.sdlc', 'state.json'), root); } catch (e) {
@@ -534,20 +536,28 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
       writeJSON(file, stamped(obj, version), { within: root });
     }
   } catch (e) {
-    // rmTree: a folder this copy made may carry a read-only mode copied from the source.
+    // rmTree: a folder this copy made may carry a read-only mode copied from the source. A delete refused under
+    // a folder that became a link since `linkedMoveFolder` (#252) does not stop the rest of the cleanup, and the
+    // error still says why the move failed, with what was left behind.
+    const left = [];
+    const clear = (p) => { try { rmTree(p, { within: root }); } catch (r) { if (r?.code !== 'YAD-STATE-001') throw r; left.push(r.message); } };
     if (!toExisted) {
-      rmTree(to);
+      clear(to);
     } else {
       // Only what this copy made: a file that came into foundation/ after the plan is the user's, and stays.
       // Its folders are opened first: a file inside a read-only folder it made goes before that folder does.
       for (const p of created) { try { if (fs.lstatSync(p).isDirectory()) fs.chmodSync(p, 0o700); } catch { /* gone */ } }
-      for (const p of [...created].reverse()) rmTree(p);
+      for (const p of [...created].reverse()) clear(p);
     }
     // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
-    if (keepBackup) rmTree(backup);
-    throw new Error(`nothing was moved — ${e.message}`, { cause: e });
+    if (keepBackup) clear(backup);
+    const also = left.length ? ` (and the undo was refused: ${left.join('; ')})` : '';
+    throw new Error(`nothing was moved — ${e.message}${also}`, { cause: e });
   }
-  rmTree(from);
+  try { rmTree(from, { within: root }); } catch (r) {
+    if (r?.code !== 'YAD-STATE-001') throw r;
+    throw Object.assign(new Error(`${move.to}/ was written, but ${move.from}/ was left in place — ${r.message}`, { cause: r }), { code: r.code, hint: r.hint, kind: r.kind, folder: r.folder });
+  }
   return productMoveFiles(move);
 }
 

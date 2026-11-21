@@ -269,7 +269,14 @@ export const nodeEndOfLife = (version) => `Node ${version} is end of life and ge
 
 // Remove a file or a folder tree, read-only folders too: each folder is opened (its owner may write) first,
 // since a folder whose mode forbids writing keeps its files from `rmSync`. A path that is not there is fine.
-export function rmTree(p) {
+// Given options (#252: `{ within }`), a path under a linked folder is refused first, as `removeDir` refuses it:
+// the same walk, from the Product's folder and from `within` (an undefined `within` still checks the Product's
+// folder), and the same YAD-STATE-001 ("did not delete"). A link AT the path is removed as the link (lstat sees
+// a link, not a folder), and the walk below never follows a link, so only the top call is checked. With no
+// options it checks nothing, as before: a caller that deletes a team file passes `within` (the delete guard in
+// cli/test.mjs counts the calls that do not).
+export function rmTree(p, opts) {
+  if (opts) refuseLinked(p, opts.within, 'delete');
   let st;
   try { st = fs.lstatSync(p); } catch { return; }
   if (st.isDirectory()) {
