@@ -11145,6 +11145,27 @@ test('a retired story is owed nothing: featureStatus ships the feature once anot
   assert.equal(nextAction(L(s01, s02)).why, 'Build — every story/repo lane is shipped or skipped');
 });
 
+test('yad next says a retired story is retired, with its own reason, and counts it beside the Build line (#621)', async () => {
+  const { runNext, actionLine } = await import('./next.mjs');
+  const { nextAction, loadLedger } = await import('./epic-state.mjs');
+  const { stripAnsi } = await import('./lib.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-retired-next-'));
+  try {
+    const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
+    const dir = laneEpic(T, {
+      stories: { 'EP-l-S01': ['api'], 'EP-l-S02': ['api', 'web'] },
+      buildState: {
+        'EP-l-S01': { story: 'EP-l-S01', repos: { api: done } },
+        'EP-l-S02': { story: 'EP-l-S02', retired: retiredRec, repos: { api: { status: 'skipped', record: { reason: 'retired: moved to another epic' } }, web: { status: 'skipped', record: { reason: 'retired: moved to another epic' } } } },
+      },
+    });
+    const out = await grab(() => runNext(T, { epic: 'EP-l' }));
+    assert.match(out, /EP-l-S02 \/ api — retired: moved to another epic/);
+    assert.doesNotMatch(out, /EP-l-S02 \/ api — skipped/);
+    assert.equal(stripAnsi(actionLine(nextAction(loadLedger(dir)))), 'Build — every lane shipped or skipped (1 story retired)');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad skip <epic> <story> --repo: writes the lane, refuses what E39 refuses, and unskip takes it back out (E39)', async () => {
   const { runLaneSkip } = await import('./skip.mjs');
   const { runNext } = await import('./next.mjs');
