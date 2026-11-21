@@ -7179,18 +7179,27 @@ test('gate repair --push commits ONLY state.json to the default branch and pushe
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('gate repair --push refuses off the default branch unless --allow-branch', async () => {
+test('gate repair --push off the default branch is refused before it writes, so the same command then works on it (#632)', async () => {
   const prev = process.exitCode;
-  const { T, statePath } = productWithStrandedEpic();
+  const { T, bare, statePath } = productWithStrandedEpic();
   try {
     git(T, 'checkout', '-q', '-b', 'wip/side');
     process.exitCode = 0;
-    await gateRepair(T, { epic: 'EP-x', push: true });
+    const r = await gateRepair(T, { epic: 'EP-x', push: true });
     assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
-    // the heal itself still landed on disk; only the commit was withheld
-    assert.equal(JSON.parse(fs.readFileSync(statePath)).steps[0].status, 'done');
+    assert.deepEqual([r.written, r.committed, r.pushed], [false, false, false], 'the --json answer says nothing was written');
+    assert.equal(git(T, 'status', '--porcelain').toString(), '', 'the refusal leaves the Product as it was');
+    assert.equal(JSON.parse(fs.readFileSync(statePath)).steps[0].status, 'in_progress', 'the stranded step is still there to repair');
     assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'seed', 'nothing committed');
-  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+    // On the default branch the same command finds the step and commits the repair.
+    git(T, 'checkout', '-q', 'main');
+    process.exitCode = 0;
+    const again = await gateRepair(T, { epic: 'EP-x', push: true });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([again.closed, again.written, again.committed, again.pushed], [['stories'], true, true, true]);
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): repair epic state/);
+    assert.equal(git(T, 'status', '--porcelain').toString(), '');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
 
 test('gate status counts only non-stale approvals after an artifact change', async () => {
@@ -17972,6 +17981,56 @@ test('publishCodeContext: commits chore(product) code-context, pushes to origin/
     const out2 = await grab(() => publishCodeContext(T, { push: true }));
     assert.match(out2, /already published — nothing to do/, 'unchanged + already pushed -> no-op');
     assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), count, 'no second commit');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// #632: `yad repo refresh --push` checks the branch before it writes the packs and the registry, so a refused
+// branch leaves the Product as it was. The repo here is not cloned, so nothing is packed and the registry is
+// all the refresh writes (re-serialized from the compact form it was committed in).
+test('#632 repo refresh --push off the default branch writes nothing, and the same command then publishes on it', async () => {
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'gone', path: 'demo/gone', platform: 'github', default_branch: 'main', codeMap: '.sdlc/code-context/gone/code-map.md' }] }));
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'registry');
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    let r;
+    await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
+    assert.deepEqual([r.refreshed, r.published], [0, null]);
+    assert.equal(git(T, 'status', '--porcelain').toString(), '', 'the registry is not rewritten');
+    git(T, 'checkout', '-q', 'main');
+    process.exitCode = 0;
+    await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.published?.committed, r.published?.pushed], [true, true]);
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(product\): sync code-context/);
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('#632 repo refresh --push --allow-branch on a side branch writes, commits and pushes to origin/<side>', async () => {
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'gone', path: 'demo/gone', platform: 'github', default_branch: 'main', codeMap: '.sdlc/code-context/gone/code-map.md' }] }));
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'registry');
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    let r;
+    const out = await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, allowBranch: true, today: '2026-11-21' }); });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.published?.committed, r.published?.pushed], [true, true]);
+    assert.equal((out.match(/--allow-branch: committing on/g) || []).length, 1, 'the guard runs once');
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(product\): sync code-context/);
+    assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(productBare, 'rev-parse', 'wip/side').toString().trim(), 'pushed to its own branch');
+    assert.equal(git(productBare, 'branch', '--list', 'main').toString().trim(), '', 'never to the default branch');
   } finally {
     process.exitCode = prev;
     for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
@@ -34746,6 +34805,50 @@ test('#322 gate reopen --push commits exactly what it wrote, on a verified Produ
     const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n').sort();
     assert.deepEqual(files, ['epics/EP-x/.sdlc/approvals.json', 'epics/EP-x/.sdlc/hub-prs.json', 'epics/EP-x/.sdlc/product-prs.json', 'epics/EP-x/.sdlc/state.json', 'epics/EP-x/architecture.md', 'epics/EP-x/stories/EP-x-S01.md']);
     assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(T, 'rev-parse', 'origin/main').toString().trim());
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+});
+
+// #632: with --push the branch is checked before anything is written. A refused branch used to leave the walk-back
+// on disk, uncommitted, and the re-run on the default branch then refused: the step already read as reopened.
+for (const verified of [false, true]) {
+  test(`#632 gate reopen --push off the default branch writes nothing, and the same command then works on it${verified ? ' (a verified Product)' : ''}`, async () => {
+    const prev = process.exitCode;
+    const { T, bare, ep } = productForReopen({ verified });
+    try {
+      git(T, 'checkout', '-q', '-b', 'wip/side');
+      const before = fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8');
+      process.exitCode = 0;
+      const r = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true });
+      assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
+      assert.deepEqual([r.written, r.committed, r.pushed], [[], false, false], 'the --json answer says nothing was written');
+      assert.equal(git(T, 'status', '--porcelain').toString(), '', 'no ledger, record or story status line is changed');
+      assert.equal(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'), before);
+      assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'seed', 'nothing committed');
+      git(T, 'checkout', '-q', 'main');
+      process.exitCode = 0;
+      const again = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true });
+      assert.equal(process.exitCode, 0);
+      assert.deepEqual([again.currentStep, again.committed, again.pushed], ['architecture', true, true]);
+      assert.ok(again.written.includes('epics/EP-x/architecture.md'));
+      assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): reopen EP-x\/architecture — auth changed \[skip ci\]$/);
+      assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(T, 'rev-parse', 'origin/main').toString().trim());
+    } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
+  });
+}
+
+test('#632 gate reopen --push --allow-branch on a side branch writes, commits and pushes to origin/<side>', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = productForReopen();
+  try {
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    const r = await gateReopen(T, { newest: noNewer, epic: 'EP-x', step: 'architecture', reason: 'auth changed', push: true, allowBranch: true });
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual([r.currentStep, r.committed, r.pushed], ['architecture', true, true]);
+    assert.ok(r.written.includes('epics/EP-x/.sdlc/state.json'));
+    assert.match(git(T, 'log', '-1', '--format=%s').toString().trim(), /^chore\(gate\): reopen EP-x\/architecture/);
+    assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), git(bare, 'rev-parse', 'wip/side').toString().trim(), 'pushed to its own branch');
+    assert.notEqual(git(bare, 'rev-parse', 'main').toString().trim(), git(bare, 'rev-parse', 'wip/side').toString().trim(), 'never to the default branch');
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });
 

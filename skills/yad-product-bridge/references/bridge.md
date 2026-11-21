@@ -345,7 +345,8 @@ authoring step stranded behind a review gate that already advanced) by writing `
 is not a `ledger-guard` gap: the repair commits to the **default branch**, where `ledger-guard` — which
 only inspects review PRs — never runs, and where the `yad-update-guard` (platform-Verified signature)
 vets it instead, exactly as it does for `yad checkpoint` and `yad update`.
-The command refuses to commit off the default branch unless `--allow-branch` is passed.
+With `--push` the command refuses to commit off the default branch unless `--allow-branch` is passed,
+and it checks the branch before it writes: a refused run leaves `state.json` as it was (#632).
 
 **Loop prevention & races.** The only ledger commit lands on the **default branch** at merge, which
 fires no PR trigger; it carries `[skip ci]` to guard sibling workflows. Because CI never pushes the
