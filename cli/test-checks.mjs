@@ -4374,6 +4374,42 @@ test('epic-open gate: an open epic (an unshipped story) passes', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('epic-open gate: a retired story is owed nothing, and the gate and sealedEpic agree on each shape (#621)', async () => {
+  const { sealedEpic } = await import('./thread.mjs');
+  const T = scaffoldRepo();
+  const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  try {
+    const dir = seedProductEpic(productConfig, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'approved' } });
+    linkedCommit(T, productConfig);
+    const bs = (v) => {
+      fs.mkdirSync(path.join(dir, '.sdlc/build-state'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-demo-S02.json'), `${JSON.stringify(v, null, 2)}\n`);
+    };
+    const lane = { status: 'skipped', record: { reason: 'retired' } };
+    for (const [why, v, sealed] of [
+      ['retired, S01 shipped', { story: 'EP-demo-S02', retired: { reason: 'moved', by: 'sam', date: '2026-11-21' }, repos: { api: lane } }, true],
+      ['a record with no reason', { story: 'EP-demo-S02', retired: {}, repos: {} }, true],
+      ['only a lane reason says retired', { story: 'EP-demo-S02', repos: { api: lane } }, false],
+      ['a repo named retired', { story: 'EP-demo-S02', repos: { retired: lane } }, false],
+    ]) {
+      bs(v);
+      const r = runGate(EPIC_OPEN, T);
+      assert.equal(r.code, sealed ? 1 : 0, `${why}: ${r.out}`);
+      assert.match(r.out, sealed ? /targets SEALED epic EP-demo/ : /epic is open — has unshipped stories/, why);
+      assert.equal(sealedEpic(productConfig, 'EP-demo'), sealed, `sealedEpic agrees: ${why}`);
+    }
+    // Every story retired, none shipped: nothing was built, so the epic is open.
+    fs.writeFileSync(path.join(dir, 'stories/EP-demo-S01.md'), linkMd({ story: 'EP-demo-S01', status: 'approved' }) + '\n# EP-demo-S01\n');
+    fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-demo-S01.json'), `${JSON.stringify({ story: 'EP-demo-S01', retired: { reason: 'x' }, repos: {} }, null, 2)}\n`);
+    bs({ story: 'EP-demo-S02', retired: { reason: 'x' }, repos: {} });
+    assert.equal(runGate(EPIC_OPEN, T).code, 0);
+    assert.equal(sealedEpic(productConfig, 'EP-demo'), false);
+  } finally {
+    fs.rmSync(productConfig, { recursive: true, force: true });
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and freezes the thread', () => {
   const T = scaffoldRepo();
   const productConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));

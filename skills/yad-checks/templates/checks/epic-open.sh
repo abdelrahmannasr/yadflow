@@ -478,7 +478,18 @@ resolve_product() {
   esac
 }
 
-# Is the epic SEALED? true iff it has >=1 story and EVERY stories/*.md frontmatter status is `shipped`.
+# Is the epic SEALED? true iff EVERY stories/*.md frontmatter status is `shipped`, apart from a RETIRED
+# story (#621: its .sdlc/build-state/<story>.json has a top-level `"retired": { … }` record, which
+# `yad story retire` writes), and at least one story really shipped. The record is found by its key and
+# an object after it, at the top level — never the bare word, which a lane's reason (`retired: <why>`)
+# holds, nor a repo named `retired` one level down. No jq here, so this is a line match on the shape yad
+# writes (two-space indent, one key per line); a file written another way reads as not retired, the side
+# where the story is still owed.
+story_retired() {
+  bs="$1/.sdlc/build-state/$2.json"
+  [ -f "$bs" ] || return 1
+  grep -Eq '^  "retired"[[:space:]]*:[[:space:]]*[{]' "$bs"
+}
 epic_sealed() {
   ep_dir="$1"
   sdir="${ep_dir}/stories"
@@ -486,6 +497,7 @@ epic_sealed() {
   found=0
   for f in "$sdir"/*.md; do
     [ -e "$f" ] || continue
+    story_retired "$ep_dir" "$(basename "$f" .md)" && continue
     found=1
     st="$(fm_val status "$f")"
     [ "$st" = "shipped" ] || return 1
