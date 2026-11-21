@@ -21,10 +21,10 @@ import path from 'node:path';
 import { c, log, info, hand, readJSON, readPlainFile, forTerminal, exists } from './lib.mjs';
 import { VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
-import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds } from './epic-state.mjs';
+import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds, bindingsForProfile, loadSkillBindings, recordedRoute, stepSkills } from './epic-state.mjs';
 import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
-import { recommendationsFor, bindCommand } from './recommend.mjs';
+import { recommendationsFor, bindCommand, sameSkill } from './recommend.mjs';
 import { installedSkillNames } from './skill.mjs';
 import { TOOLBOX, parseVersion, compare as compareVersions } from './toolbox.mjs';
 import { productGit } from './productcommit.mjs';
@@ -289,7 +289,7 @@ function stepBlock(a, state, ctx = {}) {
     why: clean(a.why ?? null),
     skills: {
       bound: skills,
-      recommended: facts && !facts.gate ? recommendedRows(a, authorId, ctx) : [],
+      recommended: facts && !facts.gate ? recommendedRows(a, authorId, state, ctx) : [],
     },
     tools,
     ...(a.parallel ? { parallel: { step: clean(a.parallel.step), skill: clean(a.parallel.skill ?? null), artifact: clean(a.parallel.artifact ?? null) } } : {}),
@@ -303,14 +303,21 @@ function stepBlock(a, state, ctx = {}) {
 // (#242): `installed` is what `yad skill recommend` answers, `null` when `yad detect` could not look. In
 // Build the step is the loop itself, so the picks are those of the step each open lane is on, each step
 // once, in lane order. Detection reads the skill folders, so it runs only when there is a pick to mark.
-function recommendedRows(a, authorId, ctx) {
+// `bound` is true when the step already runs the pick, on the epic's own route — the same test
+// `yad skill recommend` makes — so an agent offers only a pick that is installed and not yet bound.
+function recommendedRows(a, authorId, state, ctx) {
   const steps = a.kind === 'build'
     ? [...new Set((a.builds || []).flatMap((b) => (b.repos || []).filter((r) => !r.shipped && r.status !== 'skipped').map((r) => r.step)))]
     : [authorId];
   const picks = steps.filter((s) => typeof s === 'string').flatMap((s) => recommendationsFor(s));
   if (!picks.length) return [];
   const names = ctx.root ? installedSkillNames(ctx.root, { home: ctx.home ?? os.homedir() }) : null;
-  return picks.map((r) => ({ step: r.step, skill: r.skill, why: r.reason, bind: bindCommand(r), installed: names ? names.has(r.skill) : null, decidedBy: 'human' }));
+  const bindings = ctx.root ? bindingsForProfile(loadSkillBindings(ctx.root), recordedRoute(state ?? {})) : null;
+  return picks.map((r) => ({
+    step: r.step, skill: r.skill, why: r.reason, bind: bindCommand(r),
+    bound: stepSkills(r.step, bindings).some((s) => sameSkill(s, r.skill)),
+    installed: names ? names.has(r.skill) : null, decidedBy: 'human',
+  }));
 }
 
 // Each Build lane: its step's facts, and whether a person moves it on (the epic's `advance` dial).
