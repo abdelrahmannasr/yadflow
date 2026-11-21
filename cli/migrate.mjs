@@ -536,20 +536,28 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = c
       writeJSON(file, stamped(obj, version), { within: root });
     }
   } catch (e) {
-    // rmTree: a folder this copy made may carry a read-only mode copied from the source.
+    // rmTree: a folder this copy made may carry a read-only mode copied from the source. A delete refused under
+    // a folder that became a link since `linkedMoveFolder` (#252) does not stop the rest of the cleanup, and the
+    // error still says why the move failed, with what was left behind.
+    const left = [];
+    const clear = (p) => { try { rmTree(p, { within: root }); } catch (r) { if (r?.code !== 'YAD-STATE-001') throw r; left.push(r.message); } };
     if (!toExisted) {
-      rmTree(to, { within: root });
+      clear(to);
     } else {
       // Only what this copy made: a file that came into foundation/ after the plan is the user's, and stays.
       // Its folders are opened first: a file inside a read-only folder it made goes before that folder does.
       for (const p of created) { try { if (fs.lstatSync(p).isDirectory()) fs.chmodSync(p, 0o700); } catch { /* gone */ } }
-      for (const p of [...created].reverse()) rmTree(p, { within: root });
+      for (const p of [...created].reverse()) clear(p);
     }
     // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
-    if (keepBackup) rmTree(backup, { within: root });
-    throw new Error(`nothing was moved — ${e.message}`, { cause: e });
+    if (keepBackup) clear(backup);
+    const also = left.length ? ` (and the undo was refused: ${left.join('; ')})` : '';
+    throw new Error(`nothing was moved — ${e.message}${also}`, { cause: e });
   }
-  rmTree(from, { within: root });
+  try { rmTree(from, { within: root }); } catch (r) {
+    if (r?.code !== 'YAD-STATE-001') throw r;
+    throw Object.assign(new Error(`${move.to}/ was written, but ${move.from}/ was left in place — ${r.message}`, { cause: r }), { code: r.code, hint: r.hint, kind: r.kind, folder: r.folder });
+  }
   return productMoveFiles(move);
 }
 
