@@ -78,7 +78,7 @@ Yadflow is four things you install:
 | Part | What it is |
 | --- | --- |
 | **The `yad` command-line tool** | A program you run in a terminal (a text window for typing commands). It is written in Node.js and has no dependencies — it needs no other packages to run. It sets up projects, says what to do next, runs reviews and reads the history. Installed with `npm install -g yadflow`. |
-| **41 workflow skills** | A **skill** is a set of instructions an AI assistant loads for one task, such as "write the architecture". They run in Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder and opencode. |
+| **42 workflow skills** | A **skill** is a set of instructions an AI assistant loads for one task, such as "write the architecture". They run in Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder and opencode. |
 | **Plain files in git** | **Git** is the tool most teams use to save versions of their files. Every plan, decision and approval is a readable file in a git repository (a **repository**, or **repo**, is one project folder tracked by git). There is no database and no server. |
 | **Checks in your code repositories** | Small scripts that run on GitHub Actions or GitLab CI — the services that test each change automatically before it is merged. One check, for example, makes every change name the task it belongs to. |
 
@@ -1083,7 +1083,7 @@ yad brain view --live --open         # watch an agent work, against the plan
 <!-- explainer:begin id=skills audience=everyone -->
 ## 16. The skills
 
-> **In one line:** 41 ready-made instruction sets that teach your AI assistant each step of the work.
+> **In one line:** 42 ready-made instruction sets that teach your AI assistant each step of the work.
 
 ### What and why (for everyone)
 
