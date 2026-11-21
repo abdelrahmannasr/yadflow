@@ -150,4 +150,22 @@ thin read-then-write wrapper, like `runLaneSkip`. Tests go with the code they te
 - docs/CLI.md
 - skills/yad-run/SKILL.md
 - checks/yad-activity.mjs
+
+## T14 — epic-open fails a change that names a retired story, and its seal message counts retired stories
+**Files:**
+- checks/epic-open.sh
+- skills/yad-checks/templates/checks/epic-open.sh
+- cli/test-checks.mjs
+
+## T15 — The last-story check never counts a retired story as shipped; doctor warns when every story is retired
+**Files:**
+- cli/story-retire.mjs
+- cli/doctor.mjs
+- cli/test.mjs
+
+## T16 — Print a skipped lane's reason as plain text, and fix the retired-story docs
+**Files:**
+- cli/next.mjs
+- skills/yad-run/SKILL.md
+- docs/GATES.md
 <!-- /yad:tasks -->
