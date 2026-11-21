@@ -8,7 +8,7 @@ import { c, log, ok, info, warn, hand, readJSON, exists, emitJSON, refuse, forTe
 import { readShips } from './ledger.mjs';
 import { shipDrift } from './ship-drift.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, currentPhase, isProductLevel,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, storyRetired, typeNoun, currentPhase, isProductLevel,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -26,13 +26,17 @@ export const loadBuildLog = (root, epic) => ({ epic, ships: readShips(epicRoot(r
 // An epic is SEALED once every authored story is `shipped` (config.yaml change.seal_on). A sealed epic
 // refuses new behaviour (epic-open.sh) — a further change must open a new threaded change-epic, which is
 // what keeps the Shape artifacts from going stale. An epic with no stories is NOT sealed (nothing built).
+// A RETIRED story (#621, `storyRetired`: read by its file name, as `epic_sealed` reads it) is owed
+// nothing, so it does not hold the seal open — but at least one story must really have shipped.
 export function sealedEpic(root, epic) {
-  const dir = path.join(epicRoot(root, epic), 'stories');
+  const epicDir = epicRoot(root, epic);
+  const dir = path.join(epicDir, 'stories');
   if (!exists(dir)) return false;
   const stories = fs.readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile() && /\.md$/.test(e.name)).map((e) => e.name);
-  if (!stories.length) return false;
-  return stories.every((f) => readFrontmatter(path.join(dir, f)).status === 'shipped');
+  const owed = stories.filter((f) => !storyRetired(epicDir, f.replace(/\.md$/, '')));
+  if (!owed.length) return false;
+  return owed.every((f) => readFrontmatter(path.join(dir, f)).status === 'shipped');
 }
 
 // The OPEN hotfix debt across a thread (every epic that shares the root). An open entry blocks the next
