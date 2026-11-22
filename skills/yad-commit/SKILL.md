@@ -5,6 +5,17 @@ description: 'Commit one staged atomic change by the conventions (subject, trail
 
 # SDLC — Commit by Convention (Build helper)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `(Get-Command yad -ErrorAction SilentlyContinue).Source`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when that check prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** Turn ONE staged atomic change into a single commit that satisfies the project conventions
 (`CONTRIBUTING.md` / `config.yaml` `build`): a Conventional-Commits subject, the fixed trailer order
 `Task → Contract-Change → Ledger-Override → Co-Authored-By` (the override only with `--manual`; the footer

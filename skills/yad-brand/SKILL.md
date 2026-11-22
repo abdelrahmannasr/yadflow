@@ -5,6 +5,17 @@ description: 'Make the pages yadflow generates use the Product''s own logo, colo
 
 # yadflow — the Product's brand on every page (E184)
 
+<!-- generated: yad-cli — from cli/skill-yad-cli.mjs by scripts/skill-yad-cli.mjs; do not edit by hand -->
+
+**This skill needs the `yad` command.** Before its first `yad …` command, run `command -v yad` (in PowerShell, `(Get-Command yad -ErrorAction SilentlyContinue).Source`). When it prints nothing, the yadflow CLI is not installed on this machine: stop there, and tell the person:
+
+- Install it with `npm install -g yadflow@latest`, or run each command as `npx -y yadflow@4 …` in place of `yad …`.
+- It is needed because the CLI is what enforces the approvals. Without it, a step could only ask you to wait; it could not check that a person approved.
+
+Go on only when that check prints a path, or when the person chooses `npx -y yadflow@4`. A command this skill already writes as `npx -y yadflow@4 …` runs without the install.
+
+<!-- end: yad-cli -->
+
 **Goal:** every page yadflow makes for this Product — the progress map, the brain view, the standup, usage
 and issues reports, the saved-reports catalog, and the generated doc sites (`yad docs brand <site>`, E186) — wears the Product's own logo, colours
 and fonts. Pages never read a design system directly. They read **one** file, `.sdlc/brand.json`. This skill
