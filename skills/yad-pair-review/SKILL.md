@@ -1,6 +1,6 @@
 ---
 name: yad-pair-review
-description: 'The guided, two-way, teaching pair-review walkthrough for the SDLC review gates — the AI-driven companion face. The human opens a PR/MR with an AI session and the AI walks them through the change ONE STOP AT A TIME (highest-risk first), giving comprehensive context per change, then asking the human a Socratic question about it; the human answers and asks back, and both keep going until BOTH declare satisfied. The session doubles as a learning session: it demonstrates a transferable review method, scores the engineer against it, and records their review-skill growth in the local-only yad-learn ledger (rolled up by the yad-status skill). Works on the Build code PR/MR (yad review) and the Shape artifact-review PR/MR (yad gate). Soft and additive — it NEVER blocks a merge or gate; it rides the existing engagement signal and surfaces genuine concerns as normal blocking comments. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
+description: 'A guided two-way pair review of a PR/MR, one stop at a time, highest risk first, that teaches a review method. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
 ---
 
 # SDLC — Pair Review (the guided, two-way, teaching walkthrough)

@@ -1,6 +1,6 @@
 ---
 name: yad-architecture
-description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (the contract risk tag raises its approver count). Use when the user says "author the architecture" or after the epic gate passes.'
+description: 'Shape step: with the architect, write the architecture and lock the shared cross-repo contract, for review. Use when the user says "author the architecture" or after the epic gate passes.'
 ---
 
 # SDLC — Author Architecture + Contract (Shape step 3)

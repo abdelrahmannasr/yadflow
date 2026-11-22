@@ -1,6 +1,6 @@
 ---
 name: yad-docs
-description: 'Generates the per-epic interactive documentation site — a vendored React/Vite/Tailwind SPA with an animated flow canvas and role-based stakeholder doc pages — from the epic''s approved artifacts (epic, architecture, the locked contract, UI design, stories, code-context, test cases). Themes it from the design tokens, wires the docs.json base path, and drives `yad docs build/deploy` to publish to Pages (or build-only when no target). This is an OUTPUT ENRICHMENT, never a gated Shape step: it never mutates state.json steps, approvals, or the contract lock. Use when the user says "generate the docs site", "build the interactive docs", or "deploy the epic docs".'
+description: 'Generate and publish an epic''s interactive docs site from its approved artifacts. Never a gate. Use when the user says "generate the docs site", "build the interactive docs", or "deploy the epic docs".'
 ---
 
 # SDLC — Author the Interactive Docs Site (per-epic, output enrichment)

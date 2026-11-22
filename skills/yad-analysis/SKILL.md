@@ -1,6 +1,6 @@
 ---
 name: yad-analysis
-description: 'Optional Shape step 1 of the gated SDLC. With the analyst, pressure-test a feature idea and write the discovery brief into analysis.md. Assigns the EP-<slug> ID and seeds .sdlc/ state (the 12-step chain that puts analysis before epic). Never auto-advances — hands off to the team review gate. Optional: if skipped, the epic step does this shaping inline. Use when the user says "analyse the idea", "start with analysis", or "author the analysis".'
+description: 'Optional first Shape step: with the analyst, pressure-test a feature idea and write the discovery brief for review. Use when the user says "analyse the idea", "start with analysis", or "author the analysis".'
 ---
 
 # SDLC — Author Analysis (optional Shape step 1)

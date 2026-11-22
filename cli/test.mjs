@@ -22153,7 +22153,11 @@ const E52 = { ...(await import('./epic-state.mjs')), ...(await import('./manifes
 // never reused for other content.
 const CATALOGUE_VERSIONS = [
   [1, '812f9dfb98ecda14'],
+  [2, 'c4db1526d3bdae88'],
 ];
+
+// Declared before the test that uses it, so it is set however soon the runner starts that test.
+const isCalendarDayE52 = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 test('E52: every catalogue entry is well formed and vetted, and each version names one list', () => {
   assert.ok(RECOMMENDATIONS.length >= 6, 'the catalogue recommends skills for several steps');
@@ -22170,11 +22174,18 @@ test('E52: every catalogue entry is well formed and vetted, and each version nam
   assert.ok(same, `catalogue version ${CATALOGUE.version} is not recorded — add ${JSON.stringify(pair)} to CATALOGUE_VERSIONS`);
   assert.equal(same[1], pair[1], `the catalogue changed but its version did not — move CATALOGUE.version in cli/recommend.mjs, then add [${CATALOGUE.version + 1}, '…'] to CATALOGUE_VERSIONS`);
   assert.equal(CATALOGUE_VERSIONS.at(-1)[0], CATALOGUE.version, 'the newest recorded version is the shipped one');
-  // A record is never newer than the day the list was read through.
-  for (const r of RECOMMENDATIONS) assert.ok(r.vetted.on <= CATALOGUE.checked, `${r.step}:${r.skill} vetted after the catalogue's checked day`);
+  // A row may be read again (or added) after the whole list was last read through (#242), so its own date may
+  // be newer than CATALOGUE.checked — but never in the future, and never more than VET_MAX_AGE_DAYS after it:
+  // a list that is mostly re-read one row at a time is due a whole read.
+  const dayMs = (s) => Date.parse(`${s}T00:00:00Z`);
+  for (const r of RECOMMENDATIONS) {
+    const id = `${r.step}:${r.skill}`;
+    assert.equal(isCalendarDayE52(r.vetted.on), true, `${id}: vetted.on is a real day`);
+    assert.ok(dayMs(r.vetted.on) <= Date.now(), `${id}: vetted in the future`);
+    assert.ok((dayMs(r.vetted.on) - dayMs(CATALOGUE.checked)) / 86400000 <= E52.VET_MAX_AGE_DAYS,
+      `${id}: vetted more than ${E52.VET_MAX_AGE_DAYS} days after the catalogue's checked day — read the whole list again`);
+  }
 });
-
-const isCalendarDayE52 = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 test('E52: a malformed entry is named, sentence by sentence', () => {
   const good = RECOMMENDATIONS[0];

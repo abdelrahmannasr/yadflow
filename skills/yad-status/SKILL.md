@@ -1,6 +1,6 @@
 ---
 name: yad-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (driver/advance, under either spelling) and status, and which approvals are still required at the active gate. For stories in Build it also prints each Build step''s automation dial, status, and run record (runs / % approved-unchanged, as advice), plus the kill switch and the Shape author dials from .sdlc/automation.json — so the team can see WHY a step is automated and reverse it. Also prints the cross-cutting personal skills-log roll-up from the LOCAL-ONLY learning ledger (gitignored, never committed/pushed — the local learner''s own learning, by stage). Across multiple epics, prints a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
+description: 'Read-only view of an epic: step, dials, status, approvals still needed, Build run record, and roll-ups. Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
 ---
 
 # SDLC — Status (read-only)

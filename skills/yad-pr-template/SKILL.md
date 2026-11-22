@@ -1,6 +1,6 @@
 ---
 name: yad-pr-template
-description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and commit the matching PR/MR template — .github/pull_request_template.md (GitHub) or .gitlab/merge_request_templates/Default.md (GitLab). The template carries an Impact & Risk block; a high risk level (or a touched contract surface) raises the approver count, the same count yad-review-gate prints. Includes risk-route.sh to print that count from a PR body. Never auto-advances. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
+description: 'Build step D: commit a code repo''s PR/MR template, with the Impact & Risk block that sets the approval count. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
 ---
 
 # SDLC — PR/MR Template (Build Step D)

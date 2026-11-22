@@ -1342,17 +1342,57 @@ test('the yad-guide skill is shipped, and its generated sections agree with the 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('every skill\'s description fits the 1,024 characters an agent harness reads', () => {
-  for (const skill of fs.readdirSync(path.join(REPO, 'skills'))) {
-    const file = path.join(REPO, 'skills', skill, 'SKILL.md');
-    if (!fs.existsSync(file)) continue;
-    const m = read(file).match(/^description:\s*(.*)$/m);
-    if (!m) continue;
-    let v = m[1].trim();
-    if (v.startsWith('\'')) v = v.slice(1, -1).replace(/''/g, '\'');
-    else if (v.startsWith('"')) v = JSON.parse(v);
-    assert.ok(v.length <= 1024, `${skill}: ${v.length} characters`);
+// An agent loads every installed skill's description into its context in every session, yadflow work or
+// not, so each yad-* description is held short, and so is their total (Product #240). A skill whose
+// description is missing or not on one line is a failure, never skipped.
+const DESCRIPTION_MAX = 300;
+const DESCRIPTIONS_TOTAL_MAX = 10000;
+function skillDescriptionProblems(skillsDir) {
+  const problems = [];
+  let total = 0;
+  for (const skill of fs.readdirSync(skillsDir).filter((s) => s.startsWith('yad-')).sort()) {
+    const file = path.join(skillsDir, skill, 'SKILL.md');
+    if (!fs.existsSync(file)) { problems.push(`${skill}: no SKILL.md`); continue; }
+    const front = read(file).match(/^---\n([\s\S]*?)\n---/);
+    const m = front && front[1].match(/^description:[ \t]*(.*)$/m);
+    let v = m ? m[1].trim() : '';
+    if (!v || /^[|>]/.test(v)) { problems.push(`${skill}: no one-line description`); continue; }
+    if (v.startsWith('\'')) {
+      // A single-quoted YAML scalar ends with a quote, and a quote inside it is doubled.
+      const inner = v.length > 1 && v.endsWith('\'') ? v.slice(1, -1) : null;
+      if (inner === null || inner.replace(/''/g, '').includes('\'')) { problems.push(`${skill}: description is not a valid single-quoted string`); continue; }
+      v = inner.replace(/''/g, '\'');
+    } else if (v.startsWith('"')) v = JSON.parse(v);
+    if (v.length > DESCRIPTION_MAX) problems.push(`${skill}: ${v.length} characters (at most ${DESCRIPTION_MAX})`);
+    total += v.length;
   }
+  if (total > DESCRIPTIONS_TOTAL_MAX) problems.push(`all yad-* descriptions: ${total} characters (at most ${DESCRIPTIONS_TOTAL_MAX})`);
+  return problems;
+}
+
+test(`every yad-* skill has a one-line description of at most ${DESCRIPTION_MAX} characters, ${DESCRIPTIONS_TOTAL_MAX} in all`, () => {
+  assert.deepEqual(skillDescriptionProblems(path.join(REPO, 'skills')), []);
+  // The check itself: a 301-character description, a missing one, a block one, an apostrophe that is not
+  // doubled and a missing closing quote are each named.
+  const T = tmp();
+  try {
+    const skill = (name, front) => put(path.join(T, name, 'SKILL.md'), `---\nname: ${name}\n${front}---\n\n# ${name}\n`);
+    skill('yad-ok', `description: '${'a'.repeat(DESCRIPTION_MAX)}'\n`);
+    assert.deepEqual(skillDescriptionProblems(T), []);
+    skill('yad-long', `description: '${'b'.repeat(DESCRIPTION_MAX - 1)}''s'\n`);
+    skill('yad-none', '');
+    skill('yad-block', 'description: |\n  two\n  lines\n');
+    skill('yad-badquote', 'description: \'the story\'s title\'\n');
+    skill('yad-unclosed', 'description: \'no closing quote\n');
+    put(path.join(T, 'sdlc', 'config.yaml'), 'not a skill\n');
+    assert.deepEqual(skillDescriptionProblems(T), [
+      'yad-badquote: description is not a valid single-quoted string',
+      'yad-block: no one-line description',
+      `yad-long: ${DESCRIPTION_MAX + 1} characters (at most ${DESCRIPTION_MAX})`,
+      'yad-none: no one-line description',
+      'yad-unclosed: description is not a valid single-quoted string',
+    ]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('no skill tells the agent to run a human-only command: only the person runs it', () => {

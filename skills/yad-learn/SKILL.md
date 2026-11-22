@@ -1,6 +1,6 @@
 ---
 name: yad-learn
-description: 'The cross-cutting learning layer: at ANY SDLC stage, a team member can ask to learn a concept and be tutored in the context of what the team is building. Routes the request to the connected learning tool (.sdlc/learning.json, DeepTutor-first) grounded in the project knowledge base, or degrades to harness-native tutoring (the harness model reading the artifacts) when no tool is connected. Renders a tutorial artifact and appends to a per-member learning ledger that is kept LOCAL-ONLY — gitignored, never committed or pushed to the Product or any code repo — so it stays a private, personal skills log (yad-status rolls up the local records). Purely opt-in — it NEVER blocks a gate and never touches epic state, approvals, or the contract lock. Use when the user says "teach me <concept>", "learn about <concept>", or "yad-learn".'
+description: 'Tutor a team member on a concept in the project''s context, logged privately on this machine. Never blocks a gate. Use when the user says "teach me <concept>", "learn about <concept>", or "yad-learn".'
 ---
 
 # SDLC — Learn (the cross-cutting tutor)

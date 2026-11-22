@@ -1,6 +1,6 @@
 ---
 name: yad-connect-design
-description: 'Connects a design tool (Figma, or another tool — pluggable) to the Product so the UI design step can materialize the full feature design (mobile screens / web pages) inside it, not just Markdown. Registers the tool into the project-wide .sdlc/design.json (local-user / MCP-session auth, no stored tokens), detecting whether a design-tool MCP is available and degrading to markdown-only when it is not. Run at setup or any time the design tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Figma", "connect a design tool", "refresh the design connection", or "list the design connection".'
+description: 'Connect a design tool so the UI step can build the design in it, or fall back to Markdown. Use when the user says "connect Figma", "connect a design tool", "refresh the design connection", or "list the design connection".'
 ---
 
 # SDLC — Connect a Design Tool (make the UI step design-tool aware)
