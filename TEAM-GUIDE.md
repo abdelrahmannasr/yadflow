@@ -30,7 +30,7 @@ You will have **four separate git repos**, each with one job, plus the **yadflow
 
 ```
   yadflow         ──►  the TOOL
-  (npm package)        The `yad` CLI and the 41 workflow skills, installed from npm
+  (npm package)        The `yad` CLI and the 42 workflow skills, installed from npm
                        (`npx yadflow …` or `npm install -g yadflow`). You never clone it,
                        and no real product work happens inside it.
 
@@ -830,7 +830,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 12. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions of all 41 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
+descriptions of all 42 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -885,6 +885,6 @@ descriptions of all 41 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 - **[`docs/YADFLOW-EXPLAINED.md`](docs/YADFLOW-EXPLAINED.md)** — every part of yadflow in plain words, for technical and non-technical readers.
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
-- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 41 agent skills.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 42 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-checkout/`** — a full worked epic (Shape + Build) you can copy from.
