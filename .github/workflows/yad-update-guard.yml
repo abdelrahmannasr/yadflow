@@ -24,8 +24,10 @@ permissions:
 
 jobs:
   update-guard:
-    # Only the default branch — pushes to feature branches are reviewed via their PR gate suite.
-    if: github.ref_name == github.event.repository.default_branch
+    # Only the default branch — pushes to feature branches are reviewed via their PR gate suite — and the
+    # trunk named by the YAD_TRUNK repository variable, for a team whose trunk (the branch named in the
+    # Product's registry) is not the default branch (`yad ci check` names the value). Unset, it is ''.
+    if: github.ref_name == github.event.repository.default_branch || (vars.YAD_TRUNK != '' && github.ref_name == vars.YAD_TRUNK)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
