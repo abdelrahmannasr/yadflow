@@ -1,6 +1,6 @@
 ---
 name: yad-epic
-description: 'Shape step for the epic in the gated SDLC. Shape a feature idea with the analyst (or read analysis.md when the optional analysis step already ran), then write the epic with the pm, into epic.md. The entry point when analysis is skipped: assigns the EP-<slug> ID and seeds .sdlc/ state. Never auto-advances — hands off to the team review gate. Use when the user says "start a new feature/epic" or "author an epic".'
+description: 'Shape step: shape a feature idea and write the epic, starting it when analysis was skipped, for review. Use when the user says "start a new feature/epic" or "author an epic".'
 ---
 
 # SDLC — Author Epic (Shape step)
