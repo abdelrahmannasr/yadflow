@@ -806,6 +806,7 @@ There are no open questions left.
 | 6 | Do we ever measure adoption? | **Never.** Public signals only — npm, GitHub issues, stars | Closed by rule 8. A floor is enough to know whether we are growing |
 | 7 | Chain or panel for multi-skill steps? | **Chain only.** One skill per step by default; extras opt-in with a cost warning. Panel deferred, maybe forever | Chain has a clear winner (the last output). Panel needs a picking step — a human reading three architectures, or an AI judge nobody should trust in a governance tool |
 | 8 | The boundary between the engine and anything built on it | **`--json` (E1) and MCP (E2). Nothing else.** No private API | If every host, plugin and paid product uses the same door as everyone else, the door stays honest and we feel every gap ourselves. Anyone may build a competing product on the engine — that is what an open licence means |
+| 9 | Do the skills work without the `yad` CLI? | **No. The skills keep the CLI dependency** (#244, 2026-11-21). Each skill that runs `yad` starts with a block, written from `cli/skill-yad-cli.mjs` by `scripts/skill-yad-cli.mjs`, that checks `command -v yad` and, when it is missing, stops and says to run `npm install -g yadflow@latest` or use `npx -y yadflow@4 …` | The CLI is what enforces an approval. A skill that worked without it could only ask the agent to wait, not enforce an approval |
 
 ---
 
