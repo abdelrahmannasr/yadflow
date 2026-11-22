@@ -1,6 +1,6 @@
 ---
 name: yad-timeline
-description: 'Phase 6 output enrichment (never a gate) — render a feature THREAD as an evolution view AND resolve its current truth. Walks the thread (genesis -> changes -> defects, linked by parent: frontmatter), renders the evolution as the vendored React/Vite/Tailwind shell HTML + a TIMELINE.md summary (each node: type, what it re-authored vs inherited, ship events, contract re-lock history, open debt), and emits thread-resolved.md — the composed CURRENT-TRUTH map (the latest epic that owns each artifact + the resolved contract-lock hash). That resolved map is the source-of-truth AI/humans read to plan the next change, instead of a stale genesis epic. Degrades to markdown-only when no docs target is connected. Use when the user says "show the feature timeline", "how did this feature evolve", "resolve the current truth", or "render the thread".'
+description: 'Show how a feature thread evolved and which epic now owns each artifact. Never a gate. Use when the user says "show the feature timeline", "how did this feature evolve", "resolve the current truth", or "render the thread".'
 ---
 
 # SDLC — Feature Timeline + Current-Truth Resolver (Phase 6, output enrichment)
