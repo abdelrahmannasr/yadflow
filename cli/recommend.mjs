@@ -34,7 +34,7 @@ import { TOOLBOX, isCalendarDay, vettingProblems } from './toolbox.mjs';
 
 // The list's own version and the day it was last read through as a whole. Move `version` whenever an
 // entry is added, removed or changed — the test names the new digest to record beside it.
-export const CATALOGUE = Object.freeze({ version: 1, checked: '2026-10-03' });
+export const CATALOGUE = Object.freeze({ version: 2, checked: '2026-10-03' });
 
 const VETTED_ON = '2026-10-03';
 
@@ -70,6 +70,10 @@ const MATT = Object.freeze({
   packages: [],
   note: 'Named as the mattpocock-skills plugin calls it (<plugin>:<name>): a plugin is the one install route the toolbox lists for this pool.',
 });
+// diagnosing-bugs was read at the same tag later (#242), so its record is the pool's with its own date:
+// re-dating the shared record would claim every mattpocock entry was read again. CATALOGUE.checked stays
+// on the last read of the whole list, so this row is newer than it (the E52 test allows that).
+const MATT_DEBUG = Object.freeze({ ...MATT, on: '2026-11-21' });
 const B = 'https://github.com/bmad-code-org/BMAD-METHOD/blob/v6.12.0/src';
 const E = 'https://github.com/affaan-m/ECC/blob/v2.2.3/skills';
 const M = 'https://github.com/mattpocock/skills/blob/v1.2.3/skills';
@@ -132,6 +136,8 @@ export const RECOMMENDATIONS = Object.freeze([
   // ---- checks ----
   { step: 'checks', skill: 'verification-loop', pool: 'ecc', licence: 'MIT', file: `${E}/verification-loop/SKILL.md`, vetted: ECC, caveat: null,
     reason: 'Runs build, type check, lint, tests, a security search and a diff review locally, with a pass/fail report, before the CI gates run.' },
+  { step: 'checks', skill: 'mattpocock-skills:diagnosing-bugs', pool: 'mattpocock-skills', licence: 'MIT', file: `${M}/engineering/diagnosing-bugs/SKILL.md`, vetted: MATT_DEBUG, caveat: null,
+    reason: 'A step-by-step diagnosis loop for a failing check: a loop that reproduces it, one hypothesis tested at a time, then the fix with a regression test.' },
 
   // ---- engineer-review: a first pass before the human review is recorded ----
   { step: 'engineer-review', skill: 'bmad-code-review', pool: 'bmad-method', licence: 'MIT', file: `${B}/bmm-skills/ship/bmad-code-review/SKILL.md`, vetted: BMAD, caveat: null,
