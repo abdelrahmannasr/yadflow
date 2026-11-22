@@ -1,3 +1,24 @@
+# [4.14.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.13.0...v4.14.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* hold each skill description to 300 characters and count 42 skills ([#651](https://github.com/abdelrahmannasr/yadflow/issues/651)) ([7c79b55](https://github.com/abdelrahmannasr/yadflow/commit/7c79b55008d596b5191d5847f5a55ccfda291629))
+* shorten the Build skill descriptions ([#647](https://github.com/abdelrahmannasr/yadflow/issues/647)) ([f140760](https://github.com/abdelrahmannasr/yadflow/commit/f140760570f287a78408c8678133eb04089f8131))
+* shorten the connector skill descriptions ([#648](https://github.com/abdelrahmannasr/yadflow/issues/648)) ([9c08e50](https://github.com/abdelrahmannasr/yadflow/commit/9c08e50b20d6a2342654a68491a16d23910be0e2))
+* shorten the remaining skill descriptions ([#650](https://github.com/abdelrahmannasr/yadflow/issues/650)) ([e9c9b40](https://github.com/abdelrahmannasr/yadflow/commit/e9c9b40ba206ee1a398a36548327415e55597350))
+* shorten the report and docs skill descriptions ([#649](https://github.com/abdelrahmannasr/yadflow/issues/649)) ([fe4db62](https://github.com/abdelrahmannasr/yadflow/commit/fe4db623a63962e7dbb7657779e7221aa8ddd62d))
+* shorten the Shape skill descriptions ([#646](https://github.com/abdelrahmannasr/yadflow/issues/646)) ([7cde9e1](https://github.com/abdelrahmannasr/yadflow/commit/7cde9e17f968d86d6b7e56c0b424f1baf7e0c6e1))
+
+
+### Features
+
+* mark each recommended skill in yad guide installed or not, and show the Build steps' picks ([#644](https://github.com/abdelrahmannasr/yadflow/issues/644)) ([d6fde43](https://github.com/abdelrahmannasr/yadflow/commit/d6fde43fe562861c32c878f5906cd33276562518))
+* recommend mattpocock-skills:diagnosing-bugs for the checks step ([#643](https://github.com/abdelrahmannasr/yadflow/issues/643)) ([3e14b5b](https://github.com/abdelrahmannasr/yadflow/commit/3e14b5b19cddefbdc479a2cb7148e529b9f87a4b))
+* say in each skill that it needs the yad CLI: the block's source and script ([#244](https://github.com/abdelrahmannasr/yadflow/issues/244)) ([#654](https://github.com/abdelrahmannasr/yadflow/issues/654)) ([fbaee97](https://github.com/abdelrahmannasr/yadflow/commit/fbaee970c9ce05ce0af8d0723cf8127f86e2964a))
+* write the failing test first when no TDD skill is bound, and offer only installed picks ([#645](https://github.com/abdelrahmannasr/yadflow/issues/645)) ([e22e83e](https://github.com/abdelrahmannasr/yadflow/commit/e22e83ef382604196c5dbffb590f28dbf6e98989))
+* write the yad-cli block into every skill that runs yad, and hold it there ([#244](https://github.com/abdelrahmannasr/yadflow/issues/244)) ([#655](https://github.com/abdelrahmannasr/yadflow/issues/655)) ([38831f1](https://github.com/abdelrahmannasr/yadflow/commit/38831f103b6decf55b140b2e377f1c49cca6882f))
+
 # [4.13.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.12.0...v4.13.0) (2026-11-21)
 
 
