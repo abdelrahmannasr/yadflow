@@ -1,6 +1,6 @@
 ---
 name: yad-docs-overview
-description: 'Generates the project-level SDLC-overview interactive site — the same React/Vite/Tailwind shell as the per-epic docs — showing every yadflow stage from setup → ship: the pipeline as a flow canvas, each skill/gate as a flow step, the durable .sdlc state objects as system components, and the lenses as stakeholder roles. Themed with yadflow''s own brand palette for continuity, built from config.yaml + module-help.csv + the overview diagram. The hand-maintained report is the MAIN documentation at the Pages root (report.html, also served as index.html); the interactive SPA mounts under `app/` and is reached from it (and links back). Deploys via `yad docs deploy --overview`. This is project documentation, not a gated state — it never touches any epic''s state or approvals. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline (module-help.csv / config.yaml / skill count) changes.'
+description: 'Generate the project overview site, showing every yadflow stage from setup to ship. Never a gate. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline changes.'
 ---
 
 # SDLC — Author the Overview Site (project-level, the pipeline as a living map)

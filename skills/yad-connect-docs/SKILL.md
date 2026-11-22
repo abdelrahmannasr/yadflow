@@ -1,6 +1,6 @@
 ---
 name: yad-connect-docs
-description: 'Connects a docs/Pages publishing target to the Product so the interactive-docs steps can build and deploy the generated SPA — not just commit its source. Registers the target into the project-wide .sdlc/docs.json (GitHub Pages / GitLab Pages / build-only), auto-detecting the platform from .sdlc/product.json and resolving the Vite base path, with local-user auth and no stored tokens. Detects whether gh/glab is present and degrades to build-only when absent. Run at setup or any time the publish target changes. Reusable, idempotent, refreshable. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
+description: 'Connect a Pages target so the docs steps can build and publish the generated sites. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
 ---
 
 # SDLC — Connect a Docs/Pages Target (make the docs steps publishable)

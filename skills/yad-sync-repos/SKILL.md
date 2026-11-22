@@ -1,6 +1,6 @@
 ---
 name: yad-sync-repos
-description: 'Brings every connected code repo up to date in one shot: switches each repo in .sdlc/repos.json to its registry default_branch and fast-forwards it to the latest from origin (local-user git, no stored tokens). A working-tree-only maintenance op — never a gate; it reads the registry but never writes it. A repo with uncommitted local changes is skipped and reported, never overwritten; a diverged branch is left for manual resolution (fast-forward only). After pulling, a repo''s cached code-context pack goes stale, so it points the human at `yad repo refresh`. Use when the user says "sync the repos", "switch all repos to the default branch", "pull latest on every repo", or "get the latest from the default branch".'
+description: 'Switch every connected code repo to its default branch and fast-forward it, skipping local changes. Use when the user says "sync the repos", "switch all repos to the default branch", "pull latest on every repo", or "get the latest from the default branch".'
 ---
 
 # SDLC — Sync Connected Repos (one command, every repo on its default branch)

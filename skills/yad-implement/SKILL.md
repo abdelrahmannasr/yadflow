@@ -1,6 +1,6 @@
 ---
 name: yad-implement
-description: 'Build Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (yad-run) may auto-run once the team sets `implement` to `advance: auto` (`yad dial`) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
+description: 'Build step B: implement one atomic task as a small diff on its own branch, inside the files the task declared. Use when the user says "implement task <id>" or after a story is spec''d.'
 ---
 
 # SDLC — Implement Task (Build Step B)
@@ -243,6 +243,13 @@ Adopt the **dev** lens. Implement the task's goal so it satisfies its acceptance
 must exercise behavior, not just pass (build plan §C). **Before committing, run a smoke or test that
 actually exercises the task's acceptance criterion** — the task is not done until the criterion is
 demonstrably met (record the result in the Step 7 report).
+
+**Tests first when no TDD skill is bound (#242).** When no test-first skill runs before this one on
+`implement`, or the bound one is not installed here (`yad skill list` shows what runs and whether it is
+installed; the catalogue's TDD picks are `mattpocock-skills:tdd` and `tdd-workflow`), work test first
+yourself: write or update a test for the task's acceptance criterion first, run it and see it fail for
+the reason the task is about, then write the code until it passes. A task with no behaviour a test can
+check (a doc, or a skill's text) says so in the Step 7 report instead.
 
 **File-boundary rule (hard):** if the implementation genuinely needs a file **not** in the declared
 list (in a Unity repo, a declared file's own `.meta`, and the `.meta` of a folder made for it, are part of it: see "In a Unity repo" in Step 3), **flag and STOP** — do not silently widen the diff. Report the extra file(s) needed so the

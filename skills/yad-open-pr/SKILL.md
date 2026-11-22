@@ -1,6 +1,6 @@
 ---
 name: yad-open-pr
-description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject (a branch of several commits: its strongest type and the story's title). Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself); prints a reviewer suggestion from recent history and CODEOWNERS, a hint and never a request. High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Open a code-repo task PR/MR from the committed template, prefilled and assigned. Never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
 # SDLC — Open Task PR/MR (Build helper)
