@@ -1,6 +1,6 @@
 ---
 name: yad-connect-testing
-description: 'Connects a testing tool (Playwright, or another tool — pluggable) to the Product so the test-cases step can implement the actual automation tests, not just Markdown test cases. Registers the tool into the project-wide .sdlc/testing.json (local-user / MCP-session auth, no stored tokens), detecting whether a testing-tool MCP is available and degrading to artifacts-only when it is not. Run at setup or any time the testing tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Playwright", "connect a testing tool", "refresh the testing connection", or "list the testing connection".'
+description: 'Connect a testing tool so the test-cases step can write automation tests, or fall back to Markdown. Use when the user says "connect Playwright", "connect a testing tool", "refresh the testing connection", or "list the testing connection".'
 ---
 
 # SDLC — Connect a Testing Tool (make the test-cases step automation-aware)

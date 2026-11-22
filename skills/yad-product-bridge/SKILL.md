@@ -1,6 +1,6 @@
 ---
 name: yad-product-bridge
-description: 'The templated PR/MR bridge for the Shape review gate. When the Product has a platform (.sdlc/product.json), it opens a review PR/MR on the Product for an authored artifact (analysis / epic / architecture+contract / ui-design / stories / test-cases), applies the touched-domain labels (it requests no reviewers), and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the Product: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the local gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'Open the review PR/MR for a Shape artifact, read its comments and approvals back, and wire the merge-time sync. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Product Review Bridge (the templated PR/MR bridge)
