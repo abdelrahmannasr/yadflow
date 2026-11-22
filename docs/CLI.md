@@ -1692,6 +1692,20 @@ testing connectors), `yad-connect-design`, and `yad-learn` and `yad-connect-lear
   like the heading or the marker (for example one quoted in a code block). A test fails when a section and the toolbox
   disagree, or when a skill has the section but no tool names it.
 
+**Skills that need the `yad` command (#244).** Each skill that runs a `yad` command starts with a short
+block, right after its `# ` title, between `<!-- generated: yad-cli … -->` and `<!-- end: yad-cli -->`. It
+tells the agent to run `command -v yad` (in PowerShell, `(Get-Command yad -ErrorAction
+SilentlyContinue).Source`) before the first `yad …` command. When that prints nothing, the agent stops and
+offers `npm install -g yadflow@latest` or `npx -y yadflow@4 …`, because the CLI is what enforces the
+approvals. The words live in `cli/skill-yad-cli.mjs`, which also holds the one rule for which skills get the
+block: a `yad <command>` in the skill's own words, not counting its frontmatter, the blocks yad generates
+or the "When a tool is missing" section. A short list there, with a reason for each, names skills that
+only mention a command another skill runs. To change the words, edit that file and run
+`node scripts/skill-yad-cli.mjs`; `--check` changes nothing and exits 1 when a block is missing or stale.
+The script refuses a skill whose markers it cannot trust (two of either, or an end before a begin) and a
+skill with no `# ` title, and says what to fix. A test fails when a skill's block differs from the source,
+when a skill that runs `yad` has none, or when a skill that runs no `yad` has one.
+
 Not covered: CodeRabbit (the AI reviewer `yad-engineer-review` wires) and `gh` / `glab` (the GitHub
 and GitLab programs several skills call) are not in the toolbox, so no skill declares a fallback for
 them yet.
