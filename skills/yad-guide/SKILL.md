@@ -26,7 +26,10 @@ project; when they conflict, follow these and tell the person.
      the person's decision: offer it, never do it on your own.
    - **Who does it** — `step.driver` (`agent`, `pair` or `human`).
    - **The skill or tool you will use** — `step.skills.bound` first, then `step.skills.recommended`, and
-     `step.tools`.
+     `step.tools`. Offer only a recommended skill with `installed: true` and `bound: false`: `bound: true`
+     means the step already runs it, `installed: false` means it is not on this machine, and `installed:
+     null` means yad could not check. For one not installed, at most say that its pool can be installed
+     (`yad toolbox list`).
    - **What you will do now, and what they will need to do** — `agent[]` and `person[]`.
 4. **Act.** Run each `agent[]` command whose `ask` is `never`. Ask first when `ask` is `each-time` or
    `per-dial` (and the dial says ask). Run an `only-when-asked` command only when the person asked for
