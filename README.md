@@ -21,7 +21,10 @@ where it matters.
   project, tells you the next action, runs reviews, and reads the project history.
 - **42 workflow skills.** A skill is a set of instructions that your AI assistant loads for one task,
   such as "write the architecture". The skills run in Claude Code, Codex CLI, Cursor, Gemini CLI,
-  GitHub Copilot, Zencoder and opencode.
+  GitHub Copilot, Zencoder and opencode. Your assistant loads every skill's short description at the
+  start of each session. Since 4.14.0 the 42 descriptions together are about 9,200 characters (about
+  2,300 tokens), down from about 31,500 (about 7,900 tokens). A test keeps each one at 300
+  characters or fewer.
 - **Plain files in git.** Every plan, decision, approval and link lives as a readable file in a
   repository. There is no database and no server.
 - **Checks in your code repositories.** These run on GitHub Actions or GitLab CI. One check, for
