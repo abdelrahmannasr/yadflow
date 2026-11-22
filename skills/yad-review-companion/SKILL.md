@@ -1,6 +1,6 @@
 ---
 name: yad-review-companion
-description: 'The fun, easy, transparent review companion for the SDLC review gates. Generates a 60-second AI "trailer" of what changed and where the risk is, deals a swipe-through deck of small review "cards", and runs a grounded chat where a reviewer asks anything and their questions become the review record — then records an engagement signal on the approval (verified vs none) and posts a friendly public nudge on a bare rubber-stamp. Works on the Shape artifact-review PR/MR (yad gate) and the Build code PR/MR (yad review). Use when the user says "review this", "run the companion", "give me the trailer/cards", or wants reviewing to be less of a chore.'
+description: 'A light review helper for PRs/MRs: a short trailer of the change and its risks, review cards, and a grounded chat. Use when the user says "review this", "run the companion", "give me the trailer/cards", or wants reviewing to be less of a chore.'
 ---
 
 # SDLC — Review Companion (fun & easy, transparent review)

@@ -1,6 +1,6 @@
 ---
 name: yad-stub
-description: 'Phase 6 brownfield helper — mint a STUB genesis epic for an already-built feature that has no epic in the Product, so a defect/change can thread off it TODAY. In a brownfield repo not every feature has an epic; yad-change requires a real parent and dead-ends without one. This skill creates the smallest real thread anchor — a tiny epic.md (type feature under both names, thread:self, verified:false, stub:backfill-pending) + a seeded state.json + empty ledgers — never inventing behaviour. Defects thread off it immediately (gates pass, the bug list is derived by the thread rollup), and yad-backfill + its promote step later fill/flip it into a real feature epic. Never auto-advances. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when yad-change / yad-reconcile point here because a parent epic is missing.'
+description: 'Create a stub epic for a built feature that has none, so a defect or change can thread off it. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when another skill finds no parent epic.'
 ---
 
 # SDLC — Stub Genesis Epic (Phase 6, the brownfield thread anchor)

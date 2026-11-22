@@ -1,6 +1,6 @@
 ---
 name: yad-run
-description: 'Phase 4 (automation) — the orchestrator that makes the second dial real. Drives a story''s Build loop (spec → tasks → implement → checks) in one code repo, reading each step''s advance dial from build-state: on `auto` it advances on its own, on `human` it stops for a human. Records every run in the trust log, the run record `yad dial` shows as advice. With `checks` on auto, a clean gate pass advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS and pulls in a human. Also sets a step''s dial (`yad dial`, nothing to earn since E34) and flips the kill switch (`yad kill` / `yad unkill`). Never advances a Shape step or the engineer review. Use when the user says "run Build", "advance story <id>", "set the checks dial", or "kill switch".'
+description: 'Drive one story''s Build loop in one code repo: go on alone where a step''s dial is auto, stop for a person where it is human, halt on any failure. Use when the user says "run Build", "advance story <id>", "set the checks dial", or "kill switch".'
 ---
 
 # SDLC — Run (Phase 4 orchestrator)

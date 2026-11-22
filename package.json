@@ -1,7 +1,7 @@
 {
   "name": "yadflow",
   "version": "4.13.0",
-  "description": "Shared project memory and workflows for teams building with AI: a versioned record of plans, decisions, contracts and reviews across repos, human-approved review gates, and a zero-dependency `yad` CLI plus 41 skills for your AI assistant.",
+  "description": "Shared project memory and workflows for teams building with AI: a versioned record of plans, decisions, contracts and reviews across repos, human-approved review gates, and a zero-dependency `yad` CLI plus 42 skills for your AI assistant.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",

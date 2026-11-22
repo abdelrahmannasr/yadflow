@@ -1,6 +1,6 @@
 ---
 name: yad-test-cases
-description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so Build can start at the same time) and runs alongside implementation. With the test architect, author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
+description: 'Shape step beside Build: write the test cases for the approved stories, and automation tests when a tool is connected. Use when the user says "author the test cases" or after the stories gate passes.'
 ---
 
 # SDLC — Author Test Cases (Shape step 9 — parallel, non-blocking)

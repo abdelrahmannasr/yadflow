@@ -1,6 +1,6 @@
 ---
 name: yad-docs-sync
-description: 'The maintenance/CI reconciler for the generated docs sites — mirroring the `yad check` / `yad gate ci` drift pattern. Recomputes each site''s freshness hashes (per-epic: the artifact hash + repo HEADs; overview: config.yaml + module-help.csv + the overview diagram + skill count) and compares them to each docs-build.json baseline: a site is stale when any hash differs or its shell template is out of date. `--check` (default, read-only) reports which sites are stale and WHY; `--refresh` regenerates + redeploys each stale site; `--wire` commits the CI workflow that builds and deploys every site on push. Refresh is always a human/CI decision, never silent; docs are never a gate. Use when the user says "sync the docs", "check docs staleness", "refresh stale docs sites", or "wire the docs CI".'
+description: 'Find stale generated docs sites and say why, refresh them, or wire the CI job that rebuilds them. Use when the user says "sync the docs", "check docs staleness", "refresh stale docs sites", or "wire the docs CI".'
 ---
 
 # SDLC — Sync the Docs Sites (the staleness reconciler)

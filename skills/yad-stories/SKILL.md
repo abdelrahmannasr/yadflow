@@ -1,6 +1,6 @@
 ---
 name: yad-stories
-description: 'Shape step 7 of the gated SDLC. With the pm, break the approved epic into user stories, each tagged with the repos that must implement it. Assigns zero-padded EP-<slug>-S0N IDs and writes one file per story under stories/. Reads epic + architecture + contract + UI as input. Never auto-advances — hands off to the team review gate (an ordinary approval-count gate). Use when the user says "author the stories" or after the UI gate passes.'
+description: 'Shape step: break the approved epic into user stories, each tagged with the repos that build it, for review. Use when the user says "author the stories" or after the UI gate passes.'
 ---
 
 # SDLC — Author Stories (Shape step 7)

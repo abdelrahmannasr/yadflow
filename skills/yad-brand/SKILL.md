@@ -1,6 +1,6 @@
 ---
 name: yad-brand
-description: 'Makes every page yadflow generates for this Product wear the Product''s own design system — its logo, colours and fonts — by filling the one small brand file, .sdlc/brand.json (E184). Runs `yad brand init` when the DESIGN.md is machine-readable (YAML front matter or a CSS :root block); otherwise reads a prose DESIGN.md, a design folder, or a connected design tool, and writes the same file by hand: seven colour roles (bg, surface, text, muted, border, primary, accent) for light and dark, the logo and mark paths, and the font families and files. Never invents a colour: a role it cannot find is left out and named, and yadflow''s value is used — or, with Impeccable, suggests one from the same palette, written only on the person''s yes. Then runs `yad brand check` and shows the person the result. Not a gated step — it never touches epic state or approvals. Use when the user says "use our brand", "theme the reports", "add our logo", "brand init", or "the pages should use our design system".'
+description: 'Make the pages yadflow generates use the Product''s own logo, colours and fonts, never inventing a colour. Use when the user says "use our brand", "theme the reports", "add our logo", "brand init", or "the pages should use our design system".'
 ---
 
 # yadflow — the Product's brand on every page (E184)

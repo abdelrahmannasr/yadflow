@@ -33,7 +33,7 @@ const setupSteps: FlowStep[] = [
     id: "install",
     title: "Install the Module",
     description:
-      "Run `npx yadflow setup` — the guided wizard copies all 41 yad-* skills into your IDE skill dirs and installs the module config into .sdlc/config.yaml. Idempotent; re-run `check --fix` any time.",
+      "Run `npx yadflow setup` — the guided wizard copies all 42 yad-* skills into your IDE skill dirs and installs the module config into .sdlc/config.yaml. Idempotent; re-run `check --fix` any time.",
     actor: "system",
     status: "installed",
     stepState: ".sdlc/config.yaml installed",
@@ -41,7 +41,7 @@ const setupSteps: FlowStep[] = [
     handler: "yad setup",
     activeComponents: ["product", "platform"],
     messages: [
-      { id: "in-1", from: "platform", to: "product", label: "install 41 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "in-1", from: "platform", to: "product", label: "install 42 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/cli-version.json stamped" },
   },
@@ -745,7 +745,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: start or join a workspace (yad new / init / join), install the 41 skills, then connect code repos (clone any missing with yad repo clone, and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
+      "One-time setup: start or join a workspace (yad new / init / join), install the 42 skills, then connect code repos (clone any missing with yad repo clone, and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
     category: "setup",
     steps: setupSteps,
   },

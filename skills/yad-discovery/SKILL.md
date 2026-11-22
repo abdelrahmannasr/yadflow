@@ -1,6 +1,6 @@
 ---
 name: yad-discovery
-description: 'The Foundation step of the gated SDLC — the Product level, run once per product before any feature epic. With the field-expert lenses (analyst + pm), frame the product and write the Foundation sections into foundation/ — purpose, market (optional), scope (what it is AND what it is not), MVP, roadmap, stack, repos, risks (optional). Greenfield AND brownfield (brownfield reads the connected code). The engine seeds the ledger with `yad foundation new`; this skill authors the sections, then hands off to the team review gate and never auto-advances. Its roadmap.md is the menu of features each yad-epic reads. Use when the user says "start the project", "write the Foundation", "do discovery", "market research / feasibility / roadmap", or "what should we build first".'
+description: 'The Foundation step, once per product: frame its purpose, scope, MVP, roadmap and stack, for review. Use when the user says "start the project", "write the Foundation", "do discovery", "market research / feasibility / roadmap", or "what should we build first".'
 ---
 
 # SDLC — Foundation (the Product level)
