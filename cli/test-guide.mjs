@@ -395,6 +395,128 @@ test('Build: the step is the Build loop, with its brief', async () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #242: each recommended skill says whether it is installed here, from the detection `yad skill recommend`
+// uses; in Build the picks are those of the step each open lane is on, each step once.
+test('#242 Build: the open lanes\' picks, each with its step and whether it is installed here', async () => {
+  const T = await product();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-home-'));
+  try {
+    const st = readState(T, 'EP-pay');
+    for (const s of st.steps) s.status = 'done';
+    st.currentStep = 'ready-for-build';
+    put(statePath(T, 'EP-pay'), st);
+    const lanes = (step) => ({ currentStep: step, steps: [{ id: step, status: 'in_progress' }] });
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S01.json'), { story: 'EP-pay-S01', repos: { api: lanes('implement'), web: lanes('implement') } });
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S02.json'), { story: 'EP-pay-S02', repos: { api: lanes('checks') } });
+    const tdd = (g) => g.step.skills.recommended.find((r) => r.skill === 'mattpocock-skills:tdd');
+    // Absent: an empty home folder holds no skill.
+    let g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(g.step.actionKind, 'build');
+    const steps = g.step.skills.recommended.map((r) => r.step);
+    assert.deepEqual([...new Set(steps)], ['implement', 'checks'], 'each open lane\'s step once, in lane order');
+    assert.equal(steps.filter((s) => s === 'implement').length, 3, 'two lanes on implement list its picks once');
+    assert.ok(g.step.skills.recommended.some((r) => r.step === 'checks' && r.skill === 'mattpocock-skills:diagnosing-bugs'));
+    assert.equal(tdd(g).installed, false);
+    assert.equal(tdd(g).decidedBy, 'human');
+    assert.match(tdd(g).bind, /^yad skill bind implement mattpocock-skills:tdd yad-implement/);
+    // Present: the mattpocock-skills plugin, with its tdd skill, installed in the home folder.
+    const at = path.join(H, 'plugin-copy');
+    put(path.join(at, 'skills/tdd/SKILL.md'), '---\nname: tdd\n---\n');
+    put(path.join(H, '.claude/plugins/installed_plugins.json'), { plugins: {
+      'mattpocock-skills@claude-plugins-official': [{ scope: 'user', installPath: at, version: '1.2.3' }] } });
+    g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(tdd(g).installed, true);
+    assert.equal(g.step.skills.recommended.find((r) => r.skill === 'mattpocock-skills:diagnosing-bugs').installed, false);
+    // Unknown: detection could not look, so nothing is claimed either way.
+    g = buildGuide(T, { epic: 'EP-pay', home: { toString() { throw new Error('boom'); } } });
+    assert.equal(tdd(g).installed, null);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+test('#242 a step with no recommendation lists none, and a lane that is shipped or skipped brings none', async () => {
+  const T = await product();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-home-'));
+  try {
+    const st = readState(T, 'EP-pay');
+    for (const s of st.steps) s.status = 'done';
+    st.currentStep = 'ready-for-build';
+    put(statePath(T, 'EP-pay'), st);
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S01.json'), { story: 'EP-pay-S01', repos: {
+      api: { currentStep: 'implement', status: 'skipped', record: { reason: 'no change', by: 'al', date: '2026-11-21' }, steps: [{ id: 'implement', status: 'todo' }] },
+    } });
+    const g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(g.step.actionKind, 'build');
+    assert.deepEqual(g.step.skills.recommended, [], 'a skipped lane brings no picks');
+    // An author step keeps its picks, now with `step` and `installed`.
+    const T2 = await product();
+    try {
+      const e = buildGuide(T2, { epic: 'EP-pay', home: H }).step.skills.recommended.find((r) => r.skill === 'bmad-prd');
+      assert.equal(e.step, 'epic');
+      assert.equal(e.installed, false);
+    } finally { fs.rmSync(T2, { recursive: true, force: true }); }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+test('#242 a shipped lane brings no picks, and a step with no pick never runs detection', async (t) => {
+  const T = await product();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-home-'));
+  try {
+    const st = readState(T, 'EP-pay');
+    for (const s of st.steps) s.status = 'done';
+    st.currentStep = 'ready-for-build';
+    put(statePath(T, 'EP-pay'), st);
+    const done = ['spec', 'tasks', 'implement', 'checks', 'engineer-review'].map((id) => ({ id, status: 'done' }));
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S01.json'), { story: 'EP-pay-S01', repos: { api: { currentStep: 'engineer-review', steps: done } } });
+    // Detection is the only reader of the home folder here: count every file-system call that reaches it.
+    let reads = 0;
+    for (const name of ['readdirSync', 'statSync', 'lstatSync', 'readFileSync', 'existsSync']) {
+      const orig = fs[name];
+      t.mock.method(fs, name, function (p, ...rest) {
+        if (String(p).startsWith(H)) reads += 1;
+        return orig.call(this, p, ...rest);
+      });
+    }
+    let g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(g.step.lanes[0].shipped, true);
+    assert.deepEqual(g.step.skills.recommended, [], 'a shipped lane brings no picks');
+    // A lane on spec: the catalogue has no pick for it, so the list is empty and nothing is detected.
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S02.json'), { story: 'EP-pay-S02', repos: { api: { currentStep: 'spec', steps: [{ id: 'spec', status: 'in_progress' }] } } });
+    g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(g.step.lanes.find((l) => l.story === 'EP-pay-S02').step, 'spec');
+    assert.deepEqual(g.step.skills.recommended, []);
+    assert.equal(reads, 0, 'detection never read the home folder');
+    assert.deepEqual(buildGuide(T, { epic: 'EP-pay', home: { toString() { throw new Error('detection ran'); } } }).step.skills.recommended, [],
+      'a home folder that throws is never touched when there is no pick');
+    // The count does see detection once a lane is on a step with picks.
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S03.json'), { story: 'EP-pay-S03', repos: { api: { currentStep: 'checks', steps: [{ id: 'checks', status: 'in_progress' }] } } });
+    g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.ok(reads > 0, 'detection ran for the checks picks');
+    assert.ok(g.step.skills.recommended.some((r) => r.step === 'checks'));
+    // And a home folder that cannot be read at all still answers, with installed: null.
+    g = buildGuide(T, { epic: 'EP-pay', home: { toString() { throw new Error('boom'); } } });
+    assert.ok(g.step.skills.recommended.every((r) => r.installed === null));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
+test('#242 a pick the step already runs says bound: true', async () => {
+  const T = await product();
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-guide-home-'));
+  try {
+    const st = readState(T, 'EP-pay');
+    for (const s of st.steps) s.status = 'done';
+    st.currentStep = 'ready-for-build';
+    put(statePath(T, 'EP-pay'), st);
+    put(path.join(T, 'epics/EP-pay/.sdlc/build-state/EP-pay-S01.json'), { story: 'EP-pay-S01', repos: { api: { currentStep: 'implement', steps: [{ id: 'implement', status: 'in_progress' }] } } });
+    const row = (g, skill) => g.step.skills.recommended.find((r) => r.skill === skill);
+    let g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(row(g, 'mattpocock-skills:tdd').bound, false);
+    execFileSync(process.execPath, [YAD, 'skill', 'bind', 'implement', 'mattpocock-skills:tdd', 'yad-implement'], { cwd: T, stdio: 'pipe', env: { ...process.env, HOME: H, USERPROFILE: H } });
+    g = buildGuide(T, { epic: 'EP-pay', home: H });
+    assert.equal(row(g, 'mattpocock-skills:tdd').bound, true);
+    assert.equal(row(g, 'tdd-workflow').bound, false, 'only the pick the chain runs');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(H, { recursive: true, force: true }); }
+});
+
 test('a ledger that does not load: the answer is yad doctor, never another epic', async () => {
   const T = await product();
   try {
