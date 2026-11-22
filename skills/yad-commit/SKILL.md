@@ -1,6 +1,6 @@
 ---
 name: yad-commit
-description: 'Build helper of the gated SDLC. Commit ONE staged atomic change by the conventions — a Conventional-Commits subject, the fixed trailer order (Task → Contract-Change → Ledger-Override, plus an OPTIONAL Co-Authored-By), and an atomic-file guard (≤3 files). By default the commit carries NO AI footer: the human git author owns it, and a Co-Authored-By trailer is added ONLY when --ai <id> is explicitly passed (claude|copilot|cursor|coderabbit; default none = human-only). The flag is the sole switch — never add the footer on the AI''s own initiative. Drives the zero-dependency `yad commit` CLI; never auto-advances. Use when the user says "commit this", "commit by convention", or "make an atomic commit".'
+description: 'Commit one staged atomic change by the conventions (subject, trailers, small-diff guard). Use when the user says "commit this", "commit by convention", or "make an atomic commit".'
 ---
 
 # SDLC — Commit by Convention (Build helper)

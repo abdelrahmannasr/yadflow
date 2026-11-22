@@ -1,6 +1,6 @@
 ---
 name: yad-checks
-description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unsigned commits — every commit carries a platform-Verified signature; write access to the repo decides who can author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid), plus an advisory risk-map check (warns when .sdlc/risk-map is stale). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build step C: wire and run the CI check gates on a code repo (spec link, contract, build/test/lint, signed commits). Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (Build Step C)

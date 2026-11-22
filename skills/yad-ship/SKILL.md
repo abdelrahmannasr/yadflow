@@ -1,6 +1,6 @@
 ---
 name: yad-ship
-description: 'Build helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change trailers, an OPTIONAL Co-Authored-By footer that is OFF by default and added only when --ai <id> is explicitly passed, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template, assigned to the logged-in gh/glab login with no reviewers requested. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
+description: 'Commit the staged task and open its PR/MR in one step. Never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR".'
 ---
 
 # SDLC — Commit + Open PR/MR (Build helper)
