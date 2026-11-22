@@ -80,7 +80,7 @@
     { "request": "Set up the merge request template for our GitLab repo.", "expect": "yad-pr-template", "why": "set up the MR template" },
 
     { "request": "Open a review PR on the Product for the architecture document so the team can comment.", "expect": "yad-product-bridge", "why": "open the review PR" },
-    { "request": "Wire it so approvals on the hub PR are synced back when it merges.", "expect": "yad-product-bridge", "why": "wire the gate sync" },
+    { "request": "Wire it so approvals on the Product review PR are synced back when it merges.", "expect": "yad-product-bridge", "why": "wire the gate sync" },
 
     { "request": "Is there code that shipped without any epic behind it?", "expect": "yad-reconcile", "why": "drift: shipped with no epic" },
     { "request": "Check our feature threads for broken lineage and any hotfix that was never reconciled.", "expect": "yad-reconcile", "why": "drift across threads" },
