@@ -9,6 +9,9 @@ and OpenAI accounts, and both must be installed and logged in. It never runs in 
 Run it before each release that changes what the agent reads (AGENTS.md, the `yad-guide` skill,
 `yad guide`), and before every minor or major release.
 
+Whether an agent picks the right skill from its description at all is a separate, cheaper run:
+[`docs/skill-trigger.md`](skill-trigger.md).
+
 ## Run it
 
 ```bash
