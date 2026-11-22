@@ -738,10 +738,10 @@ test('#244: every skill that runs yad starts with the yad-cli block word for wor
     // Right after the title, and below the frontmatter, so the description is never touched.
     const title = lines.findIndex((l, i) => i > lines.indexOf('---', 1) && /^# \S/.test(l));
     assert.ok(title > 0, `skills/${s}/SKILL.md has a # title below its frontmatter`);
-    assert.deepEqual(lines.slice(title + 1, title + 3), ['', YAD_CLI_BEGIN], `skills/${s}/SKILL.md: the block is right after the # title`);
+    assert.deepEqual(lines.slice(title + 1, title + 3), ['', YAD_CLI_BEGIN], `skills/${s}/SKILL.md: the block is not right after the # title — move it under the # title`);
   }
   // The skills that run no yad, each for a reason the rule or YAD_CLI_MENTIONS_ONLY gives.
-  assert.deepEqual(without.sort(), ['yad-connect-docs', 'yad-learn']);
+  assert.deepEqual(without.sort(), ['yad-connect-docs', 'yad-learn', 'yad-pr-template']);
   for (const s of Object.keys(YAD_CLI_MENTIONS_ONLY)) {
     const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
     assert.ok(ownLines(text).some((l) => /`yad [a-z]/.test(l)), `${s} still names a yad command; drop it from YAD_CLI_MENTIONS_ONLY if not`);
@@ -758,6 +758,7 @@ test('#244: the block checks for yad, says how to install it or use npx, and why
   const b = yadCliBlock();
   assert.ok(b.startsWith(`${YAD_CLI_BEGIN}\n`) && b.endsWith(`\n${YAD_CLI_END}`));
   assert.match(b, /`command -v yad`/, 'the check');
+  assert.match(b, /`\(Get-Command yad -ErrorAction SilentlyContinue\)\.Source`/, 'the PowerShell check also prints nothing or a path');
   assert.match(b, /`npm install -g yadflow@latest`/, 'the install');
   assert.match(b, /`npx -y yadflow@4 …`/, 'the way without the install');
   assert.match(b, /the CLI is what enforces the approvals/, 'why');
@@ -798,6 +799,29 @@ test('#244: the block goes right after the `# ` title, past the frontmatter and 
     assert.match(r.refused, /no `# ` title line/);
   }
   assert.deepEqual(withYadCliBlock('# S\n\nx\n', false), { text: '# S\n\nx\n', refused: null }, 'no block wanted, none there');
+});
+
+test('#244: a byte-order mark, a fence that does not close, markers in a fence, and mixed line endings', () => {
+  const block = yadCliBlock();
+  // A byte-order mark before the frontmatter, or before the title, as toolbox.mjs's sectionBounds allows.
+  const bom = "\uFEFF---\nname: s\ndescription: 'run `yad next`'\n---\n\n# S\n\nx\n";
+  assert.equal(skillRunsYad('s', bom), false, 'the frontmatter after a BOM is still frontmatter');
+  assert.equal(withYadCliBlock(bom, true).text, `\uFEFF---\nname: s\ndescription: 'run \`yad next\`'\n---\n\n# S\n\n${block}\n\nx\n`);
+  assert.equal(withYadCliBlock('\uFEFF# S\n\nx\n', true).text, `\uFEFF# S\n\n${block}\n\nx\n`, 'a title on the first line, after a BOM');
+  // A closing fence has nothing after its mark (CommonMark): "```js" inside a fence does not close it.
+  assert.equal(withYadCliBlock('```\n```js\n# not this\n```\n# S\n', true).text, `\`\`\`\n\`\`\`js\n# not this\n\`\`\`\n# S\n\n${block}\n`);
+  assert.equal(withYadCliBlock('````\n```\n# not this\n````\n# S\n', true).text, `\`\`\`\`\n\`\`\`\n# not this\n\`\`\`\`\n# S\n\n${block}\n`, 'a shorter mark does not close a longer fence');
+  assert.equal(skillRunsYad('s', '# S\n\n```\n``` x\n$ yad next\n```\n'), true, 'still in the fence: a code line');
+  // A marker or the E87 heading in a fence is an example, not a region: the text after it still counts.
+  assert.equal(skillRunsYad('s', '# S\n\n```md\n<!-- generated: x -->\n```\n\nRun `yad next`.\n\n<!-- end: x -->\n'), true, 'a generated marker in a fence');
+  assert.equal(skillRunsYad('s', `# S\n\n\`\`\`md\n${SKILL_FALLBACK_HEADING}\n\`\`\`\n\nRun \`yad next\`.\n\n${SKILL_FALLBACK_END}\n`), true, 'the E87 heading in a fence');
+  assert.deepEqual(ownLines('# S\n```\n<!-- generated: x -->\n```\nout'), ['# S', '```', '<!-- generated: x -->', '```', 'out']);
+  // Each line yad does not write keeps its own ending; yad's lines take the ending of the line they follow.
+  const mixed = '# S\r\nintro\nmore\r\n';
+  const put = withYadCliBlock(mixed, true).text;
+  assert.equal(put, `# S\r\n\r\n${block.replace(/\n/g, '\r\n')}\r\n\r\nintro\nmore\r\n`);
+  assert.equal(withYadCliBlock(put, false).text, '# S\r\n\r\nintro\nmore\r\n', 'taken out, the rest byte for byte');
+  assert.equal(withYadCliBlock('# S', true).text, `# S\n\n${block}\n`, 'a title with no newline at the end of the file');
 });
 
 test('#244: the sync writes, rewrites and removes the block, and refuses markers it cannot trust', () => {
