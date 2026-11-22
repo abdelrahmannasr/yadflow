@@ -142,6 +142,11 @@ jobs:
       - name: Agent acceptance checks (selftest)
         run: npm run test:agents:selftest
 
+      # The skill trigger check's reader, cases and scoring, with no model (no credit). The real run asks a
+      # model to pick a skill from the descriptions, before and after a change (docs/skill-trigger.md).
+      - name: Skill trigger checks (selftest)
+        run: npm run test:trigger:selftest
+
   # The Pages deploy (yad-docs.yml) builds these sites only after a merge, so a pull request that
   # breaks one was found only when the live site lost its page. Same Node as the deploy.
   docs-sites:

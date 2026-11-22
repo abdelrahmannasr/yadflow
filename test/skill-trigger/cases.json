@@ -1,0 +1,150 @@
+{
+  "about": "Requests for the skill trigger check (docs/skill-trigger.md). Each is written in a person's own words, not copied from any version's description, so no version gets an easy match. expect is the yad-* skill an agent should load first, or none; also lists other answers that are right too, for a request two skills genuinely share.",
+  "cases": [
+    { "request": "Before we write an epic, can you poke holes in this idea: a loyalty points wallet for repeat customers?", "expect": "yad-analysis", "why": "discovery brief before the epic" },
+    { "request": "I want a quick discovery brief on whether offline mode is worth building, before we commit to it.", "expect": "yad-analysis", "why": "pressure-test an idea" },
+
+    { "request": "The epic is approved. Let's design the system now and pin down the API between the backend and the app.", "expect": "yad-architecture", "why": "architecture + contract" },
+    { "request": "Write up how the components fit together for the checkout epic, including the shared interface the repos agree on.", "expect": "yad-architecture", "why": "architecture + contract" },
+
+    { "request": "We have a payments module that was built years ago with no docs. Can you write a spec for it from the code?", "expect": "yad-backfill", "why": "spec for an already-built feature" },
+    { "request": "Turn our legacy login code into proper specs so we can work on it the yadflow way.", "expect": "yad-backfill", "why": "spec legacy code" },
+
+    { "request": "Make the generated report pages use our company colours and logo instead of the default look.", "expect": "yad-brand", "why": "brand the generated pages" },
+    { "request": "We have a DESIGN.md with our palette. Can the yadflow pages follow it?", "expect": "yad-brand", "why": "design system on generated pages" },
+
+    { "request": "The order export shipped last month but customers now want CSV too. Log that as a change against the original epic.", "expect": "yad-change", "why": "change after the contract locked" },
+    { "request": "Users found a bug in the shipped checkout: totals round wrong. File it so it threads back to the checkout epic.", "expect": "yad-change", "why": "defect on a shipped epic" },
+
+    { "request": "Set up the CI gates on the mobile repo so every PR has to link a story and pass the contract check.", "expect": "yad-checks", "why": "wire the check gates" },
+    { "request": "Run the safety checks on this branch before it goes to review.", "expect": "yad-checks", "also": ["yad-run"], "why": "run the gates" },
+
+    { "request": "I've staged my change. Commit it with the right message format and trailers.", "expect": "yad-commit", "why": "commit only" },
+    { "request": "Make one clean conventional commit of what's staged, nothing else.", "expect": "yad-commit", "why": "commit only" },
+
+    { "request": "Hook up our Figma so the UI step can draw the screens there.", "expect": "yad-connect-design", "why": "connect a design tool" },
+    { "request": "Which design tool is this project connected to, and is the connection still good?", "expect": "yad-connect-design", "why": "list the design connection" },
+
+    { "request": "Set up GitHub Pages so the docs sites can be published.", "expect": "yad-connect-docs", "why": "connect a Pages target" },
+    { "request": "Our docs publishing target changed; refresh where the docs sites deploy to.", "expect": "yad-connect-docs", "why": "refresh the docs connection" },
+
+    { "request": "Connect DeepTutor so new teammates can be tutored on this project.", "expect": "yad-connect-learning", "why": "connect a learning tool" },
+    { "request": "Is a tutoring tool connected for this Product? If not, set one up.", "expect": "yad-connect-learning", "why": "learning connection" },
+
+    { "request": "Add our new backend repo to the Product so the planning steps know what code exists.", "expect": "yad-connect-repos", "why": "connect a code repo" },
+    { "request": "The code map for the engine repo is out of date. Refresh it.", "expect": "yad-connect-repos", "why": "refresh the code context" },
+
+    { "request": "Connect Playwright so the test cases can become real automated tests.", "expect": "yad-connect-testing", "why": "connect a testing tool" },
+    { "request": "Which testing tool is registered for this project?", "expect": "yad-connect-testing", "why": "list the testing connection" },
+
+    { "request": "Which review stage keeps letting bugs through? Break the defects down by where they should have been caught.", "expect": "yad-defects", "why": "defect report by gate" },
+    { "request": "Give me the bug report for the checkout thread, grouped by root cause.", "expect": "yad-defects", "why": "defect report" },
+
+    { "request": "We're starting a brand-new product. Help me write down its purpose, scope, MVP and roadmap first.", "expect": "yad-discovery", "why": "the Foundation" },
+    { "request": "Before any features, I want the product-level plan: what it is, what it is not, the stack, the first release.", "expect": "yad-discovery", "why": "the Foundation" },
+
+    { "request": "Build the interactive docs site for the checkout epic and publish it.", "expect": "yad-docs", "why": "one epic's docs site" },
+    { "request": "Generate a browsable site from this epic's approved architecture and stories.", "expect": "yad-docs", "why": "one epic's docs site" },
+
+    { "request": "Make the site that shows the whole project's process, every stage from setup to ship.", "expect": "yad-docs-overview", "why": "the overview site" },
+    { "request": "Regenerate the project-wide overview docs, not any single epic.", "expect": "yad-docs-overview", "why": "the overview site" },
+
+    { "request": "Some of our generated docs sites look stale. Which ones, and why?", "expect": "yad-docs-sync", "why": "docs staleness" },
+    { "request": "Add the CI job that rebuilds the docs sites whenever main changes.", "expect": "yad-docs-sync", "why": "wire the docs rebuild" },
+
+    { "request": "The PR for task T03 was approved by Sara. Record that review.", "expect": "yad-engineer-review", "why": "record the engineer review" },
+    { "request": "Turn on CodeRabbit as the first-pass reviewer on the backend repo's PRs.", "expect": "yad-engineer-review", "why": "wire the AI review" },
+
+    { "request": "I have an idea for a referral programme. Start a new epic for it.", "expect": "yad-epic", "why": "start an epic" },
+    { "request": "Write the epic document for push notifications: goal, scope, out of scope, acceptance signals.", "expect": "yad-epic", "why": "author the epic" },
+
+    { "request": "What should I do next on this project?", "expect": "yad-guide", "also": ["yad-status"], "why": "next step" },
+    { "request": "I just installed yadflow. Walk me through running it from this chat.", "expect": "yad-guide", "why": "run yadflow" },
+
+    { "request": "Do task T02 of story S01: write the code for it on its own branch.", "expect": "yad-implement", "why": "implement one task" },
+    { "request": "The tasks are spec'd. Implement the next one as a small diff.", "expect": "yad-implement", "why": "implement one task" },
+
+    { "request": "What's in our GitHub issues backlog right now?", "expect": "yad-issues", "why": "show the backlog" },
+    { "request": "Start an epic from issue 42.", "expect": "yad-issues", "why": "epic from an issue" },
+
+    { "request": "I don't understand what a contract lock is. Can you teach me, using this project as the example?", "expect": "yad-learn", "why": "tutor a concept" },
+    { "request": "Explain idempotency keys to me in the context of our checkout feature; I want to learn it.", "expect": "yad-learn", "why": "tutor a concept" },
+
+    { "request": "Push this branch and open the pull request from our template.", "expect": "yad-open-pr", "why": "open the PR only" },
+    { "request": "The commit is done. Now raise the merge request on GitLab.", "expect": "yad-open-pr", "why": "open the MR only" },
+
+    { "request": "Sit with me and review PR 88 together, one piece at a time, riskiest part first.", "expect": "yad-pair-review", "why": "pair review" },
+    { "request": "I'm new to code review. Walk me through this MR and teach me how to review it.", "expect": "yad-pair-review", "why": "guided review" },
+
+    { "request": "Add a pull request template with the impact and risk section to the mobile repo.", "expect": "yad-pr-template", "why": "add the PR template" },
+    { "request": "Set up the merge request template for our GitLab repo.", "expect": "yad-pr-template", "why": "set up the MR template" },
+
+    { "request": "Open a review PR on the Product for the architecture document so the team can comment.", "expect": "yad-product-bridge", "why": "open the review PR" },
+    { "request": "Wire it so approvals on the Product review PR are synced back when it merges.", "expect": "yad-product-bridge", "why": "wire the gate sync" },
+
+    { "request": "Is there code that shipped without any epic behind it?", "expect": "yad-reconcile", "why": "drift: shipped with no epic" },
+    { "request": "Check our feature threads for broken lineage and any hotfix that was never reconciled.", "expect": "yad-reconcile", "why": "drift across threads" },
+
+    { "request": "yad crashed with a stack trace when I ran gate sync. Report it to the yadflow maintainers.", "expect": "yad-report", "why": "bug in yadflow itself" },
+    { "request": "Something in the yadflow tool itself is broken. File an issue upstream for me.", "expect": "yad-report", "why": "bug in yadflow itself" },
+
+    { "request": "Give me a short summary of what this PR changes and where the risks are before I review it.", "expect": "yad-review-companion", "why": "trailer of a PR" },
+    { "request": "Make review cards for MR 17 so reviewing it is less of a chore.", "expect": "yad-review-companion", "why": "review cards" },
+
+    { "request": "The stories are drafted. Put them up for the team to review and approve.", "expect": "yad-review-gate", "why": "Shape review + approve" },
+    { "request": "Has the epic got enough approvals to move to architecture?", "expect": "yad-review-gate", "also": ["yad-status"], "why": "gate approvals" },
+
+    { "request": "Drive story S02 through spec, tasks, implement and checks in the backend repo, stopping where a person is needed.", "expect": "yad-run", "why": "the Build loop" },
+    { "request": "Stop all automation everywhere now: flip the kill switch.", "expect": "yad-run", "why": "kill switch" },
+
+    { "request": "Look over this branch for security holes and tech debt, and file what you find.", "expect": "yad-scan", "why": "scan a built change" },
+    { "request": "Check the change I just built for vulnerabilities before review.", "expect": "yad-scan", "why": "scan for vulnerabilities" },
+
+    { "request": "Commit what I staged and open the PR in one go.", "expect": "yad-ship", "why": "commit + PR together" },
+    { "request": "Ship this task: commit it and raise the merge request.", "expect": "yad-ship", "why": "commit + MR together" },
+
+    { "request": "Write the spec, plan and task list for story S03 in the mobile repo.", "expect": "yad-spec", "why": "spec a story" },
+    { "request": "Story S01 is ready for build. Break it into atomic tasks for the backend repo.", "expect": "yad-spec", "why": "spec a story" },
+
+    { "request": "Where is epic EP-checkout at, and what approvals is it still waiting for?", "expect": "yad-status", "also": ["yad-review-gate"], "why": "epic status" },
+    { "request": "Show me the trust record for the checks step.", "expect": "yad-status", "why": "trust record" },
+
+    { "request": "Break the approved epic into user stories and tag the repos each one touches.", "expect": "yad-stories", "why": "author the stories" },
+    { "request": "The UI design passed review. Write the stories now.", "expect": "yad-stories", "why": "author the stories" },
+
+    { "request": "Our old search feature has no epic at all, and I need to file a bug against it. Give it something to hang off.", "expect": "yad-stub", "why": "stub epic for a legacy feature" },
+    { "request": "Create a placeholder epic for the already-built invoices feature so changes can thread from it.", "expect": "yad-stub", "why": "stub epic" },
+
+    { "request": "Pull the latest default branch in every connected repo, skipping any with local changes.", "expect": "yad-sync-repos", "why": "sync the repos" },
+    { "request": "Put all our code repos back on main and up to date.", "expect": "yad-sync-repos", "why": "sync the repos" },
+
+    { "request": "The stories are approved. Write the test cases for them.", "expect": "yad-test-cases", "why": "author the test cases" },
+    { "request": "As the tester, I need the test plan for this epic's stories, and Playwright tests if we can.", "expect": "yad-test-cases", "why": "author the test cases" },
+
+    { "request": "How has the checkout feature changed over time, and which epic owns its architecture now?", "expect": "yad-timeline", "why": "feature timeline" },
+    { "request": "Show me the history of this feature thread from the first epic to the latest change.", "expect": "yad-timeline", "why": "feature timeline" },
+
+    { "request": "The architecture is approved. Design the screens and flows for this feature.", "expect": "yad-ui", "why": "author the UI design" },
+    { "request": "Write the UI design document for the merchant queue screens.", "expect": "yad-ui", "why": "author the UI design" },
+
+    { "request": "Commit this, but don't open any PR yet.", "expect": "yad-commit", "why": "confusable: commit vs ship" },
+    { "request": "The PR is open already; record the merge once it's in.", "expect": "yad-engineer-review", "why": "confusable: ship vs engineer review" },
+    { "request": "A bug was found in the shipped refund flow, which does have an epic. Log it.", "expect": "yad-change", "why": "confusable: change vs stub vs defects" },
+    { "request": "Rebuild just the checkout epic's docs site, nothing else.", "expect": "yad-docs", "why": "confusable: docs vs overview vs sync" },
+    { "request": "Approve-and-advance isn't what I want; just give me a quick overview card of this code PR.", "expect": "yad-review-companion", "why": "confusable: companion vs gate" },
+    { "request": "Pull new approvals from the epic's review PR into the ledger.", "expect": "yad-review-gate", "also": ["yad-product-bridge"], "why": "confusable: gate sync vs bridge" },
+    { "request": "Connect our GitLab code repo for the dashboard.", "expect": "yad-connect-repos", "why": "confusable: connect-repos vs other connectors" },
+    { "request": "Fetch and fast-forward the repos, don't re-pack anything.", "expect": "yad-sync-repos", "why": "confusable: sync vs connect-repos refresh" },
+
+    { "request": "Rename the variable userId to accountId across this TypeScript file.", "expect": "none", "why": "plain coding" },
+    { "request": "Why does this Python script throw a KeyError on line 40?", "expect": "none", "why": "plain debugging" },
+    { "request": "Write a SQL query that returns the top 10 customers by revenue.", "expect": "none", "why": "plain SQL" },
+    { "request": "Add a dark mode toggle to the settings page.", "expect": "none", "why": "plain feature code, no yadflow step named" },
+    { "request": "Explain what this regular expression matches.", "expect": "none", "why": "plain explanation" },
+    { "request": "Bump the lodash dependency to the latest version.", "expect": "none", "why": "dependency update" },
+    { "request": "Format this JSON file with two-space indentation.", "expect": "none", "why": "formatting" },
+    { "request": "What's the difference between a Promise and an async function?", "expect": "none", "why": "general question" },
+    { "request": "Write unit tests for the parseDate helper.", "expect": "none", "why": "plain tests" },
+    { "request": "Make the build faster; webpack takes two minutes.", "expect": "none", "why": "performance" }
+  ]
+}
