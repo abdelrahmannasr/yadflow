@@ -738,10 +738,10 @@ test('#244: every skill that runs yad starts with the yad-cli block word for wor
     // Right after the title, and below the frontmatter, so the description is never touched.
     const title = lines.findIndex((l, i) => i > lines.indexOf('---', 1) && /^# \S/.test(l));
     assert.ok(title > 0, `skills/${s}/SKILL.md has a # title below its frontmatter`);
-    assert.deepEqual(lines.slice(title + 1, title + 3), ['', YAD_CLI_BEGIN], `skills/${s}/SKILL.md: the block is right after the # title`);
+    assert.deepEqual(lines.slice(title + 1, title + 3), ['', YAD_CLI_BEGIN], `skills/${s}/SKILL.md: the block is not right after the # title — move it under the # title`);
   }
   // The skills that run no yad, each for a reason the rule or YAD_CLI_MENTIONS_ONLY gives.
-  assert.deepEqual(without.sort(), ['yad-connect-docs', 'yad-learn']);
+  assert.deepEqual(without.sort(), ['yad-connect-docs', 'yad-learn', 'yad-pr-template']);
   for (const s of Object.keys(YAD_CLI_MENTIONS_ONLY)) {
     const text = fs.readFileSync(path.join(ROOT, 'skills', s, 'SKILL.md'), 'utf8');
     assert.ok(ownLines(text).some((l) => /`yad [a-z]/.test(l)), `${s} still names a yad command; drop it from YAD_CLI_MENTIONS_ONLY if not`);
