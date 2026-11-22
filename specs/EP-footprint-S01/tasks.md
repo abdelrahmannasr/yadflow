@@ -74,3 +74,11 @@
 - README.md
 - docs/SKILLS.md
 - TEAM-GUIDE.md
+
+## T08 — Count 42 skills in the remaining docs, and list yad-brand in the team guide
+**Files:**
+- specs/EP-footprint-S01/tasks.md
+- docs/YADFLOW-EXPLAINED.md
+- TEAM-GUIDE.md
+- docs/sdlc-site/public/report.html
+- docs/sdlc-site/src/data/paths.ts

@@ -875,6 +875,7 @@ descriptions of all 42 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-docs` | Generate an epic's interactive documentation site from its approved artifacts, and publish it. Never a gate. |
 | `yad-docs-overview` | Generate the project-level overview site (`docs/sdlc-site/`) that shows every yadflow stage. |
 | `yad-docs-sync` | Report which generated docs sites are stale, and why; rebuild them on request. |
+| `yad-brand` | Make the pages yadflow generates (docs sites, reports) use the Product's own logo, colours and fonts, from its design system. Never invents a colour; not a gated step. |
 | `yad-report` | File a bug against yadflow with privacy-safe diagnostics. It shows you the exact text and asks before posting. |
 | `yad-guide` | The rules for an AI agent running yadflow: read `yad guide --json` before each step, brief you, do its part, and hand you yours with the exact steps. |
 
