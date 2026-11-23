@@ -22,7 +22,6 @@ export const BRAIN_BLOCK_END = '<!-- end: brain -->';
 // What each skill asks, where it writes down what it used, and what it does with no brain. Markdown.
 export const BRAIN_SKILLS = Object.freeze({
   'yad-architecture': {
-    brainFirst: true,
     asks: [
       '- **What is already there.** For each area the epic changes, run `yad brain query <area word> --json`: the stories, contracts, contract surfaces and ships already in that area. Do not re-define a surface the brain shows is shipped.',
       '- **Who a contract change reaches.** For each existing file the new contract surface lands in, run `yad brain file <repo>/<path> --json`. Its `usedBy` files are the callers a change to that surface reaches: name them in the architecture\'s risks.',
@@ -31,7 +30,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps and the pack as above',
   },
   'yad-stories': {
-    brainFirst: true,
     asks: [
       '- **Work already done.** For each area a story covers, run `yad brain query <area word> --json`: past stories and ships there. A name match is not proof: when a story looks like work the brain shows is shipped, keep the story and ask the person before you write it ("<story> looks shipped as <ship> — drop it, or keep it?"). When no one is there to answer, keep it and list the question in your Step 7 report. Never drop scope yourself.',
       '- **Real anchors for "Notes for build".** For each existing file a story\'s notes name, run `yad brain file <repo>/<path> --json` and name its main `usedBy` files in the notes, so the build half knows what the change reaches.',
@@ -40,7 +38,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps as above',
   },
   'yad-spec': {
-    brainFirst: true,
     asks: [
       '- **The story across its repos.** Run `yad brain story <story-id> --json`: the tasks other repos already have for this story. When one of them already covers a change the tasks here plan, fix the tasks here so the repos line up.',
       '- **Complete Files lists.** Once the tasks are written (by `/speckit.tasks`, by hand, or in the light block), run `yad brain file <repo>/<path> --json` for each existing file a task declares. A `usedBy` file that must change with it (its test, a caller whose call changes) goes in that task\'s **Files:** list, or in a task of its own when the list would pass 3 files. Fix the tasks before you stop: a task that misses one is stopped later by the file-boundary rule.',
@@ -50,7 +47,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'keep the tasks as written',
   },
   'yad-implement': {
-    brainFirst: true,
     asks: [
       '- **What the edit reaches.** After reading the task\'s **Files:** list, run `yad brain file <repo>/<path> --json` for each declared file. Its `usedBy` files are what the edit can reach.',
       '- **The file boundary stands.** Never edit a file outside the declared list because the brain names it. A `usedBy` file that may need a change is named in your report as a dependent outside the task\'s files; when the change cannot work without it, it is a scope overrun (Step 4).',
@@ -72,7 +68,8 @@ export function brainBlockLines(skill) {
     '',
     '**Ask the project brain (E179).** The brain (`.sdlc/brain/graph.json`, built by `yad brain build` on this machine) joins the stories, tasks and contracts to the code: who declares a file, what uses it, what shipped. It is optional: use it when it is there, and never stop for it. It never lifts a rule above — a stale code-map still means flag and stop.',
     '',
-    ...(s.brainFirst ? [BRAIN_FIRST_LINE, ''] : []),
+    BRAIN_FIRST_LINE,
+    '',
     '1. Run `yad brain status --json` and read its `state`, and each `repos[].state`:',
     '   - `current`, and no repo `behind` or `unknown`: the brain is **current**. Use it as below.',
     '   - `behind`, or any repo `behind` or `unknown` (its code moved since the build, or its commit cannot be read): the brain is **behind**. Use it, knowing an answer may miss the newest code, and suggest `yad brain build` to the person. Do not run it inside this step: it runs Graphify over every connected repo, which can take minutes, and writes `graphify-out/` (kept out of git) in each.',

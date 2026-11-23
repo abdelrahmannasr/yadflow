@@ -740,6 +740,8 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
     assert.match(block, /Skip step 2, .*, and still do step 3/);
     assert.match(block, /A refusal .* go on without it/);
     assert.match(block, /never lifts a rule above/);
+    // EP-brain-first-S04: each block holds the paragraph, right after its opening one.
+    assert.equal(lines[b + 4], BRAIN_FIRST_LINE, `${skill}: the Brain first paragraph`);
   }
   // EP-brain-first-S04: the block says the brain is asked first, and when the other tools are used.
   assert.match(BRAIN_FIRST_LINE, /^\*\*Brain first\.\*\* .*ask the brain before you search the repo or read files, the pack or the code-map for the same answer.*only when the brain has no answer.*What a file contains is not a brain question/);
