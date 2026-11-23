@@ -34,7 +34,7 @@ const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk
 const GIT_ENV = Object.fromEntries(
   Object.entries(process.env).filter(
     ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)
-      && !['SDLC_BASE', 'SDLC_HUB_CONFIG', 'SDLC_PRODUCT_CONFIG', 'YAD_TEST_MAX_WORKERS'].includes(k),
+      && !['SDLC_BASE', 'SDLC_HUB_CONFIG', 'SDLC_PRODUCT_CONFIG', 'YAD_TEST_MAX_WORKERS', 'GITHUB_EVENT_PATH'].includes(k),
   ),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
@@ -5510,6 +5510,48 @@ test('pr-template gate: the real code template passes; a stripped body fails', (
   assert.equal(r.code, 1);
   assert.match(r.out, /does not use the template/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: a Dependabot PR passes without the template; the author comes from the PR event, login and type both', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  try {
+    const free = body(T, 'Bumps [eslint](https://github.com/eslint/eslint) from 10.0.0 to 10.1.0.');
+    let n = 0;
+    const file = (text) => { const f = path.join(T, `event-${n++}.json`); fs.writeFileSync(f, text); return f; };
+    const event = (user) => file(JSON.stringify({ pull_request: { user } }));
+    const run = (env, args = ['--profile', 'code', free]) => runGate(PR_TEMPLATE, T, args, env);
+
+    const bot = event({ login: 'dependabot[bot]', type: 'Bot' });
+    const ok = run({ GITHUB_EVENT_PATH: bot });
+    assert.equal(ok.code, 0, ok.out);
+    assert.match(ok.out, /PASS \[pr-template\]: a Dependabot PR/);
+    // The Product profile too, on a non-review head.
+    assert.equal(run({ GITHUB_EVENT_PATH: bot }, ['--profile', 'product', '--head', 'dependabot/npm/x', free]).code, 0);
+
+    // A Dependabot PR that changes a Shape artifact is never exempt: the bypass guard still holds.
+    const artifact = path.join(T, 'changed.txt');
+    fs.writeFileSync(artifact, 'epics/EP-demo/architecture.md\n');
+    const guarded = run({ GITHUB_EVENT_PATH: bot }, ['--profile', 'product', '--head', 'dependabot/npm/x', '--changed', artifact, free]);
+    assert.equal(guarded.code, 1, guarded.out);
+    assert.match(guarded.out, /Shape artifacts/);
+
+    // Not Dependabot: the login alone, a person, another bot, a broken or missing event file, or none.
+    for (const [why, env] of [
+      ['type User', { GITHUB_EVENT_PATH: event({ login: 'dependabot[bot]', type: 'User' }) }],
+      ['a person', { GITHUB_EVENT_PATH: event({ login: 'alice', type: 'User' }) }],
+      ['another bot', { GITHUB_EVENT_PATH: event({ login: 'renovate[bot]', type: 'Bot' }) }],
+      ['not JSON', { GITHUB_EVENT_PATH: file('not json') }],
+      ['no pull_request', { GITHUB_EVENT_PATH: file('{}') }],
+      ['a null user', { GITHUB_EVENT_PATH: file(JSON.stringify({ pull_request: { user: null } })) }],
+      ['a folder', { GITHUB_EVENT_PATH: T }],
+      ['a missing file', { GITHUB_EVENT_PATH: path.join(T, 'nope.json') }],
+      ['no event', {}],
+    ]) {
+      const r = run(env);
+      assert.equal(r.code, 1, `${why}: ${r.out}`);
+      assert.match(r.out, /does not use the template/, why);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('pr-template gate: a prepended companion trailer block does not break the check', () => {

@@ -51,6 +51,9 @@ async function loadGateSync() {
   const { gateSync } = await import('./gate.mjs');
   return (root, opts = {}) => gateSync(root, { contentAt: headIsCurrent, ...opts });
 }
+// The PR event GitHub Actions hands this job: on a Dependabot PR, pr-template.sh reads it and passes any
+// body, so a gate a test runs would answer for the CI run instead of for the test's own input.
+delete process.env.GITHUB_EVENT_PATH;
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
 // and semantic-release exports them during `npm publish` (prepublishOnly runs this suite) — test
 // commits must carry the identity each test sets, not the publisher's.

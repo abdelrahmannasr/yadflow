@@ -652,12 +652,19 @@ from any branch (#512). None is reviewed, and a `review/EP-*` branch would advan
 **Exemptions:** lines inside `<!-- yad:trailer -->` … `<!-- /yad:trailer -->` and lines marked
 `<!-- yad:noblock -->` are ignored. Owner-file-only Product PRs, as in pr-title.
 
+**Dependabot PRs pass.** Dependabot writes its own description and rewrites it on every rebase, so it
+cannot carry the template. On GitHub, a PR whose author is `dependabot[bot]` with account type `Bot`
+passes. The gate reads the author from the PR event that GitHub Actions gives every job
+(`GITHUB_EVENT_PATH`), not from the person who last edited or re-ran it. A Dependabot PR that changes
+Shape artifacts still fails, as in pr-title. The exemption follows who opened the PR: a description
+edited later, or extra commits pushed to a Dependabot PR, are not checked against the template.
+
 **GitLab cuts long descriptions.** GitLab gives CI only the first 2700 characters of a description. In
 GitLab CI, when the description was cut, the gate reads the whole text from GitLab's API, with the
 `GITLAB_TOKEN` (or `SDLC_API_TOKEN`) CI/CD variable, else the job's own token. If that fails, it checks
 the cut text and prints a `NOTE` saying why, and what to change when a token change would help.
 
-**Reads:** the description; on the Product, the branch name and the changed paths.
+**Reads:** the description; on GitHub, the PR author from the event file; on the Product, the branch name and the changed paths.
 
 | Message (after `FAIL [pr-template]: …`) | What to change |
 |---|---|
