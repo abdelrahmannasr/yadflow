@@ -33404,6 +33404,102 @@ function packNpx(T) {
   };
 }
 
+// EP-brain-first-S01: a refresh rewrites the registry and the pack, and the brain reads both, so a refresh that
+// packed a repo names `yad brain build` as the next command: in its last hand-off line, and in `next` under
+// --json (hand-off lines go to stderr there). One that packed nothing names nothing.
+test('EP-brain-first-S01: yad repo refresh names yad brain build after a pack, and nothing when nothing was packed', { skip: E125_SKIP }, () => {
+  const T = e79Tmp();
+  try {
+    const { product } = e80Workspace(T);
+    const npx = packNpx(T);
+    const regFile = path.join(product, '.sdlc', 'repos.json');
+    const one = fs.readFileSync(regFile, 'utf8');
+    // One repo packed: the line comes last, after the two hand-off lines, and names the repo.
+    const plain = e79Yad(T, product, ['repo', 'refresh'], npx.env);
+    assert.equal(plain.status, 0, plain.stdout + plain.stderr);
+    const text = plain.stdout + plain.stderr;
+    assert.match(text, /refreshed 1 repo\(s\)/);
+    assert.match(text, /`yad brain build --repo backend`/);
+    assert.ok(text.indexOf('yad brain build') > text.indexOf('yad repo refresh --push'), 'after the publish hand-off');
+    assert.match(text, /after the code-map is written again/);
+    fs.writeFileSync(regFile, one);
+    const json = e79Yad(T, product, ['repo', 'refresh', '--json'], npx.env);
+    assert.equal(json.status, 0, json.stdout + json.stderr);
+    const got = JSON.parse(json.stdout);
+    assert.equal(got.refreshed, 1);
+    assert.deepEqual(got.next, ['yad brain build --repo backend']);
+    assert.deepEqual(got.repos.map((r) => [r.name, r.refreshed]), [['backend', true]], 'the fields it had are unchanged');
+    assert.equal(got.published, null);
+    // Two repos packed: the whole brain is built.
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [{ name: 'backend', path: '../backend' }, { name: 'api', path: '../backend' }] }));
+    const two = JSON.parse(e79Yad(T, product, ['repo', 'refresh', '--json'], npx.env).stdout);
+    assert.equal(two.refreshed, 2);
+    assert.deepEqual(two.next, ['yad brain build']);
+    // A name `yad brain build --repo` would refuse is never put on the command line: not one plain word, a
+    // `..` in it, or a name another repo shares in another case (review 1).
+    for (const repos of [
+      [{ name: 'back end;x', path: '../backend' }],
+      [{ name: 'api..v2', path: '../backend' }],
+      [{ name: 'constructor', path: '../backend' }],
+    ]) {
+      fs.writeFileSync(regFile, JSON.stringify({ repos }));
+      const odd = JSON.parse(e79Yad(T, product, ['repo', 'refresh', '--json'], npx.env).stdout);
+      assert.equal(odd.refreshed, 1, repos[0].name);
+      assert.deepEqual(odd.next, ['yad brain build'], repos[0].name);
+    }
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [{ name: 'Api', path: '../backend' }, { name: 'api', path: '../gone' }] }));
+    const cased = JSON.parse(e79Yad(T, product, ['repo', 'refresh', 'Api', '--json'], npx.env).stdout);
+    assert.equal(cased.refreshed, 1);
+    assert.deepEqual(cased.next, ['yad brain build']);
+    // Nothing packed (Repomix fails; an unknown name; a repo not cloned here): no line, and an empty list.
+    fs.writeFileSync(regFile, one);
+    const failed = e79Yad(T, product, ['repo', 'refresh'], { ...npx.env, NPX_FAIL: '1' });
+    assert.match(failed.stdout + failed.stderr, /nothing refreshed/);
+    assert.doesNotMatch(failed.stdout + failed.stderr, /yad brain build/);
+    assert.deepEqual(JSON.parse(e79Yad(T, product, ['repo', 'refresh', '--json'], { ...npx.env, NPX_FAIL: '1' }).stdout).next, []);
+    assert.deepEqual(JSON.parse(e79Yad(T, product, ['repo', 'refresh', 'ghost', '--json'], npx.env).stdout).next, []);
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [{ name: 'gone', path: '../gone' }] }));
+    const gone = e79Yad(T, product, ['repo', 'refresh', '--json'], npx.env);
+    assert.deepEqual(JSON.parse(gone.stdout).next, []);
+    assert.doesNotMatch(gone.stdout + gone.stderr, /yad brain build/);
+    // No repo registered: an empty list too.
+    fs.writeFileSync(regFile, JSON.stringify({ repos: [] }));
+    assert.deepEqual(JSON.parse(e79Yad(T, product, ['repo', 'refresh', '--json'], npx.env).stdout).next, []);
+    // --push from a Product that cannot publish (no git here): refused before anything is packed.
+    fs.writeFileSync(regFile, one);
+    const refused = e79Yad(T, product, ['repo', 'refresh', '--push', '--json'], npx.env);
+    assert.deepEqual(JSON.parse(refused.stdout).next ?? [], []);
+    assert.doesNotMatch(refused.stdout + refused.stderr, /yad brain build/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// With --push the line comes after the publish, and never says the publish went through (review 1).
+test('EP-brain-first-S01: yad repo refresh --push names yad brain build after the publish', { skip: E125_SKIP }, async () => {
+  const prev = process.exitCode;
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
+  const savedPath = process.env.PATH;
+  try {
+    const npx = packNpx(T);
+    fs.rmSync(path.join(T, 'npx-calls.log'), { force: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: path.relative(T, backend), platform: 'github', default_branch: 'main' }] }));
+    fs.writeFileSync(path.join(T, '.gitignore'), 'npx-bin/\nnpx-calls.log\n');
+    git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'registry');
+    process.env.PATH = npx.env.PATH;
+    process.exitCode = 0;
+    let r;
+    const out = await grab(async () => { r = await runRepo(T, { action: 'refresh', push: true, today: '2026-11-23' }); });
+    assert.equal(r.refreshed, 1, out);
+    assert.deepEqual(r.next, ['yad brain build --repo backend']);
+    assert.match(out, /last, whatever the publish did, build the project brain on this machine: `yad brain build --repo backend`/);
+    assert.doesNotMatch(out, /after the code-map is written again and published/);
+    assert.ok(out.indexOf('yad brain build') > out.indexOf('refreshed 1 repo(s)'));
+  } finally {
+    process.env.PATH = savedPath;
+    process.exitCode = prev;
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('#213: yad repo pack runs npx from an empty folder of its own, names the registry, and passes --include, --logs and absolute paths', { skip: E125_SKIP }, async () => {
   const { REPOMIX_VERSION } = await import('./toolbox.mjs');
   const T = e79Tmp();

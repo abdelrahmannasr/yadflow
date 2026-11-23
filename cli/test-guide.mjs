@@ -148,6 +148,10 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   assert.deepEqual(HUMAN_ONLY_ACTS.map((a) => a.id), ['approve-merge', 'login', 'secrets', 'signing-key', 'platform-settings']);
   assert.ok(NEVER.some((n) => n.id === 'force-push'));
   assert.ok(RULES.some((r) => r.id === 'report'));
+  // EP-brain-first-S01: a refresh leaves the brain behind, so a rule names the build that follows it.
+  const afterRefresh = RULES.find((r) => r.id === 'brain-after-refresh');
+  assert.ok(afterRefresh, 'the brain-after-refresh rule');
+  for (const re of [/`yad repo refresh`/, /`yad check --fix`/, /`yad brain build`/, /`--repo <name>`/, /code-map is written again/, /`yad repo refresh --push`/, /without asking/, /Never stop for it/, /Graphify/]) assert.match(afterRefresh.text, re);
 });
 
 test('a command named alone runs its default action, and is classed as that action', () => {

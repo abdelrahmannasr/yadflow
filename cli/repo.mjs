@@ -15,6 +15,7 @@ import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPa
 import { gitHead, packRepo, runRepomix } from './setup.mjs';
 import { publishCodeContext, publishTarget, packOf, codeMapOf } from './repo-publish.mjs';
 import { PREVIEW_KEY, patternProblems } from './preview.mjs';
+import { safeName } from './brain.mjs';
 
 // Why `refresh` will not pack this entry, or null when it will (E81): see the loop in `runRepo`.
 function notPackable(root, repo, j) {
@@ -65,8 +66,8 @@ function defaultBranch(cwd, repo) {
 export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false, include, logs = false, out } = {}) {
   const { regPath, registry, problem } = load(root);
   // A refresh that stops here published nothing, and says so as every refused refresh does (`published: null`).
-  if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [], ...(action === 'refresh' ? { refreshed: 0, published: null } : {}) }; }
-  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [] }; }
+  if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [], ...(action === 'refresh' ? { refreshed: 0, published: null, next: [] } : {}) }; }
+  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { action, repos: [], ...(action === 'refresh' ? { next: [] } : {}) }; }
   // An entry that is not an object (`null`, `5`) is named where it would be acted on, never dereferenced.
   const isEntry = (r) => !!r && typeof r === 'object' && !Array.isArray(r);
   const odd = registry.repos.filter((r) => !isEntry(r)).length;
@@ -107,14 +108,15 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
 
   if (action === 'refresh') {
     const targets = name ? entries.filter((r) => r.name === name) : entries;
-    if (name && !targets.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return { action, refreshed: 0, repos: [], published: null }; }
+    if (name && !targets.length) { fail(`unknown repo: ${shown(name)}`); process.exitCode = 1; return { action, refreshed: 0, repos: [], published: null, next: [] }; }
     // With --push the branch is checked BEFORE the packs and the registry are written (#632): a refused
     // branch leaves the Product as it was.
     const target = push ? publishTarget(root, { allowBranch }) : null;
-    if (push && !target) return { action, refreshed: 0, repos: [], published: null };
+    if (push && !target) return { action, refreshed: 0, repos: [], published: null, next: [] };
     let refreshed = 0;
     let published = null;
     const rows = [];
+    const packedNames = [];
     for (const repo of targets) {
       // Judged before git runs (E81), as `sync` judges it: only a checkout that is there is packed, never
       // one reached through a link inside a repo's tree (repomix would pack wherever the link points,
@@ -134,6 +136,7 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
         repo.syncedHead = head;
         if (today) repo.lastSyncedAt = today;   // always stamp when a date is supplied (the CLI passes today)
         refreshed++;
+        packedNames.push(repo.name);
       }
       rows.push({ name: repo.name ?? null, refreshed: packed, head: head || null });
     }
@@ -145,7 +148,7 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
       // A refusal stops here, `--push` included (E81 review 18): nothing is published after it.
       fail(`${path.dirname(PROJECT_FILES.reposRegistry)} in the Product is a link — ${PROJECT_FILES.reposRegistry} was not written`);
       process.exitCode = 1;
-      return { action, refreshed, repos: rows, published: null };
+      return { action, refreshed, repos: rows, published: null, next: [] };
     }
     writeJSON(regPath, registry);
     refreshed ? ok(`refreshed ${refreshed} repo(s)`) : info('nothing refreshed');
@@ -160,9 +163,24 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
       hand('regenerate the code-map in your AI agent (yad-connect-repos) — the pack is cached, the map is the AI step');
       hand('then publish it to the Product default branch with `yad repo refresh --push`');
     }
+    // A repo is packed again because its code moved, and the refresh stamps the registry, which the project
+    // brain reads (E176) with the code-map written after it: so a refresh that packed a repo leaves the brain
+    // behind. Name the build as the next command (EP-brain-first-S01). `next` carries it for a --json reader,
+    // whom the hand-off lines never reach. One repo packed: only its code graph is built again, and its name
+    // goes on the command line only when `yad brain build --repo` takes it (`brainRepos`: one plain word that
+    // no other repo shares in another case). With --push the line does not say the publish went through: the
+    // brain is kept on this machine, and the registry is written either way.
+    const next = [];
+    if (packedNames.length) {
+      const one = packedNames.length === 1 ? packedNames[0] : null;
+      const sameName = (r) => r && typeof r === 'object' && typeof r.name === 'string' && r.name.toLowerCase() === one.toLowerCase();
+      const only = safeName(one) && entries.filter(sameName).length === 1 ? one : null;
+      next.push(only ? `yad brain build --repo ${only}` : 'yad brain build');
+      hand(`${push ? 'last, whatever the publish did,' : 'last, after the code-map is written again and published,'} build the project brain on this machine: \`${next[0]}\``);
+    }
     // `published`: what `--push` did (`{ message, committed, pushed }`), or null when it committed nothing
     // — nothing to publish, or a refusal, which the answer's `error` then names.
-    return { action, refreshed, repos: rows, published };
+    return { action, refreshed, repos: rows, published, next };
   }
 
   if (action === 'sync') {
