@@ -45,6 +45,15 @@ skill that reads the code-maps before its block still does. The pre-approved com
   2. two skills are marked and written again;
   3. the other two are marked and written again;
   4. the mark is taken out: the paragraph is in every block. No skill file changes in this step.
+- Q: "The questions in step 2": which step 2 (review 1)? → A: the block's own list. Each skill also has a
+  heading "Step 2", so the paragraph now says `under "2. Ask it" below`.
+- Q: Two skills load the code-maps before the block. Does the paragraph clash with that (review 1)? → A: no,
+  and it now says so: the skill's own steps still stand, and a code-map a step above already loaded
+  stays loaded. It also says that after a declined prompt the brain is not asked again in the session,
+  as the S03 rule does.
+- Q: How are the new words split into commits (review 1)? → A: the same way as before: the source learns
+  the new words for a marked skill (T05), two skills at a time are marked and written (T06, T07), then
+  the mark and the old words are taken out, with a sentence in `docs/CLI.md` (T08).
 
 ## Plan
 
@@ -79,4 +88,27 @@ Check after each task: `node scripts/brain-skills.mjs --check`, `node cli/test-b
 **Files:**
 - cli/brain-skills.mjs
 - cli/test-brain.mjs
+
+## T05 — Teach the block the clearer Brain first words, for a marked skill (review fixes)
+**Files:**
+- cli/brain-skills.mjs
+- cli/test-brain.mjs
+
+## T06 — Write the clearer words into the architecture and stories skills
+**Files:**
+- cli/brain-skills.mjs
+- skills/yad-architecture/SKILL.md
+- skills/yad-stories/SKILL.md
+
+## T07 — Write the clearer words into the spec and implement skills
+**Files:**
+- cli/brain-skills.mjs
+- skills/yad-spec/SKILL.md
+- skills/yad-implement/SKILL.md
+
+## T08 — Keep only the clearer words, and say brain first in the command reference
+**Files:**
+- cli/brain-skills.mjs
+- cli/test-brain.mjs
+- docs/CLI.md
 <!-- /yad:tasks -->
