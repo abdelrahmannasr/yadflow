@@ -40,6 +40,7 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps as above',
   },
   'yad-spec': {
+    brainFirst: true,
     asks: [
       '- **The story across its repos.** Run `yad brain story <story-id> --json`: the tasks other repos already have for this story. When one of them already covers a change the tasks here plan, fix the tasks here so the repos line up.',
       '- **Complete Files lists.** Once the tasks are written (by `/speckit.tasks`, by hand, or in the light block), run `yad brain file <repo>/<path> --json` for each existing file a task declares. A `usedBy` file that must change with it (its test, a caller whose call changes) goes in that task\'s **Files:** list, or in a task of its own when the list would pass 3 files. Fix the tasks before you stop: a task that misses one is stopped later by the file-boundary rule.',
@@ -49,6 +50,7 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'keep the tasks as written',
   },
   'yad-implement': {
+    brainFirst: true,
     asks: [
       '- **What the edit reaches.** After reading the task\'s **Files:** list, run `yad brain file <repo>/<path> --json` for each declared file. Its `usedBy` files are what the edit can reach.',
       '- **The file boundary stands.** Never edit a file outside the declared list because the brain names it. A `usedBy` file that may need a change is named in your report as a dependent outside the task\'s files; when the change cannot work without it, it is a scope overrun (Step 4).',
