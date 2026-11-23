@@ -22,7 +22,6 @@ export const BRAIN_BLOCK_END = '<!-- end: brain -->';
 // What each skill asks, where it writes down what it used, and what it does with no brain. Markdown.
 export const BRAIN_SKILLS = Object.freeze({
   'yad-architecture': {
-    reworded: true,
     asks: [
       '- **What is already there.** For each area the epic changes, run `yad brain query <area word> --json`: the stories, contracts, contract surfaces and ships already in that area. Do not re-define a surface the brain shows is shipped.',
       '- **Who a contract change reaches.** For each existing file the new contract surface lands in, run `yad brain file <repo>/<path> --json`. Its `usedBy` files are the callers a change to that surface reaches: name them in the architecture\'s risks.',
@@ -31,7 +30,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps and the pack as above',
   },
   'yad-stories': {
-    reworded: true,
     asks: [
       '- **Work already done.** For each area a story covers, run `yad brain query <area word> --json`: past stories and ships there. A name match is not proof: when a story looks like work the brain shows is shipped, keep the story and ask the person before you write it ("<story> looks shipped as <ship> — drop it, or keep it?"). When no one is there to answer, keep it and list the question in your Step 7 report. Never drop scope yourself.',
       '- **Real anchors for "Notes for build".** For each existing file a story\'s notes name, run `yad brain file <repo>/<path> --json` and name its main `usedBy` files in the notes, so the build half knows what the change reaches.',
@@ -40,7 +38,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps as above',
   },
   'yad-spec': {
-    reworded: true,
     asks: [
       '- **The story across its repos.** Run `yad brain story <story-id> --json`: the tasks other repos already have for this story. When one of them already covers a change the tasks here plan, fix the tasks here so the repos line up.',
       '- **Complete Files lists.** Once the tasks are written (by `/speckit.tasks`, by hand, or in the light block), run `yad brain file <repo>/<path> --json` for each existing file a task declares. A `usedBy` file that must change with it (its test, a caller whose call changes) goes in that task\'s **Files:** list, or in a task of its own when the list would pass 3 files. Fix the tasks before you stop: a task that misses one is stopped later by the file-boundary rule.',
@@ -50,7 +47,6 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'keep the tasks as written',
   },
   'yad-implement': {
-    reworded: true,
     asks: [
       '- **What the edit reaches.** After reading the task\'s **Files:** list, run `yad brain file <repo>/<path> --json` for each declared file. Its `usedBy` files are what the edit can reach.',
       '- **The file boundary stands.** Never edit a file outside the declared list because the brain names it. A `usedBy` file that may need a change is named in your report as a dependent outside the task\'s files; when the change cannot work without it, it is a scope overrun (Step 4).',
@@ -63,7 +59,6 @@ export const BRAIN_SKILLS = Object.freeze({
 // EP-brain-first-S04: the brain is asked before the other tools, for the questions the block asks. It says
 // "for the same answer" so a skill's own steps (its code-map check, its declared files) still stand.
 export const BRAIN_FIRST_LINE = '**Brain first.** For the questions under "2. Ask it" below, ask the brain before you search the repo or read files, the pack or the code-map for the same answer. Go to those only when the brain has no answer: it is **none**, the answer is empty, or the command refuses or is declined (after a declined prompt, do not ask it again in this session). What a file contains is not a brain question: read the file. The skill\'s own steps still stand: a code-map a step above already loaded stays loaded.';
-const BRAIN_FIRST_LINE_OLD = '**Brain first.** For the questions in step 2, ask the brain before you search the repo or read files, the pack or the code-map for the same answer. Go to those only when the brain has no answer: it is **none**, the answer is empty, or the command refuses or is declined. What a file contains is not a brain question: read the file.';
 
 // The block's lines for one skill, between the markers.
 export function brainBlockLines(skill) {
@@ -73,7 +68,7 @@ export function brainBlockLines(skill) {
     '',
     '**Ask the project brain (E179).** The brain (`.sdlc/brain/graph.json`, built by `yad brain build` on this machine) joins the stories, tasks and contracts to the code: who declares a file, what uses it, what shipped. It is optional: use it when it is there, and never stop for it. It never lifts a rule above — a stale code-map still means flag and stop.',
     '',
-    s.reworded ? BRAIN_FIRST_LINE : BRAIN_FIRST_LINE_OLD,
+    BRAIN_FIRST_LINE,
     '',
     '1. Run `yad brain status --json` and read its `state`, and each `repos[].state`:',
     '   - `current`, and no repo `behind` or `unknown`: the brain is **current**. Use it as below.',

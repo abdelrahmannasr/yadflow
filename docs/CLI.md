@@ -2338,6 +2338,11 @@ The brain is optional. Each skill first runs `yad brain status --json`:
 - `missing` or `unreadable`: it goes on as before. A step never stops for the brain, and a refusal (a
   new file the brain does not hold yet) or a declined permission prompt also means "go on".
 
+Each block also says **brain first**: for its questions the agent asks the brain before it searches the
+repo or reads files, the pack or the code-map for the same answer. It goes to those only when the brain is
+`none`, the answer is empty, or the command refuses or is declined. A question about what a file contains
+is not a brain question. This matches the `brain-first` agent rule.
+
 The brain never lifts a skill's own rules: a stale code-map still means flag and stop, `yad-implement`
 still edits only the task's declared files, and `yad-stories` asks the person about a story that looks
 already shipped instead of dropping it.
