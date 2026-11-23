@@ -741,10 +741,12 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
     assert.match(block, /A refusal .* go on without it/);
     assert.match(block, /never lifts a rule above/);
     // EP-brain-first-S04: each block holds the paragraph, right after its opening one.
-    assert.equal(lines[b + 4], BRAIN_FIRST_LINE, `${skill}: the Brain first paragraph`);
+    assert.ok(lines.slice(b + 1, e).some((l) => l.startsWith('**Brain first.** ')), `${skill}: the Brain first paragraph`);
   }
   // EP-brain-first-S04: the block says the brain is asked first, and when the other tools are used.
-  assert.match(BRAIN_FIRST_LINE, /^\*\*Brain first\.\*\* .*ask the brain before you search the repo or read files, the pack or the code-map for the same answer.*only when the brain has no answer.*What a file contains is not a brain question/);
+  assert.match(BRAIN_FIRST_LINE, /^\*\*Brain first\.\*\* .*ask the brain before you search the repo or read files, the pack or the code-map for the same answer.*only when the brain has no answer: it is \*\*none\*\*, the answer is empty, or the command refuses or is declined.*What a file contains is not a brain question/);
+  // Review 1: it names the block's own list, not a skill's "Step 2"; a declined prompt ends the asking; the skill's steps stand.
+  assert.match(BRAIN_FIRST_LINE, /For the questions under "2\. Ask it" below.*do not ask it again in this session.*The skill's own steps still stand: a code-map a step above already loaded stays loaded/);
   assert.match(brainBlockLines('yad-stories').join('\n'), /Never drop scope yourself/);
   assert.match(brainBlockLines('yad-stories').join('\n'), /never change the key after the stories review/);
   // Review 2: the question has a place to go; the stale record keeps its fields; the light spec is re-judged.
