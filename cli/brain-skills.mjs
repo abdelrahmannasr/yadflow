@@ -22,6 +22,7 @@ export const BRAIN_BLOCK_END = '<!-- end: brain -->';
 // What each skill asks, where it writes down what it used, and what it does with no brain. Markdown.
 export const BRAIN_SKILLS = Object.freeze({
   'yad-architecture': {
+    brainFirst: true,
     asks: [
       '- **What is already there.** For each area the epic changes, run `yad brain query <area word> --json`: the stories, contracts, contract surfaces and ships already in that area. Do not re-define a surface the brain shows is shipped.',
       '- **Who a contract change reaches.** For each existing file the new contract surface lands in, run `yad brain file <repo>/<path> --json`. Its `usedBy` files are the callers a change to that surface reaches: name them in the architecture\'s risks.',
@@ -30,6 +31,7 @@ export const BRAIN_SKILLS = Object.freeze({
     fallback: 'use the code-maps and the pack as above',
   },
   'yad-stories': {
+    brainFirst: true,
     asks: [
       '- **Work already done.** For each area a story covers, run `yad brain query <area word> --json`: past stories and ships there. A name match is not proof: when a story looks like work the brain shows is shipped, keep the story and ask the person before you write it ("<story> looks shipped as <ship> — drop it, or keep it?"). When no one is there to answer, keep it and list the question in your Step 7 report. Never drop scope yourself.',
       '- **Real anchors for "Notes for build".** For each existing file a story\'s notes name, run `yad brain file <repo>/<path> --json` and name its main `usedBy` files in the notes, so the build half knows what the change reaches.',
