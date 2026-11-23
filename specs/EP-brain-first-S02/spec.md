@@ -51,6 +51,11 @@ and stop, never auto-refresh" in the planning skills.
   which the brain reads. The words match the S01 rule.
 - Q: Four files, and a commit is held to three. How is it split? → A: two tasks: the two
   `yad-connect-repos` files, then the sync skill and the doc.
+- Q: Does the build write only `.sdlc/brain/` (review 1)? → A: no. Graphify also writes a `graphify-out/`
+  folder in each code repo, kept out of git. The text names both.
+- Q: What does "no asking" cover (review 1)? → A: asking the person. The agent's own permission prompt can
+  still appear; a declined prompt means go on. A no to the publish means the build comes right after the
+  code-map. The text also names `yad check --fix`, and the command the refresh prints (S01).
 - Q: Is there a test for this text? → A: no test holds it. The description limits in
   `cli/test-agents-file.mjs` and the generated-block checks must still pass.
 
@@ -78,5 +83,15 @@ Check: `node scripts/agent-guide.mjs --check`, `node scripts/brain-skills.mjs --
 ## T02 — Name the brain build after a refresh in the sync skill and the command reference
 **Files:**
 - skills/yad-sync-repos/SKILL.md
+- docs/CLI.md
+
+## T03 — Say what the build writes, and what a declined prompt or a no to the publish means (review fixes)
+**Files:**
+- skills/yad-connect-repos/SKILL.md
+- skills/yad-connect-repos/references/code-context.md
+- skills/yad-sync-repos/SKILL.md
+
+## T04 — The same review fixes in the command reference
+**Files:**
 - docs/CLI.md
 <!-- /yad:tasks -->
