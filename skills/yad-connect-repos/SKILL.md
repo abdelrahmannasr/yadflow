@@ -240,13 +240,15 @@ This first build is an offer. After a later `refresh` the build is the last step
   This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
   no Co-Authored-By.
   **Then build the project brain, last.** The order is: `yad repo refresh <repo>`; write the
-  `code-map.md` again; the publish (`--push`), when the person says yes to it; then
-  **`yad brain build --repo <repo>`** (plain `yad brain build` when more than one repo was refreshed).
+  `code-map.md` again; the publish (`--push`), when the person says yes to it (on a no, the build comes
+  right after the code-map); then **`yad brain build --repo <repo>`** (plain `yad brain build` when more
+  than one repo was refreshed; when `yad repo refresh` printed the command in its last line, run that one).
   The brain reads `.sdlc/repos.json` and each code-map, and the first three steps change them: a build
-  that runs before the code-map is written again leaves the brain `behind` once more. The build needs
-  no asking: it writes only `.sdlc/brain/` on this machine and commits nothing. Never stop for it: when
-  Graphify is not installed or the build fails, tell the person, show the hint the command printed,
-  and go on.
+  that runs before the code-map is written again leaves the brain `behind` once more. Do not ask the
+  person before the build: it writes on this machine only (`.sdlc/brain/`, and a `graphify-out/` folder
+  in each code repo, kept out of git) and commits nothing. Never stop for it: when Graphify is not
+  installed, the build fails, or the person declines the agent's permission prompt, tell the person,
+  show what the command printed, and go on.
 - **`list`** — print every registry entry with a **fresh/stale** flag: compare each repo's current HEAD
   (`git -C <path> rev-parse HEAD`) to its `syncedHead`; differ ⇒ **stale** (suggest `refresh`).
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo

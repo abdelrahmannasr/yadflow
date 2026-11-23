@@ -96,7 +96,8 @@ default branch as a `chore(product): sync code-context … [skip ci]` audit comm
 branch, so an AI agent asks the person first, every time (E158). The last step after that refresh is
 `yad brain build` (`--repo <name>` for one repo): the project brain reads the registry and the
 code-map, so it is `behind` after every refresh, and a build before the code-map is written again
-leaves it `behind` once more. This skill never runs the build either: it follows a refresh, not a sync.
+leaves it `behind` once more. The agent that runs that refresh runs the build, without asking the
+person. This skill never runs it, because it never refreshes.
 
 ## Hard rules
 
