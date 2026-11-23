@@ -50,6 +50,12 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">= 6.1.0"
+      # semantic-release 26 needs Node 26.13 or newer, but the test matrix runs Node 18-24 and release.yml runs
+      # Node 24, so it cannot run anywhere CI does (the pin-major-check test runs it). Remove this when CI and
+      # the release move to Node 26.
+      - dependency-name: "semantic-release"
+        versions:
+          - ">= 26.0.0"
 
   - package-ecosystem: "github-actions"
     directory: "/"
