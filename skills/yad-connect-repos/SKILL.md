@@ -225,6 +225,8 @@ To watch an agent work through the brain live (E178), the Product sets `"activit
 against the task's declared files. It records what the agent did, never why.
 Once built, the planning and building skills ask it themselves (E179): `yad brain file <repo>/<path>`
 (who declares a file, what uses it) and `yad brain story <id>` (a story's tasks and their files).
+This first build is an offer. After a later `refresh` the build is the last step, with no asking: the
+`refresh` action below gives the order.
 
 ## Other actions
 
@@ -237,6 +239,14 @@ Once built, the planning and building skills ask it themselves (E179): `yad brai
   straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch, only when the person asks).
   This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
   no Co-Authored-By.
+  **Then build the project brain, last.** The order is: `yad repo refresh <repo>`; write the
+  `code-map.md` again; the publish (`--push`), when the person says yes to it; then
+  **`yad brain build --repo <repo>`** (plain `yad brain build` when more than one repo was refreshed).
+  The brain reads `.sdlc/repos.json` and each code-map, and the first three steps change them: a build
+  that runs before the code-map is written again leaves the brain `behind` once more. The build needs
+  no asking: it writes only `.sdlc/brain/` on this machine and commits nothing. Never stop for it: when
+  Graphify is not installed or the build fails, tell the person, show the hint the command printed,
+  and go on.
 - **`list`** — print every registry entry with a **fresh/stale** flag: compare each repo's current HEAD
   (`git -C <path> rev-parse HEAD`) to its `syncedHead`; differ ⇒ **stale** (suggest `refresh`).
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
