@@ -18,6 +18,7 @@
 #     --no-renames a rename lists only its new path, and the removed artifact is never seen.
 # The body is passed as a FILE path (single positional arg); CI writes the event body to a temp file
 # (GitHub: github.event.pull_request.body; GitLab: $CI_MERGE_REQUEST_DESCRIPTION).
+# A Dependabot PR on GitHub (author dependabot[bot], type Bot) passes without the template: see dependabot_pr below.
 set -euo pipefail
 
 PROFILE=code
@@ -67,6 +68,27 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 # `LC_ALL=C grep -a` on both: with quotePath off a path's high bytes arrive raw, and GNU grep under a UTF-8
 # locale drops a line that is not valid UTF-8 from its output — the pipe would then read as "no artifact".
 artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && LC_ALL=C grep -aE '^"?(epics|foundation)/' "$CHANGED" | LC_ALL=C grep -avE '^(epics/EP-[^/]+|foundation)/\.sdlc/owners/[^/]+\.json$|^epics/EP-[^/]+/\.sdlc/issue-links\.json$|^foundation/\.sdlc/roadmap-items\.json$' >/dev/null; }
+
+# A Dependabot PR carries Dependabot's own description, which it writes and rewrites on every rebase, so it can
+# never hold the template. Its author is read from the PR event GitHub Actions hands every job
+# ($GITHUB_EVENT_PATH: pull_request.user), never from GITHUB_ACTOR, which is whoever last edited or re-ran it.
+# Both the login and the account type must match: no person's login can hold `[bot]`, and type Bot is GitHub's
+# own field. No event file, no node, or a file node cannot read → no exemption, and the body is checked as
+# usual. Read here rather than passed as a flag, because CI runs the BASE branch's copy of this script with
+# the PR's workflow call: an older script given a new flag would take it for the body file.
+# A PR that changes Shape artifacts is never exempt: the artifact guard below still applies.
+dependabot_pr() {
+  { [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ] && command -v node >/dev/null 2>&1; } || return 1
+  node -e '
+    let u;
+    try { u = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).pull_request.user; } catch { process.exit(1); }
+    process.exit(u && u.login === "dependabot[bot]" && u.type === "Bot" ? 0 : 1);
+  ' "$GITHUB_EVENT_PATH" 2>/dev/null
+}
+if dependabot_pr && ! artifact_changed; then
+  echo "PASS [pr-template]: a Dependabot PR — its description is Dependabot's own, so the template is not required."
+  exit 0
+fi
 
 BODY="${ARGS[0]:-}"
 if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
