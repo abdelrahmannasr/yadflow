@@ -56,6 +56,10 @@ after every real refresh `yad brain status` says `behind`. Nothing names the bui
   in the stories review).
 - Q: Is the line printed with `--push` too? → A: yes. The publish stamps `.sdlc/repos.json`, so the brain is
   behind after it as well; the line comes after the publish.
+- Q: Which names go on the command line (review 1)? → A: only one `yad brain build --repo` takes: `safeName`
+  from `cli/brain.mjs`, and no other repo with the same name in another case. Otherwise the plain command.
+- Q: The words of the line with `--push` (review 1)? → A: it does not say the publish went through. The brain is
+  kept on this machine, and the registry is written either way.
 - Q: The name and shape of the new field? → A: `next`, a list of command lines, empty when nothing was
   packed. A list leaves room for a later command without a new field.
 
@@ -80,6 +84,12 @@ tests of R8, beside the `refresh` tests there. `docs/CLI.md`: the two `yad repo 
 - cli/test-guide.mjs
 
 ## T02 — Name yad brain build at the end of a refresh
+**Files:**
+- cli/repo.mjs
+- cli/test.mjs
+- docs/CLI.md
+
+## T03 — Name only a repo the brain build takes, and do not imply the publish went through (review fixes)
 **Files:**
 - cli/repo.mjs
 - cli/test.mjs
