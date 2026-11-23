@@ -15,6 +15,7 @@ import { judgeRepo, cloneMissingRepos, reportClones, readRegistry, codeContextPa
 import { gitHead, packRepo, runRepomix } from './setup.mjs';
 import { publishCodeContext, publishTarget, packOf, codeMapOf } from './repo-publish.mjs';
 import { PREVIEW_KEY, patternProblems } from './preview.mjs';
+import { safeName } from './brain.mjs';
 
 // Why `refresh` will not pack this entry, or null when it will (E81): see the loop in `runRepo`.
 function notPackable(root, repo, j) {
@@ -162,15 +163,20 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
       hand('regenerate the code-map in your AI agent (yad-connect-repos) — the pack is cached, the map is the AI step');
       hand('then publish it to the Product default branch with `yad repo refresh --push`');
     }
-    // The pack and the registry are what the project brain reads (E176), so a refresh that packed a repo leaves
-    // the brain behind: name the build as the next command (EP-brain-first-S01). `next` carries it for a
-    // --json reader, whom the hand-off lines never reach. One repo packed: only its code graph is built again,
-    // and its name goes on the command line only when it is a plain word.
+    // A repo is packed again because its code moved, and the refresh stamps the registry, which the project
+    // brain reads (E176) with the code-map written after it: so a refresh that packed a repo leaves the brain
+    // behind. Name the build as the next command (EP-brain-first-S01). `next` carries it for a --json reader,
+    // whom the hand-off lines never reach. One repo packed: only its code graph is built again, and its name
+    // goes on the command line only when `yad brain build --repo` takes it (`brainRepos`: one plain word that
+    // no other repo shares in another case). With --push the line does not say the publish went through: the
+    // brain is kept on this machine, and the registry is written either way.
     const next = [];
     if (packedNames.length) {
-      const only = packedNames.length === 1 && typeof packedNames[0] === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packedNames[0]) ? packedNames[0] : null;
+      const one = packedNames.length === 1 ? packedNames[0] : null;
+      const sameName = (r) => r && typeof r === 'object' && typeof r.name === 'string' && r.name.toLowerCase() === one.toLowerCase();
+      const only = safeName(one) && entries.filter(sameName).length === 1 ? one : null;
       next.push(only ? `yad brain build --repo ${only}` : 'yad brain build');
-      hand(`${push ? 'then' : 'last, after the code-map is written again and published,'} build the project brain: \`${next[0]}\``);
+      hand(`${push ? 'last, whatever the publish did,' : 'last, after the code-map is written again and published,'} build the project brain on this machine: \`${next[0]}\``);
     }
     // `published`: what `--push` did (`{ message, committed, pushed }`), or null when it committed nothing
     // — nothing to publish, or a refusal, which the answer's `error` then names.
