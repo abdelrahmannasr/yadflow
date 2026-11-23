@@ -2277,6 +2277,14 @@ stories, the contracts, the build logs, each repo's `tasks.md` and code-map, and
 of them changes, `status` says the brain is **behind**. Each repo's code graph also records the commit it
 was built at; when the repo moves on, that repo's code graph is behind.
 
+**After a refresh, build it again, last.** The brain also reads the registry (`.sdlc/repos.json`).
+`yad repo refresh` stamps the registry, and the agent then writes the code-map again, so the brain is
+behind after every refresh. The order is: `yad repo refresh <repo>`; write the code-map again;
+`yad repo refresh <repo> --push`, when the person says yes to it; then `yad brain build --repo <repo>`
+(plain `yad brain build` for more than one repo). A build that runs before the code-map is written again
+leaves the brain behind once more. An agent runs this build without asking, and never stops for it:
+when Graphify is not installed or the build fails, it says so and goes on.
+
 **Without Graphify** (`uv tool install graphifyy==0.9.108`, or `yad toolbox connect graphify`), `build`
 writes the work layer alone, with a file node for each file a task declares. A different Graphify version
 is used, with a warning. A graph whose `schema_version` this yadflow does not read is refused
@@ -2334,7 +2342,7 @@ The brain is optional. Each skill first runs `yad brain status --json`:
 - `current`, with no repo `behind` or `unknown`: it uses the brain.
 - `behind`, or a repo whose code moved since the build: it uses the brain, says so, and suggests
   `yad brain build` to the person. It never runs the build inside its step: that runs Graphify in every
-  connected repo.
+  connected repo. A build after a refresh (above) is not inside a step.
 - `missing` or `unreadable`: it goes on as before. A step never stops for the brain, and a refusal (a
   new file the brain does not hold yet) or a declined permission prompt also means "go on".
 

@@ -93,7 +93,10 @@ the command ends by pointing the human at `yad repo refresh` to repack (that is 
 decision; this skill never repacks or writes the registry). After the repack + AI code-map
 regeneration, `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product's
 default branch as a `chore(product): sync code-context … [skip ci]` audit commit. It pushes to the default
-branch, so an AI agent asks the person first, every time (E158).
+branch, so an AI agent asks the person first, every time (E158). The last step after that refresh is
+`yad brain build` (`--repo <name>` for one repo): the project brain reads the registry and the
+code-map, so it is `behind` after every refresh, and a build before the code-map is written again
+leaves it `behind` once more. This skill never runs the build either: it follows a refresh, not a sync.
 
 ## Hard rules
 
