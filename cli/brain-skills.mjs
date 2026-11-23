@@ -56,6 +56,10 @@ export const BRAIN_SKILLS = Object.freeze({
   },
 });
 
+// EP-brain-first-S04: the brain is asked before the other tools, for the questions the block asks. It says
+// "for the same answer" so a skill's own steps (its code-map check, its declared files) still stand.
+export const BRAIN_FIRST_LINE = '**Brain first.** For the questions in step 2, ask the brain before you search the repo or read files, the pack or the code-map for the same answer. Go to those only when the brain has no answer: it is **none**, the answer is empty, or the command refuses or is declined. What a file contains is not a brain question: read the file.';
+
 // The block's lines for one skill, between the markers.
 export function brainBlockLines(skill) {
   const s = BRAIN_SKILLS[skill];
@@ -64,6 +68,7 @@ export function brainBlockLines(skill) {
     '',
     '**Ask the project brain (E179).** The brain (`.sdlc/brain/graph.json`, built by `yad brain build` on this machine) joins the stories, tasks and contracts to the code: who declares a file, what uses it, what shipped. It is optional: use it when it is there, and never stop for it. It never lifts a rule above — a stale code-map still means flag and stop.',
     '',
+    ...(s.brainFirst ? [BRAIN_FIRST_LINE, ''] : []),
     '1. Run `yad brain status --json` and read its `state`, and each `repos[].state`:',
     '   - `current`, and no repo `behind` or `unknown`: the brain is **current**. Use it as below.',
     '   - `behind`, or any repo `behind` or `unknown` (its code moved since the build, or its commit cannot be read): the brain is **behind**. Use it, knowing an answer may miss the newest code, and suggest `yad brain build` to the person. Do not run it inside this step: it runs Graphify over every connected repo, which can take minutes, and writes `graphify-out/` (kept out of git) in each.',

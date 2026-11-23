@@ -614,7 +614,7 @@ test('review 4: --json build and status name a Graphify that does not start; the
 // ---- E179: focused questions, and the skills that ask them ---------------------------------------------
 
 const { fileAbout, storyAbout, fileCandidates } = await import('./brain-about.mjs');
-const { BRAIN_SKILLS, brainBlockLines, syncBrainSkills, BRAIN_BLOCK_BEGIN, BRAIN_BLOCK_END } = await import('./brain-skills.mjs');
+const { BRAIN_SKILLS, BRAIN_FIRST_LINE, brainBlockLines, syncBrainSkills, BRAIN_BLOCK_BEGIN, BRAIN_BLOCK_END } = await import('./brain-skills.mjs');
 const SKILLS = path.join(HERE, '..', 'skills');
 
 // The golden Product with its backend mapped by the fake Graphify, composed and written: a brain with both layers.
@@ -741,6 +741,8 @@ test('E179 the four skills hold the brain block exactly, and no other skill hold
     assert.match(block, /A refusal .* go on without it/);
     assert.match(block, /never lifts a rule above/);
   }
+  // EP-brain-first-S04: the block says the brain is asked first, and when the other tools are used.
+  assert.match(BRAIN_FIRST_LINE, /^\*\*Brain first\.\*\* .*ask the brain before you search the repo or read files, the pack or the code-map for the same answer.*only when the brain has no answer.*What a file contains is not a brain question/);
   assert.match(brainBlockLines('yad-stories').join('\n'), /Never drop scope yourself/);
   assert.match(brainBlockLines('yad-stories').join('\n'), /never change the key after the stories review/);
   // Review 2: the question has a place to go; the stale record keeps its fields; the light spec is re-judged.
