@@ -5542,6 +5542,8 @@ test('pr-template gate: a Dependabot PR passes without the template; the author 
       ['another bot', { GITHUB_EVENT_PATH: event({ login: 'renovate[bot]', type: 'Bot' }) }],
       ['not JSON', { GITHUB_EVENT_PATH: file('not json') }],
       ['no pull_request', { GITHUB_EVENT_PATH: file('{}') }],
+      ['a null user', { GITHUB_EVENT_PATH: file(JSON.stringify({ pull_request: { user: null } })) }],
+      ['a folder', { GITHUB_EVENT_PATH: T }],
       ['a missing file', { GITHUB_EVENT_PATH: path.join(T, 'nope.json') }],
       ['no event', {}],
     ]) {

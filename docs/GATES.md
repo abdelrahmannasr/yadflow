@@ -656,7 +656,8 @@ from any branch (#512). None is reviewed, and a `review/EP-*` branch would advan
 cannot carry the template. On GitHub, a PR whose author is `dependabot[bot]` with account type `Bot`
 passes. The gate reads the author from the PR event that GitHub Actions gives every job
 (`GITHUB_EVENT_PATH`), not from the person who last edited or re-ran it. A Dependabot PR that changes
-Shape artifacts still fails, as in pr-title.
+Shape artifacts still fails, as in pr-title. The exemption follows who opened the PR: a description
+edited later, or extra commits pushed to a Dependabot PR, are not checked against the template.
 
 **GitLab cuts long descriptions.** GitLab gives CI only the first 2700 characters of a description. In
 GitLab CI, when the description was cut, the gate reads the whole text from GitLab's API, with the
