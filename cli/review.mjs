@@ -11,6 +11,8 @@ import { productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
 import { codeRepoFor } from './workspace.mjs';
+import { isSolo } from './gate.mjs';
+import { inboxReady, inboxBlock, reviewMessage } from './inbox.mjs';
 import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
   resolveBaseBranch,
@@ -114,7 +116,9 @@ export async function reviewTrailer(root, { repo, dir, product, pr, body, getBod
 
 // `yad review nudge --repo <r> --pr <n>` — friendly public @-mention on a bare approve (engagement none)
 // of a code PR. A platform comment (carries the noblock marker so it never blocks); call once per PR.
-export async function reviewNudge(root, { repo, dir, product, pr, reader = readPr, poster = postComment } = {}) {
+// With `json`, a PR that was read also carries the `inbox` block: one `review` message for the person's
+// Plannotator Inbox, when the Product chose it and it is found where yad ran (`cwd`). The agent posts it.
+export async function reviewNudge(root, { repo, dir, product, pr, reader = readPr, poster = postComment, json = false, cwd = null, ready = inboxReady } = {}) {
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
   const rr = resolveRepo(root, { repo, dir, product });
   if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
@@ -130,7 +134,13 @@ export async function reviewNudge(root, { repo, dir, product, pr, reader = readP
   }
   if (nudged) info(`nudged ${nudged} bare approval(s) — invited to run \`${NUDGE_CMD}\``);
   else ok('no un-engaged approvals to nudge');
-  return { nudged };
+  const productRoot = rr.productRoot || root;
+  const inbox = json && ready(productRoot, { detectRoot: cwd ?? root })
+    ? inboxBlock([reviewMessage({
+      repo: meta?.name || repo || path.basename(repoRoot), pr, url: pull.url || null,
+      solo: isSolo(readJSON(productConfigPath(productRoot), {})),
+    })]) : undefined;
+  return { nudged, ...(inbox ? { inbox } : {}) };
 }
 
 // `yad review reconcile --epic <id> --repo <r> --pr <n>` — the Build BRIDGE: read the code PR's

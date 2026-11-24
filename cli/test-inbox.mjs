@@ -282,3 +282,48 @@ test('S04 yad gate open: no inbox on a failed open, the printed path, or an Inbo
     assert.equal(JSON.stringify(off), JSON.stringify(plain));
   } finally { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+const { reviewNudge } = await import('./review.mjs');
+const nudgeProduct = (o) => {
+  const T = reviewProduct(o);
+  fs.mkdirSync(path.join(T, 'engine'), { recursive: true });
+  return T;
+};
+const reader7 = () => ({ ok: true, url: URL7, reviews: [{ login: 'bo', state: 'APPROVED' }] });
+const nudge = (T, o) => quiet(() => reviewNudge(T, { repo: 'engine', pr: 7, reader: reader7, poster: () => ({ ok: true }), ...o }));
+
+test('S04 yad review nudge --json: one review message for the PR when the Inbox is ready; solo wording when solo (TC-16)', async () => {
+  const team = nudgeProduct();
+  const solo = nudgeProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await nudge(team, { json: true, cwd: '/some/repo', ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[team, '/some/repo']]);
+    assert.equal(r.nudged, 1);
+    const [m] = r.inbox.messages;
+    assert.equal(r.inbox.messages.length, 1);
+    assert.deepEqual([m.kind, m.key, m.thread, m.title], ['review', 'review:engine:7:nudge', 'yad engine', 'Review ready — PR #7 in engine']);
+    assert.deepEqual(m.links, [URL7]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    assert.match(m.body, /approve or merge/);
+    const s = await nudge(solo, { json: true, ready: () => true });
+    assert.match(s.inbox.messages[0].body, /merging it is the decision/);
+    // A PR whose web page the platform did not give: no link, never one made up.
+    const bare = await nudge(team, { json: true, ready: () => true, reader: () => ({ ok: true, reviews: [] }) });
+    assert.deepEqual(bare.inbox.messages[0].links, []);
+  } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge: no inbox on a failed read, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
+  const T = nudgeProduct();
+  const code = process.exitCode;
+  try {
+    let calls = 0;
+    const on = () => { calls += 1; return true; };
+    assert.equal(await nudge(T, { json: true, ready: on, reader: () => ({ ok: false, reason: 'gone' }) }), undefined, 'a failed read returns nothing');
+    assert.equal(await nudge(T, { json: true, ready: on, pr: undefined }), undefined);
+    assert.ok(!('inbox' in await nudge(T, { ready: on })));
+    assert.equal(calls, 0, 'the machine is scanned only for a read PR under --json');
+    assert.equal(JSON.stringify(await nudge(T, { json: true, ready: () => false })), JSON.stringify(await nudge(T)));
+  } finally { process.exitCode = code; fs.rmSync(T, { recursive: true, force: true }); }
+});

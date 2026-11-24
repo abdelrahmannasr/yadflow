@@ -1332,7 +1332,7 @@ async function main() {
       if (action === 'trailer') result = await commands.reviewTrailer(o.dir, { repo: o.repo, product: o.product, pr: o.pr, body: o.body || o.message });
       else if (action === 'context' || action === 'chat' || action === 'cards') result = await commands.reviewContext(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
       else if (action === 'walkthrough') result = await commands.reviewWalkthrough(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
-      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
+      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, product: o.product, pr: o.pr, json: !!o.json, cwd: toolboxAt?.from ?? null });
       else if (action === 'reconcile') {
         // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
         if (!o.epic || !commands.isValidEpicId(o.epic)) { refuse(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
