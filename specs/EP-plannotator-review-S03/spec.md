@@ -59,6 +59,13 @@ proposes; it never moves the step.
 - Q: Build the block in `planStep` (pure) or `buildStep`? → A: `buildStep`, after the write succeeded and only
   when `json` is set; `planStep` stays pure and unchanged.
 - Q: Light spec? → A: yes.
+- Q (code review, 2026-11-24): "make the fix, then run the step again" lets a go-ahead for a fix pass for
+  "resolved", and "move it as above" named no command. → A: after a fix the agent says it is made and waits for
+  "resolved"; then it clears the halt with `yad build step … in_progress` and posts "Resumed.".
+- Q (code review): the CLI test ran from the Product, so the `cwd` wiring was untested. → A: a case runs from the
+  code repo, with the Inbox server only there.
+- Q (code review): the key `halt:<story>:<step>:<repo>` has no task, so a halt on T02 supersedes T01's. → A: the
+  contract fixes the key (S02); raised at the engineer review, not changed here.
 
 ## Plan
 
