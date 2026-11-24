@@ -54,6 +54,14 @@ helps the reviewer only on their own machine; the epic accepts that.
 - Q: The nudge's PR URL — `readPr` does not return it on GitHub. → A: add it (R1), a field read in the same call,
   rather than a second platform call or a URL built by hand (it would be wrong on a self-hosted host).
 - Q: Light spec? → A: yes.
+- Q (code review, 2026-11-24): the nudge tests ran with the Product as `root`, so reading the Product from inside
+  a code repo was untested, and no test ran the commands through the CLI. → A: a case runs the nudge from the code
+  repo with `--product`; a CLI case runs `yad review nudge --json` in a code repo whose own Inbox server is the only
+  one (a fake `gh`, a PATH of linked `node`, `git` and `which`). `gate open` through the CLI needs a PR created and
+  a branch on origin, so its wiring stays covered only by the same one-line pattern; noted, not added.
+- Q (code review): the review-gate paragraph split a paragraph and named `yad gate approve` / `advance` as the only
+  ways, though with a platform approvals are given on the PR and the gate advances at the merge. → A: moved after
+  the PR paragraph; both ways named; the example command shows `--json`.
 
 ## Plan
 
