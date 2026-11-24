@@ -63,3 +63,107 @@ test('S01 inboxReady reads only: it writes nothing in the Product', () => {
     assert.equal(fs.readFileSync(path.join(p, '.sdlc/toolbox.json'), 'utf8'), text);
   } finally { fs.rmSync(p, { recursive: true, force: true }); }
 });
+
+// ---- S02: the messages (TC-06, TC-07, TC-11, TC-12, TC-15) -------------------------------------------------------
+const { inboxBlock, handOffMessage, haltMessage, reviewMessage, TEXT, TITLE_MAX, BODY_MAX, HALT_LINES } = await import('./inbox.mjs');
+const NOTICE = 'Replying here does not approve or record anything in yadflow. Type the command.';
+const FIELDS = ['key', 'kind', 'thread', 'title', 'body', 'links', 'notice'];
+const approveMerge = {
+  act: 'approve-merge',
+  why: 'an approval is a person\'s act: the record of who approved what rests on it',
+  steps: ['Open the review pull request #265 for epic.md on GitHub: https://github.com/o/r/pull/265', 'Merge it when the checks pass.'],
+  commands: [],
+  verify: 'yad gate sync EP-x epic.md',
+};
+
+test('S02 inboxBlock: absent for no message, never an empty list', () => {
+  assert.equal(inboxBlock([]), undefined);
+  assert.equal(inboxBlock(undefined), undefined);
+  assert.equal(inboxBlock([null]), undefined);
+  const m = handOffMessage({ epic: 'EP-x', step: 'epic-review', entry: approveMerge });
+  assert.deepEqual(inboxBlock([m]), { tool: 'plannotator', messages: [m] });
+});
+
+test('S02 handOffMessage: the contract fields, the DESIGN words, commands in code blocks, the notice last (TC-07)', () => {
+  assert.equal(TEXT.notice, NOTICE, 'the fixed notice, word for word');
+  const m = handOffMessage({ epic: 'EP-x', step: 'epic-review', entry: { ...approveMerge, commands: ['yad gate approve EP-x epic.md'] } });
+  assert.deepEqual(Object.keys(m), FIELDS);
+  assert.equal(m.kind, 'hand-off');
+  assert.equal(m.key, 'hand-off:EP-x:epic-review:approve-merge');
+  assert.equal(m.thread, 'yad EP-x');
+  assert.equal(m.title, 'Review and merge the PR — EP-x');
+  assert.equal(m.notice, NOTICE);
+  assert.deepEqual(m.links, ['https://github.com/o/r/pull/265']);
+  assert.match(m.body, /^Only you can do this: an approval is a person's act: the record of who approved what rests on it\.\n\n1\. Open the review/);
+  assert.match(m.body, /\n2\. Merge it when the checks pass\.\n/);
+  assert.match(m.body, /\n```\nyad gate approve EP-x epic\.md\n```\n/);
+  assert.match(m.body, /I will confirm with `yad gate sync EP-x epic\.md`\./);
+  assert.ok(m.body.endsWith(`\n\n*${NOTICE}*`), 'the notice is the last paragraph, in italics');
+  assert.equal(m.question, undefined);
+  // Every act the guide emits reads as words; any other act still has a title.
+  for (const [act, words] of [['choose', 'Choose what to work on'], ['answer', 'Answer the agent\'s questions'], ['unblock', 'Resolve the blocker'], ['install', 'Install a tool'], ['login', 'Log in'], ['stories', 'Your step: stories']]) {
+    assert.equal(handOffMessage({ epic: 'EP-x', entry: { act } }).title, `${words} — EP-x`, act);
+  }
+  // No epic: its own thread, and `-` in the key.
+  const none = handOffMessage({ entry: { act: 'choose', why: 'w', steps: ['Pick one.'] } });
+  assert.deepEqual([none.thread, none.key, none.title], ['yad', 'hand-off:-:-:choose', 'Choose what to work on']);
+  // A command holding backticks cannot close its block early.
+  assert.match(handOffMessage({ entry: { act: 'x', commands: ['echo ```x```'] } }).body, /````\necho ```x```\n````/);
+});
+
+test('S02 every text field is redacted: steps, commands, why, verify, title and ids (TC-06, TC-12)', () => {
+  const tokens = ['ghp_abcdefghij0123456789', 'glpat-abcdefghij012345', 'sk-abcdefghijklmnop0123', '-----BEGIN OPENSSH PRIVATE KEY-----'];
+  const m = handOffMessage({
+    epic: 'EP-x', step: 'x',
+    entry: { act: 'login', why: `use ${tokens[0]}`, steps: [`paste ${tokens[1]}`], commands: [`export T=${tokens[2]}`], verify: `check ${tokens[3]}` },
+  });
+  const h = haltMessage({ story: 'EP-x-S01', repo: 'engine', step: 'checks', reason: `tests failed\nAuthorization: token ${tokens[0]}\n${tokens[3]}` });
+  const r = reviewMessage({ epic: 'EP-x', artifact: 'epic.md', url: `https://github.com/o/r/pull/1?t=${tokens[0]}` });
+  const all = JSON.stringify([m, h, r]);
+  for (const t of tokens) assert.ok(!all.includes(t), `${t} never reaches a message`);
+  assert.match(all, /\[redacted\]/);
+});
+
+test('S02 title and body limits: 120 and 4,000, the notice kept whole, (trimmed) said in words', () => {
+  const long = handOffMessage({ epic: `EP-${'a'.repeat(30)}`, entry: { act: 'a long act '.repeat(20), steps: Array.from({ length: 400 }, (_, i) => `step number ${i} says something long enough`) } });
+  assert.ok(long.title.length <= TITLE_MAX && long.title.endsWith('…'), long.title);
+  assert.ok(long.body.length <= BODY_MAX, `${long.body.length}`);
+  assert.ok(long.body.endsWith(`\n\n*${NOTICE}*`), 'the notice survives the cut');
+  assert.match(long.body, /\n\(trimmed\)\n\n\*Replying here/);
+  const short = handOffMessage({ entry: { act: 'choose', steps: ['Pick one.'] } });
+  assert.ok(!short.body.includes('(trimmed)'));
+});
+
+test('S02 haltMessage: the DESIGN layout, the fixed question, the last 60 lines, no notice (TC-11, TC-15)', () => {
+  const out = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n');
+  const h = haltMessage({ story: 'EP-x-S02', repo: 'engine', step: 'checks', reason: `build/test/lint failed (2 tests)\n${out}` });
+  assert.deepEqual(Object.keys(h), ['key', 'kind', 'thread', 'title', 'body', 'links', 'question']);
+  assert.equal(h.key, 'halt:EP-x-S02:checks:engine');
+  assert.equal(h.thread, 'yad EP-x-S02');
+  assert.equal(h.title, 'Build halted — EP-x-S02 in engine: checks');
+  assert.deepEqual(h.question, { prompt: 'What should happen next?', options: ['fix', 'skip', 'stop'] });
+  assert.equal(h.notice, undefined, 'a halt carries the closing line instead of the notice');
+  assert.match(h.body, /^Story `EP-x-S02` in `engine`: step `checks` is halted\.\n\nWhy: build\/test\/lint failed \(2 tests\)\n\n\(trimmed\)\n```\nline 41\n/);
+  assert.match(h.body, /line 100\n```\n/);
+  assert.ok(!/\bline 40\b/.test(h.body), 'only the last 60 lines');
+  assert.equal(h.body.split('\n').filter((l) => /^line \d+$/.test(l)).length, HALT_LINES);
+  assert.ok(h.body.endsWith(TEXT.haltClosing));
+  // A one-line reason: no output block (TC-15).
+  const one = haltMessage({ story: 'EP-x-S02', repo: 'engine', step: 'implement', reason: 'scope overrun: cli/x.mjs is not declared' });
+  assert.ok(!one.body.includes('```'));
+  assert.match(one.body, /Why: scope overrun: cli\/x\.mjs is not declared/);
+});
+
+test('S02 reviewMessage: a Shape review or a code PR, the solo wording, the link and the notice', () => {
+  const gate = reviewMessage({ epic: 'EP-x', artifact: 'epic.md', url: 'https://github.com/o/r/pull/265', solo: true });
+  assert.deepEqual(Object.keys(gate), FIELDS);
+  assert.deepEqual([gate.kind, gate.key, gate.thread, gate.title], ['review', 'review:EP-x:epic.md:gate', 'yad EP-x', 'Review ready — epic.md for EP-x']);
+  assert.match(gate.body, /merging it is the decision/);
+  assert.deepEqual(gate.links, ['https://github.com/o/r/pull/265']);
+  assert.equal(gate.notice, NOTICE);
+  const nudge = reviewMessage({ repo: 'engine', pr: 7, url: 'https://github.com/o/e/pull/7' });
+  assert.deepEqual([nudge.key, nudge.thread, nudge.title], ['review:engine:7:nudge', 'yad engine', 'Review ready — PR #7 in engine']);
+  assert.match(nudge.body, /approve or merge/);
+  // A link is only ever an https URL it was handed.
+  assert.deepEqual(reviewMessage({ epic: 'EP-x', artifact: 'a.md', url: 'javascript:alert(1)' }).links, []);
+});
