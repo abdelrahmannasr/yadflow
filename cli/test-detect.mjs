@@ -504,7 +504,12 @@ test('E88: every shipped toolbox entry carries a complete vetting record', () =>
   // each file (LICENSE-APACHE, LICENSE-MIT: Plannotator), as `isRepoLicenceFile` reads them.
   for (const t of TOOLBOX) {
     if (t.licence === 'proprietary') assert.doesNotMatch(t.vetted.licenceFrom, /\/LICENSE$/, t.id);
-    else assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && /\/LICENSE(-[A-Z0-9]+)?$/.test(t.vetted.licenceFrom), `${t.id}: ${t.vetted.licenceFrom}`);
+    else {
+      // A named file only for a dual licence, and only one of the licences it names (`Apache-2.0 OR MIT`).
+      const named = t.licence.includes(' OR ') ? t.licence.split(' OR ').map((l) => l.split('-')[0].toUpperCase()) : [];
+      const file = t.vetted.licenceFrom.split('/').at(-1);
+      assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && (file === 'LICENSE' || named.some((n) => file === `LICENSE-${n}`)), `${t.id}: ${t.vetted.licenceFrom}`);
+    }
   }
   // Every registry package an install route names is in the record — so a package nobody vetted cannot
   // ride in on an install line. The forms read: npx / npm exec / npm i|install [-g], with -y or --yes;
@@ -2277,25 +2282,27 @@ test('E165: every shipped tool has a recipe; agent steps are pinned installs, th
   }
 });
 
-test('EP-plannotator-review-S01: connecting Plannotator — your pinned script and marketplace, then the agent installs the plugin', async () => {
+test('EP-plannotator-review-S01: connecting Plannotator — every step is yours: the pinned script, the marketplace, the plugin', async () => {
   const { connectPlan } = await import('./toolbox-connect.mjs');
   assert.deepEqual(recipeProblems(TOOLBOX.find((t) => t.id === 'plannotator')), []);
   const j = connectPlan('plannotator', { items: [], has: () => false, productRoot: null });
   assert.equal(j.state, 'missing');
-  assert.deepEqual(j.steps.map((s) => [s.who, s.run]), [
-    ['person', 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin'],
-    ['person', 'claude plugin marketplace add backnotprop/plannotator'],
-    ['agent', 'claude plugin install plannotator@plannotator'],
-    ['person', 'restart your agent'],
-  ]);
-  // The agent never runs the script: its one step is the plugin install.
-  assert.deepEqual(j.steps.filter((s) => s.who === 'agent').map((s) => s.run), ['claude plugin install plannotator@plannotator']);
-  assert.match(j.ask, /^Connect Plannotator\? First, you run `curl -fsSL https:\/\/plannotator\.ai\/install\.sh [^`]+` \(a remote install script: /);
-  assert.equal(j.verify, 'yad toolbox connect plannotator --verify --json');
-  assert.deepEqual(j.person.commands, [
+  const commands = [
     'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin',
     'claude plugin marketplace add backnotprop/plannotator',
-  ]);
+    'claude plugin install plannotator@plannotator',
+  ];
+  assert.deepEqual(j.steps.map((s) => [s.who, s.run]), [...commands.map((c) => ['person', c]), ['person', 'restart your agent']]);
+  // The agent runs nothing: a remote script, and a plugin from a marketplace you add first, are yours (docs/CLI.md).
+  assert.deepEqual(j.steps.filter((s) => s.who === 'agent'), []);
+  for (const s of j.steps) assert.ok(s.why, `${s.run}: says why it is yours`);
+  // The script's reason names what it changes besides the program.
+  assert.match(j.steps[0].why, /other agents it finds/);
+  assert.match(j.steps[0].why, /needs the gh program/);
+  assert.match(j.steps[2].why, /not pinned/);
+  assert.match(j.ask, /^Plannotator needs steps only you can do\. First, you run `curl -fsSL https:\/\/plannotator\.ai\/install\.sh [^`]+` \(a remote install script, /);
+  assert.equal(j.verify, 'yad toolbox connect plannotator --verify --json');
+  assert.deepEqual(j.person.commands, commands);
   // Already on this machine: nothing to install, only the record.
   assert.deepEqual(connectPlan('plannotator', { items: [], has: (b) => b === 'plannotator' }).steps, []);
 });

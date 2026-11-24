@@ -47,12 +47,15 @@ export const RECIPES = Object.freeze({
   'mattpocock-skills': [P('claude plugin install mattpocock-skills', 'it comes from its own plugin marketplace, which you add in your agent first')],
   graphify: [A('uv tool install graphifyy==0.9.108')],
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
-  // EP-plannotator-review-S01: the program first (a pinned, signature-checked script, so the person's), then the
-  // plugin source (a marketplace outside the official one: trusting it is the person's), then the plugin itself.
+  // EP-plannotator-review-S01: every step is the person's. The program comes from a pinned, signature-checked
+  // script (not --minimal: the /plannotator-* skills that yad-review-companion and yad-engineer-review offer come
+  // from it, not from the plugin). The plugin comes from a marketplace the person adds, is not pinned and brings
+  // hooks — "a plugin from a marketplace you add first is yours" (docs/CLI.md, yad toolbox connect).
   plannotator: [
-    P('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin', SCRIPT),
+    P('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin',
+      'a remote install script, so you read and run it yourself: besides the plannotator program (in ~/.local/bin), it installs Plannotator\'s skills and slash commands (~/.claude/skills, ~/.agents) and writes its hooks and settings into the other agents it finds (Codex, Gemini, OpenCode and others); --verify-attestation needs the gh program'),
     P('claude plugin marketplace add backnotprop/plannotator', 'it adds a plugin source from outside the official marketplace to your agent, and trusting it is your choice'),
-    A('claude plugin install plannotator@plannotator'),
+    P('claude plugin install plannotator@plannotator', 'a plugin from the marketplace you just added: it is not pinned to the vetted version, and its hooks run on your agent\'s events'),
     PT('restart your agent', 'an agent loads a new plugin\'s hooks when it starts'),
   ],
   'unity-mcp': [

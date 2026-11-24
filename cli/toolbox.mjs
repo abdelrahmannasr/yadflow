@@ -274,7 +274,7 @@ export const TOOLBOX = Object.freeze([
       on: '2026-11-24', licenceFrom: 'https://github.com/backnotprop/plannotator/blob/main/LICENSE-APACHE',
       source: 'https://github.com/backnotprop/plannotator', release: 'v0.29.3',
       packages: [],
-      note: 'Dual-licensed: the repo carries LICENSE-APACHE and LICENSE-MIT. The plannotator program ships as GitHub release binaries with SLSA build provenance (since v0.17.2), which the install script checks with --verify-attestation. A marketplace plugin cannot be pinned by its install command: the program is pinned, and --skip-claude-plugin keeps the script from updating the plugin.',
+      note: 'Dual-licensed: the repo carries LICENSE-APACHE and LICENSE-MIT. The install script is served from plannotator.ai, the project\'s own site; the plannotator program it fetches ships as GitHub release binaries with SLSA build provenance (since v0.17.2), which --verify-attestation checks (it needs gh). Without --minimal the script also installs Plannotator\'s skills and slash commands and writes its hooks into the other agents it finds. A marketplace plugin cannot be pinned by its install command: the program is pinned, and --skip-claude-plugin keeps the script from updating the plugin.',
     },
     install: [
       { type: 'script', command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin' },
@@ -285,7 +285,7 @@ export const TOOLBOX = Object.freeze([
     versions: null,
     fallback: 'nothing changes: hand-offs, Build halts and review notices stay in the chat',
     records: null,
-    note: 'Set PLANNOTATOR_SHARE=disabled: a share link sends the page to Plannotator\'s host. Never put a secret in an Inbox message. The plugin\'s hook runs the plannotator program, so both are needed.',
+    note: 'Set PLANNOTATOR_SHARE=disabled: a share link sends the page to Plannotator\'s host. Never put a secret in an Inbox message. The plugin\'s hook runs the plannotator program, so both are needed; the program alone counts as found, though the agent then has no Inbox tool, so an agent posts only when its session has that tool.',
     usedBy: [],
   },
   {
