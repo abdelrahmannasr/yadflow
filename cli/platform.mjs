@@ -152,7 +152,7 @@ export function mapApprovers(reviews = [], { headOid } = {}) {
 
 // ---- read PR state (github) ---------------------------------------------------------------------
 function readPrGitHub(n, { cwd, runner = run } = {}) {
-  const view = runner('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,mergedBy,mergeCommit,headRefOid'], { cwd });
+  const view = runner('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,mergedBy,mergeCommit,headRefOid,url'], { cwd });
   if (!view.ok) return { ok: false, reason: view.stderr || 'gh pr view failed' };
   const meta = JSON.parse(view.stdout);
   let reviews = [];
@@ -222,6 +222,8 @@ function readPrGitHub(n, { cwd, runner = run } = {}) {
     mergedBy: meta.mergedBy?.login || null,
     mergeCommit: meta.mergeCommit?.oid || null,
     headOid: meta.headRefOid,
+    // The PR's web page (the Inbox shows it as a card, S04). Null when the platform does not say.
+    url: meta.url || null,
     reviews,
     threads,
   };
@@ -269,6 +271,7 @@ function readPrGitLab(n, { cwd, runner = run } = {}) {
     mergedBy: mr.merge_user?.username || mr.merged_by?.username || null,
     mergeCommit: mr.merge_commit_sha || mr.squash_commit_sha || null,
     headOid: mr.diff_refs?.head_sha || mr.sha,
+    url: mr.web_url || null,
     reviews,
     threads,
   };
