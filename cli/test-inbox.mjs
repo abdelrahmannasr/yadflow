@@ -462,3 +462,22 @@ test('EP-inbox-guide-scan yad guide: only the Inbox scan changes — "here" and 
     assert.equal(off.yad(at(off), 'guide', 'EP-x', '--json').stdout, offRun.stdout);
   } finally { on.done(); off.done(); }
 });
+
+test('EP-inbox-guide-scan yad gate open --json through the CLI: one review message with the PR link; none when not chosen (TC-05, TC-06)', winSkip, () => {
+  const on = inboxWorkspace({ step: 'architecture-review', status: 'todo' });
+  const off = inboxWorkspace({ chosen: false, step: 'architecture-review', status: 'todo' });
+  try {
+    // Run from the code repo, where its own Inbox server is: the Product is found through the workspace file.
+    const r = on.yad(on.E, 'gate', 'open', 'EP-x', 'architecture.md', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.opened, true, r.stderr);
+    assert.equal(j.inbox?.messages.length, 1, r.stderr);
+    const [m] = j.inbox.messages;
+    assert.deepEqual([m.kind, m.title, m.links], ['review', 'Review ready — architecture.md for EP-x', ['https://github.com/o/product/pull/9']]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    const n = JSON.parse(off.yad(off.E, 'gate', 'open', 'EP-x', 'architecture.md', '--json').stdout);
+    assert.equal(n.opened, true);
+    assert.ok(!('inbox' in n), 'not chosen: no inbox');
+  } finally { on.done(); off.done(); }
+});
