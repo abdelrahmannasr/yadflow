@@ -265,6 +265,30 @@ export const TOOLBOX = Object.freeze([
     usedBy: [],
   },
   {
+    // EP-plannotator-review-S01: a local review page and Inbox for agents. yad never calls it (the agent posts
+    // what yad's `inbox` output holds); `inboxReady` (cli/inbox.mjs) asks this entry whether it is chosen and found.
+    // The plugin's hook runs the `plannotator` program, so the pinned install script comes first (the person's).
+    id: 'plannotator', name: 'Plannotator', tier: 'recommended', role: 'a local review page and Inbox for agents: plan review, line notes on files, and messages an agent leaves for you',
+    licence: 'Apache-2.0 OR MIT', source: 'https://github.com/backnotprop/plannotator', checked: '2026-11-24',
+    vetted: {
+      on: '2026-11-24', licenceFrom: 'https://github.com/backnotprop/plannotator/blob/main/LICENSE-APACHE',
+      source: 'https://github.com/backnotprop/plannotator', release: 'v0.29.3',
+      packages: [],
+      note: 'Dual-licensed: the repo carries LICENSE-APACHE and LICENSE-MIT. The plannotator program ships as GitHub release binaries with SLSA build provenance (since v0.17.2), which the install script checks with --verify-attestation. A marketplace plugin cannot be pinned by its install command: the program is pinned, and --skip-claude-plugin keeps the script from updating the plugin.',
+    },
+    install: [
+      { type: 'script', command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin' },
+      { type: 'plugin', command: '/plugin marketplace add backnotprop/plannotator, then /plugin install plannotator@plannotator' },
+    ],
+    manual: null,
+    detect: { bins: ['plannotator'], plugins: ['plannotator'], mcp: ['plannotator-inbox'] },
+    versions: null,
+    fallback: 'nothing changes: hand-offs, Build halts and review notices stay in the chat',
+    records: null,
+    note: 'Set PLANNOTATOR_SHARE=disabled: a share link sends the page to Plannotator\'s host. Never put a secret in an Inbox message. The plugin\'s hook runs the plannotator program, so both are needed.',
+    usedBy: [],
+  },
+  {
     // #321 (E168): a Unity code repo's editor, for yad-implement. Recommended, not a connector: it is set up in
     // the Unity Editor of one repo, with no Product file, and yad-implement's "In a Unity repo" section says
     // when to use it (a recommended tool has no generated "When a tool is missing" section). Since E175 it is the

@@ -47,6 +47,14 @@ export const RECIPES = Object.freeze({
   'mattpocock-skills': [P('claude plugin install mattpocock-skills', 'it comes from its own plugin marketplace, which you add in your agent first')],
   graphify: [A('uv tool install graphifyy==0.9.108')],
   'docker-mcp': [PT('set up the MCP Toolkit in Docker Desktop: https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', 'it is a feature of the Docker Desktop app')],
+  // EP-plannotator-review-S01: the program first (a pinned, signature-checked script, so the person's), then the
+  // plugin source (a marketplace outside the official one: trusting it is the person's), then the plugin itself.
+  plannotator: [
+    P('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin', SCRIPT),
+    P('claude plugin marketplace add backnotprop/plannotator', 'it adds a plugin source from outside the official marketplace to your agent, and trusting it is your choice'),
+    A('claude plugin install plannotator@plannotator'),
+    PT('restart your agent', 'an agent loads a new plugin\'s hooks when it starts'),
+  ],
   'unity-mcp': [
     PT('in the Unity Editor, open the Package Manager (Window → Package Manager), choose + → Add (in Unity 6: Install) package from git URL, and enter https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#v10.3.0', 'it is set up inside the Unity Editor, in your project'),
     PT('then open Window → MCP for Unity → Toggle MCP Window; under Per-client setup, with Claude Code chosen, set Client Project Dir to the folder your agent starts in (the Unity repo, unless you start it elsewhere); press Configure All Detected Clients, and restart your agent', 'the Editor writes the server into your agent\'s settings for that folder only, and an agent loads a new MCP server when it starts'),
