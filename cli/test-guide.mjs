@@ -1963,7 +1963,12 @@ test('S02 yad guide --json: no inbox unless the Product chose Plannotator and it
     // The printed guide never changes.
     assert.equal(guide([]).stdout, printedBefore);
     // Chosen, but not found here: no inbox.
-    r = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--json', '--dir', T], { encoding: 'utf8', env: { ...env, PATH: path.dirname(process.execPath) } });
+    // A PATH holding only node (linked into an empty folder): a plannotator installed beside node elsewhere
+    // (Homebrew, ~/.local/bin) can never be found by this case.
+    const only = path.join(bin, 'only-node');
+    fs.mkdirSync(only);
+    fs.symlinkSync(process.execPath, path.join(only, 'node'));
+    r = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--json', '--dir', T], { encoding: 'utf8', env: { ...env, PATH: only } });
     assert.ok(!('inbox' in JSON.parse(r.stdout)), r.stderr);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bin, { recursive: true, force: true }); }
 });
