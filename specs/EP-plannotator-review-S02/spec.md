@@ -76,6 +76,15 @@ secrets out, and never lets a reply pass for an approval.
 - Q: Links — the guide names a PR by number in its steps, not by URL. → A: `links` carries only `https://` URLs
   found in the entry's steps; often it is empty in S02. S04's `review` message carries the PR URL.
 - Q: Light spec? → A: yes.
+- Q (code review, 2026-11-24): a body cut at a fixed count could leave a fence open, drop a halt's question and
+  closing line, and keep the oldest output instead of the last. → A: a cut inside a fence closes it first, then says
+  `(trimmed)`; a halt fits its fixed paragraphs first and drops its OLDEST output lines until the body fits.
+- Q (code review): steps, why and verify could hold line breaks or backticks and forge a paragraph or the notice. →
+  A: prose fields are put on one line; the verify span and every block use more backticks than any run inside.
+- Q (code review): `redact()` misses `NAME=value` secrets (`DB_PASSWORD=…` in a test log). → A: on top of `redact()`,
+  any line `looksSecret()` flags is replaced whole with `[redacted line]`.
+- Q (code review): small ones. → A: a cut never splits a character in two; an act is looked up as the map's own key
+  only; a link loses a trailing full stop or comma; a body with nothing but the notice is the notice alone.
 
 ## Plan
 

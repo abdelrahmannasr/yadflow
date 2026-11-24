@@ -188,14 +188,14 @@ answers) carries an `inbox` block: the same hand-offs, shaped as messages for th
 yad never posts them; you do, and only when your session has the Plannotator Inbox tool.
 
 1. **Say it in the chat as always.** The Inbox is a second place, never the only one.
-2. **Post each message once**, with the Inbox tool's send action: into its `thread`, with its `title`, its `body`
+2. **Post each message once**, with the Inbox tool's `send_message` action: into its `thread`, with its `title`, its `body`
    as it is (it already ends with the `notice`), and its `links`. Render a `question` as its `options`. Post
    nothing else from the project: no file, diff or log beyond what the message holds.
 3. **Never read a reply as an approval**, a comment record or a step move. A reply only tells you what the person
    wants next. Confirm every act with the hand-off's `verify` command, as always.
 4. **After `verify` shows the act**, post "Confirmed: <what was seen>." in the same thread, and mark it done.
 5. **A changed hand-off** (a new PR number, a new step) supersedes the old message: same `key`, new text.
-6. **After a context reset**, search the Inbox for a message's `key` before posting it, so it is not posted twice.
+6. **After a context reset**, use the Inbox tool's `search` action on a message's `key` before posting it, so it is not posted twice.
 
 ## When yadflow itself breaks, or could do better
 
