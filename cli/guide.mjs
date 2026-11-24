@@ -601,10 +601,12 @@ export function withInbox(g, root, { cwd = root, ready = inboxReady } = {}) {
   return inbox ? { ...g, inbox } : g;
 }
 
-export async function runGuide(root, { epic = null, cwd, json = false, runner, productElsewhere = null, ready = inboxReady } = {}) {
+// `inboxAt` is where the Inbox scan looks (EP-inbox-guide-scan): the top of the checkout or Product, as for the
+// other commands that carry `inbox`. It defaults to `cwd`, which stays what the guide reads "here" from.
+export async function runGuide(root, { epic = null, cwd, inboxAt = null, json = false, runner, productElsewhere = null, ready = inboxReady } = {}) {
   const g = buildGuide(root, { epic, cwd, runner, productElsewhere });
   if (g.ok === false) process.exitCode = 1;
-  if (json) return withInbox(g, root, { cwd: cwd ?? root, ready });
+  if (json) return withInbox(g, root, { cwd: inboxAt ?? cwd ?? root, ready });
   printGuide(g);
   return undefined;
 }

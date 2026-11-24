@@ -382,3 +382,83 @@ test('S04 yad review nudge --json through the CLI, run in a code repo whose own 
     assert.ok(!('inbox' in fromProduct));
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+// EP-inbox-guide-scan: a workspace (Product + the code repo `engine`) where only the code repo sets up the Inbox
+// (its own `.mcp.json`), with fake tools on a PATH that can reach nothing of this machine's: linked node, git and
+// which, plus a fake gh. Every command runs through the CLI.
+function inboxWorkspace({ chosen = true, step = 'architecture-review', status = 'in_review' } = {}) {
+  const { execFileSync, spawnSync } = require('node:child_process');
+  const W = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-inbox-ws-')));
+  const P = path.join(W, 'product');
+  const E = path.join(W, 'engine');
+  const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(W, rel)), { recursive: true }); fs.writeFileSync(path.join(W, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b.c', ...a], { cwd, stdio: 'pipe' }).toString().trim();
+  put('.yad-workspace.json', { version: 1, product: 'product' });
+  put('product/.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main' });
+  put('product/.sdlc/repos.json', { repos: [{ name: 'engine', path: '../engine', platform: 'github', default_branch: 'main' }] });
+  if (chosen) put('product/.sdlc/toolbox.json', { schemaVersion: 10, shipped: { plannotator: 'use' } });
+  put('product/epics/EP-x/epic.md', '---\nid: EP-x\nowner: alice\n---\n# EP-x\n');
+  put('product/epics/EP-x/architecture.md', '---\nid: EP-x\nartifact: architecture\nstatus: draft\n---\n# arch\n');
+  put('product/epics/EP-x/.sdlc/state.json', { epicId: 'EP-x', currentStep: step, steps: [
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done', risk_tags: [] },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status, risk_tags: [] },
+  ] });
+  put('product/epics/EP-x/.sdlc/approvals.json', '[]');
+  put('product/epics/EP-x/.sdlc/comments.json', '[]');
+  put('engine/.mcp.json', { mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } });
+  put('engine/src/a.js', 'a\n');
+  for (const d of [P, E]) {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+    git(d, 'add', '-A');
+    git(d, 'commit', '-q', '-m', 'chore: seed');
+  }
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E });
+  // The Product's origin is a local bare repo holding the review branch, so `gate open` finds it there.
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', path.join(W, 'product.git')]);
+  execFileSync('git', ['remote', 'add', 'origin', path.join(W, 'product.git')], { cwd: P });
+  git(P, 'push', '-q', 'origin', 'main', 'main:review/EP-x/architecture');
+  put('bin/gh', '#!/bin/sh\ncase "$*" in\n  "pr create"*) echo "https://github.com/o/product/pull/9" ;;\n  *) exit 1 ;;\nesac\n');
+  fs.chmodSync(path.join(W, 'bin/gh'), 0o755);
+  fs.mkdirSync(path.join(W, 'tools'));
+  fs.symlinkSync(process.execPath, path.join(W, 'tools/node'));
+  for (const t of ['git', 'which']) fs.symlinkSync(execFileSync('/usr/bin/which', [t]).toString().trim(), path.join(W, 'tools', t));
+  const home = path.join(W, 'home');
+  fs.mkdirSync(home);
+  const PATH = [path.join(W, 'bin'), path.join(W, 'tools')].join(path.delimiter);
+  const yad = (cwd, ...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/yad.mjs', import.meta.url)), ...args],
+    { cwd, encoding: 'utf8', env: { ...process.env, PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+  return { W, P, E, yad, done: () => fs.rmSync(W, { recursive: true, force: true }) };
+}
+const winSkip = { skip: process.platform === 'win32' && 'fake programs on PATH are shell scripts' };
+
+test('EP-inbox-guide-scan yad guide --json from a code repo\'s subfolder finds that repo\'s own Inbox server; from the Product it does not (TC-01, TC-02)', winSkip, () => {
+  const ws = inboxWorkspace();
+  try {
+    const r = ws.yad(path.join(ws.E, 'src'), 'guide', 'EP-x', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.ok(j.person.length > 0, 'the step has person hand-offs');
+    assert.equal(j.inbox?.messages.length, j.person.length, r.stderr);
+    assert.ok(j.inbox.messages.every((m) => m.kind === 'hand-off'));
+    assert.ok(!('inbox' in JSON.parse(ws.yad(ws.P, 'guide', 'EP-x', '--json').stdout)), 'the repo\'s server is not where the Product is');
+  } finally { ws.done(); }
+});
+
+test('EP-inbox-guide-scan yad guide: only the Inbox scan changes — "here" and the printed guide are the same; not chosen is byte for byte (TC-03, TC-04)', winSkip, () => {
+  const on = inboxWorkspace();
+  const off = inboxWorkspace({ chosen: false });
+  try {
+    const at = (ws) => path.join(ws.E, 'src');
+    const withInbox = JSON.parse(on.yad(at(on), 'guide', 'EP-x', '--json').stdout);
+    const offRun = off.yad(at(off), 'guide', 'EP-x', '--json');
+    const without = JSON.parse(offRun.stdout);
+    assert.ok('inbox' in withInbox);
+    assert.ok(!('inbox' in without));
+    delete withInbox.inbox;
+    // The two workspaces differ only in their temp folder (and the toolbox choice), so compare with it swapped.
+    assert.equal(JSON.stringify(withInbox).replaceAll(on.W, '<W>'), JSON.stringify(without).replaceAll(off.W, '<W>'), 'nothing but inbox differs');
+    assert.equal(on.yad(at(on), 'guide', 'EP-x').stdout.replaceAll(on.W, '<W>'), off.yad(at(off), 'guide', 'EP-x').stdout.replaceAll(off.W, '<W>'), 'the printed guide is the same');
+    // Not chosen: the same answer twice, and no inbox key at all.
+    assert.equal(off.yad(at(off), 'guide', 'EP-x', '--json').stdout, offRun.stdout);
+  } finally { on.done(); off.done(); }
+});

@@ -1233,7 +1233,7 @@ async function main() {
       if (epic !== undefined && !commands.isValidEpicId(epic)) { refuse(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`, 'usage: yad guide [<epic>] [--json]'); break; }
       const root = o.product || (commands.hasProduct(o.dir) ? o.dir : null);
       // A Product one `cd` away is said in the answer too, so an agent never starts a second one (E80).
-      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, json: o.json, productElsewhere: root ? null : o.productElsewhere ?? null });
+      result = await commands.runGuide(root, { epic: epic ?? null, cwd: o.dir, inboxAt: toolboxAt?.from ?? o.dir, json: o.json, productElsewhere: root ? null : o.productElsewhere ?? null });
       break;
     }
     case 'next': {
