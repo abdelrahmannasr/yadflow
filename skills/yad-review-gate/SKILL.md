@@ -126,6 +126,15 @@ forgetting:
 With **no platform** configured it writes the ledger and simply opens no PR, so this works offline.
 With a platform, the `review/<epic>/<artifact>` branch must already be **on origin** — cut it from the
 authoring branch and push it, or run `yad open-pr` from it, which pushes first and then delegates here.
+
+**The review in the Inbox.** Run it as `yad gate open <epic> <artifact> --json`. When the result has
+`inbox` (the Product chose Plannotator, and it is on this machine) and your session has the Plannotator
+Inbox tool, post its one `review` message as the yad-guide skill's "Posting to the Inbox" says: it names
+the artifact, carries the review PR's link and ends with the notice that a reply records nothing. Once the
+gate passes (`yad gate status <epic>` shows it), post "Confirmed: <the gate> passed." in the same thread and
+mark the message done. A reply in the Inbox never approves, comments on or advances the gate: those stay
+`yad gate approve` / `comment` / `advance`, typed by the person. `yad open-pr` on a review branch adds no
+`inbox`, so a review it opened has no message to post.
 In **verified mode** the command deliberately writes nothing: CI owns the ledger and performs the whole
 transition at merge.
 
