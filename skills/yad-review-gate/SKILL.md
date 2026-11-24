@@ -110,7 +110,7 @@ needs (base, and the full count from its risk tags), and tell reviewers how to c
 make the transition with the engine:
 
 ```bash
-yad gate open <epic> <artifact>
+yad gate open <epic> <artifact> --json
 ```
 
 **Do not hand-write this one.** It does three things, and the second is the one a transcription keeps
@@ -143,6 +143,16 @@ legacy `bridge: true` — `.sdlc/product.json` (else `.sdlc/hub.json`) is the on
 below). With no platform, or when the PR cannot be opened on a local ledger, the step is still
 `in_review` locally — no error. (In verified mode a failed open writes nothing; open the PR by hand and
 CI records the gate at merge.) Opening the PR records no approvals and never advances.
+
+**The review in the Inbox.** Run the open as `yad gate open <epic> <artifact> --json`. When the result has
+`inbox` (the Product chose Plannotator, and it is on this machine) and your session has the Plannotator
+Inbox tool, post its one `review` message as the yad-guide skill's "Posting to the Inbox" says: it names
+the artifact, carries the review PR's link and ends with the notice that a reply records nothing. Once the
+gate passes (`yad gate status <epic>` shows it), post "Confirmed: <the gate> passed." in the same thread and
+mark the message done. A reply in the Inbox never approves, comments on or advances the gate: approvals and
+comments are given on the PR (or with `yad gate approve` / `comment`, typed by the person), and the gate
+advances at the merge (or with `yad gate advance`, typed by the person). `yad open-pr` on a review branch
+adds no `inbox`, so a review it opened has no message to post.
 
 **`comment`** — Capture reviewer feedback. Append/create a review file
 `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` with a heading per reviewer:

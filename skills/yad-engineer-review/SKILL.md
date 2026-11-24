@@ -144,6 +144,11 @@ approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto 
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
 `review.requireEngagement: true` in the Product settings. The signal is gameable by design and sits **beside** the CI gates,
 never above them.
+Run the nudge as `yad review nudge --repo <r> --pr <n> --json`: when the result has `inbox` and your
+session has the Plannotator Inbox tool, post its one `review` message (the PR's link, and the notice that a
+reply records nothing) as the yad-guide skill's "Posting to the Inbox" says. Once the PR is merged
+(confirmed by reading, as `yad build merged` does), post "Confirmed: PR #<n> merged." in the same thread and
+mark the message done. A reply there is never the review record.
 Recording an approval does **not** ship — shipping is a separate, explicit step. Shape discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
 

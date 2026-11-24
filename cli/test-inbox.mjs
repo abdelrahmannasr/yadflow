@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const { inboxReady, INBOX_TOOL } = await import('./inbox.mjs');
 
@@ -212,4 +216,169 @@ test('S02 review: a cut never splits a character, an odd act is never an object 
   assert.deepEqual(handOffMessage({ entry: { act: 'x', steps: ['Open https://github.com/o/r/pull/5.'] } }).links, ['https://github.com/o/r/pull/5']);
   // Nothing to say but the notice: the body is the notice alone.
   assert.equal(handOffMessage({ entry: { act: 'x' } }).body, `*${NOTICE}*`);
+});
+
+// EP-plannotator-review-S04: `yad gate open --json` and `yad review nudge --json` carry one `review` message.
+const { gateOpen } = await import('./gate.mjs');
+const quiet = async (fn) => {
+  const log = console.log;
+  console.log = () => {};
+  try { return await fn(); } finally { console.log = log; }
+};
+// A Product on GitHub (a local ledger) with one review step ready to open.
+function reviewProduct({ solo = false } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-inbox-gate-'));
+  const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
+  put('.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main', ...(solo ? { solo: true } : {}) });
+  put('.sdlc/repos.json', { repos: [{ name: 'engine', path: 'engine', platform: 'github', default_branch: 'main' }] });
+  put('epics/EP-x/epic.md', '---\nid: EP-x\nowner: alice\n---\n');
+  put('epics/EP-x/architecture.md', '---\nid: EP-x\nartifact: architecture\nstatus: draft\n---\n# arch\n');
+  put('epics/EP-x/.sdlc/state.json', { epicId: 'EP-x', currentStep: 'architecture-review', steps: [
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done', risk_tags: [] },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'todo', risk_tags: [] },
+  ] });
+  put('epics/EP-x/.sdlc/approvals.json', '[]');
+  put('epics/EP-x/.sdlc/comments.json', '[]');
+  return T;
+}
+const URL7 = 'https://github.com/o/product/pull/7';
+const opened = () => ({ ok: true, url: URL7 });
+const open = (T, o) => quiet(() => gateOpen(T, { epic: 'EP-x', artifact: 'architecture.md', creator: opened, hasBranch: () => true, runner: () => ({ ok: true, stdout: '[]' }), env: {}, today: '2026-11-24', ...o }));
+
+test('S04 yad gate open --json: one review message when the review PR opened and the Inbox is ready; solo wording when solo (TC-16)', async () => {
+  const team = reviewProduct();
+  const solo = reviewProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await open(team, { json: true, cwd: '/some/repo', ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[team, '/some/repo']], 'the scan runs from where yad ran');
+    assert.equal(r.opened, true);
+    assert.equal(r.inbox.tool, 'plannotator');
+    assert.equal(r.inbox.messages.length, 1);
+    const [m] = r.inbox.messages;
+    assert.equal(m.kind, 'review');
+    assert.equal(m.key, 'review:EP-x:architecture.md:gate');
+    assert.equal(m.thread, 'yad EP-x');
+    assert.equal(m.title, 'Review ready — architecture.md for EP-x');
+    assert.deepEqual(m.links, [URL7]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    assert.match(m.body, /approve or merge/);
+    assert.ok(m.body.trimEnd().endsWith(`*${m.notice}*`), 'the notice is the last paragraph');
+    const s = await open(solo, { json: true, ready: () => true });
+    assert.match(s.inbox.messages[0].body, /In solo mode no approval is counted, so merging it is the decision\./);
+  } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
+});
+
+test('S04 yad gate open: no inbox on a failed open, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
+  const dirs = [reviewProduct(), reviewProduct(), reviewProduct(), reviewProduct()];
+  try {
+    let calls = 0;
+    const on = () => { calls += 1; return true; };
+    const failed = await open(dirs[0], { json: true, ready: on, creator: () => ({ ok: false, reason: 'refused' }) });
+    assert.equal(failed.opened, false);
+    assert.ok(!('inbox' in failed));
+    const printed = await open(dirs[1], { ready: on });
+    assert.ok(!('inbox' in printed));
+    assert.equal(calls, 0, 'the machine is scanned only for an opened review under --json');
+    // Not ready: the result is exactly the one without the feature.
+    const off = await open(dirs[2], { json: true, ready: () => false });
+    const plain = await open(dirs[3]);
+    assert.equal(JSON.stringify(off), JSON.stringify(plain));
+  } finally { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+const { reviewNudge } = await import('./review.mjs');
+const nudgeProduct = (o) => {
+  const T = reviewProduct(o);
+  fs.mkdirSync(path.join(T, 'engine'), { recursive: true });
+  return T;
+};
+const reader7 = () => ({ ok: true, url: URL7, reviews: [{ login: 'bo', state: 'APPROVED' }] });
+const nudge = (T, o) => quiet(() => reviewNudge(T, { repo: 'engine', pr: 7, reader: reader7, poster: () => ({ ok: true }), ...o }));
+
+test('S04 yad review nudge --json: one review message for the PR when the Inbox is ready; solo wording when solo (TC-16)', async () => {
+  const team = nudgeProduct();
+  const solo = nudgeProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await nudge(team, { json: true, cwd: '/some/repo', ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[team, '/some/repo']]);
+    assert.equal(r.nudged, 1);
+    const [m] = r.inbox.messages;
+    assert.equal(r.inbox.messages.length, 1);
+    assert.deepEqual([m.kind, m.key, m.thread, m.title], ['review', 'review:engine:7:nudge', 'yad engine', 'Review ready — PR #7 in engine']);
+    assert.deepEqual(m.links, [URL7]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    assert.match(m.body, /approve or merge/);
+    const s = await nudge(solo, { json: true, ready: () => true });
+    assert.match(s.inbox.messages[0].body, /merging it is the decision/);
+    // A PR whose web page the platform did not give: no link, never one made up.
+    const bare = await nudge(team, { json: true, ready: () => true, reader: () => ({ ok: true, reviews: [] }) });
+    assert.deepEqual(bare.inbox.messages[0].links, []);
+  } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge: no inbox on a failed read, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
+  const T = nudgeProduct();
+  const code = process.exitCode;
+  try {
+    let calls = 0;
+    const on = () => { calls += 1; return true; };
+    assert.equal(await nudge(T, { json: true, ready: on, reader: () => ({ ok: false, reason: 'gone' }) }), undefined, 'a failed read returns nothing');
+    assert.equal(await nudge(T, { json: true, ready: on, pr: undefined }), undefined);
+    assert.ok(!('inbox' in await nudge(T, { ready: on })));
+    assert.equal(calls, 0, 'the machine is scanned only for a read PR under --json');
+    assert.equal(JSON.stringify(await nudge(T, { json: true, ready: () => false })), JSON.stringify(await nudge(T)));
+  } finally { process.exitCode = code; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge: from inside a code repo, the Product is read for the choice and the solo wording (TC-16)', async () => {
+  const T = nudgeProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await nudge(path.join(T, 'engine'), { product: T, json: true, ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[T, path.join(T, 'engine')]], 'the Product decides; the scan is where yad ran');
+    assert.match(r.inbox.messages[0].body, /merging it is the decision/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge --json through the CLI, run in a code repo whose own Inbox server is the only one (TC-16)', { skip: process.platform === 'win32' && 'fake programs on PATH are shell scripts' }, () => {
+  const { execFileSync, spawnSync } = require('node:child_process');
+  const W = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-inbox-nudge-')));
+  try {
+    const P = path.join(W, 'product');
+    const E = path.join(W, 'engine');
+    const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(W, rel)), { recursive: true }); fs.writeFileSync(path.join(W, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
+    put('.yad-workspace.json', { version: 1, product: 'product' });
+    put('product/.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main' });
+    put('product/.sdlc/repos.json', { repos: [{ name: 'engine', path: '../engine', platform: 'github', default_branch: 'main' }] });
+    put('product/.sdlc/toolbox.json', { schemaVersion: 10, shipped: { plannotator: 'use' } });
+    put('engine/.mcp.json', { mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } });
+    put('engine/a.txt', 'a\n');
+    for (const d of [P, E]) {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+      execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b.c', 'commit', '-q', '--allow-empty', '-m', 'chore: seed'], { cwd: d });
+    }
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E });
+    // A fake gh that answers the PR read; no plannotator program anywhere on PATH.
+    put('bin/gh', `#!/bin/sh\ncase "$*" in\n  "pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid,url") echo '{"state":"OPEN","headRefOid":"abc","url":"https://github.com/o/engine/pull/7"}' ;;\n  "pr view 7 --json latestReviews") echo '{"latestReviews":[]}' ;;\n  *) exit 1 ;;\nesac\n`);
+    fs.chmodSync(path.join(W, 'bin/gh'), 0o755);
+    // node, git and which only, linked into one folder: a real gh or plannotator on this machine is never found.
+    fs.mkdirSync(path.join(W, 'tools'));
+    fs.symlinkSync(process.execPath, path.join(W, 'tools/node'));
+    for (const t of ['git', 'which']) fs.symlinkSync(execFileSync('/usr/bin/which', [t]).toString().trim(), path.join(W, 'tools', t));
+    const home = path.join(W, 'home');
+    fs.mkdirSync(home);
+    const PATH = [path.join(W, 'bin'), path.join(W, 'tools')].join(path.delimiter);
+    const yad = (cwd) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/yad.mjs', import.meta.url)), 'review', 'nudge', '--repo', 'engine', '--pr', '7', '--json'],
+      { cwd, encoding: 'utf8', env: { ...process.env, PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+    const r = yad(E);
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.inbox?.messages.length, 1, r.stderr);
+    assert.deepEqual(j.inbox.messages[0].links, ['https://github.com/o/engine/pull/7']);
+    // From the Product, the code repo's own server is not here: no inbox.
+    const fromProduct = JSON.parse(yad(P).stdout);
+    assert.ok(!('inbox' in fromProduct));
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

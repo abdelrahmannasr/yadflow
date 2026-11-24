@@ -10517,6 +10517,7 @@ test('readPr (GitHub): a merged PR gives who merged, when and the merge commit; 
   const merged = fakeRunner({
     'gh pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid': JSON.stringify({
       state: 'MERGED', mergedAt: '2026-06-08T21:40:00Z', mergedBy: { login: 'al', name: 'Alice' }, mergeCommit: { oid: 'c0ffee1234567' }, headRefOid: 'abc',
+      url: 'https://github.com/o/r/pull/7',
     }),
     'gh pr view 7 --json latestReviews': JSON.stringify({ latestReviews: [{ author: { login: 'bo' }, state: 'APPROVED' }] }),
   });
@@ -10524,12 +10525,13 @@ test('readPr (GitHub): a merged PR gives who merged, when and the merge commit; 
   assert.equal(pr.ok, true);
   assert.deepEqual([pr.merged, pr.mergedAt, pr.mergedBy, pr.mergeCommit, pr.headOid], [true, '2026-06-08T21:40:00Z', 'al', 'c0ffee1234567', 'abc']);
   assert.deepEqual(pr.reviews, [{ login: 'bo', state: 'APPROVED', submittedAt: undefined, body: undefined, commit: null }], 'the degraded review read still works');
-  assert.ok(merged.calls.includes('gh pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid'), merged.calls.join('\n'));
+  assert.ok(merged.calls.includes('gh pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid,url'), merged.calls.join('\n'));
+  assert.equal(pr.url, 'https://github.com/o/r/pull/7', 'the PR\'s web page, read in the same call (S04)');
 
   const open = readPr('github', 8, { runner: fakeRunner({
     'gh pr view 8 --json state': JSON.stringify({ state: 'OPEN', mergedAt: null, mergedBy: null, mergeCommit: null, headRefOid: 'def' }),
   }) });
-  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
+  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit, open.url], [false, null, null, null, null]);
 
   assert.equal(readPr('github', 9, { runner: fakeRunner() }).ok, false, 'a failed view is a failed read');
 });
@@ -10541,7 +10543,9 @@ test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, t
   const current = readPr('gitlab', 3, { runner: view({
     iid: 3, state: 'merged', merged_at: '2026-06-08T21:40:00.000Z', merge_user: { username: 'al' }, merged_by: { username: 'old-name' },
     merge_commit_sha: 'c0ffee1234567', squash_commit_sha: 'squash9876', diff_refs: { head_sha: 'abc' },
+    web_url: 'https://gitlab.example.com/g/r/-/merge_requests/3',
   }) });
+  assert.equal(current.url, 'https://gitlab.example.com/g/r/-/merge_requests/3', 'the MR\'s web page (S04)');
   assert.equal(current.ok, true);
   assert.deepEqual([current.merged, current.mergedAt, current.mergedBy, current.mergeCommit, current.headOid],
     [true, '2026-06-08T21:40:00.000Z', 'al', 'c0ffee1234567', 'abc'], 'merge_user wins over the deprecated merged_by');
@@ -10550,7 +10554,7 @@ test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, t
   assert.deepEqual([older.mergedBy, older.mergeCommit, older.headOid], ['bo', 'squash9876', 'def'], 'an older instance, and a squash merge');
 
   const open = readPr('gitlab', 5, { runner: view({ iid: 5, state: 'opened', sha: 'ghi' }) });
-  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
+  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit, open.url], [false, null, null, null, null]);
 });
 
 test('readPr (GitHub): the review read carries each review\'s id and url beside its commit, and mapApprovers keeps them (E64)', async () => {

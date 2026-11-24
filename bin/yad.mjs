@@ -1308,7 +1308,7 @@ async function main() {
       // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. Local mode keeps local writes.
-      if (action === 'open') result = await commands.gateOpen(o.dir, { epic, artifact, today });
+      if (action === 'open') result = await commands.gateOpen(o.dir, { epic, artifact, today, json: !!o.json, cwd: toolboxAt?.from ?? null });
       else if (action === 'sync') result = await commands.gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
       else if (action === 'comments') result = await commands.gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') result = await commands.gateStatus(o.dir, { epic });
@@ -1332,7 +1332,7 @@ async function main() {
       if (action === 'trailer') result = await commands.reviewTrailer(o.dir, { repo: o.repo, product: o.product, pr: o.pr, body: o.body || o.message });
       else if (action === 'context' || action === 'chat' || action === 'cards') result = await commands.reviewContext(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
       else if (action === 'walkthrough') result = await commands.reviewWalkthrough(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
-      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, product: o.product, pr: o.pr });
+      else if (action === 'nudge') result = await commands.reviewNudge(o.dir, { repo: o.repo, product: o.product, pr: o.pr, json: !!o.json, cwd: toolboxAt?.from ?? null });
       else if (action === 'reconcile') {
         // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
         if (!o.epic || !commands.isValidEpicId(o.epic)) { refuse(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`); break; }
