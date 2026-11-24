@@ -158,6 +158,7 @@ agent "LGTM". The engineer review is still the approval on the PR, recorded as a
 the person's. A genuine concern found there goes on the PR as a normal comment, so it holds the merge like any
 reviewer's note. Before anyone shares a Plannotator link, recommend `PLANNOTATOR_SHARE=disabled`: a share sends
 the diff to Plannotator's host.
+
 Recording an approval does **not** ship — shipping is a separate, explicit step. Shape discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
 
