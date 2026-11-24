@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const { inboxReady, INBOX_TOOL } = await import('./inbox.mjs');
 
@@ -326,4 +330,55 @@ test('S04 yad review nudge: no inbox on a failed read, the printed path, or an I
     assert.equal(calls, 0, 'the machine is scanned only for a read PR under --json');
     assert.equal(JSON.stringify(await nudge(T, { json: true, ready: () => false })), JSON.stringify(await nudge(T)));
   } finally { process.exitCode = code; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge: from inside a code repo, the Product is read for the choice and the solo wording (TC-16)', async () => {
+  const T = nudgeProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await nudge(path.join(T, 'engine'), { product: T, json: true, ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[T, path.join(T, 'engine')]], 'the Product decides; the scan is where yad ran');
+    assert.match(r.inbox.messages[0].body, /merging it is the decision/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('S04 yad review nudge --json through the CLI, run in a code repo whose own Inbox server is the only one (TC-16)', { skip: process.platform === 'win32' && 'fake programs on PATH are shell scripts' }, () => {
+  const { execFileSync, spawnSync } = require('node:child_process');
+  const W = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'yad-inbox-nudge-')));
+  try {
+    const P = path.join(W, 'product');
+    const E = path.join(W, 'engine');
+    const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(W, rel)), { recursive: true }); fs.writeFileSync(path.join(W, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
+    put('.yad-workspace.json', { version: 1, product: 'product' });
+    put('product/.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main' });
+    put('product/.sdlc/repos.json', { repos: [{ name: 'engine', path: '../engine', platform: 'github', default_branch: 'main' }] });
+    put('product/.sdlc/toolbox.json', { schemaVersion: 10, shipped: { plannotator: 'use' } });
+    put('engine/.mcp.json', { mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } });
+    put('engine/a.txt', 'a\n');
+    for (const d of [P, E]) {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+      execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b.c', 'commit', '-q', '--allow-empty', '-m', 'chore: seed'], { cwd: d });
+    }
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E });
+    // A fake gh that answers the PR read; no plannotator program anywhere on PATH.
+    put('bin/gh', `#!/bin/sh\ncase "$*" in\n  "pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid,url") echo '{"state":"OPEN","headRefOid":"abc","url":"https://github.com/o/engine/pull/7"}' ;;\n  "pr view 7 --json latestReviews") echo '{"latestReviews":[]}' ;;\n  *) exit 1 ;;\nesac\n`);
+    fs.chmodSync(path.join(W, 'bin/gh'), 0o755);
+    // node, git and which only, linked into one folder: a real gh or plannotator on this machine is never found.
+    fs.mkdirSync(path.join(W, 'tools'));
+    fs.symlinkSync(process.execPath, path.join(W, 'tools/node'));
+    for (const t of ['git', 'which']) fs.symlinkSync(execFileSync('/usr/bin/which', [t]).toString().trim(), path.join(W, 'tools', t));
+    const home = path.join(W, 'home');
+    fs.mkdirSync(home);
+    const PATH = [path.join(W, 'bin'), path.join(W, 'tools')].join(path.delimiter);
+    const yad = (cwd) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/yad.mjs', import.meta.url)), 'review', 'nudge', '--repo', 'engine', '--pr', '7', '--json'],
+      { cwd, encoding: 'utf8', env: { ...process.env, PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+    const r = yad(E);
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.inbox?.messages.length, 1, r.stderr);
+    assert.deepEqual(j.inbox.messages[0].links, ['https://github.com/o/engine/pull/7']);
+    // From the Product, the code repo's own server is not here: no inbox.
+    const fromProduct = JSON.parse(yad(P).stdout);
+    assert.ok(!('inbox' in fromProduct));
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
