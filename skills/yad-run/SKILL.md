@@ -134,6 +134,25 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      no second entry — **stop the loop**, and report what a human must resolve. The record is not decoration: since shape 7 a `blocked` step with nothing recorded
      on it reads as `todo` ("not started"), so a halt written without one is indistinguishable from a
      lane nobody has begun. `yad doctor` reports the difference as `step:no-record`.
+     **The halt in the Inbox.** Run the halt with `--json`. Put the cause on the first line of `--reason`
+     and the last lines of the failing output after it, if there is any (the record keeps them too). When
+     the result has `inbox` and your session has the Plannotator Inbox tool, post its one `halt` message
+     as the yad-guide skill's "Posting to the Inbox" says (a halt has no notice and no `verify`; "Resumed."
+     takes the place of "Confirmed: …"). Its `key` names the story, step and repo, so a
+     second halt of the same step supersedes the first. Then act on the answer, in the Inbox or the chat:
+     - `fix`: propose the fix in the chat — what you would change, inside the task's declared files. Make
+       it only after the person's go-ahead, then say it is made. A go-ahead for the fix is not "resolved":
+       wait for that before you run the step again (that run moves the step).
+     - `skip`: yad cannot skip a single Build step. A whole lane is skipped only before any work starts in
+       it (`yad skip <epic> <story> --repo <repo> --reason "<why>"`), which a halted lane is past. Say this
+       plainly and offer `fix` or `stop`. Never give a command yad will refuse, and never run `yad skip`
+       yourself: it is `on-request`.
+     - `stop`: do nothing more on this story. Wait.
+
+     An answer only says what to propose. Never move the halted step (`in_progress` or any move) until the
+     person says the halt is resolved. Then clear it with
+     `yad build step <story> --repo <repo> <step> in_progress [--task <task>]`, post "Resumed." in the same
+     thread, and run the step again.
    - else if effective dial is **`advance: auto`** → `yad build step <story> --repo <repo> <step> done
      --via auto --run <uid>` (it writes the `closed` record and moves `currentStep` on), and **continue the
      loop** (this is the Step B auto-advance for `checks`).

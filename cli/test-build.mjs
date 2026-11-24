@@ -1927,3 +1927,102 @@ test('the Spec Kit pin: the Product\'s own entry is its checkout, and a folder i
     assert.equal(fs.existsSync(path.join(P, 'apps', 'web', '.specify', 'feature.json')), false);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
+
+// EP-plannotator-review-S03: a halt carries the Inbox message, only under --json and only when the Inbox is ready.
+const { buildStep } = await import('./build.mjs');
+
+test('S03 yad build step … blocked: one halt message when the Inbox is ready; nothing else changes (TC-11, TC-12, TC-14, TC-15)', async () => {
+  const { W, P, dir } = workspace();
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const asked = [];
+    const on = (root, o) => { asked.push([root, o.detectRoot]); return true; };
+    const token = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
+    const out = Array.from({ length: 80 }, (_, i) => `out line ${i + 1}`);
+    const reason = `checks failed: 2 tests\n${out.slice(0, 40).join('\n')}\nusing ${token}\n${out.slice(40).join('\n')}`;
+    const r = await buildStep(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', to: 'blocked', reason, json: true, cwd: '/some/repo', ready: on });
+    assert.deepEqual(asked, [[P, '/some/repo']], 'the scan runs from where yad ran');
+    assert.equal(r.inbox.tool, 'plannotator');
+    assert.equal(r.inbox.messages.length, 1);
+    const [m] = r.inbox.messages;
+    assert.equal(m.kind, 'halt');
+    assert.equal(m.key, 'halt:EP-l-S01:spec:api');
+    assert.equal(m.thread, 'yad EP-l-S01');
+    assert.equal(m.title, 'Build halted — EP-l-S01 in api: spec');
+    assert.deepEqual(m.question, { prompt: 'What should happen next?', options: ['fix', 'skip', 'stop'] });
+    assert.ok(!('notice' in m), 'a halt has no notice');
+    assert.match(m.body, /Why: checks failed: 2 tests/);
+    assert.match(m.body, /\(trimmed\)/);
+    assert.match(m.body, /out line 80\n/, 'the last line is kept');
+    assert.doesNotMatch(m.body, /out line 20\n/, 'only the last 60 lines are kept');
+    assert.ok(!m.body.includes(token), 'the token is redacted');
+    assert.match(m.body, /\[redacted( line)?\]/);
+    assert.match(m.body, /The step moves only when you say it is resolved\.$/);
+    // The record is the whole reason, as before.
+    assert.equal(read(path.join(dir, '.sdlc/build-state/EP-l-S01.json')).repos.api.steps[0].record.reason, reason.trim());
+    // A one-line reason: no output block.
+    asked.length = 0;
+    const one = await buildStep(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', to: 'blocked', reason: 'the contract is unclear', json: true, ready: on });
+    assert.doesNotMatch(one.inbox.messages[0].body, /```/);
+    assert.deepEqual(asked, [[P, P]], 'with no folder given, the scan runs from the Product');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('S03 yad build step: no inbox on another move, a failed move, the printed path, or an Inbox not ready (TC-13, TC-14)', async () => {
+  const { W, P } = workspace();
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    let calls = 0;
+    const on = () => { calls += 1; return true; };
+    const step = (o) => buildStep(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', ...o });
+    assert.ok(!('inbox' in await step({ to: 'in_progress', json: true, ready: on })));
+    await assert.rejects(step({ to: 'blocked', reason: '  ', json: true, ready: on }), /a halt needs a reason/);
+    await assert.rejects(step({ step: 'nope', to: 'blocked', reason: 'x', json: true, ready: on }), /EP-l-S01 \/ api has no step 'nope'/);
+    assert.ok(!('inbox' in await step({ to: 'blocked', reason: 'x', json: false, ready: on })));
+    assert.equal(calls, 0, 'the machine is scanned only for a halt under --json');
+    // Not ready: the result is exactly the one without the feature.
+    const off = await step({ to: 'blocked', reason: 'why\nline', json: true, ready: () => false });
+    const plain = await step({ to: 'blocked', reason: 'why\nline' });
+    assert.equal(JSON.stringify(off), JSON.stringify(plain));
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('S03 yad build step … blocked --json: the CLI adds the block only when Plannotator is chosen and here (TC-13, TC-14)', { skip: process.platform === 'win32' && 'a fake program on PATH is a shell script' }, () => {
+  const { W, P, api } = workspace();
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const bin = path.join(W, 'bin');
+    const home = path.join(W, 'home');
+    fs.mkdirSync(home);
+    write(bin, { plannotator: '#!/bin/sh\nexit 0\n' });
+    fs.chmodSync(path.join(bin, 'plannotator'), 0o755);
+    const only = path.join(W, 'only-node');
+    fs.mkdirSync(only);
+    fs.symlinkSync(process.execPath, path.join(only, 'node'));
+    const run = (PATH) => spawnSync(process.execPath, [YAD, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'blocked', '--reason', 'checks failed\n✗ one test', '--json'],
+      { cwd: P, encoding: 'utf8', env: { ...ENV, PWD: P, HOME: home, USERPROFILE: home, PATH, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+    // Found here, but not chosen.
+    const notChosen = run(`${bin}${path.delimiter}${only}`);
+    assert.equal(notChosen.status, 0, notChosen.stderr);
+    assert.ok(!('inbox' in JSON.parse(notChosen.stdout)));
+    write(P, { '.sdlc/toolbox.json': JSON.stringify({ schemaVersion: 10, shipped: { plannotator: 'use' } }) });
+    // Chosen, but not found: byte for byte the same.
+    const notFound = run(only);
+    assert.equal(notFound.stdout, notChosen.stdout);
+    // Chosen and found.
+    const r = run(`${bin}${path.delimiter}${only}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.inbox.messages.length, 1);
+    assert.equal(j.inbox.messages[0].kind, 'halt');
+    assert.match(j.inbox.messages[0].body, /✗ one test/);
+    delete j.inbox;
+    assert.deepEqual(j, JSON.parse(notChosen.stdout), 'nothing else changes');
+    // Found only in a code repo (its own MCP server, no program on PATH): run there it counts, run from the
+    // Product it does not — the scan is where yad ran, the choice is the Product's.
+    write(api, { '.mcp.json': JSON.stringify({ mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } }) });
+    const from = (cwd) => JSON.parse(spawnSync(process.execPath, [YAD, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'blocked', '--reason', 'x', '--json'],
+      { cwd, encoding: 'utf8', env: { ...ENV, PWD: cwd, HOME: home, USERPROFILE: home, PATH: only, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } }).stdout);
+    assert.equal(from(api).inbox?.messages.length, 1, 'run from the code repo, its server counts');
+    assert.ok(!('inbox' in from(P)), 'run from the Product, the repo\'s server does not');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
