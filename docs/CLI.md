@@ -466,10 +466,15 @@ Plannotator, and never reads or writes its files.
 
 **When it appears.** Only under `--json`, and only when both hold:
 - the Product chose Plannotator (`yad toolbox add plannotator`, in `.sdlc/toolbox.json`), and
-- it is found on this machine, looking from the folder yad ran in (see [the toolbox](#the-toolbox)).
+- it is found on this machine (see [the toolbox](#the-toolbox)). `yad build step`, `yad gate open` and
+  `yad review nudge` look from the top of the checkout or Product they ran in, as `yad toolbox list` does;
+  `yad guide` looks from the exact folder it ran in.
+
+Found is not enough to post: the program alone counts as found, but the Inbox tool comes from Plannotator's
+plugin or its `plannotator-inbox` server, so the agent posts only when its session has that tool.
 
 Otherwise the answer has no `inbox` key and is byte-for-byte what it was. The printed (not `--json`) output
-never changes. A command that fails adds none.
+never changes. A refused halt, a review PR that could not be opened, or a PR that could not be read adds none.
 
 | Command | When it adds `inbox` | Its messages |
 |---|---|---|
@@ -482,13 +487,13 @@ The block is `{ "tool": "plannotator", "messages": [ … ] }`. Each message has:
 
 | Field | Meaning |
 |---|---|
-| `key` | a stable id, `<kind>:<epic or story>:<step>:<act or repo>`. A message with the same key replaces the earlier one; after a context reset the agent searches for it before posting again |
+| `key` | a stable id: `hand-off:<epic>:<step>:<act>`, `halt:<story>:<step>:<repo>`, or `review:<epic or repo>:<artifact or PR number>:gate` (or `:nudge`). The agent posts a changed message as a replacement for the one with the same key, and after a context reset searches for the key before posting again |
 | `kind` | `hand-off` (a step only the person can do), `halt` (a Build step stopped) or `review` (a review is ready) |
-| `thread` | the thread to post into: `yad <epic>`, `yad <story>` for a halt, `yad <repo>` for a nudge |
+| `thread` | the thread to post into: `yad <epic>` (a hand-off, a gate review), `yad <story>` (a halt), `yad <repo>` (a nudge); `yad` when none is known |
 | `title` | one line, at most 120 characters |
 | `body` | Markdown, at most 4,000 characters: the why, the steps, each command in its own code block, the command that confirms it, or the halt's output |
-| `links` | the PR/MR's URL when it is known; otherwise empty |
-| `notice` | on `hand-off` and `review`, exactly: "Replying here does not approve or record anything in yadflow. Type the command." It is also the body's last line |
+| `links` | a review: the PR/MR's URL when the platform gave it; a hand-off: any `https` link in its steps or commands; a halt: none |
+| `notice` | on `hand-off` and `review`, exactly: "Replying here does not approve or record anything in yadflow. Type the command." It is also the body's last paragraph, in italics |
 | `question` | on `halt` only: `{ "prompt": "What should happen next?", "options": ["fix", "skip", "stop"] }` |
 
 **A reply records nothing.** An answer in the Inbox never approves, comments, advances a gate or moves a Build
@@ -497,10 +502,11 @@ the person says the halt is resolved. yad cannot skip a single Build step, so on
 so and offers `fix` or `stop`.
 
 **Privacy.**
-- Every text field goes through yad's secret filter. A token is replaced with `[redacted]`, and a whole line
-  that looks like a secret (`DB_PASSWORD=…`) is replaced with `[redacted line]`. Still, never put a secret in a
-  message.
-- The Inbox keeps its messages on this machine, in `~/.plannotator/inbox/`. Nothing is sent to a team server.
+- Every text field goes through yad's secret filter. A line that holds a known token (`ghp_…`, `AKIA…`) or names
+  a secret with a value (`DB_PASSWORD=…`, `--token …`) is replaced whole with `[redacted line]`; any other run of
+  40 or more key-like characters is replaced with `[redacted]`. Still, never put a secret in a message.
+- yad itself sends nothing anywhere: it only prints the block. Plannotator keeps the Inbox's messages on this
+  machine, in `~/.plannotator/inbox/` (as of v0.29.3).
 - Set `PLANNOTATOR_SHARE=disabled`: a Plannotator share link sends the page to Plannotator's own host.
 
 ## The PR-driven review gate
@@ -1635,9 +1641,10 @@ that runs local tests — the entry says so and links the vendor's docs instead.
 notes on a file (`/plannotator-annotate`), a PR review (`/plannotator-review`), and the Inbox above. It is not
 used until the team adds it (`yad toolbox add plannotator`). It counts as found here when the `plannotator`
 program is on PATH, the `plannotator` Claude Code plugin is enabled, or an MCP server named `plannotator-inbox`
-is set up. `yad toolbox connect plannotator` hands **every** step to the person, each with its reason: the
-install script, pinned to the vetted release and checked against its signed attestation
-(`--version v0.29.3 --verify-attestation --skip-claude-plugin`, which needs `gh`). It installs the program and
+is set up. The program alone gives an agent no Inbox tool: that comes from the plugin or the server. `yad toolbox connect plannotator` hands **every** step to the person, each with its reason: the
+install script from plannotator.ai, told to fetch the vetted release of the program (`--version v0.29.3`) and to
+check that program's signed build attestation (`--verify-attestation`, which needs `gh`); the script itself is
+not pinned. It installs the program and
 Plannotator's skills and slash commands, and writes its hooks into the other agents it finds. Then the
 marketplace and the plugin (`claude plugin marketplace add backnotprop/plannotator`, `claude plugin install
 plannotator@plannotator`): the plugin is not pinned to the vetted release, and its hooks run on the agent's
