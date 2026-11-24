@@ -1961,8 +1961,10 @@ test('S03 yad build step … blocked: one halt message when the Inbox is ready; 
     // The record is the whole reason, as before.
     assert.equal(read(path.join(dir, '.sdlc/build-state/EP-l-S01.json')).repos.api.steps[0].record.reason, reason.trim());
     // A one-line reason: no output block.
-    const one = await buildStep(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', to: 'blocked', reason: 'the contract is unclear', json: true, ready: () => true });
+    asked.length = 0;
+    const one = await buildStep(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', to: 'blocked', reason: 'the contract is unclear', json: true, ready: on });
     assert.doesNotMatch(one.inbox.messages[0].body, /```/);
+    assert.deepEqual(asked, [[P, P]], 'with no folder given, the scan runs from the Product');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
@@ -1986,7 +1988,7 @@ test('S03 yad build step: no inbox on another move, a failed move, the printed p
 });
 
 test('S03 yad build step … blocked --json: the CLI adds the block only when Plannotator is chosen and here (TC-13, TC-14)', { skip: process.platform === 'win32' && 'a fake program on PATH is a shell script' }, () => {
-  const { W, P } = workspace();
+  const { W, P, api } = workspace();
   try {
     yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
     const bin = path.join(W, 'bin');
@@ -2015,5 +2017,12 @@ test('S03 yad build step … blocked --json: the CLI adds the block only when Pl
     assert.match(j.inbox.messages[0].body, /✗ one test/);
     delete j.inbox;
     assert.deepEqual(j, JSON.parse(notChosen.stdout), 'nothing else changes');
+    // Found only in a code repo (its own MCP server, no program on PATH): run there it counts, run from the
+    // Product it does not — the scan is where yad ran, the choice is the Product's.
+    write(api, { '.mcp.json': JSON.stringify({ mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } }) });
+    const from = (cwd) => JSON.parse(spawnSync(process.execPath, [YAD, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'blocked', '--reason', 'x', '--json'],
+      { cwd, encoding: 'utf8', env: { ...ENV, PWD: cwd, HOME: home, USERPROFILE: home, PATH: only, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } }).stdout);
+    assert.equal(from(api).inbox?.messages.length, 1, 'run from the code repo, its server counts');
+    assert.ok(!('inbox' in from(P)), 'run from the Product, the repo\'s server does not');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
