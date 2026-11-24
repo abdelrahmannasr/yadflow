@@ -43,6 +43,22 @@ when the tool is ready — and say plainly that those notes are not a yadflow re
   and no finding for it (present here). The same two facts `inboxReady` checks.
 - Q: Add the skills to the toolbox entry's `usedBy`? → A: no (R6).
 - Q: Light spec? → A: yes.
+- Q (code review, 2026-11-24): "push it as usual so the review sees the change" was wrong — the review PR's head is
+  `review/<epic>/<artifact-base>`, its own branch, and a later gate's review branch is cut from the default branch.
+  → A: commit the artifact's file only on `<step>/<epic>`, carry that one commit onto the review branch with
+  `git cherry-pick`, push it (never force); with no platform, no review branch and no push.
+- Q (code review): `yad gate comment` / `approve` refuse with a platform. → A: with a platform, the PR/MR's comment
+  and review; with no platform, those commands. Both the person's.
+- Q (code review): an edit revokes approvals; a real concern in a note would be fixed quietly and never recorded; a
+  reviewer is not the owner. → A: say the revoke first; a real concern still goes on the review as an unflagged
+  comment; revise only when the person is the owner or the owner agrees.
+- Q (code review): the program alone counts as installed, but `/plannotator-annotate` comes with Plannotator's own
+  install. → A: a third condition — the session lists the `plannotator-annotate` command or skill.
+- Q (code review): `epics/<epic>/<artifact>` is wrong for the Foundation. → A: the path is the bundle's
+  `artifactPath`, relative to the Product.
+- Q (code review): pair review — a revision makes the walkthrough stale; two copies of the text drift. → A: re-run
+  `yad gate walkthrough` before Step 4; pair-review points to the companion's section and adds only its own two
+  points.
 
 ## Plan
 
