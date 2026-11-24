@@ -35,6 +35,7 @@ import { setupQuestions } from './setup.mjs';
 import { reposBeside, insideGitRepo, PRODUCT_DIR } from './workspace.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
 import { localSetupWaiting } from './local-setup.mjs';
+import { handOffMessage, inboxBlock, inboxReady } from './inbox.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -588,10 +589,22 @@ export function printGuide(g) {
   if (g.then) info(c.dim(`then: ${g.then}`));
 }
 
-export async function runGuide(root, { epic = null, cwd, json = false, runner, productElsewhere = null } = {}) {
+// EP-plannotator-review-S02: the guide's `person[]`, as Inbox messages, when the Product chose Plannotator and it is
+// here (contract.md, API). Added on the --json answer only, so the printed guide and `buildGuide` never change, and
+// with the Inbox not ready the answer is exactly what it was. The agent posts them; yad never calls Plannotator.
+export function withInbox(g, root, { cwd = root, ready = inboxReady } = {}) {
+  const person = Array.isArray(g?.person) ? g.person : [];
+  if (!root || !person.length || !ready(root, { detectRoot: cwd ?? root })) return g;
+  const epic = g.step?.epic ?? null;
+  const step = g.step?.id ?? null;
+  const inbox = inboxBlock(person.map((entry) => handOffMessage({ epic, step, entry })));
+  return inbox ? { ...g, inbox } : g;
+}
+
+export async function runGuide(root, { epic = null, cwd, json = false, runner, productElsewhere = null, ready = inboxReady } = {}) {
   const g = buildGuide(root, { epic, cwd, runner, productElsewhere });
   if (g.ok === false) process.exitCode = 1;
-  if (json) return g;
+  if (json) return withInbox(g, root, { cwd: cwd ?? root, ready });
   printGuide(g);
   return undefined;
 }
