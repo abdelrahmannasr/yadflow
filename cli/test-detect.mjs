@@ -500,10 +500,16 @@ const { REPOMIX_VERSION, VET_MAX_AGE_DAYS, isRepoLicenceFile, staleVettings, vet
 test('E88: every shipped toolbox entry carries a complete vetting record', () => {
   for (const t of TOOLBOX) assert.deepEqual(vettingProblems(t), [], t.id);
   // The proof matches the answer: an open licence was read from the source's own LICENSE file, a closed
-  // one from the vendor's terms page — never a LICENSE file it does not have.
+  // one from the vendor's terms page — never a LICENSE file it does not have. A dual-licensed repo names
+  // each file (LICENSE-APACHE, LICENSE-MIT: Plannotator), as `isRepoLicenceFile` reads them.
   for (const t of TOOLBOX) {
     if (t.licence === 'proprietary') assert.doesNotMatch(t.vetted.licenceFrom, /\/LICENSE$/, t.id);
-    else assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && t.vetted.licenceFrom.endsWith('/LICENSE'), `${t.id}: ${t.vetted.licenceFrom}`);
+    else {
+      // A named file only for a dual licence, and only one of the licences it names (`Apache-2.0 OR MIT`).
+      const named = t.licence.includes(' OR ') ? t.licence.split(' OR ').map((l) => l.split('-')[0].toUpperCase()) : [];
+      const file = t.vetted.licenceFrom.split('/').at(-1);
+      assert.ok(t.vetted.licenceFrom.startsWith(`${t.vetted.source}/blob/`) && (file === 'LICENSE' || named.some((n) => file === `LICENSE-${n}`)), `${t.id}: ${t.vetted.licenceFrom}`);
+    }
   }
   // Every registry package an install route names is in the record — so a package nobody vetted cannot
   // ride in on an install line. The forms read: npx / npm exec / npm i|install [-g], with -y or --yes;
@@ -1426,6 +1432,40 @@ test('#361 Docker MCP Toolkit: a recommended tool, found by its MCP_DOCKER serve
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('EP-plannotator-review-S01 Plannotator: a recommended tool, found by its program, plugin or Inbox server, added like any other', () => {
+  const t = TOOLBOX.find((x) => x.id === 'plannotator');
+  assert.equal(t.tier, 'recommended');
+  assert.deepEqual([toolProblems(t), vettingProblems(t)], [[], []]);
+  // Exactly the contract's toolbox row (EP-plannotator-review contract.md, Data model).
+  assert.deepEqual(t.detect, { bins: ['plannotator'], plugins: ['plannotator'], mcp: ['plannotator-inbox'] });
+  assert.deepEqual([t.licence, t.vetted.release, t.records, t.usedBy], ['Apache-2.0 OR MIT', 'v0.29.3', null, []]);
+  assert.ok(t.install.some((r) => r.type === 'script' && r.command.includes('--version v0.29.3') && r.command.includes('--verify-attestation')), 'the script is pinned and signature-checked');
+  assert.match(t.note, /PLANNOTATOR_SHARE=disabled/);
+  // Each signal alone finds it: the program, the plugin (by its id or id@marketplace), the Inbox server in any case.
+  const none = () => false;
+  assert.equal(toolStatus(t, [], { has: (b) => b === 'plannotator' }).state, 'installed');
+  for (const name of ['plannotator', 'plannotator@plannotator']) {
+    assert.equal(toolStatus(t, [{ kind: 'plugin', name, enabled: true, agents: ['Claude Code'], where: 'Claude Code plugins' }], { has: none }).state, 'installed', name);
+  }
+  assert.equal(toolStatus(t, [{ kind: 'mcp', name: 'Plannotator-Inbox', where: '.mcp.json' }], { has: none }).state, 'installed');
+  // A plugin the settings turn off is not loaded.
+  assert.equal(toolStatus(t, [{ kind: 'plugin', name: 'plannotator@plannotator', enabled: false, agents: ['Claude Code'], where: 'Claude Code plugins' }], { has: none }).state, 'disabled');
+  assert.equal(toolStatus(t, [], { has: none }).state, 'missing');
+  const { T, p, home } = product({ '.mcp.json': JSON.stringify({ mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } }) });
+  try {
+    let r = yad(['toolbox', '--json'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).tools.find((x) => x.id === 'plannotator').status.state, 'installed');
+    const human = yad(['toolbox', 'list'], { cwd: p, home }).stdout;
+    const recommended = human.slice(human.indexOf('Recommended'), human.indexOf('Connectors'));
+    assert.match(recommended, /Plannotator/, 'listed under Recommended');
+    r = yad(['toolbox', 'add', 'plannotator'], { cwd: p, home });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /Plannotator is used here now/);
+    assert.deepEqual(toolboxJSON(p).shipped, { plannotator: 'use' });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('#321 Unity MCP: a recommended tool used by yad-implement, found by its UnityMCP server in any case, set up by the person', () => {
   const t = TOOLBOX.find((x) => x.id === 'unity-mcp');
   assert.equal(t.tier, 'recommended');
@@ -2240,6 +2280,31 @@ test('E165: every shipped tool has a recipe; agent steps are pinned installs, th
   for (const id of ['maestro', 'ecc', 'bmad-method', 'impeccable']) {
     assert.ok(!RECIPES[id].some((s) => s.who === 'agent' && /curl|install --guided|bmad-method install|impeccable install/.test(s.run)), id);
   }
+});
+
+test('EP-plannotator-review-S01: connecting Plannotator — every step is yours: the pinned script, the marketplace, the plugin', async () => {
+  const { connectPlan } = await import('./toolbox-connect.mjs');
+  assert.deepEqual(recipeProblems(TOOLBOX.find((t) => t.id === 'plannotator')), []);
+  const j = connectPlan('plannotator', { items: [], has: () => false, productRoot: null });
+  assert.equal(j.state, 'missing');
+  const commands = [
+    'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v0.29.3 --verify-attestation --skip-claude-plugin',
+    'claude plugin marketplace add backnotprop/plannotator',
+    'claude plugin install plannotator@plannotator',
+  ];
+  assert.deepEqual(j.steps.map((s) => [s.who, s.run]), [...commands.map((c) => ['person', c]), ['person', 'restart your agent']]);
+  // The agent runs nothing: a remote script, and a plugin from a marketplace you add first, are yours (docs/CLI.md).
+  assert.deepEqual(j.steps.filter((s) => s.who === 'agent'), []);
+  for (const s of j.steps) assert.ok(s.why, `${s.run}: says why it is yours`);
+  // The script's reason names what it changes besides the program.
+  assert.match(j.steps[0].why, /other agents it finds/);
+  assert.match(j.steps[0].why, /needs the gh program/);
+  assert.match(j.steps[2].why, /not pinned/);
+  assert.match(j.ask, /^Plannotator needs steps only you can do\. First, you run `curl -fsSL https:\/\/plannotator\.ai\/install\.sh [^`]+` \(a remote install script, /);
+  assert.equal(j.verify, 'yad toolbox connect plannotator --verify --json');
+  assert.deepEqual(j.person.commands, commands);
+  // Already on this machine: nothing to install, only the record.
+  assert.deepEqual(connectPlan('plannotator', { items: [], has: (b) => b === 'plannotator' }).steps, []);
 });
 
 test('E165: `yad toolbox connect <tool> --json` reads only — the steps, the question, what will be recorded', () => {
