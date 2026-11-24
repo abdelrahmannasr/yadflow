@@ -158,13 +158,13 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   `! if the risk step were enforced: …`); it holds nothing (E73). In solo mode, `yad gate status` instead
   suggests `yad mode team` (`! solo mode is on, but …`) when more than one person may work on the
   Product; it switches nothing (E74). A gate already passed is taken back only by `yad gate reopen`,
-  before Build starts (#322).
+  before Build starts (#322). With Plannotator ready, the agent also posts the opened review to the person's Plannotator Inbox, and closes it once the gate passes; a reply never approves.
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
   Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
   an **engagement** signal on each approval (`verified` vs `none`) and posts a friendly public nudge on a
   bare rubber-stamp. Soft by default ("visible, not impossible"); gates only when
-  `review.requireEngagement` (Product settings). Companion comments carry `<!-- yad:noblock -->` so they never block.
+  `review.requireEngagement` (Product settings). Companion comments carry `<!-- yad:noblock -->` so they never block. For a Shape artifact, when Plannotator is ready, it offers line notes in Plannotator (`/plannotator-annotate`): the notes help the owner revise and are never a comment or an approval.
 - **`yad-pair-review`** — The guided, two-way, **teaching** walkthrough — the AI-driven 5th companion
   face (front **and** Build). The AI walks the engineer through the change **one risk-ordered stop at
   a time** (`yad review walkthrough` / `yad gate walkthrough`), gives comprehensive context per change,
@@ -172,7 +172,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   sign-off). It doubles as a learning session — demonstrates a transferable review method, scores the
   engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (the `yad-status`
   skill rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
-  surfaces genuine concerns as normal blocking comments.
+  surfaces genuine concerns as normal blocking comments. It follows the companion's rules for Plannotator line notes, and re-runs the walkthrough after a revision.
 - **`yad-product-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
   (`.sdlc/product.json`), it opens a review PR/MR per artifact, applies the touched-domain labels (it requests no reviewers), and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
@@ -239,7 +239,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   one approver holds the merge, with the same reported count) → on merge, record the ship in the epic build-log and
   update the story state so the epic → story → task → PR chain stays traceable. For a UI change it runs
   the live design check (the page at several screen widths) at the PR's preview address from
-  `yad review context`'s `preview` field, or says plainly that the check ran locally only (#359).
+  `yad review context`'s `preview` field, or says plainly that the check ran locally only (#359). With Plannotator ready, it offers `/plannotator-review <PR_URL>` as an optional read, whose "Approve" is not the review record, and posts a nudged review to the person's Plannotator Inbox.
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
   before it counts. A change is blocked only until the features it touches have approved specs. Its
@@ -255,7 +255,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   step's output is not finished). Sets a step's dial through `yad dial` (nothing to earn since E34) and flips the kill switch
   through `yad kill` / `yad unkill`. It
   never drives a lane skipped whole with `yad skip <epic> <story> --repo <name>` (E39), and never marks a
-  single Build step skipped.
+  single Build step skipped. A halt also goes to the person's Plannotator Inbox when it is ready, with a fix / skip / stop question; the answer only steers what the agent proposes, and the step moves only when the person says the halt is resolved.
 - **`yad-status`** — Read-only view of an epic: the current step, each step's dials (driver/advance) and status, which approvals are still required, per-story Build run records (as advice),
   the kill switch and the Shape dials from `.sdlc/automation.json`, and a fleet roll-up across epics.
   It starts from `yad status --brief` (#349), the ~20-line view of where the work stands.
@@ -275,7 +275,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   agent's part; hand the person's part over with the exact command or steps, then confirm by reading.
   It lists what the agent runs without asking, what it asks about every time, and what only the person
   runs (approvals and merges, logins, secrets, signing keys, platform settings). Its lists are written
-  from `cli/agent-rules.mjs` by `scripts/agent-guide.mjs`. Never a gate; never touches epic state.
+  from `cli/agent-rules.mjs` by `scripts/agent-guide.mjs`. Never a gate; never touches epic state. With Plannotator chosen and on this machine, it also says how to post the `inbox` messages yad's `--json` answers carry into the person's Plannotator Inbox, and that a reply records nothing ([docs/CLI.md](CLI.md#the-plannotator-inbox-the-inbox-field)).
 
 ## Post-lock change management — feature threads (Phase 6)
 

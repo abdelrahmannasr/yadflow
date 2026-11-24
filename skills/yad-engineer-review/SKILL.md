@@ -149,6 +149,15 @@ session has the Plannotator Inbox tool, post its one `review` message (the PR's 
 reply records nothing) as the yad-guide skill's "Posting to the Inbox" says. Once the PR is merged
 (confirmed by reading, as `yad build merged` does), post "Confirmed: PR #<n> merged." in the same thread and
 mark the message done. A reply there is never the review record.
+
+**A line-by-line read in Plannotator (optional).** The engineer may read the PR in Plannotator's review window:
+`/plannotator-review <PR_URL>`. Offer it only when `yad toolbox check --json` lists `plannotator` in `used`, no
+`findings` entry has `id: "plannotator"`, and your session lists the `plannotator-review` command or skill;
+otherwise say nothing about it. It is an aid to reading, never the review record: its "Approve" only tells the
+agent "LGTM". The engineer review is still the approval on the PR, recorded as above, and the merge is still
+the person's. A genuine concern found there goes on the PR as a normal comment, so it holds the merge like any
+reviewer's note. Before anyone shares a Plannotator link, recommend `PLANNOTATOR_SHARE=disabled`: a share sends
+the diff to Plannotator's host.
 Recording an approval does **not** ship — shipping is a separate, explicit step. Shape discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
 
