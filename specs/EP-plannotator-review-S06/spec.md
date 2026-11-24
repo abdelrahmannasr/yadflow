@@ -42,6 +42,17 @@ the docs describe what was built.
 - Q: One section or notes spread across each command's row? → A: one section, so the four commands read the
   same and there is one place to change.
 - Q: Light spec? → A: yes.
+- Q (docs review, 2026-11-24): the docs said things the code does not do. → A: fixed against the code — the
+  `review` key is `review:<epic or repo>:<artifact or PR>:gate|nudge` (the contract's one-line key pattern fits
+  only hand-off and halt; raised at the engineer review); a line holding a known token is dropped whole as
+  `[redacted line]`; a hand-off's `links` are the `https` links in its steps; the install script is not pinned —
+  `--version` and `--verify-attestation` apply to the program it fetches; the program alone gives no Inbox tool;
+  local-only storage is Plannotator's, not a yad promise; thread `yad` when none is known; the notice is the last
+  paragraph, in italics.
+- Q (docs review): `yad guide` passes the exact folder it ran in, while the other three pass the top of the
+  checkout (`toolboxAt.from`), so `yad guide` run from a subfolder misses a repo-level plugin or server. → A:
+  documented as it is; the code change (pass `toolboxAt?.from ?? o.dir` in `bin/yad.mjs`) is out of this docs
+  story and raised at the engineer review as a follow-up.
 
 ## Plan
 
