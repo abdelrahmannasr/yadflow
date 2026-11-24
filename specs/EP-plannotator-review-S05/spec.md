@@ -17,14 +17,14 @@ when the tool is ready — and say plainly that those notes are not a yadflow re
   "Line notes in Plannotator (Shape, optional)", that applies to a **Shape** artifact only (not a code PR).
 - R2. **Only when ready.** The agent offers `/plannotator-annotate epics/<epic>/<artifact>` only when
   `yad toolbox check --json` lists `plannotator` in `used` and has no `findings` entry for it (the Product chose it
-  and this machine has it). Otherwise it says nothing about Plannotator.
+  and this machine has it), and the session has the `plannotator-annotate` command (review clarification). Otherwise it says nothing about Plannotator.
 - R3. **Not a record.** The offer says, in plain words, that the notes go to the agent so it can revise the draft,
   and are **not** a yadflow comment or approval: a comment for the record is `yad gate comment`, and an approval is
   `yad gate approve` (or the review on the PR), both the person's. A Plannotator "Approve" in that window records
   nothing either.
 - R4. **Where the agent revises.** Only on the artifact's authoring branch (the branch the review branch was cut
-  from), never on the review branch and never in `.sdlc/` files. A revision after the review opened is pushed as
-  usual, so the review sees the change.
+  from), never in `.sdlc/` files; with a platform, that one commit is carried onto the review branch and pushed
+  (see the review clarifications below).
 - R5. **Privacy.** Before anyone shares a Plannotator link, recommend `PLANNOTATOR_SHARE=disabled` (or a
   self-hosted share server): a share sends the artifact to an outside host.
 - R6. The skill-fallback check (`node scripts/skill-fallbacks.mjs --check`) and the skill tests pass. The
