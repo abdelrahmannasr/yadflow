@@ -1204,6 +1204,31 @@ test('check --fix wires the agent guard on every Product, beside the team\'s own
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('EP-plannotator-review-S02: with Plannotator\'s hooks in .claude/settings.json, the agent guard is wired beside them and still refuses (TC-09)', () => {
+  const T = tmp();
+  try {
+    put(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'github', default_branch: 'main' }));
+    // Plannotator's own hooks, as its plugin declares them: plan review when plan mode ends, and a context hook.
+    const plannotator = {
+      PermissionRequest: [{ matcher: 'ExitPlanMode', hooks: [{ type: 'command', command: 'plannotator', timeout: 345600 }] }],
+      PreToolUse: [{ matcher: 'EnterPlanMode', hooks: [{ type: 'command', command: 'plannotator improve-context', timeout: 5 }] }],
+    };
+    put(path.join(T, '.claude/settings.json'), JSON.stringify({ hooks: plannotator }));
+    for (const a of agentGuardActions(T, ['.claude'])) a.apply();
+    const hooks = JSON.parse(read(path.join(T, '.claude/settings.json'))).hooks;
+    // Plannotator's entries are kept as they were.
+    assert.deepEqual(hooks.PermissionRequest, plannotator.PermissionRequest);
+    const pre = hooks.PreToolUse.flatMap((e) => e.hooks.map((h) => h.command));
+    assert.ok(pre.includes('plannotator improve-context'), 'its PreToolUse hook is kept');
+    assert.ok(pre.includes(AGENT_GUARD_ADAPTERS['.claude'].command), 'the agent guard is wired beside it');
+    assert.ok(agentGuardActions(T, ['.claude']).every((a) => a.status === 'ok'), 'and a second run changes nothing');
+    // The guard's answer does not depend on any other hook: it still refuses what only a person does.
+    for (const line of ['yad gate approve EP-x epic.md', 'git push --force origin main']) {
+      assert.equal(agentGuardDecision(line).allow, false, line);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // ---- the read-only yad commands, pre-approved for Claude Code (E158, issue #353) ------------------------
 
 const { readAllowList, COMMAND_CLASS, classify } = await import('./agent-rules.mjs');
