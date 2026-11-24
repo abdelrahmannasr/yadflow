@@ -466,9 +466,9 @@ Plannotator, and never reads or writes its files.
 
 **When it appears.** Only under `--json`, and only when both hold:
 - the Product chose Plannotator (`yad toolbox add plannotator`, in `.sdlc/toolbox.json`), and
-- it is found on this machine (see [the toolbox](#the-toolbox)). `yad build step`, `yad gate open` and
-  `yad review nudge` look from the top of the checkout or Product they ran in, as `yad toolbox list` does;
-  `yad guide` looks from the exact folder it ran in.
+- it is found on this machine (see [the toolbox](#the-toolbox)). All four commands look from the top of the
+  checkout or Product they ran in, as `yad toolbox list` does, so a code repo's own plugin or Inbox server counts
+  wherever in that repo you run them.
 
 Found is not enough to post: the program alone counts as found, but the Inbox tool comes from Plannotator's
 plugin or its `plannotator-inbox` server, so the agent posts only when its session has that tool.
