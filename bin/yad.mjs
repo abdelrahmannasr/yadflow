@@ -1308,7 +1308,7 @@ async function main() {
       // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. Local mode keeps local writes.
-      if (action === 'open') result = await commands.gateOpen(o.dir, { epic, artifact, today });
+      if (action === 'open') result = await commands.gateOpen(o.dir, { epic, artifact, today, json: !!o.json, cwd: toolboxAt?.from ?? null });
       else if (action === 'sync') result = await commands.gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
       else if (action === 'comments') result = await commands.gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') result = await commands.gateStatus(o.dir, { epic });

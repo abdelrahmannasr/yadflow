@@ -213,3 +213,72 @@ test('S02 review: a cut never splits a character, an odd act is never an object 
   // Nothing to say but the notice: the body is the notice alone.
   assert.equal(handOffMessage({ entry: { act: 'x' } }).body, `*${NOTICE}*`);
 });
+
+// EP-plannotator-review-S04: `yad gate open --json` and `yad review nudge --json` carry one `review` message.
+const { gateOpen } = await import('./gate.mjs');
+const quiet = async (fn) => {
+  const log = console.log;
+  console.log = () => {};
+  try { return await fn(); } finally { console.log = log; }
+};
+// A Product on GitHub (a local ledger) with one review step ready to open.
+function reviewProduct({ solo = false } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-inbox-gate-'));
+  const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
+  put('.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main', ...(solo ? { solo: true } : {}) });
+  put('.sdlc/repos.json', { repos: [{ name: 'engine', path: 'engine', platform: 'github', default_branch: 'main' }] });
+  put('epics/EP-x/epic.md', '---\nid: EP-x\nowner: alice\n---\n');
+  put('epics/EP-x/architecture.md', '---\nid: EP-x\nartifact: architecture\nstatus: draft\n---\n# arch\n');
+  put('epics/EP-x/.sdlc/state.json', { epicId: 'EP-x', currentStep: 'architecture-review', steps: [
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done', risk_tags: [] },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'todo', risk_tags: [] },
+  ] });
+  put('epics/EP-x/.sdlc/approvals.json', '[]');
+  put('epics/EP-x/.sdlc/comments.json', '[]');
+  return T;
+}
+const URL7 = 'https://github.com/o/product/pull/7';
+const opened = () => ({ ok: true, url: URL7 });
+const open = (T, o) => quiet(() => gateOpen(T, { epic: 'EP-x', artifact: 'architecture.md', creator: opened, hasBranch: () => true, runner: () => ({ ok: true, stdout: '[]' }), env: {}, today: '2026-11-24', ...o }));
+
+test('S04 yad gate open --json: one review message when the review PR opened and the Inbox is ready; solo wording when solo (TC-16)', async () => {
+  const team = reviewProduct();
+  const solo = reviewProduct({ solo: true });
+  try {
+    const asked = [];
+    const r = await open(team, { json: true, cwd: '/some/repo', ready: (root, o) => { asked.push([root, o.detectRoot]); return true; } });
+    assert.deepEqual(asked, [[team, '/some/repo']], 'the scan runs from where yad ran');
+    assert.equal(r.opened, true);
+    assert.equal(r.inbox.tool, 'plannotator');
+    assert.equal(r.inbox.messages.length, 1);
+    const [m] = r.inbox.messages;
+    assert.equal(m.kind, 'review');
+    assert.equal(m.key, 'review:EP-x:architecture.md:gate');
+    assert.equal(m.thread, 'yad EP-x');
+    assert.equal(m.title, 'Review ready — architecture.md for EP-x');
+    assert.deepEqual(m.links, [URL7]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    assert.match(m.body, /approve or merge/);
+    assert.ok(m.body.trimEnd().endsWith(`*${m.notice}*`), 'the notice is the last paragraph');
+    const s = await open(solo, { json: true, ready: () => true });
+    assert.match(s.inbox.messages[0].body, /In solo mode no approval is counted, so merging it is the decision\./);
+  } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
+});
+
+test('S04 yad gate open: no inbox on a failed open, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
+  const dirs = [reviewProduct(), reviewProduct(), reviewProduct(), reviewProduct()];
+  try {
+    let calls = 0;
+    const on = () => { calls += 1; return true; };
+    const failed = await open(dirs[0], { json: true, ready: on, creator: () => ({ ok: false, reason: 'refused' }) });
+    assert.equal(failed.opened, false);
+    assert.ok(!('inbox' in failed));
+    const printed = await open(dirs[1], { ready: on });
+    assert.ok(!('inbox' in printed));
+    assert.equal(calls, 0, 'the machine is scanned only for an opened review under --json');
+    // Not ready: the result is exactly the one without the feature.
+    const off = await open(dirs[2], { json: true, ready: () => false });
+    const plain = await open(dirs[3]);
+    assert.equal(JSON.stringify(off), JSON.stringify(plain));
+  } finally { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); }
+});

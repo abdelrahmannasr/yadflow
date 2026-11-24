@@ -33,6 +33,7 @@ import { err } from './errors.mjs';
 import { readLabels, createLabel } from './issues.mjs';
 import { prTarget } from './pr-list.mjs';
 import { configuredGitUrl } from './protection.mjs';
+import { inboxReady, inboxBlock, reviewMessage } from './inbox.mjs';
 
 // Who WRITES a closing record (E18): the platform login, else the raw git user.name, else null
 // (`actorName`). On CI that is usually the bot's git name — a job token cannot read `/user`. Best-effort,
@@ -1961,7 +1962,10 @@ function labelHint(platform, labels, why) {
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` and `runner` are injected in tests.
-export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, runner = run, env = process.env, today = new Date().toISOString().slice(0, 10) } = {}) {
+// With `json` (`yad gate open --json` only — never `open-pr`'s delegation), an opened review also carries the
+// `inbox` block: one `review` message for the person's Plannotator Inbox, when the Product chose it and it is
+// found where yad ran (`cwd`). yad never posts it: the agent does. Not ready, the JSON is what it was.
+export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, runner = run, env = process.env, today = new Date().toISOString().slice(0, 10), json = false, cwd = null, ready = inboxReady } = {}) {
   const { productConfig } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -2101,7 +2105,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   hand(verified
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
-  return { epic, step: step.id, artifact, branch, opened: true, url: r.url, markedInReview: !verified };
+  const inbox = json && ready(root, { detectRoot: cwd ?? root })
+    ? inboxBlock([reviewMessage({ epic, artifact, url: r.url, solo: isSolo(productConfig) })]) : undefined;
+  return { epic, step: step.id, artifact, branch, opened: true, url: r.url, markedInReview: !verified, ...(inbox ? { inbox } : {}) };
 }
 
 // `yad gate review <epic> [artifact]` — assemble + print the grounding bundle the companion skill uses
