@@ -218,6 +218,14 @@ test('S02 review: a cut never splits a character, an odd act is never an object 
   assert.equal(handOffMessage({ entry: { act: 'x' } }).body, `*${NOTICE}*`);
 });
 
+// The fake workspaces run git and yad with no global or system git config (no commit signing, no hooks) and
+// none of the developer's GH_*, GIT_* or YAD_* variables, so a test never prompts or touches the real machine.
+function isolatedEnv(W, extra = {}) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GH_|GITHUB_|GIT_|YAD_)/.test(k)));
+  fs.writeFileSync(path.join(W, 'gitconfig'), '[user]\n\tname = a\n\temail = a@b.c\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n');
+  return { ...env, GIT_CONFIG_GLOBAL: path.join(W, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', ...extra };
+}
+
 // EP-plannotator-review-S04: `yad gate open --json` and `yad review nudge --json` carry one `review` message.
 const { gateOpen } = await import('./gate.mjs');
 const quiet = async (fn) => {
@@ -355,11 +363,12 @@ test('S04 yad review nudge --json through the CLI, run in a code repo whose own 
     put('product/.sdlc/toolbox.json', { schemaVersion: 10, shipped: { plannotator: 'use' } });
     put('engine/.mcp.json', { mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } });
     put('engine/a.txt', 'a\n');
+    const genv = isolatedEnv(W);
     for (const d of [P, E]) {
-      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
-      execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b.c', 'commit', '-q', '--allow-empty', '-m', 'chore: seed'], { cwd: d });
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d, env: genv });
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'chore: seed'], { cwd: d, env: genv });
     }
-    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E });
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E, env: genv });
     // A fake gh that answers the PR read; no plannotator program anywhere on PATH.
     put('bin/gh', `#!/bin/sh\ncase "$*" in\n  "pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid,url") echo '{"state":"OPEN","headRefOid":"abc","url":"https://github.com/o/engine/pull/7"}' ;;\n  "pr view 7 --json latestReviews") echo '{"latestReviews":[]}' ;;\n  *) exit 1 ;;\nesac\n`);
     fs.chmodSync(path.join(W, 'bin/gh'), 0o755);
@@ -371,7 +380,7 @@ test('S04 yad review nudge --json through the CLI, run in a code repo whose own 
     fs.mkdirSync(home);
     const PATH = [path.join(W, 'bin'), path.join(W, 'tools')].join(path.delimiter);
     const yad = (cwd) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/yad.mjs', import.meta.url)), 'review', 'nudge', '--repo', 'engine', '--pr', '7', '--json'],
-      { cwd, encoding: 'utf8', env: { ...process.env, PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+      { cwd, encoding: 'utf8', env: isolatedEnv(W, { PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' }) });
     const r = yad(E);
     assert.equal(r.status, 0, r.stderr);
     const j = JSON.parse(r.stdout);
@@ -392,7 +401,8 @@ function inboxWorkspace({ chosen = true, step = 'architecture-review', status = 
   const P = path.join(W, 'product');
   const E = path.join(W, 'engine');
   const put = (rel, v) => { fs.mkdirSync(path.dirname(path.join(W, rel)), { recursive: true }); fs.writeFileSync(path.join(W, rel), typeof v === 'string' ? v : JSON.stringify(v)); };
-  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=a', '-c', 'user.email=a@b.c', ...a], { cwd, stdio: 'pipe' }).toString().trim();
+  const genv = isolatedEnv(W);
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: genv }).toString().trim();
   put('.yad-workspace.json', { version: 1, product: 'product' });
   put('product/.sdlc/product.json', { schemaVersion: 10, platform: 'github', default_branch: 'main' });
   put('product/.sdlc/repos.json', { repos: [{ name: 'engine', path: '../engine', platform: 'github', default_branch: 'main' }] });
@@ -408,14 +418,14 @@ function inboxWorkspace({ chosen = true, step = 'architecture-review', status = 
   put('engine/.mcp.json', { mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } });
   put('engine/src/a.js', 'a\n');
   for (const d of [P, E]) {
-    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+    git(d, 'init', '-q', '-b', 'main');
     git(d, 'add', '-A');
     git(d, 'commit', '-q', '-m', 'chore: seed');
   }
-  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/engine.git'], { cwd: E });
+  git(E, 'remote', 'add', 'origin', 'https://github.com/o/engine.git');
   // The Product's origin is a local bare repo holding the review branch, so `gate open` finds it there.
-  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', path.join(W, 'product.git')]);
-  execFileSync('git', ['remote', 'add', 'origin', path.join(W, 'product.git')], { cwd: P });
+  git(W, 'init', '-q', '--bare', '-b', 'main', path.join(W, 'product.git'));
+  git(P, 'remote', 'add', 'origin', path.join(W, 'product.git'));
   git(P, 'push', '-q', 'origin', 'main', 'main:review/EP-x/architecture');
   put('bin/gh', '#!/bin/sh\ncase "$*" in\n  "pr create"*) echo "https://github.com/o/product/pull/9" ;;\n  *) exit 1 ;;\nesac\n');
   fs.chmodSync(path.join(W, 'bin/gh'), 0o755);
@@ -426,7 +436,7 @@ function inboxWorkspace({ chosen = true, step = 'architecture-review', status = 
   fs.mkdirSync(home);
   const PATH = [path.join(W, 'bin'), path.join(W, 'tools')].join(path.delimiter);
   const yad = (cwd, ...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/yad.mjs', import.meta.url)), ...args],
-    { cwd, encoding: 'utf8', env: { ...process.env, PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } });
+    { cwd, encoding: 'utf8', env: isolatedEnv(W, { PWD: cwd, HOME: home, USERPROFILE: home, PATH, NO_COLOR: '1', YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' }) });
   return { W, P, E, yad, done: () => fs.rmSync(W, { recursive: true, force: true }) };
 }
 const winSkip = { skip: process.platform === 'win32' && 'fake programs on PATH are shell scripts' };
@@ -444,10 +454,12 @@ test('EP-inbox-guide-scan yad guide --json from a code repo\'s subfolder finds t
   } finally { ws.done(); }
 });
 
-test('EP-inbox-guide-scan yad guide: only the Inbox scan changes — "here" and the printed guide are the same; not chosen is byte for byte (TC-03, TC-04)', winSkip, () => {
-  const on = inboxWorkspace();
-  const off = inboxWorkspace({ chosen: false });
+test('EP-inbox-guide-scan yad guide: only the Inbox scan changes — "here" and the printed guide are the same; not chosen gives the same answer every run (TC-03, TC-04)', winSkip, () => {
+  let on;
+  let off;
   try {
+    on = inboxWorkspace();
+    off = inboxWorkspace({ chosen: false });
     const at = (ws) => path.join(ws.E, 'src');
     const withInbox = JSON.parse(on.yad(at(on), 'guide', 'EP-x', '--json').stdout);
     const offRun = off.yad(at(off), 'guide', 'EP-x', '--json');
@@ -460,13 +472,15 @@ test('EP-inbox-guide-scan yad guide: only the Inbox scan changes — "here" and 
     assert.equal(on.yad(at(on), 'guide', 'EP-x').stdout.replaceAll(on.W, '<W>'), off.yad(at(off), 'guide', 'EP-x').stdout.replaceAll(off.W, '<W>'), 'the printed guide is the same');
     // Not chosen: the same answer twice, and no inbox key at all.
     assert.equal(off.yad(at(off), 'guide', 'EP-x', '--json').stdout, offRun.stdout);
-  } finally { on.done(); off.done(); }
+  } finally { on?.done(); off?.done(); }
 });
 
 test('EP-inbox-guide-scan yad gate open --json through the CLI: one review message with the PR link; none when not chosen (TC-05, TC-06)', winSkip, () => {
-  const on = inboxWorkspace({ step: 'architecture-review', status: 'todo' });
-  const off = inboxWorkspace({ chosen: false, step: 'architecture-review', status: 'todo' });
+  let on;
+  let off;
   try {
+    on = inboxWorkspace({ step: 'architecture-review', status: 'todo' });
+    off = inboxWorkspace({ chosen: false, step: 'architecture-review', status: 'todo' });
     // Run from the code repo, where its own Inbox server is: the Product is found through the workspace file.
     const r = on.yad(on.E, 'gate', 'open', 'EP-x', 'architecture.md', '--json');
     assert.equal(r.status, 0, r.stderr);
@@ -479,5 +493,17 @@ test('EP-inbox-guide-scan yad gate open --json through the CLI: one review messa
     const n = JSON.parse(off.yad(off.E, 'gate', 'open', 'EP-x', 'architecture.md', '--json').stdout);
     assert.equal(n.opened, true);
     assert.ok(!('inbox' in n), 'not chosen: no inbox');
-  } finally { on.done(); off.done(); }
+  } finally { on?.done(); off?.done(); }
+});
+
+test('EP-inbox-guide-scan runGuide: the Inbox scan looks from inboxAt, the guide itself from cwd; inboxAt left out falls back to cwd', async () => {
+  const { runGuide } = await import('./guide.mjs');
+  const T = product({ schemaVersion: 10, shipped: { plannotator: 'use' } });
+  try {
+    const asked = [];
+    const ready = (root, o) => { asked.push(o.detectRoot); return false; };
+    await runGuide(T, { cwd: T, inboxAt: '/top/of/checkout', json: true, ready });
+    await runGuide(T, { cwd: T, json: true, ready });
+    assert.deepEqual(asked, ['/top/of/checkout', T]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
