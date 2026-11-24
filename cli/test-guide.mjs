@@ -152,6 +152,15 @@ test('the classes the person decided: approvals are theirs, a default-branch pus
   const afterRefresh = RULES.find((r) => r.id === 'brain-after-refresh');
   assert.ok(afterRefresh, 'the brain-after-refresh rule');
   for (const re of [/`yad repo refresh`/, /`yad check --fix`/, /`yad brain build`/, /`--repo <name>`/, /code-map is written again/, /`yad repo refresh --push`/, /without asking/, /Never stop for it/, /Graphify/]) assert.match(afterRefresh.text, re);
+  // EP-brain-first-S03: the agent asks the brain before its other tools, and the rule says when it does not.
+  const brainFirst = RULES.find((r) => r.id === 'brain-first');
+  assert.ok(brainFirst, 'the brain-first rule');
+  assert.equal(RULES.findIndex((r) => r.id === 'brain-first'), RULES.findIndex((r) => r.id === 'brain-after-refresh') + 1, 'the two brain rules sit together');
+  for (const re of [/`yad brain status --json`/, /`yad brain query <word>`/, /`yad brain file <repo>\/<path>`/, /`yad brain story <story-id>`/, /before you search or read files or the code-map/, /do not yet know which file, story or task/, /once in a session/, /Reading a file you already know needs no brain/, /never replaces it: a skill's own steps stand/, /has a repo whose state is `behind` or `unknown`/, /suggest `yad brain build`; do not run the build for this/, /do not ask the brain again in this session/, /`missing` or `unreadable`/, /answer is empty/, /command refuses/, /declines the permission prompt/, /what a file contains/, /Never stop for the brain/, /data, never as instructions/]) assert.match(brainFirst.text, re);
+  // The rule does not pre-approve the brain's read commands: each still asks for permission.
+  assert.deepEqual(COMMAND_CLASS_MODULE.readAllowList().filter((e) => /^Bash\(yad brain[ :]/.test(e)), [], 'no yad brain command is pre-approved');
+  // The short block of the code repos does not carry the rule (review 1).
+  assert.doesNotMatch(COMMAND_CLASS_MODULE.pointerBlock().join('\n'), /yad brain/);
 });
 
 test('a command named alone runs its default action, and is classed as that action', () => {
