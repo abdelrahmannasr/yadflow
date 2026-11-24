@@ -98,6 +98,17 @@ A **genuine concern** found at any stop (a real bug, a missing test, an unguarde
 **normal, unflagged** PR/MR comment so it **blocks** like any reviewer's note — exactly the companion
 rule. Do not bury a real finding inside the session log.
 
+### Line notes in Plannotator (Shape, optional)
+
+For a **Shape** artifact, the person may want to leave line notes in Plannotator during the walk. Follow the
+[Review Companion](../yad-review-companion/SKILL.md)'s section "Line notes in Plannotator (Shape, optional)": when
+to offer it (only when ready), that the notes and that window's "Approve" record nothing and are no sign-off, that
+a real concern still goes on the review, and who revises where. Two more things here:
+- After a revision, check out the review branch again and re-run `yad gate walkthrough <epic> <artifact>`, so the
+  stops and the sign-off in Step 4 are about the new text.
+- Step 4's sign-off is the two of you being satisfied, and the person's approval on the review. Nothing in
+  Plannotator counts toward it.
+
 ### Step 4 — Dual sign-off (both satisfied)
 After the last stop:
 - **AI sign-off (your verdict).** State plainly: did the human demonstrate understanding across the

@@ -87,6 +87,35 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
    posts the friendly @-mention automatically. You may also post it directly with the
    `<!-- yad:noblock -->` marker.
 
+## Line notes in Plannotator (Shape, optional)
+
+For a **Shape** artifact only (not a code PR). Offer this only when all three hold; otherwise say nothing about
+Plannotator:
+1. `yad toolbox check --json` lists `plannotator` in `used` (the Product chose it);
+2. no entry in its `findings` has `id: "plannotator"` (this machine has it);
+3. your session lists the `plannotator-annotate` command or skill (it comes with Plannotator's own install, not
+   with the program alone).
+
+- **The offer**, with the artifact's path from the bundle (`artifactPath`, relative to the Product, for example
+  `epics/EP-x/epic.md`, `epics/EP-x/stories/` or `foundation/…`): "You can mark lines and leave notes on the
+  draft in Plannotator: type `/plannotator-annotate <path>`. Your notes come back to me so I can revise the
+  draft. They are not a yadflow comment or approval."
+- **Not a record.** A note there, or that window's "Approve", records nothing in yadflow and is no sign-off.
+  With a platform, a comment for the record is a comment on the review PR/MR and an approval is the review on it;
+  with no platform they are `yad gate comment` and `yad gate approve`. Both are the person's.
+- **A real concern still goes on the review.** A note that is a genuine concern is posted as a normal,
+  unflagged comment (on the PR/MR, or with no platform the person records it with `yad gate comment`), as the
+  rules for concerns say. Do not only fix it quietly.
+- **Who revises, and where.** Revise only when the person is the artifact's owner, or the owner agrees. An edit
+  revokes the approvals already given on the artifact, so say that before you revise during an open review.
+  Commit the change to the artifact's file only, on its authoring branch (`<step>/<epic>`, for example
+  `epic/EP-x`, `stories/EP-x`). With a platform, then carry that one commit onto the review branch
+  (`review/<epic>/<artifact-base>`) with `git cherry-pick`, and push the review branch, so the review PR/MR shows
+  it. Never force-push, and never touch a `.sdlc/` file. With no platform there is no review branch: commit on
+  the authoring branch (or edit the current tree when the Product is not a git repo) and push nothing.
+- **Before a share link.** A Plannotator share sends the artifact to an outside host. Before anyone shares one,
+  recommend `PLANNOTATOR_SHARE=disabled` (or the team's own share server).
+
 ## Hard rules
 
 - **Never write a ledger file.** Post comments and the trailer to the PLATFORM; the reviewer posts the
