@@ -1898,3 +1898,77 @@ test('E125 b: hook settings that are a link never ride the update, and are never
     assert.equal(fs.readFileSync(outside, 'utf8'), '{"permissions":{"allow":["Bash(ls)"]}}\n', 'the file it points at is untouched');
   } finally { fs.rmSync(P, { recursive: true, force: true }); process.exitCode = 0; }
 });
+
+// ---- EP-plannotator-review-S02: the guide's hand-offs, as Inbox messages (TC-05, TC-08) ---------------------------
+const { runGuide, withInbox } = await import('./guide.mjs');
+
+test('S02 withInbox: one hand-off per person[] entry, in order, only when the Inbox is ready', async () => {
+  const T = await product();
+  try {
+    moveTo(T, 'EP-pay', 'epic-review', 'todo');
+    const g = buildGuide(T, { epic: 'EP-pay' });
+    assert.ok(g.person.length >= 1);
+    // Not ready: the very same answer, byte for byte, and no `inbox` key at all.
+    const off = await runGuide(T, { epic: 'EP-pay', json: true, ready: () => false });
+    assert.equal(JSON.stringify(off), JSON.stringify(g));
+    assert.ok(!('inbox' in off));
+    // Ready: the guide plus `inbox`, and nothing else changed.
+    const on = await runGuide(T, { epic: 'EP-pay', json: true, ready: () => true });
+    const { inbox, ...rest } = on;
+    assert.equal(JSON.stringify(rest), JSON.stringify(g));
+    assert.equal(inbox.tool, 'plannotator');
+    assert.equal(inbox.messages.length, g.person.length);
+    assert.deepEqual(inbox.messages.map((m) => m.key), g.person.map((p) => `hand-off:EP-pay:${g.step.id}:${p.act}`));
+    const m = inbox.messages[0];
+    assert.deepEqual([m.kind, m.thread], ['hand-off', 'yad EP-pay']);
+    assert.match(m.body, /I will confirm with `yad gate sync EP-pay epic\.md`\./);
+    assert.ok(m.body.endsWith('*Replying here does not approve or record anything in yadflow. Type the command.*'));
+    // No hand-off: no block, even when ready. No Product: nothing to read.
+    assert.equal(withInbox({ person: [] }, T, { ready: () => true }).inbox, undefined);
+    assert.equal(withInbox({ person: [{ act: 'choose' }] }, null, { ready: () => true }).inbox, undefined);
+    // The readiness check is asked from where yad runs, with the Product's choice.
+    const asked = [];
+    withInbox(g, T, { cwd: '/some/repo', ready: (root, o) => { asked.push([root, o.detectRoot]); return false; } });
+    assert.deepEqual(asked, [[T, '/some/repo']]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('S02 yad guide --json: no inbox unless the Product chose Plannotator and it is here; the ledger is untouched (TC-05, TC-08)', { skip: process.platform === 'win32' && 'a fake program on PATH is a shell script' }, async () => {
+  const T = await product();
+  const bin = tmp();
+  try {
+    moveTo(T, 'EP-pay', 'epic-review', 'todo');
+    fs.writeFileSync(path.join(bin, 'plannotator'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    // An empty home: this machine's own plugins and servers never count.
+    const home = path.join(bin, 'home');
+    fs.mkdirSync(home);
+    const env = { ...process.env, NO_COLOR: '1', HOME: home, USERPROFILE: home, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+    const guide = (args) => spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', ...args, '--dir', T], { encoding: 'utf8', env });
+    // Found here, but not chosen: no inbox.
+    let r = guide(['--json']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!('inbox' in JSON.parse(r.stdout)));
+    const printedBefore = guide([]).stdout;
+    // Chosen and found: the block, one message per hand-off.
+    put(path.join(T, '.sdlc/toolbox.json'), { schemaVersion: 10, shipped: { plannotator: 'use' } });
+    git(T, ['add', '-A']);
+    git(T, ['commit', '-q', '-m', 'chore: use plannotator']);
+    const before = git(T, ['status', '--porcelain']);
+    r = guide(['--json']);
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.inbox.tool, 'plannotator');
+    assert.equal(j.inbox.messages.length, j.person.length);
+    assert.equal(git(T, ['status', '--porcelain']), before, 'nothing under .sdlc/ (or anywhere) is written');
+    // The printed guide never changes.
+    assert.equal(guide([]).stdout, printedBefore);
+    // Chosen, but not found here: no inbox.
+    // A PATH holding only node (linked into an empty folder): a plannotator installed beside node elsewhere
+    // (Homebrew, ~/.local/bin) can never be found by this case.
+    const only = path.join(bin, 'only-node');
+    fs.mkdirSync(only);
+    fs.symlinkSync(process.execPath, path.join(only, 'node'));
+    r = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--json', '--dir', T], { encoding: 'utf8', env: { ...env, PATH: only } });
+    assert.ok(!('inbox' in JSON.parse(r.stdout)), r.stderr);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bin, { recursive: true, force: true }); }
+});
