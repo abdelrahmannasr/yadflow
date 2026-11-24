@@ -30,6 +30,7 @@ import { recordActor } from './skip.mjs';
 import { sealedEpic } from './thread.mjs';
 import { worktreeAt, sameDir } from './worktree-record.mjs';
 import { judgedRepos } from './workspace.mjs';
+import { inboxReady, inboxBlock, haltMessage } from './inbox.mjs';
 
 const CODE = 'YAD-STATE-009';
 export const STORY_RE = /^EP-[a-z0-9-]+-S\d+$/;
@@ -342,7 +343,10 @@ export async function buildStart(root, { story, repo, today } = {}) {
   return { story, repo, changed: true, lane: buildState.repos[repo], file: rel(root, ctx.file) };
 }
 
-export async function buildStep(root, { story, repo, step, to, reason, via = 'human', run: runUid = null, task = null, today } = {}) {
+// With `json`, a halt also carries the `inbox` block: the halt shaped as one message for the person's
+// Plannotator Inbox, when the Product chose it and it is found where yad ran (`cwd`). yad never posts it:
+// the agent does. Nothing else changes, so with the Inbox not ready the JSON is what it was.
+export async function buildStep(root, { story, repo, step, to, reason, via = 'human', run: runUid = null, task = null, today, json = false, cwd = null, ready = inboxReady } = {}) {
   repoArg(repo, `yad build step ${story || '<story>'} --repo <name> <step> ${STEP_MOVES.join('|')}`);
   if (!step || !to) throw err(CODE, 'a step and the state to move it to are required', `yad build step ${story} --repo ${repo} <step> ${STEP_MOVES.join('|')}`);
   const ctx = storyContext(root, story);
@@ -382,7 +386,9 @@ export async function buildStep(root, { story, repo, step, to, reason, via = 'hu
   if (to === 'done') info(`next: ${lane.currentStep}`);
   hand('commit with `yad checkpoint --push`');
   const specKit = SPEC_KIT_STEPS.has(step) && to === 'in_progress' ? pinSpecKit(root, repo, story, step) : null;
-  return { story, repo, step, status: to, currentStep: lane.currentStep, changed: true, ...(specKit ? { specKit } : {}) };
+  const inbox = json && to === 'blocked' && ready(root, { detectRoot: cwd ?? root })
+    ? inboxBlock([haltMessage({ story, repo, step, reason: String(reason).trim() })]) : undefined;
+  return { story, repo, step, status: to, currentStep: lane.currentStep, changed: true, ...(specKit ? { specKit } : {}), ...(inbox ? { inbox } : {}) };
 }
 
 // Spec Kit finds the story folder it writes into through `.specify/feature.json` (issue #348): pinned to

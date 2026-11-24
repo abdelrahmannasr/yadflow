@@ -1363,7 +1363,7 @@ async function main() {
       if (badSignal) { refuse(`--signal ${badSignal}: expected name=value`, '--signal checks=pass'); break; }
       for (const sgl of o.signal || []) signals[sgl.slice(0, sgl.indexOf('='))] = sgl.slice(sgl.indexOf('=') + 1);
       if (action === 'start') result = await commands.buildStart(o.dir, { story, repo: o.repo, today });
-      else if (action === 'step') result = await commands.buildStep(o.dir, { story, repo: o.repo, step: a3, to: a4, reason: o.reason, via: o.via || 'human', run: o.run || null, task: o.task || null, today });
+      else if (action === 'step') result = await commands.buildStep(o.dir, { story, repo: o.repo, step: a3, to: a4, reason: o.reason, via: o.via || 'human', run: o.run || null, task: o.task || null, today, json: !!o.json, cwd: toolboxAt?.from ?? null });
       else if (action === 'trust') result = await commands.buildTrust(o.dir, { story, repo: o.repo, step: a3, verdict: o.verdict, signals, ranBy: o['ran-by'] || 'human', note: o.note || null, uid: o.uid || null, task: o.task || null, today });
       else if (action === 'ship') result = await commands.buildShip(o.dir, { story, task: o.task, repo: o.repo, pr: o.pr, mergeCommit: o['merge-commit'] || null, approvers: o.approver || [], followUp: !!o.followUp, today, fetch: !o.noFetch });
       else if (action === 'merged') result = await commands.buildMerged(o.dir, { story, task: o.task, repo: o.repo, pr: o.pr || null, ship: !!o.ship, followUp: !!o.followUp, today, fetch: !o.noFetch });
