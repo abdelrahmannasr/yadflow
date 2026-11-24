@@ -98,6 +98,23 @@ A **genuine concern** found at any stop (a real bug, a missing test, an unguarde
 **normal, unflagged** PR/MR comment so it **blocks** like any reviewer's note — exactly the companion
 rule. Do not bury a real finding inside the session log.
 
+### Line notes in Plannotator (Shape, optional)
+
+For a **Shape** artifact only (not a code PR). First run `yad toolbox check --json`. Offer this only when
+`plannotator` is in its `used` list and no entry in `findings` names it: the Product chose Plannotator and this
+machine has it. Otherwise say nothing about Plannotator.
+
+- **The offer:** "You can mark lines and leave notes on the draft in Plannotator:
+  `/plannotator-annotate epics/<epic>/<artifact>`. Your notes come back to me so I can revise the draft. They
+  are not a yadflow comment or approval."
+- **Not a record.** A note there, or that window's "Approve", records nothing in yadflow. A comment for the
+  record is `yad gate comment` (or a comment on the review PR/MR), and an approval is `yad gate approve` (or the
+  review on the PR/MR). Both are the person's.
+- **Where you revise.** Only on the artifact's authoring branch (the one the review branch was cut from), then
+  push it as usual so the review sees the change. Never on the review branch, and never in a `.sdlc/` file.
+- **Before a share link.** A Plannotator share sends the artifact to an outside host. Before anyone shares one,
+  recommend `PLANNOTATOR_SHARE=disabled` (or the team's own share server).
+
 ### Step 4 — Dual sign-off (both satisfied)
 After the last stop:
 - **AI sign-off (your verdict).** State plainly: did the human demonstrate understanding across the
