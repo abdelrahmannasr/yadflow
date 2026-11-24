@@ -99,6 +99,18 @@ lands the removal + the managed `.gitignore` line in the same audit commit. The 
 `git commit -- <paths>` — it never sweeps unrelated staged work, and an unrelated hand-edit to
 `.gitignore` is left for the human to commit rather than riding the `[skip ci]` audit commit.
 
+**After a refresh, build the project brain, last.** The brain (`.sdlc/brain/graph.json`, on this
+machine only) reads `.sdlc/repos.json` and each code-map. A refresh stamps the registry, and the AI
+writes the code-map again, so the brain is `behind` after every refresh (`yad repo refresh`, or a
+`yad check --fix` that packs a stale repo again). The order is: `yad repo refresh <repo>`; write the
+code-map again; `yad repo refresh <repo> --push`, when the person says yes to it (on a no, the build
+comes right after the code-map); then `yad brain build --repo <repo>` (plain `yad brain build` for more
+than one repo; when `yad repo refresh` printed the command in its last line, run that one). A build
+that runs before the code-map is written again leaves the brain `behind` once more. Do not ask the
+person before the build, and never stop the work for it: when Graphify is not installed, the build
+fails, or the person declines the agent's permission prompt, say so, show what the command printed,
+and go on.
+
 ## Why this stays DRY with backfill
 
 `yad-backfill` already documents the exact Repomix command, the Secretlint discipline, the
