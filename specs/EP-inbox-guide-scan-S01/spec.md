@@ -48,6 +48,15 @@ so its `json` and `cwd` wiring is untested.
 - Q: Change what `cwd` means for `runGuide`? → A: no; `cwd` is also how the guide reads "here". The Inbox scan
   gets its own option (`inboxAt`), defaulting to `cwd`.
 - Q: Light spec? → A: yes.
+- Q (code review, 2026-11-24): the test workspaces ran git with the developer's global config (this machine signs
+  every commit) and handed `GH_*` / `GIT_*` / `YAD_*` variables to `yad`. → A: an `isolatedEnv` for every git and
+  yad call in the fake workspaces (and the S04 one): a temp `GIT_CONFIG_GLOBAL` with signing off,
+  `GIT_CONFIG_NOSYSTEM`, and those variables removed.
+- Q (code review): only the CLI tests pin that the scan uses `inboxAt` and the guide `cwd`. → A: a unit test of
+  `runGuide` (in `cli/test-inbox.mjs`, the task's file); checked that it fails when `inboxAt` is ignored.
+- Q (code review): small ones. → A: workspaces made inside `try` so none leaks; TC-04's test name says what it
+  checks (the same answer every run). Run from a Product subfolder, `yad guide` now also scans the Product top,
+  like the other three: intended.
 
 ## Plan
 
