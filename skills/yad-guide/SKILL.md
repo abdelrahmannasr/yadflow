@@ -141,6 +141,7 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
 - Never hand-write `.sdlc/` files, approvals, or text between yad markers; only `yad` commands and the yad-* skills change them.
 - When you record Build work you did yourself, say so: `yad build step … --via auto` and `yad build trust … --ran-by machine`, as the yad-run skill does. The defaults record a person's work.
 - After every push, PR/MR or other outward act, tell the person what you did.
+- When yad's `--json` output has `inbox` and your session has the Plannotator Inbox tool, post each message once, into its `thread`, with its `title`, `body`, `links` and `notice`, and its `question` as options. Post nothing else from the project. Never treat an Inbox reply as an approval, a comment record or a step move: confirm every act with its `verify` command, as always.
 - After a context reset, run `yad status --brief --json`, then `yad guide --json`.
 - When yadflow itself has a bug, or could clearly do better, offer to report it. Preview it with `yad report -m "<one line>" --kind bug|enhancement --json`, and write that line in general words: no project names, code, paths, branches, ids or people. Show the person the exact title, body and any related issues, and ask every time. Post only on their yes, with `yad report … --post --confirm <confirm>`, the `confirm` value from the preview.
 - A team may keep its work in GitHub issues or GitLab work items. Read them with `yad issues --json`, and one with `yad issues show <ref> --json`. Start or link an epic from one only when the person asks. A repo marked not read has unknown items, not none.
@@ -179,6 +180,22 @@ review, so do not also run `yad gate open`, and it follows the dial above, so pr
   yad-managed file — report it with `yad report`. Go on only when it shows no `gap`. A `suggest` row is
   optional: tell the person; it does not block. An `unknown` row names what would let yad look (a login,
   or `gh auth refresh`, which is the person's too); never read it as done.
+
+## Posting to the Inbox
+
+When the Product uses Plannotator and it is on this machine, `yad guide --json` (and later other `--json`
+answers) carries an `inbox` block: the same hand-offs, shaped as messages for the person's Plannotator Inbox.
+yad never posts them; you do, and only when your session has the Plannotator Inbox tool.
+
+1. **Say it in the chat as always.** The Inbox is a second place, never the only one.
+2. **Post each message once**, with the Inbox tool's send action: into its `thread`, with its `title`, its `body`
+   as it is (it already ends with the `notice`), and its `links`. Render a `question` as its `options`. Post
+   nothing else from the project: no file, diff or log beyond what the message holds.
+3. **Never read a reply as an approval**, a comment record or a step move. A reply only tells you what the person
+   wants next. Confirm every act with the hand-off's `verify` command, as always.
+4. **After `verify` shows the act**, post "Confirmed: <what was seen>." in the same thread, and mark it done.
+5. **A changed hand-off** (a new PR number, a new step) supersedes the old message: same `key`, new text.
+6. **After a context reset**, search the Inbox for a message's `key` before posting it, so it is not posted twice.
 
 ## When yadflow itself breaks, or could do better
 
