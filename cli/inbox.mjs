@@ -9,7 +9,7 @@
 //   - this machine has it: `toolStatus` says `installed` (its program, its plugin, or its Inbox server).
 // Otherwise the `inbox` block is absent, and every command's output is what it was before (architecture D2).
 
-import { redact } from './secret-text.mjs';
+import { looksSecret, redact } from './secret-text.mjs';
 import { TOOLBOX, loadChoices, onPath, toolUse, toolboxRows } from './toolbox.mjs';
 
 export const INBOX_TOOL = 'plannotator';
@@ -48,7 +48,8 @@ export const TEXT = Object.freeze({
   haltPrompt: 'What should happen next?',
   haltOptions: Object.freeze(['fix', 'skip', 'stop']),
   trimmed: '(trimmed)',
-  verify: (cmd) => `I will confirm with \`${cmd}\`.`,
+  redactedLine: '[redacted line]',
+  verify: (cmd) => `I will confirm with ${span(cmd)}.`,
 });
 // A hand-off's act, said in words for its title; any other act is "Your step: <act>".
 const ACT_WORDS = Object.freeze({
@@ -60,31 +61,65 @@ const ACT_WORDS = Object.freeze({
   login: 'Log in',
 });
 
-const text = (v) => redact(String(v ?? '')).trim();
-// An id in a key, title or body: redacted too, and `-` when missing.
-const part = (v) => (v === null || v === undefined || String(v).trim() === '' ? '-' : text(v));
+// Redacted: every known token and long key-like run (`redact`), and any line that names a secret with a value
+// (`PASSWORD=…`, `--token …`: `looksSecret`) is dropped whole — a test log or an env dump in a halt holds such lines.
+const text = (v) => String(v ?? '').split(/\r?\n/).map((l) => (looksSecret(l) ? TEXT.redactedLine : redact(l))).join('\n').trim();
+// One line of prose: line breaks become spaces, so a step or a reason can never start its own paragraph, heading
+// or italic line (a forged notice).
+const oneLine = (v) => text(v).replace(/\s+/g, ' ');
+// An id in a key, title or body: redacted, on one line, and `-` when missing.
+const part = (v) => (v === null || v === undefined || String(v).trim() === '' ? '-' : oneLine(v));
 const keyOf = (...parts) => parts.map(part).join(':');
+// Cut to at most `max` UTF-16 units without splitting a character in two (an emoji is two units).
+const cutAt = (s, max) => {
+  let end = Math.max(0, max);
+  const c = s.charCodeAt(end - 1);
+  if (end < s.length && c >= 0xd800 && c <= 0xdbff) end -= 1;
+  return s.slice(0, end);
+};
 const title = (s) => {
-  const t = text(s).replace(/\s+/g, ' ');
-  return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1)}…` : t;
+  const t = oneLine(s);
+  return t.length > TITLE_MAX ? `${cutAt(t, TITLE_MAX - 1)}…` : t;
 };
-// A fenced block that no command can close early: one more backtick than the longest run inside it.
-const fence = (cmd) => {
-  const longest = Math.max(2, ...(String(cmd).match(/`+/g) || []).map((r) => r.length));
-  const f = '`'.repeat(longest + 1);
-  return `${f}\n${cmd}\n${f}`;
+// Backticks that no run inside can match: a code span or block the text cannot close early.
+const ticks = (s, min) => '`'.repeat(Math.max(min, ...(String(s).match(/`+/g) || []).map((r) => r.length + 1)));
+const span = (s) => {
+  const t = ticks(s, 1);
+  const pad = /^`|`$/.test(s) ? ' ' : '';
+  return `${t}${pad}${s}${pad}${t}`;
 };
-// The body, with the notice (when there is one) as its last paragraph, always whole: the text above it is cut.
+const fence = (s) => {
+  const f = ticks(s, 3);
+  return `${f}\n${s}\n${f}`;
+};
+// The body, with the notice (when there is one) as its last paragraph, always whole: the text above it is cut,
+// and a cut inside a fenced block closes that block first, so `(trimmed)` and the notice never read as code.
 function body(paragraphs, notice) {
-  const tail = notice ? `\n\n*${notice}*` : '';
+  const tail = notice ? `*${notice}*` : '';
+  const sep = tail ? '\n\n' : '';
   let main = paragraphs.filter((p) => p !== null && p !== undefined && String(p).length).join('\n\n');
-  const room = BODY_MAX - tail.length;
-  if (main.length > room) main = `${main.slice(0, room - TEXT.trimmed.length - 1).trimEnd()}\n${TEXT.trimmed}`;
-  return main + tail;
+  if (!main) return tail;
+  const room = BODY_MAX - tail.length - sep.length;
+  if (main.length > room) {
+    // Room for the closing fence and `(trimmed)` is kept before the cut is made.
+    const longestFence = Math.max(3, ...(main.match(/^`{3,}$/gm) || []).map((f) => f.length));
+    const spare = TEXT.trimmed.length + longestFence + 2;
+    let cut = cutAt(main, Math.max(0, room - spare)).trimEnd();
+    const open = [];
+    for (const line of cut.split('\n')) {
+      if (!/^`{3,}$/.test(line)) continue;
+      if (open.length && open[open.length - 1] === line) open.pop(); else open.push(line);
+    }
+    if (open.length) cut += `\n${open[open.length - 1]}`;
+    main = `${cut}\n${TEXT.trimmed}`;
+  }
+  return main + sep + tail;
 }
-// The https links in a text: a link is only ever one yad was handed, never built.
-const linksIn = (...texts) => [...new Set(texts.flatMap((s) => String(s ?? '').match(/https:\/\/[^\s)`'"<>]+/g) || []))]
-  .map((u) => text(u)).filter((u) => u.startsWith('https://'));
+// The https links in a text, without the full stop or comma a sentence puts after one: a link is only ever one
+// yad was handed, never built.
+const linksIn = (...texts) => [...new Set(texts.flatMap((s) => String(s ?? '').match(/https:\/\/[^\s)`'"<>]+/g) || [])
+  .map((u) => u.replace(/[.,;:!?]+$/, '')))]
+  .map(oneLine).filter((u) => /^https:\/\/\S+$/.test(u));
 
 // The `inbox` block for a list of messages, or undefined for none: absent, never empty (contract, API).
 export function inboxBlock(messages) {
@@ -96,15 +131,16 @@ export function inboxBlock(messages) {
 export function handOffMessage({ epic = null, step = null, entry } = {}) {
   const e = entry ?? {};
   const act = part(e.act);
-  const steps = (Array.isArray(e.steps) ? e.steps : []).map(text).filter(Boolean);
+  const steps = (Array.isArray(e.steps) ? e.steps : []).map(oneLine).filter(Boolean);
+  // A command keeps its own lines (a heredoc), inside a block it cannot close.
   const commands = (Array.isArray(e.commands) ? e.commands : []).map(text).filter(Boolean);
-  const why = text(e.why);
-  const verify = e.verify ? text(e.verify) : null;
-  const what = ACT_WORDS[act] ?? `Your step: ${act}`;
+  const why = oneLine(e.why);
+  const verify = e.verify ? oneLine(e.verify) : null;
+  const what = Object.hasOwn(ACT_WORDS, act) ? ACT_WORDS[act] : `Your step: ${act}`;
   return {
     key: keyOf('hand-off', epic, step, act),
     kind: 'hand-off',
-    thread: epic ? `yad ${text(epic)}` : 'yad',
+    thread: epic ? `yad ${part(epic)}` : 'yad',
     title: title(epic ? `${what} — ${epic}` : what),
     body: body([
       why ? `Only you can do this: ${why.replace(/\.$/, '')}.` : null,
@@ -117,30 +153,28 @@ export function handOffMessage({ epic = null, step = null, entry } = {}) {
   };
 }
 
-// A Build step that halted. The reason's first line is the "why"; any lines after it are the output, of which
-// the last HALT_LINES are kept (S03 wires it to `yad build step … blocked`).
+// A Build step that halted. The reason's first line is the "why"; the lines after it are the output. The fixed
+// paragraphs (what, why, the question, the closing line) always fit; the output keeps its LAST lines — at most
+// HALT_LINES, and fewer when they would not fit — so the error at the end is what the person sees.
 export function haltMessage({ story, repo, step, reason } = {}) {
-  const lines = text(reason).split(/\r?\n/);
-  const why = lines[0] || '-';
-  let output = lines.slice(1).join('\n').replace(/^\n+|\n+$/g, '');
+  const lines = text(reason).split('\n');
+  const why = oneLine(lines[0]) || '-';
+  const s = part(story);
+  const head = [`Story ${span(s)} in ${span(part(repo))}: step ${span(part(step))} is halted.`, `Why: ${why}`];
+  const tailParas = [`**${TEXT.haltPrompt}** ${TEXT.haltOptions.join(' / ')}`, TEXT.haltClosing];
+  let out = lines.slice(1).join('\n').replace(/^\n+|\n+$/g, '').split('\n').filter((l, i, all) => all.length > 1 || l);
   let cut = false;
-  if (output) {
-    const all = output.split('\n');
-    if (all.length > HALT_LINES) { output = all.slice(-HALT_LINES).join('\n'); cut = true; }
-  }
-  const s = text(story);
+  if (out.length > HALT_LINES) { out = out.slice(-HALT_LINES); cut = true; }
+  const fixed = [...head, ...tailParas].join('\n\n').length;
+  const build = () => (out.length ? `${cut ? `${TEXT.trimmed}\n` : ''}${fence(out.join('\n'))}` : null);
+  // Drop the oldest output lines until the whole body fits.
+  while (out.length && fixed + 2 + build().length > BODY_MAX) { out = out.slice(1); cut = true; }
   return {
     key: keyOf('halt', story, step, repo),
     kind: 'halt',
     thread: story ? `yad ${s}` : 'yad',
-    title: title(`Build halted — ${part(story)} in ${part(repo)}: ${part(step)}`),
-    body: body([
-      `Story \`${part(story)}\` in \`${part(repo)}\`: step \`${part(step)}\` is halted.`,
-      `Why: ${why}`,
-      output ? `${cut ? `${TEXT.trimmed}\n` : ''}${fence(output)}` : null,
-      `**${TEXT.haltPrompt}** ${TEXT.haltOptions.join(' / ')}`,
-      TEXT.haltClosing,
-    ], null),
+    title: title(`Build halted — ${s} in ${part(repo)}: ${part(step)}`),
+    body: body([...head, build(), ...tailParas], null),
     links: [],
     question: { prompt: TEXT.haltPrompt, options: [...TEXT.haltOptions] },
   };
@@ -148,17 +182,18 @@ export function haltMessage({ story, repo, step, reason } = {}) {
 
 // A review that is ready: a Shape artifact's review PR/MR (`epic` + `artifact`), or a code PR/MR (`repo` + `pr`).
 export function reviewMessage({ epic = null, artifact = null, repo = null, pr = null, url = null, solo = false } = {}) {
-  const what = artifact ? `${text(artifact)} for ${part(epic)}` : `PR #${part(pr)} in ${part(repo)}`;
+  const what = artifact ? `${part(artifact)} for ${part(epic)}` : `PR #${part(pr)} in ${part(repo)}`;
   const asked = solo
     ? 'Read it. In solo mode no approval is counted, so merging it is the decision.'
     : 'Read it, comment where needed, then approve or merge.';
+  const links = url ? linksIn(url) : [];
   return {
     key: keyOf('review', epic ?? repo, artifact ?? pr, artifact ? 'gate' : 'nudge'),
     kind: 'review',
-    thread: epic ? `yad ${text(epic)}` : repo ? `yad ${text(repo)}` : 'yad',
+    thread: epic ? `yad ${part(epic)}` : repo ? `yad ${part(repo)}` : 'yad',
     title: title(`Review ready — ${what}`),
-    body: body([`Review ready: ${what}.`, asked, url ? text(url) : null], TEXT.notice),
-    links: url ? linksIn(url) : [],
+    body: body([`Review ready: ${what}.`, asked, links[0] ?? null], TEXT.notice),
+    links,
     notice: TEXT.notice,
   };
 }

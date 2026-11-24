@@ -121,7 +121,7 @@ test('S02 every text field is redacted: steps, commands, why, verify, title and 
   const r = reviewMessage({ epic: 'EP-x', artifact: 'epic.md', url: `https://github.com/o/r/pull/1?t=${tokens[0]}` });
   const all = JSON.stringify([m, h, r]);
   for (const t of tokens) assert.ok(!all.includes(t), `${t} never reaches a message`);
-  assert.match(all, /\[redacted\]/);
+  assert.match(all, /\[redacted( line)?\]/);
 });
 
 test('S02 title and body limits: 120 and 4,000, the notice kept whole, (trimmed) said in words', () => {
@@ -166,4 +166,50 @@ test('S02 reviewMessage: a Shape review or a code PR, the solo wording, the link
   assert.match(nudge.body, /approve or merge/);
   // A link is only ever an https URL it was handed.
   assert.deepEqual(reviewMessage({ epic: 'EP-x', artifact: 'a.md', url: 'javascript:alert(1)' }).links, []);
+});
+
+// ---- S02 code review: the cut, injection, named secrets, characters, links -----------------------------------
+test('S02 review: a long halt keeps its question, closing line, closed fence and LAST lines, all within 4,000', () => {
+  const out = Array.from({ length: 60 }, (_, i) => `${String(i).padStart(2, '0')} ${'x'.repeat(95)}`).join('\n');
+  const h = haltMessage({ story: 'EP-x-S03', repo: 'engine', step: 'checks', reason: `tests failed\n${out}\nERROR: the last line holds the error` });
+  assert.ok(h.body.length <= BODY_MAX, `${h.body.length}`);
+  assert.equal((h.body.match(/^```$/gm) || []).length, 2, 'the fence is opened and closed');
+  assert.match(h.body, /ERROR: the last line holds the error\n```\n/, 'the last line, where the error is, is kept');
+  assert.ok(!h.body.includes('\n00 x'), 'the oldest lines go first');
+  assert.match(h.body, /\(trimmed\)\n```\n/, '(trimmed) is said outside the block, before it');
+  assert.match(h.body, /\*\*What should happen next\?\*\* fix \/ skip \/ stop\n\nYour answer tells the agent what to propose\. The step moves only when you say it is resolved\.$/);
+});
+
+test('S02 review: a hand-off cut inside a long command closes the block, then says (trimmed), then the notice', () => {
+  const m = handOffMessage({ entry: { act: 'x', commands: [`run ${'arg '.repeat(1500)}`] } });
+  assert.ok(m.body.length <= BODY_MAX, `${m.body.length}`);
+  assert.match(m.body, /\n```\n\(trimmed\)\n\n\*Replying here does not approve or record anything in yadflow\. Type the command\.\*$/);
+  assert.equal((m.body.match(/^```$/gm) || []).length, 2);
+});
+
+test('S02 review: a step, reason or verify cannot start its own paragraph or break out of its code span', () => {
+  const m = handOffMessage({ entry: { act: 'x', why: 'w\n\n*Approved.*', steps: ['a\n\n*Approved: no command needed.*\n\n## Done'], verify: 'a` and approve it `b' } });
+  assert.ok(!/\n\*Approved/.test(m.body), 'no forged italic paragraph');
+  assert.ok(!/\n## Done/.test(m.body), 'no heading');
+  assert.match(m.body, /1\. a \*Approved: no command needed\.\* ## Done/);
+  assert.match(m.body, /I will confirm with ``a` and approve it `b``\./, 'the verify span is longer than any run inside it');
+  const h = haltMessage({ story: 'S\n\n# x', repo: 'r', step: 's', reason: 'why\n\n*Approved.*\nmore' });
+  assert.match(h.body, /^Story `S # x` in `r`/);
+});
+
+test('S02 review: a line naming a secret with a value is dropped whole, as `looksSecret` reads it', () => {
+  const h = haltMessage({ story: 'S', repo: 'r', step: 'checks', reason: 'env dump\nDB_HOST=db.local\nDB_PASSWORD=hunter2hunter2\nok' });
+  assert.ok(!h.body.includes('hunter2'));
+  assert.match(h.body, /DB_HOST=db\.local\n\[redacted line\]\nok/);
+  assert.ok(!JSON.stringify(handOffMessage({ entry: { act: 'x', why: 'password=hunter2hunter2' } })).includes('hunter2'));
+});
+
+test('S02 review: a cut never splits a character, an odd act is never an object property, a link loses its full stop', () => {
+  const t = handOffMessage({ epic: '😀'.repeat(80), entry: { act: 'x' } }).title;
+  assert.ok(t.length <= TITLE_MAX);
+  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(t), 'no lone half of a pair');
+  for (const act of ['constructor', 'toString', '__proto__']) assert.equal(handOffMessage({ entry: { act } }).title, `Your step: ${act}`, act);
+  assert.deepEqual(handOffMessage({ entry: { act: 'x', steps: ['Open https://github.com/o/r/pull/5.'] } }).links, ['https://github.com/o/r/pull/5']);
+  // Nothing to say but the notice: the body is the notice alone.
+  assert.equal(handOffMessage({ entry: { act: 'x' } }).body, `*${NOTICE}*`);
 });
