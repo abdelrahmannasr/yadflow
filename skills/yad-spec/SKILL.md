@@ -289,6 +289,8 @@ to read. See `references/spec-handoff.md` for the exact file map and per-file de
 
 **Ask the project brain (E179).** The brain (`.sdlc/brain/graph.json`, built by `yad brain build` on this machine) joins the stories, tasks and contracts to the code: who declares a file, what uses it, what shipped. It is optional: use it when it is there, and never stop for it. It never lifts a rule above — a stale code-map still means flag and stop.
 
+**Brain first.** For the questions under "2. Ask it" below, ask the brain before you search the repo or read files, the pack or the code-map for the same answer. Go to those only when the brain has no answer: it is **none**, the answer is empty, or the command refuses or is declined (after a declined prompt, do not ask it again in this session). What a file contains is not a brain question: read the file. The skill's own steps still stand: a code-map a step above already loaded stays loaded.
+
 1. Run `yad brain status --json` and read its `state`, and each `repos[].state`:
    - `current`, and no repo `behind` or `unknown`: the brain is **current**. Use it as below.
    - `behind`, or any repo `behind` or `unknown` (its code moved since the build, or its commit cannot be read): the brain is **behind**. Use it, knowing an answer may miss the newest code, and suggest `yad brain build` to the person. Do not run it inside this step: it runs Graphify over every connected repo, which can take minutes, and writes `graphify-out/` (kept out of git) in each.
