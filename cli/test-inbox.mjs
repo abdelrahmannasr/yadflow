@@ -35,6 +35,8 @@ test('S01 inboxReady: true only when the Product chose Plannotator AND this mach
     assert.equal(inboxReady(chosen, { items: [{ kind: 'mcp', name: 'plannotator-inbox', where: '.mcp.json' }], has: absent }), true, 'the Inbox server');
     // A plugin the settings turn off is not loaded: disabled, not installed.
     assert.equal(inboxReady(chosen, { items: [plugin(false)], has: absent }), false, 'a disabled plugin');
+    // KNOWN LIMIT (contract): the program on PATH alone counts as found, even with the plugin turned off.
+    assert.equal(inboxReady(chosen, { items: [plugin(false)], has: found }), true, 'a disabled plugin, but the program is on PATH');
   } finally { for (const p of [chosen, notChosen, skipped]) fs.rmSync(p, { recursive: true, force: true }); }
 });
 
@@ -55,6 +57,8 @@ test('S01 inboxReady reads only: it writes nothing in the Product', () => {
     const before = list(p);
     const text = fs.readFileSync(path.join(p, '.sdlc/toolbox.json'), 'utf8');
     inboxReady(p, { items: [], has: found });
+    // And with the real machine scan (no `items`): the scan reads too.
+    assert.equal(typeof inboxReady(p), 'boolean');
     assert.deepEqual(list(p), before);
     assert.equal(fs.readFileSync(path.join(p, '.sdlc/toolbox.json'), 'utf8'), text);
   } finally { fs.rmSync(p, { recursive: true, force: true }); }

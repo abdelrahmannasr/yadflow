@@ -9,7 +9,7 @@
 //   - this machine has it: `toolStatus` says `installed` (its program, its plugin, or its Inbox server).
 // Otherwise the `inbox` block is absent, and every command's output is what it was before (architecture D2).
 
-import { TOOLBOX, onPath, toolboxRows } from './toolbox.mjs';
+import { TOOLBOX, loadChoices, onPath, toolUse, toolboxRows } from './toolbox.mjs';
 
 export const INBOX_TOOL = 'plannotator';
 
@@ -17,10 +17,15 @@ export const INBOX_TOOL = 'plannotator';
 // plugins and servers count, as in `yad toolbox list`); `items` and `has` replace detection in tests. Asks the
 // toolbox exactly as `yad toolbox list` does, so "chosen" and "found" mean what that list shows. A plugin the
 // settings turn off is `disabled`, not installed: not ready. No Product: nothing chose it, so not ready.
+// KNOWN LIMIT (contract.md, "the Inbox is ready"): the program on PATH alone counts as found, though the agent's
+// Inbox tool comes from the plugin or the MCP server. The agent rule covers it: post only when the session has the
+// Inbox tool. A caller running in a code repo passes `detectRoot`, so that repo's plugins and servers count.
 export function inboxReady(productRoot, { detectRoot = productRoot, items = null, has = onPath } = {}) {
   if (!productRoot) return false;
   const tool = TOOLBOX.find((t) => t.id === INBOX_TOOL);
   if (!tool) return false;
+  // Not chosen: the usual case, answered from the toolbox file without scanning this machine.
+  if (!toolUse(tool, loadChoices(productRoot)).used) return false;
   const { rows } = toolboxRows(detectRoot, productRoot, { tools: [tool], items, has });
   const row = rows.find((r) => r.id === INBOX_TOOL);
   return Boolean(row && row.used && row.status.state === 'installed');
