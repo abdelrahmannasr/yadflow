@@ -2929,3 +2929,29 @@ test('reconcile-debt-check: separator bytes in a subject do not fake a record (#
     assert.doesNotMatch(r.out, /: zz /);
   } finally { rig.done(); }
 });
+
+// #684: on a promotion merge request (its source branch named in YAD_PROMOTE_FROM) reconcile-debt-check passes
+// with a note; unset, empty or naming other branches, it does exactly what it did. The rig FAILs on its own
+// (its thread carries open hotfix debt), so a PASS can only come from the promotion rule.
+test('reconcile-debt-check passes a promotion merge request, and only that (#684)', () => {
+  const rig = debtRig();
+  try {
+    const plain = rig.run();
+    assert.equal(plain.code, 1, plain.out);
+    const pass = 'PASS [reconcile-debt]: promotion from develop (YAD_PROMOTE_FROM); its commits were checked when they merged into develop\n';
+    for (const env of [{ YAD_SOURCE_BRANCH: 'develop' }, { CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop' }]) {
+      const r = rig.run({ ...env, YAD_PROMOTE_FROM: 'main, develop' });
+      assert.equal(r.code, 0, r.out);
+      assert.ok(r.out.endsWith(pass), r.out);
+    }
+    for (const env of [
+      { YAD_PROMOTE_FROM: 'develop' },
+      { YAD_PROMOTE_FROM: '', YAD_SOURCE_BRANCH: 'develop' },
+      { YAD_PROMOTE_FROM: '*', YAD_SOURCE_BRANCH: 'develop' },
+      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'feature' },
+    ]) {
+      const r = rig.run(env);
+      assert.deepEqual({ code: r.code, out: r.out }, { code: plain.code, out: plain.out }, JSON.stringify(env));
+    }
+  } finally { rig.done(); }
+});
