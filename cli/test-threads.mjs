@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
@@ -2862,7 +2863,10 @@ test('#365 review 5: two story files claiming one ID fall back to their file nam
 function debtRig() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-debt-'));
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(T, '.no-global') };
-  for (const k of Object.keys(env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k) || k === 'SDLC_BASE') delete env[k];
+  // The developer's own settings stay out, as in test-checks' GIT_ENV: a Product named by SDLC_PRODUCT_CONFIG or
+  // YAD_LOCAL_PRODUCT, or a CI flag, would change what the gate reads.
+  const DROP = ['SDLC_BASE', 'SDLC_HUB_CONFIG', 'SDLC_PRODUCT_CONFIG', 'YAD_TEST_MAX_WORKERS', 'GITHUB_EVENT_PATH', 'YAD_LOCAL_PRODUCT', 'CI', 'GITHUB_ACTIONS', 'GITLAB_CI'];
+  for (const k of Object.keys(env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k) || DROP.includes(k)) delete env[k];
   const git = (...a) => execFileSync('git', a, { cwd: T, env, stdio: 'pipe' }).toString();
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
   const fm = (o) => ['---', ...Object.entries(o).map(([k, v]) => `${k}: ${v}`), '---', ''].join('\n');
@@ -2891,7 +2895,7 @@ function debtRig() {
   };
   return { T, git, write, run, done: () => fs.rmSync(T, { recursive: true, force: true }) };
 }
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('reconcile-debt-check reads the range once and asks product_for once per story, with the same output (#685)', () => {
   const rig = debtRig();
