@@ -477,7 +477,7 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
             if (typeof who !== 'string' || !who.trim() || isBot(who) || who.trim() === 'yad-gate-sync') continue;
             const via = typeof cl.via === 'string' ? cl.via : null;
             const task = typeof cl.task === 'string' ? cl.task : null;
-            const how = via ? ` (${LANE_VIA_WORDS[via] || safe(via)})` : '';
+            const how = via ? ` (${Object.hasOwn(LANE_VIA_WORDS, via) ? LANE_VIA_WORDS[via] : safe(via)})` : '';
             byEvent({ login: who, name: who }, who, 'done', { kind: 'lane-closed', epic, story, repo, step: s?.id ?? null, task, via, date: cl.date, text: `closed ${safe(story)} ${safe(s?.id)}${task ? ` ${safe(task)}` : ''} in ${safe(repo)}${how}, ${cl.date}` });
           }
         }
