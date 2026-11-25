@@ -8469,4 +8469,5 @@ test('lineage-check passes a promotion merge request, and only that (#684)', () 
 
 test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open'));
 
+test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link'));
 
