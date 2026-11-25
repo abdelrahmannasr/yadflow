@@ -1377,7 +1377,7 @@ async function main() {
       break;
     }
     case 'open-pr':
-      result = await commands.runOpenPr(o.dir, { repo: o.repo, product: o.product, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange, via: o.via, today });
+      result = await commands.runOpenPr(o.dir, { repo: o.repo, product: o.product, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange, via: o.via, today, json: !!o.json, cwd: toolboxAt?.from ?? null });
       break;
     case 'ship':
       // The ledger override is its own act (E49): recorded in its own commit, never folded into a

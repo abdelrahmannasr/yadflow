@@ -1962,7 +1962,7 @@ function labelHint(platform, labels, why) {
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` and `runner` are injected in tests.
-// With `json` (`yad gate open --json` only — never `open-pr`'s delegation), an opened review also carries the
+// With `json` (`yad gate open --json`, or `yad open-pr --json` on a review branch, which delegates here), an opened review also carries the
 // `inbox` block: one `review` message for the person's Plannotator Inbox, when the Product chose it and it is
 // found where yad ran (`cwd`). Its key names the branch's base (`review:<epic>:<base>:gate`), so each story's
 // review PR (`review/EP-x/stories-S01`) has its own. yad never posts it: the agent does. Not ready, the JSON is what it was.

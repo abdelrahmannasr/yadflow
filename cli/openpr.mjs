@@ -344,7 +344,11 @@ export async function runOpenPr(root, opts = {}) {
     // mirror open-pr's own error contract so `ship` sees the non-zero exit and never reports success.
     // (On a platform-less Product gateOpen marks the step in_review locally and returns no url; open-pr's
     // job is to open a PR, so "no PR opened" is a non-zero outcome here, unlike `yad gate open`.)
-    const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch });
+    // With --json, the review also carries gateOpen's `inbox` (one `review` message, its key naming this branch's
+    // base), looked for from `cwd`, as for `yad gate open --json` (EP-inbox-open-pr-keys contract, `open-pr` row).
+    // On this path `cwd` (the checkout's top) is the Product itself, as gateOpen's own fallback; it is passed so
+    // the two commands stay wired alike.
+    const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch, json: !!opts.json, cwd: opts.cwd ?? null });
     if (!res?.url) process.exitCode = 1;
     return res;
   }
