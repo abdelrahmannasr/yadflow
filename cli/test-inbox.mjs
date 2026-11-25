@@ -613,7 +613,9 @@ test('EP-inbox-open-pr-keys yad open-pr --json: no inbox when Plannotator is not
     fs.writeFileSync(path.join(fails.W, 'bin/gh'), '#!/bin/sh\nexit 1\n');
     const f = fails.yad(fails.P, 'open-pr', '--platform', 'github', '--json');
     assert.equal(f.status, 1, f.stderr);
-    assert.ok(!f.stdout.includes('"inbox"'), 'no PR opened: no inbox');
+    const fj = JSON.parse(f.stdout);
+    assert.equal(fj.url ?? null, null, 'the failure return: no PR opened');
+    assert.ok(!('inbox' in fj), 'no PR opened: no inbox');
   } finally { on?.done(); off?.done(); fails?.done(); }
 });
 
