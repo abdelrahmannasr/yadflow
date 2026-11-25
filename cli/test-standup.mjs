@@ -421,6 +421,39 @@ test('E132 review 1: a malformed ledger is "not read" for that epic, never a cra
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('buildStandup lists Build lane closes from build-state, keeping a person\'s, an agent\'s and an automatic close apart (#658)', async () => {
+  const T = await teamFixture();
+  try {
+    const sdlc = path.join(T, 'epics/EP-checkout/.sdlc');
+    put(path.join(sdlc, 'build-state/EP-checkout-S01.json'), { story: 'EP-checkout-S01', repos: { api: { currentStep: 'checks', steps: [
+      { id: 'spec', status: 'done', closed: { by: 'alice', date: '2026-10-03', via: 'human' } },
+      { id: 'tasks', status: 'done', closed: { by: 'alice', date: '2026-10-03', via: 'agent' } },
+      { id: 'implement', status: 'done', runs: [{ by: 'alice', date: '2026-10-04', via: 'auto', run: 'r1', task: 'T01' }, { by: 'alice', date: '2026-09-01', via: 'human', task: 'T00' }],
+        closed: { by: 'alice', date: '2026-10-04', via: 'ro\u001b[2Jbot', task: 'T02' } },
+      { id: 'checks', status: 'done', closed: { by: 'github-actions[bot]', date: '2026-10-04', via: 'auto' } },
+      { id: 'engineer-review', status: 'todo' },
+    ] } } });
+    const m = S.buildStandup(T, { now: NOW, fetch: false });
+    const alice = m.team.find((x) => x.login === 'alice');
+    const lane = alice.done.filter((i) => i.kind === 'lane-closed');
+    assert.deepEqual(texts(lane), [
+      'closed EP-checkout-S01 spec in api (a person\'s work), 2026-10-03',
+      'closed EP-checkout-S01 tasks in api (an agent\'s work, advanced by a person), 2026-10-03',
+      'closed EP-checkout-S01 implement T01 in api (advanced on its own), 2026-10-04',
+      'closed EP-checkout-S01 implement T02 in api (ro [2Jbot), 2026-10-04',
+    ], 'the close outside the window and the robot\'s are left out; an unknown via prints safely');
+    assert.deepEqual(lane.map((i) => i.via), ['human', 'agent', 'auto', 'ro\u001b[2Jbot'], 'JSON carries via as given');
+    assert.deepEqual(lane[2], { kind: 'lane-closed', epic: 'EP-checkout', story: 'EP-checkout-S01', repo: 'api', step: 'implement', task: 'T01', via: 'auto', date: '2026-10-04', text: lane[2].text });
+    const md = S.renderMarkdown(m);
+    const html = S.renderHtml(m);
+    for (const words of ['(a person\'s work)', '(an agent\'s work, advanced by a person)', '(advanced on its own)']) {
+      assert.ok(md.includes(words), `markdown: ${words}`);
+      assert.ok(html.includes(words.replace("'", '&#39;')) || html.includes(words), `html: ${words}`);
+    }
+    assert.ok(!(md + html).includes('\u001b'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E132 review 1: a control character in a shared file never reaches the text; an email-shaped name is hidden', async () => {
   const T = await teamFixture();
   try {
