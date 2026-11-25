@@ -64,6 +64,34 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   exit 1
 fi
 RANGE="${BASE}..HEAD"
+
+# A promotion merge request (#684): its source branch is a long-lived branch the team named in the
+# YAD_PROMOTE_FROM CI variable (names separated by commas or spaces). Each of its commits was gated when it
+# merged into that branch, so this gate does not judge them again against today's state. The source branch
+# comes from the environment (YAD_SOURCE_BRANCH on GitHub, GitLab's own variable), never from an argument,
+# so an older template's call is unchanged (#426). verified-commits and contract-check do not read it.
+# Whole names only: the list is read into an array (no glob), compared with `=`, and printed with control
+# characters replaced. Only a merge request from this same repository counts: a fork may name its own
+# branch `develop` (GitHub's YAD_PR_FORK must say false; on GitLab the source project must be this one).
+_src_branch=""
+if [ -n "${YAD_SOURCE_BRANCH:-}" ]; then
+  if [ "${YAD_PR_FORK:-}" = false ]; then _src_branch="$YAD_SOURCE_BRANCH"; fi
+elif [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" ] && [ -n "${CI_MERGE_REQUEST_PROJECT_ID:-}" ] \
+  && [ "${CI_MERGE_REQUEST_SOURCE_PROJECT_ID:-}" = "$CI_MERGE_REQUEST_PROJECT_ID" ]; then
+  _src_branch="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+fi
+if [ -n "${YAD_PROMOTE_FROM:-}" ] && [ -n "$_src_branch" ]; then
+  IFS=$', \t\n' read -r -d '' -a _promote_from <<<"$YAD_PROMOTE_FROM" || true
+  if [ "${#_promote_from[@]}" -gt 0 ]; then
+    for _p in "${_promote_from[@]}"; do
+      if [ "$_p" = "$_src_branch" ]; then
+        _shown="${_src_branch//[[:cntrl:]]/?}"
+        echo "PASS [reconcile-debt]: promotion from ${_shown} (YAD_PROMOTE_FROM); its commits were checked when they merged into ${_shown}"
+        exit 0
+      fi
+    done
+  fi
+fi
 EXEMPT='ci|chore|build|test|docs'
 
 # --- shared link.md resolution (byte-identical in contract-check / lineage-check / epic-open /
