@@ -1964,7 +1964,8 @@ function labelHint(platform, labels, why) {
 // the real pushed head so the PR targets a branch that exists. `creator` and `runner` are injected in tests.
 // With `json` (`yad gate open --json` only — never `open-pr`'s delegation), an opened review also carries the
 // `inbox` block: one `review` message for the person's Plannotator Inbox, when the Product chose it and it is
-// found where yad ran (`cwd`). yad never posts it: the agent does. Not ready, the JSON is what it was.
+// found where yad ran (`cwd`). Its key names the branch's base (`review:<epic>:<base>:gate`), so each story's
+// review PR (`review/EP-x/stories-S01`) has its own. yad never posts it: the agent does. Not ready, the JSON is what it was.
 export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, runner = run, env = process.env, today = new Date().toISOString().slice(0, 10), json = false, cwd = null, ready = inboxReady } = {}) {
   const { productConfig } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
@@ -2106,7 +2107,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
   const inbox = json && ready(root, { detectRoot: cwd ?? root })
-    ? inboxBlock([reviewMessage({ epic, artifact, url: r.url, solo: isSolo(productConfig) })]) : undefined;
+    ? inboxBlock([reviewMessage({ epic, artifact, base: parseReviewBranch(branch)?.base ?? null, url: r.url, solo: isSolo(productConfig) })]) : undefined;
   return { epic, step: step.id, artifact, branch, opened: true, url: r.url, markedInReview: !verified, ...(inbox ? { inbox } : {}) };
 }
 

@@ -309,6 +309,24 @@ test('S04 yad gate open --json: one review message when the review PR opened and
   } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
 });
 
+test('EP-inbox-open-pr-keys yad gate open --json: the key names the review branch base, so two stories\' reviews have two keys (TC-04)', async () => {
+  const T = reviewProduct();
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/stories'));
+    for (const n of ['S01', 'S02']) fs.writeFileSync(path.join(T, `epics/EP-x/stories/EP-x-${n}.md`), `---\nid: EP-x-${n}\n---\n`);
+    const state = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    const st = JSON.parse(fs.readFileSync(state, 'utf8'));
+    st.steps.push({ id: 'stories', type: 'author', artifact: 'stories/', status: 'done', risk_tags: [] },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'todo', risk_tags: [] });
+    fs.writeFileSync(state, JSON.stringify(st));
+    const key = async (o) => (await open(T, { json: true, ready: () => true, ...o })).inbox.messages[0];
+    const [s1, s2] = [await key({ artifact: 'stories/', head: 'review/EP-x/stories-S01' }), await key({ artifact: 'stories/', head: 'review/EP-x/stories-S02' })];
+    assert.deepEqual([s1.key, s2.key], ['review:EP-x:stories-S01:gate', 'review:EP-x:stories-S02:gate']);
+    assert.equal(s1.title, 'Review ready — stories/ for EP-x', 'the title still names the artifact');
+    assert.equal((await key({})).key, 'review:EP-x:architecture:gate', 'no head: the branch gate open makes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('S04 yad gate open: no inbox on a failed open, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
   const dirs = [reviewProduct(), reviewProduct(), reviewProduct(), reviewProduct()];
   try {
