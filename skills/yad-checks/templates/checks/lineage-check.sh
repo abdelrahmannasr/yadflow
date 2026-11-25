@@ -532,18 +532,53 @@ EXEMPT_LIST
 is_exempt_sha() { [ -n "$exempt_shas" ] && printf '%s' "$exempt_shas" | grep -qxF "$1"; }
 load_exempt_shas lineage-check
 
-commits="$(git rev-list --no-merges "$RANGE")"
+# The range, read ONCE (#685): one `git log` gives every commit's full hash, short hash, subject and Task
+# trailer values, where three `git log -1` calls per commit used to. Fields end in US (\x1f), a record in
+# RS (\x1e), and the Task values are joined with GS (\x1d). The order is rev-list's, as before.
+# showSignature is off so a `log.showSignature` setting cannot put gpg output into the records.
+commits="$(git -c log.showSignature=false log --no-merges --no-color \
+  --format='%H%x1f%h%x1f%s%x1f%(trailers:key=Task,valueonly,separator=%x1d)%x1e' "$RANGE")"
 if [ -z "$commits" ]; then
   echo "PASS [lineage-check]: no non-merge commits in ${RANGE}"
   exit 0
 fi
 
+# product_for, asked once per story (#685). Its answer depends only on the story and BASE, both fixed for
+# the run, so a later commit of the same story gets back exactly what the first one got: the same lines are
+# printed for it. Kept in plain variables named after the story (no associative arrays: bash 3.2). A story
+# id holds only letters, digits and dashes (story_ok), so `-` to `_` gives each story its own names.
+product_for_once() {
+  _pk="_pfc_${1//-/_}"
+  _pv="${_pk}_set"
+  if [ -n "${!_pv:-}" ]; then
+    _pv="${_pk}_prod"; prod="${!_pv}"
+    _pv="${_pk}_note"; prod_note="${!_pv}"
+    _pv="${_pk}_fail"; prod_fail="${!_pv}"
+    _pv="${_pk}_rel"; product_rel="${!_pv}"
+    return 0
+  fi
+  product_for "$1"
+  printf -v "${_pk}_prod" '%s' "$prod"
+  printf -v "${_pk}_note" '%s' "$prod_note"
+  printf -v "${_pk}_fail" '%s' "$prod_fail"
+  printf -v "${_pk}_rel" '%s' "$product_rel"
+  printf -v "${_pk}_set" '%s' 1
+}
+
 rc=0
-while IFS= read -r sha; do
-  [ -z "$sha" ] && continue
-  short="$(git log -1 --format=%h "$sha")"
-  subject="$(git log -1 --format=%s "$sha")"
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | awk '!f && length($0) { print; f = 1 }')"
+while IFS= read -r -d $'\x1e' rec; do
+  rec="${rec#$'\n'}"
+  [ -z "$rec" ] && continue
+  sha="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+  short="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+  subject="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+  # The first Task value that is not empty, cut at a line break: what `awk '!f && length($0)'` took.
+  task=""
+  while :; do
+    _tv="${rec%%$'\x1d'*}"; _tv="${_tv%%$'\n'*}"
+    if [ -n "$_tv" ]; then task="$_tv"; break; fi
+    case "$rec" in *$'\x1d'*) rec="${rec#*$'\x1d'}" ;; *) break ;; esac
+  done
   if is_exempt_sha "$sha"; then
     echo "PASS [lineage-check]: ${short} '${subject}' — SHA exemption (${GATE_EXEMPT_FILE} on ${BASE})"
     continue
@@ -583,7 +618,7 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
-  product_for "$story"
+  product_for_once "$story"
   if [ -n "$prod_note" ]; then printf '%s\n' "$prod_note" | sed "s/^/note [lineage-check]: ${short} /"; fi
   if [ -n "$prod_fail" ]; then
     echo "FAIL [lineage-check]: ${short} ${task} — ${prod_fail}"

@@ -8316,3 +8316,53 @@ test('#618: every frontmatter reader cuts the same trailing `# comment` (one tab
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #685: a gate reads the whole range with one `git log`, and asks product_for once per story. The output
+// must stay exactly what it was: every commit of a story still prints the note product_for gave the first
+// one, the first Task trailer still wins, a subject is read whole, and the lines keep rev-list's order.
+// A rig shared by the per-gate tests below: four commits of EP-demo-S01, whose link.md on the base names
+// another product-repo (so product_for notes it on every commit), and two maintenance commits.
+function oneReadRig({ seed, subjectOdd = "chore: odd $x 'q' \"d\" % \\ * [b] & | tab\tend" } = {}) {
+  const T = scaffoldRepo();
+  const productConfig = path.join(T, 'product');
+  seed(productConfig);
+  onBase(T, { 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }) });
+  commit(T, 'docs: link', { 'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../somewhere-else' }) });
+  for (let i = 1; i <= 4; i++) {
+    commit(T, i === 2 ? 'feat: two trailers\n\nTask: EP-demo-S01-T02\nTask: EP-other-S09-T01' : `feat: step ${i}\n\nTask: EP-demo-S01-T01`, { [`f${i}.txt`]: String(i) });
+  }
+  commit(T, subjectOdd, { 'odd.txt': 'x' });
+  const order = git(T, 'rev-list', '--no-merges', '--abbrev-commit', 'main..HEAD').toString().trim().split('\n');
+  return { T, order, subjectOdd };
+}
+
+// The short hashes in the order the gate printed them, one per commit (a commit may print a note first).
+const printedOrder = (out) => [...new Set([...out.matchAll(/^(?:PASS|FAIL|note) \[[a-z-]+\]: ([0-9a-f]{7,})\b/gm)].map((m) => m[1]))];
+
+// How many `git log` processes a gate starts on this range: git's own trace counts them.
+function gitLogCalls(script, T) {
+  const trace = path.join(T, '.git', 'yad-trace.txt');
+  runGate(script, T, ['main'], { GIT_TRACE: trace });
+  const n = (fs.readFileSync(trace, 'utf8').match(/built-in: git (?:-c \S+ )*log\b/g) || []).length;
+  fs.rmSync(trace, { force: true });
+  return n;
+}
+
+test('lineage-check reads the range once and asks product_for once per story, with the same output (#685)', () => {
+  const { T, order, subjectOdd } = oneReadRig({ seed: (p) => seedProductEpic(p, 'EP-demo', { fm: { type: 'chore' } }) });
+  try {
+    const r = runGate(LINEAGE, T, ['main']);
+    assert.equal(r.code, 0, r.out);
+    // The note product_for gives EP-demo-S01 is printed for each of its four commits, not only the first.
+    const notes = r.out.match(/^note \[lineage-check\]: [0-9a-f]+ specs\/EP-demo-S01\/link\.md names product-repo '\.\.\/\.\.\/somewhere-else', but specs\/EP-demo-S01\/link\.md on main says '\.\.\/\.\.\/product'/gm) || [];
+    assert.equal(notes.length, 4, r.out);
+    assert.equal((r.out.match(/-> EP-demo \(genesis chore epic\)\./g) || []).length, 4, r.out);
+    // The first Task trailer wins, as the awk filter took it.
+    assert.match(r.out, /PASS \[lineage-check\]: [0-9a-f]+ EP-demo-S01-T02 -> EP-demo/);
+    assert.doesNotMatch(r.out, /EP-other-S09/);
+    // A subject holding quotes, a backslash, a glob, a tab and shell words is printed whole.
+    assert.ok(r.out.includes(`'${subjectOdd}' — maintenance commit, no Task trailer (exempt)`), r.out);
+    assert.deepEqual(printedOrder(r.out), order);
+    assert.equal(gitLogCalls(LINEAGE, T), 1, 'one git log for the whole range');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
