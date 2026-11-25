@@ -366,6 +366,42 @@ test('yad build amend: corrects spec and tasks on disk; done on a closed step na
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad build amend and yad build step --via agent through the CLI write build-state (#658)', () => {
+  const { W, P, dir } = workspace();
+  const closed = (id) => read(path.join(dir, '.sdlc/build-state/EP-l-S01.json')).repos.api.steps.find((s) => s.id === id).closed;
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    let r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'done', '--json');
+    assert.equal(r.code, 0, r.out);
+    r = yad(P, 'build', 'amend', 'EP-l-S01', '--repo', 'api', 'spec', '--via', 'agent', '--reason', 'an agent wrote the spec', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).changed, json(r).from, json(r).via, json(r).step], [true, 'human', 'agent', 'spec']);
+    assert.equal(closed('spec').via, 'agent');
+    assert.equal(closed('spec').amended[0].reason, 'an agent wrote the spec');
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'tasks', 'done', '--via', 'agent', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(closed('tasks').via, 'agent');
+    // Refusals through the CLI write nothing.
+    r = yad(P, 'build', 'amend', 'EP-l-S01', '--repo', 'api', 'tasks', '--via', 'human');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /a correction needs a reason/);
+    r = yad(P, 'build', 'amend', 'EP-l-S01', '--repo', 'api', 'tasks', '--reason', 'x');
+    assert.match(r.out, /--via is required/);
+    assert.equal(closed('tasks').via, 'agent');
+    assert.match(yad(P, 'help').out, /yad build amend <story> --repo <r> <step> --via auto\|agent\|human --reason <text>/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the docs and the schema list --via agent, yad build amend and closed.amended (#658)', () => {
+  const cli = fs.readFileSync(path.join(ROOT, 'docs/CLI.md'), 'utf8');
+  assert.match(cli, /\| `yad build amend <story> --repo <r> <step> --via auto\\\|agent\\\|human --reason <text>/);
+  assert.match(cli, /\[--via auto\\\|agent\\\|human\] \[--task <T>\]` \| Move a lane's/);
+  const schema = fs.readFileSync(path.join(ROOT, 'skills/yad-epic/references/state-schema.md'), 'utf8');
+  assert.match(schema, /\| `auto` \/ `agent` \/ `human` \|/);
+  assert.match(schema, /`\{ by, date, via, run, task\?, amended\? \}`/);
+  assert.match(schema, /One\n {2}command corrects a Build lane step's `via`: `yad build amend`/);
+});
+
 test('yad build trust: signals are checked per step, and --uid finalizes the verdict', () => {
   const { W, P, dir } = workspace();
   try {
