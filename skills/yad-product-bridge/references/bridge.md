@@ -220,7 +220,8 @@ other way — up through its first review PR/MR; see "the seed of a new epic" be
 |---|---|---|
 | PR/MR opened / reopened / pushed / reviewed | pre-merge | **none** — review state lives on the platform; CI never touches the branch |
 | PR/MR closed **and merged** (the human act) | merge | `gate ci --branch <head> --pr <n> --merged` → re-read approvals, advance the step + flip the artifact `status:` **on the default branch** |
-| Schedule (`*/15`) | reconcile | Safety net: enumerate recently-**merged** `review/EP-*` PRs/MRs via the API and advance any not yet `done` (idempotent). Recovers a merge whose merge-time run failed transiently, and on GitLab also picks up a squash merge whose commit dropped the branch name (and a bare approval — GitLab fires no pipeline on one). **GitHub:** a scheduled workflow, automatic once committed. **GitLab:** a pipeline schedule with `SDLC_GATE_SYNC=true` (one-time setup) |
+| A `skip/EP-*` or `unskip/EP-*` request PR/MR closed **and merged** | merge | the same `gate ci --branch <head> --pr <n> --merged` → check with the platform that it merged into the default branch from that branch, and is the newest request for the step, then mark the step skipped (or put it back) with the reason from its description and the merger as `by` |
+| Schedule (`*/15`) | reconcile | Safety net: enumerate recently-**merged** `review/EP-*`, `skip/EP-*` and `unskip/EP-*` PRs/MRs via the API and advance or apply any not yet recorded (idempotent). Recovers a merge whose merge-time run failed transiently, and on GitLab also picks up a squash merge whose commit dropped the branch name (and a bare approval — GitLab fires no pipeline on one). **GitHub:** a scheduled workflow, automatic once committed. **GitLab:** a pipeline schedule with `SDLC_GATE_SYNC=true` (one-time setup) |
 
 **A trunk that is not the platform's default branch (#232).** When the Product's `default_branch` in
 `.sdlc/product.json` (for example `testing`) is not the platform's default, the person sets a CI variable
@@ -280,7 +281,7 @@ downloads each new release once.
 
 **The sweep lists merged PRs in one search (#434).** On GitHub the reconcile job asks one paginated GraphQL
 search for every PR merged in the last 7 days, with its number and branch, and runs `gate ci` only for the
-`review/EP-*` ones (it used to make one `gh pr view` call per merged PR). GitLab's sweep already listed
+`review/EP-*`, `skip/EP-*` and `unskip/EP-*` ones (it used to make one `gh pr view` call per merged PR). GitLab's sweep already listed
 the merged MRs with their branches in one paginated call.
 
 **A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
