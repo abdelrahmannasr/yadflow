@@ -64,8 +64,8 @@ while step is a Build step (not engineer-review):
     elif eff == "auto":
         yad build step <story> --repo <repo> <step> done --via auto --run <uid> {--task <T>}   # the closing record; currentStep moves on
         checkpoint; if step == checks: OPEN_PR; continue  # Step B advance
-    else:  # "human"
-        yad build step <story> --repo <repo> <step> done --run <uid> {--task <T>}
+    else:  # "human" — the agent did the step; a person still advances it (#658)
+        yad build step <story> --repo <repo> <step> done --via agent --run <uid> {--task <T>}
         checkpoint; if step == checks: OPEN_PR; STOP and report "waiting for human at <next>"
 
 # OPEN_PR — checks closed for a task, by either dial: open its PR/MR (#356)

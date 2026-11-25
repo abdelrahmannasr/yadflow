@@ -159,8 +159,9 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    - else if effective dial is **`advance: auto`** → `yad build step <story> --repo <repo> <step> done
      --via auto --run <uid>` (it writes the `closed` record and moves `currentStep` on), and **continue the
      loop** (this is the Step B auto-advance for `checks`).
-   - else (**`advance: human`**) → `yad build step <story> --repo <repo> <step> done --run <uid>`, then
-     **stop** and report "waiting for a human at `<next-step>`".
+   - else (**`advance: human`**) → `yad build step <story> --repo <repo> <step> done --via agent --run <uid>`
+     (you did the step, a person still advances it: `--via agent`, never the default `human`, which records
+     a person's work), then **stop** and report "waiting for a human at `<next-step>`".
    - On the `implement`/`checks` legs, pass `--task <task>` to `yad build trust` and `yad build step`, so
      each task's run and close are kept apart (the engineer review finalizes the right one).
    - `closed` is the step's **closing record** (E18): how the lane moved past it, and which run did it.
