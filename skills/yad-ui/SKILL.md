@@ -113,7 +113,7 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   It can be picked back up with `yad undefer EP-<slug> ui-design` at any time — after the stories are
   finished, the UI re-opens beside them and the stories stay done.
 - **On a verified Product (the mode check below):** by this step the epic's ledger is on the default
-  branch, and only CI writes `state.json`. A skip still works, through a PR/MR: on the person's yes,
+  branch, and only CI may change it there. A skip still works, through a PR/MR: on the person's yes,
   `yad skip EP-<slug> ui-design --reason "<why>"` pushes a `skip/EP-<slug>/ui-design` branch and opens a
   PR/MR that changes no file, and CI marks the step skipped when a person merges it. Tell the user that
   merging it is the decision, and that `yad unskip` goes back the same way. `yad defer` and `yad undefer`
