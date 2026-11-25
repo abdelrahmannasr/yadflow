@@ -10033,6 +10033,151 @@ test('yad doctor reminds of step debt as `step:debt` until it is paid, and says 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// EP-reported-agent-flow-S04: on a verified Product whose epic ledger is on origin's default branch, `yad skip` and
+// `yad unskip` open a request. A real Product with a bare origin; only the PR/MR call is faked.
+function requestProductRepo({ pin = '4.15.0' } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-request-'));
+  const origin = path.join(T, 'origin.git');
+  fs.mkdirSync(origin);
+  git(origin, 'init', '-q', '--bare');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const P = path.join(T, 'p');
+  git(T, 'clone', '-q', origin, P);
+  for (const [k, v] of [['user.email', 'a@b.c'], ['user.name', 'al'], ['commit.gpgsign', 'false']]) git(P, 'config', k, v);
+  fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(P, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified', ...(pin ? { gate_sync_version: pin } : {}) }));
+  seedEpic(P, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+  git(P, 'add', '-A');
+  git(P, 'commit', '-q', '-m', 'seed');
+  git(P, 'branch', '-q', '-M', 'main');
+  git(P, 'push', '-q', '-u', 'origin', 'main');
+  return { T, origin, P };
+}
+const fakeCreator = (answer = { ok: true, url: 'https://github.com/o/p/pull/31' }) => {
+  const calls = [];
+  const creator = (platform, opts) => { calls.push({ platform, ...opts }); return answer; };
+  creator.calls = calls;
+  return creator;
+};
+const originHas = (origin, ref) => { try { git(origin, 'rev-parse', '--verify', '--quiet', ref); return true; } catch { return false; } };
+
+test('yad skip, once CI owns the ledger, pushes skip/<epic>/<step> with one empty commit and opens a PR whose body carries the reason', async () => {
+  const { T, origin, P } = requestProductRepo();
+  const prev = process.exitCode;
+  try {
+    const before = fs.readFileSync(uiStateFile(P), 'utf8');
+    const creator = fakeCreator();
+    process.exitCode = undefined;
+    let answer;
+    const out = await grab(async () => { answer = await runSkip(P, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only epic', creator }); });
+    assert.notEqual(process.exitCode, 1, out);
+    assert.equal(fs.readFileSync(uiStateFile(P), 'utf8'), before, 'nothing written in the working tree');
+    assert.equal(git(P, 'status', '--porcelain').toString().trim(), '');
+    const sha = git(origin, 'rev-parse', 'refs/heads/skip/EP-x/ui-design').toString().trim();
+    const main = git(origin, 'rev-parse', 'refs/heads/main').toString().trim();
+    assert.equal(git(origin, 'rev-parse', `${sha}^`).toString().trim(), main, 'one commit, on the base tip');
+    assert.equal(git(origin, 'rev-parse', `${sha}^{tree}`).toString().trim(), git(origin, 'rev-parse', 'main^{tree}').toString().trim(), 'it changes no file');
+    assert.deepEqual(answer, { epic: 'EP-x', step: 'ui-design', state: 'in_progress', changed: false,
+      request: { kind: 'skip', branch: 'skip/EP-x/ui-design', commit: sha, url: 'https://github.com/o/p/pull/31', opened: true } });
+    assert.equal(creator.calls.length, 1);
+    const pr = creator.calls[0];
+    assert.deepEqual([pr.platform, pr.base, pr.head, pr.title], ['github', 'main', 'skip/EP-x/ui-design', 'chore(gate): skip ui-design in EP-x']);
+    const { requestReason } = await import('./gate.mjs');
+    assert.equal(requestReason(pr.body), 'backend-only epic', 'gate ci reads back the reason it wrote');
+    assert.match(out, /opened the skip request/);
+
+    // The real Product checks pass on what it made: the commit subject, the PR title and the PR body.
+    const checks = path.join(ROOT, 'checks');
+    const W = path.join(T, 'w');
+    git(T, 'clone', '-q', '--branch', 'skip/EP-x/ui-design', origin, W);
+    const sh = (script, args, cwd = W) => spawnSync('bash', [path.join(checks, script), ...args], { cwd, encoding: 'utf8', env: GIT_ENV });
+    const cm = sh('commit-message.sh', ['--profile', 'product', 'origin/main']);
+    assert.equal(cm.status, 0, cm.stdout + cm.stderr);
+    const changed = path.join(T, 'changed');
+    fs.writeFileSync(changed, git(W, 'diff', '--no-renames', '--name-only', 'origin/main...HEAD').toString());
+    assert.equal(fs.readFileSync(changed, 'utf8'), '', 'no path changed');
+    const tt = sh('pr-title.sh', ['--profile', 'product', '--head', 'skip/EP-x/ui-design', '--changed', changed, pr.title]);
+    assert.equal(tt.status, 0, tt.stdout + tt.stderr);
+    const body = path.join(T, 'body.md');
+    fs.writeFileSync(body, pr.body);
+    const tb = sh('pr-template.sh', ['--profile', 'product', '--head', 'skip/EP-x/ui-design', '--changed', changed, body]);
+    assert.equal(tb.status, 0, tb.stdout + tb.stderr);
+
+    // A second skip meets the branch on origin: named, refused, nothing pushed (never force-pushed).
+    process.exitCode = undefined;
+    const again = await grab(() => runSkip(P, { epic: 'EP-x', step: 'ui-design', reason: 'again', creator, finder: () => ({ ok: true, number: 31, url: 'https://github.com/o/p/pull/31' }) }));
+    assert.equal(process.exitCode, 1);
+    assert.match(again, /skip\/EP-x\/ui-design is already on origin/);
+    assert.equal(git(origin, 'rev-parse', 'refs/heads/skip/EP-x/ui-design').toString().trim(), sha);
+    assert.equal(creator.calls.length, 1);
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad skip and unskip by request refuse what a local skip refuses, an old CI pin, and say how to open a PR that did not open', async () => {
+  const prev = process.exitCode;
+  const { runDefer, runUnblock } = await import('./skip.mjs');
+  const { T, origin, P } = requestProductRepo();
+  try {
+    const creator = fakeCreator();
+    // Today's refusals, from the base's state, before anything is pushed.
+    await assert.rejects(() => runSkip(P, { epic: 'EP-x', step: 'architecture', reason: 'x', creator }), (e) => e.code === 'YAD-STATE-004');
+    await assert.rejects(() => runSkip(P, { epic: 'EP-x', step: 'ui-design', creator }), (e) => e.code === 'YAD-STATE-004', 'no reason');
+    await assert.rejects(() => runSkip(P, { epic: 'EP-x', step: 'ui-design', undo: true, creator }), (e) => e.code === 'YAD-STATE-004', 'not skipped');
+    await assert.rejects(() => runSkip(P, { epic: 'EP-x', step: 'ui-design', reason: 'x', debt: true, creator }), (e) => e.code === 'YAD-STATE-004', 'a skip is never debt');
+    assert.ok(!originHas(origin, 'refs/heads/skip/EP-x/architecture') && !originHas(origin, 'refs/heads/skip/EP-x/ui-design') && !originHas(origin, 'refs/heads/unskip/EP-x/ui-design'));
+    assert.equal(creator.calls.length, 0);
+    // Defer, undefer and unblock keep today's refusal, word for word.
+    for (const [command, verb] of [['yad defer', () => runDefer(P, { epic: 'EP-x', step: 'ui-design', reason: 'later' })], ['yad unblock', () => runUnblock(P, { epic: 'EP-x', step: 'ui-design' })]]) {
+      process.exitCode = undefined;
+      assert.match(await grab(verb), new RegExp(`\`${command}\` is refused: epics/EP-x/\\.sdlc/state\\.json is on the default branch`), command);
+      assert.equal(process.exitCode, 1);
+    }
+    // A PR that does not open: the branch is pushed, and the command to open it is given.
+    process.exitCode = undefined;
+    const failed = await grab(() => runSkip(P, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', creator: fakeCreator({ ok: false, reason: 'gh: not logged in' }) }));
+    assert.equal(process.exitCode, 1);
+    assert.match(failed, /pushed skip\/EP-x\/ui-design, but could not open the PR: gh: not logged in/);
+    assert.match(failed, /gh pr create --head skip\/EP-x\/ui-design --base main --title "chore\(gate\): skip ui-design in EP-x"/);
+    assert.ok(originHas(origin, 'refs/heads/skip/EP-x/ui-design'));
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+
+  // An unskip request, on a base where the step is skipped.
+  const second = requestProductRepo();
+  try {
+    const st = uiChain('ui-design', { ui: 'in_progress' });
+    const { skipStep: skipIt } = await import('./epic-state.mjs');
+    skipIt(st, 'ui-design', { reason: 'no UI', by: 'al', at: '2026-11-25' });
+    fs.writeFileSync(uiStateFile(second.P), JSON.stringify(st));
+    git(second.P, 'commit', '-qam', 'skipped');
+    git(second.P, 'push', '-q', 'origin', 'main');
+    const creator = fakeCreator();
+    process.exitCode = undefined;
+    let answer;
+    await grab(async () => { answer = await runSkip(second.P, { epic: 'EP-x', step: 'ui-design', undo: true, creator }); });
+    assert.notEqual(process.exitCode, 1);
+    assert.equal(answer.request.branch, 'unskip/EP-x/ui-design');
+    assert.equal(answer.state, 'skipped');
+    assert.equal(creator.calls[0].title, 'chore(gate): unskip ui-design in EP-x');
+    assert.doesNotMatch(creator.calls[0].body, /yad:reason/, 'an unskip carries no reason');
+    // A skip of a step already skipped on the base opens nothing.
+    process.exitCode = undefined;
+    const dup = await grab(async () => { answer = await runSkip(second.P, { epic: 'EP-x', step: 'ui-design', reason: 'x', creator }); });
+    assert.match(dup, /already marked N\/A by al on 2026-11-25/);
+    assert.equal(answer.request, null);
+    assert.equal(creator.calls.length, 1);
+  } finally { process.exitCode = prev; fs.rmSync(second.T, { recursive: true, force: true }); }
+
+  // A CI pinned below SET_ASIDE_SINCE would never apply the request: refused, nothing pushed.
+  const old = requestProductRepo({ pin: '4.14.0' });
+  try {
+    process.exitCode = undefined;
+    const out = await grab(() => runSkip(old.P, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', creator: fakeCreator() }));
+    assert.equal(process.exitCode, 1);
+    assert.match(out, /CI runs yadflow@4\.14\.0, older than 4\.15\.0/);
+    assert.ok(!originHas(old.origin, 'refs/heads/skip/EP-x/ui-design'));
+  } finally { process.exitCode = prev; fs.rmSync(old.T, { recursive: true, force: true }); }
+});
+
 test('runSkip: missing step arg and an unseeded epic both fail with exit 1 (no throw)', async () => {
   const prev = process.exitCode;
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-arg-'));
@@ -10074,9 +10219,20 @@ test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger
     const owned = onBase('epics/ep-x/.sdlc/state.json');   // folded, as the gate folds
     const bytes = () => fs.readFileSync(uiStateFile(T), 'utf8');
     const before = bytes();
-    const refusals = [
+    // EP-reported-agent-flow-S04: skip and unskip open a request instead (its own tests below); this git has no
+    // base to read, so the request stops before anything is pushed — and it is not today's refusal.
+    for (const [command, verb] of [
       ['yad skip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })],
       ['yad unskip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
+    ]) {
+      process.exitCode = undefined;
+      const out = await grab(verb);
+      assert.match(out, new RegExp(`\`${command}\` opened no request`), command);
+      assert.doesNotMatch(out, /is refused:/, command);
+      assert.equal(process.exitCode, 1, command);
+      assert.equal(bytes(), before, `${command} wrote nothing`);
+    }
+    const refusals = [
       ['yad defer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })],
       ['yad undefer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
       ['yad unblock', () => runUnblock(T, { epic: 'EP-x', step: 'ui-design', runner: owned })],
@@ -10098,15 +10254,15 @@ test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger
     assert.doesNotMatch(fresh, /is refused:|could not be read/);
     assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'skipped');
     assert.notEqual(process.exitCode, 1);
-    // …and it says the skip is one way once that PR merges, naming the verb that will then be refused.
-    assert.match(fresh, /yours to write only until the epic's first review PR merges; after that `yad unskip EP-x ui-design` is refused/);
+    // …and it says what the undo does once that PR merges: a request CI applies (EP-reported-agent-flow-S04).
+    assert.match(fresh, /yours to write only until the epic's first review PR merges; after that `yad unskip EP-x ui-design` opens a PR\/MR that CI applies when it merges/);
     assert.match(fresh, /git fetch origin/);
 
-    // A repeat of a skip already written is refused too once CI owns the ledger: the refusal comes before the
-    // "already skipped" path, which would otherwise rewrite the file.
+    // A repeat of a skip already written goes to the request path once CI owns the ledger, before the local
+    // "already skipped" path, which would otherwise rewrite the file. (This git has no base: nothing is pushed.)
     const skipped = bytes();
     process.exitCode = undefined;
-    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })), /`yad skip` is refused/);
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })), /`yad skip` opened no request/);
     assert.equal(process.exitCode, 1);
     assert.equal(bytes(), skipped, 'the already-skipped path wrote nothing');
     process.exitCode = undefined;

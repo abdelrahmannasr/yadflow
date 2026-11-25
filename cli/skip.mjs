@@ -24,6 +24,7 @@ import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
 import { seededSlugs } from './hook.mjs';
 import { actorName } from './platform.mjs';
+import { openSetAsideRequest } from './skip-request.mjs';
 
 // Best-effort auditable actor for a record's `by` — who WROTE the record: the platform login the CLI
 // reports (`actorName`), else the raw git user.name, else null. A malformed/absent Product has no
@@ -56,9 +57,10 @@ const VERBS = {
 };
 
 // On a verified Product, an epic's `state.json` is CI's alone once it is on the default branch (rule 9):
-// `ledger-guard` rejects every other commit that changes it, and `gate ci` has no step for a skip, a
-// deferral or an unblock. A write here could never land, and the ledger on this machine would drift from
-// the one CI keeps — so these verbs refuse, before anything is written. The question is the one the
+// `ledger-guard` rejects every other commit that changes it, and `gate ci` has no step for a deferral or an
+// unblock. A write here could never land, and the ledger on this machine would drift from the one CI keeps —
+// so these verbs refuse, before anything is written. A skip and an unskip have a step (EP-reported-agent-flow-S04):
+// with `request`, the answer is 'request', and the verb opens a request PR/MR that CI applies when it merges. The question is the one the
 // `ledger-guard` hook asks (`seededSlugs`, cli/hook.mjs), so the hook and the verb never disagree:
 //   - an epic whose ledger is NOT on the base yet still writes. Its seed rides the first review PR (#162):
 //     the epic review on `classic`, the analysis review on `analysis-first`. A skip or deferral written
@@ -68,7 +70,7 @@ const VERBS = {
 // `hub.json` is read leniently, as the hook reads it. A broken `hub.json` or `repos.json` must not stop
 // these verbs on a local ledger (`yad doctor` reports both), and the hook and the verb must give the same
 // answer on the same file.
-function ciOwnsLedger(root, { epic, command, undoCommand = null, runner }) {
+function ciOwnsLedger(root, { epic, command, undoCommand = null, request = false, runner }) {
   const productConfig = readJSON(productConfigPath(root), null);
   if (!isVerifiedLedger(productConfig)) return false;
   const seeded = seededSlugs(root, productConfig, runner);
@@ -78,17 +80,20 @@ function ciOwnsLedger(root, { epic, command, undoCommand = null, runner }) {
   }
   if (!seeded.has(epic.toLowerCase())) {
     if (undoCommand) {
-      info(`on this verified Product ${epicRel(epic)}/.sdlc/state.json is yours to write only until the epic's first review PR merges; after that \`${undoCommand}\` is refused until CI has a step for it (checked against origin as last fetched — run \`git fetch origin\` if that PR may have merged)`);
+      info(request
+        ? `on this verified Product ${epicRel(epic)}/.sdlc/state.json is yours to write only until the epic's first review PR merges; after that \`${undoCommand}\` opens a PR/MR that CI applies when it merges (checked against origin as last fetched — run \`git fetch origin\` if that PR may have merged)`
+        : `on this verified Product ${epicRel(epic)}/.sdlc/state.json is yours to write only until the epic's first review PR merges; after that \`${undoCommand}\` is refused until CI has a step for it (checked against origin as last fetched — run \`git fetch origin\` if that PR may have merged)`);
     }
     return false;
   }
+  if (request) return 'request';
   fail(`\`${command}\` is refused: ${epicRel(epic)}/.sdlc/state.json is on the default branch, and on a verified Product only CI writes it — nothing is written`);
   hand(`ledger-guard rejects any commit to it that CI did not make, and CI has no step for \`${command}\` yet. An epic's ledger is still yours to write while the epic is new, before its first review PR merges`);
   process.exitCode = 1;
   return true;
 }
 
-async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today, runner } = {}) {
+async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today, runner, creator, finder } = {}) {
   const V = VERBS[verb];
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -98,7 +103,16 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
     process.exitCode = 1;
     return;
   }
-  if (ciOwnsLedger(root, { epic, command: `yad ${undo ? V.undo : verb}`, undoCommand: undo ? null : `yad ${V.undo} ${epic} ${step}`, runner })) return;
+  const owned = ciOwnsLedger(root, { epic, command: `yad ${undo ? V.undo : verb}`, undoCommand: undo ? null : `yad ${V.undo} ${epic} ${step}`, request: verb === 'skip', runner });
+  if (owned === 'request') {
+    if (undo && reason != null && reason !== true) info(V.reasonNote);
+    return openSetAsideRequest(root, {
+      kind: undo ? 'unskip' : 'skip', epic, step, reason: undo ? null : reason, debt: !undo && debt === true,
+      productConfig: readJSON(productConfigPath(root), null), by: recordActor(root), today,
+      ...(runner ? { runner } : {}), ...(creator ? { creator } : {}), ...(finder ? { finder } : {}),
+    });
+  }
+  if (owned) return;
 
   // Guard violations throw a YadError (YAD-STATE-004) with a hint — the top-level catch in bin/yad.mjs
   // renders those. Here we only handle the happy path + the two plain-arg checks above.
