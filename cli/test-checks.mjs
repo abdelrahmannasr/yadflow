@@ -8471,3 +8471,4 @@ test('epic-open passes a promotion merge request, and only that (#684)', () => p
 
 test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link'));
 
+test('commit-message passes a promotion merge request, and only that (#684)', () => promotionCase(COMMIT_MSG, 'commit-message', ['--profile', 'code', 'main']));
