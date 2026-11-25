@@ -660,6 +660,28 @@ test('#425 doctor: a gate workflow that still starts on `edited` is checks:edit-
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// #684: a promotion merge request (a long-lived branch named in YAD_PROMOTE_FROM) passes the story gates.
+// They learn the source branch from the environment, never from an argument, so a base branch that still
+// runs the previous release's script keeps today's call (#426). GitHub passes the branch and the
+// repository variable on each story-gate step; GitLab already sets CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
+// on every merge request pipeline and exports its CI/CD variables, so its gate jobs need nothing new.
+test('yad-checks CI: the story gates get the source branch and YAD_PROMOTE_FROM, and no other step does (#684)', () => {
+  const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  const env = 'env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }';
+  for (const gate of ['spec-link', 'lineage-check', 'epic-open', 'reconcile-debt-check', 'commit-message']) {
+    const run = new RegExp(`- run: bash "\\$YAD_CHECKS/${gate}\\.sh"[^\\n]*\\n {8}${env.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`);
+    assert.match(github, run, gate);
+  }
+  assert.equal(github.split('YAD_SOURCE_BRANCH').length - 1, 5, 'only the five story gates');
+  assert.doesNotMatch(github, /bash "\$YAD_CHECKS\/(?:verified-commits|contract-check)\.sh"[^\n]*\n\s*env: \{ YAD_SOURCE_BRANCH/);
+  assert.doesNotMatch(github, /\$\{\{ github\.head_ref \}\}"\s*$/m, 'the branch name only ever reaches a step through env');
+  for (const job of ['yad-spec-link', 'yad-lineage-check', 'yad-epic-open', 'yad-reconcile-debt', 'yad-commit-message']) {
+    assert.match(gitlab, new RegExp(`\\n${job}:\\n  extends: \\.sdlc_mr_only\\n`), job);
+  }
+  assert.match(gitlab, /- if: \$CI_PIPELINE_SOURCE == "merge_request_event"/);
+});
+
 test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');

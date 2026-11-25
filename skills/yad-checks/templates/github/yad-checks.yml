@@ -70,6 +70,7 @@ jobs:
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"
+        env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }
 
   contract-check:
     runs-on: ubuntu-latest
@@ -278,6 +279,7 @@ jobs:
       - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
       - run: bash "$YAD_CHECKS/lineage-check.sh" "origin/${{ github.base_ref }}"
+        env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }
 
   epic-open:
     runs-on: ubuntu-latest
@@ -322,6 +324,7 @@ jobs:
       - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
       - run: bash "$YAD_CHECKS/epic-open.sh" "origin/${{ github.base_ref }}"
+        env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }
 
   reconcile-debt:
     runs-on: ubuntu-latest
@@ -366,6 +369,7 @@ jobs:
       - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
         env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
       - run: bash "$YAD_CHECKS/reconcile-debt-check.sh" "origin/${{ github.base_ref }}"
+        env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }
 
   # Pattern gate: every commit subject follows the convention (profile: code). The PR title and body are
   # checked by yad-pr-text.yml.
@@ -408,6 +412,7 @@ jobs:
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       - run: bash "$YAD_CHECKS/commit-message.sh" --profile code "origin/${{ github.base_ref }}"
+        env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }
 
   # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
   verified-commits:
