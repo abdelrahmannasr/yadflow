@@ -107,19 +107,25 @@ ${c.bold('Setup & maintenance')}
                        A speed bump, not proof. Wired on every Product by setup / check --fix.
                        A person's YAD_HOOK_DISABLE=1 skips it.
 
-${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic — #115)')}
-  yad worktree add <epic> [--repo <name>|--all] [--dry-run]
+${c.bold('Parallel agents')} ${c.dim('(one git worktree per epic, or per story — #115)')}
+  yad worktree add <epic> [--story <story>] [--repo <name>|--all] [--dry-run]
                                        Make the epic's own worktree beside the Product (or beside a code
                                        repo with --repo; the Product and every repo the epic names with
                                        --all), detached at origin/<default>. A code repo's ignored
                                        node_modules are linked, not reinstalled. Open the agent's session
-                                       in that folder, and make the step's usual branch there
-  yad worktree list [<epic>] [--json] The yad worktrees of the Product and every repo: branch, changes,
-                                       commits on no remote, locked, folder gone
-  yad worktree remove <epic> [--repo <name>|--all]
+                                       in that folder, and make the step's usual branch there.
+                                       --story: one worktree per story instead, <repo>--<story>, beside
+                                       each code repo the story names (or the one --repo names); never
+                                       a Product one. Refused for a story of another epic, a story with
+                                       no file, or with --all
+  yad worktree list [<epic>] [--json] The yad worktrees of the Product and every repo: story, branch,
+                                       changes, commits on no remote, locked, folder gone
+  yad worktree remove <epic> [--story <story>] [--repo <name>|--all]
                                        Remove them — refused, removing nothing, while one holds
                                        uncommitted or untracked files, commits on no remote, a lock or an
-                                       operation half done, or you are inside it. No override
+                                       operation half done, or you are inside it. No override.
+                                       --story: only that story's, also when its file is gone; without
+                                       it, never a story's
 
 ${c.bold('Team members')} ${c.dim('(identity only — no roles, no reviewers, no allowlist)')}
   yad member add [--no-push]           Prove who you are and write .sdlc/members/<platform>-<login>.json:
@@ -1426,19 +1432,21 @@ async function main() {
       break;
     }
     case 'worktree': {
-      // #115. One git worktree per epic, beside the Product and each code repo.
+      // #115. One git worktree per epic, beside the Product and each code repo; or one per story
+      // (EP-reported-agent-flow-S01), beside each code repo the story names.
       const [, action = 'list', epic, extra] = o._;
-      const usage = 'usage: yad worktree add <epic> [--repo <name>|--all] [--dry-run] | yad worktree list [<epic>] [--json] | yad worktree remove <epic> [--repo <name>|--all]';
+      const usage = 'usage: yad worktree add <epic> [--story <story>] [--repo <name>|--all] [--dry-run] | yad worktree list [<epic>] [--json] | yad worktree remove <epic> [--story <story>] [--repo <name>|--all]';
       if (!['add', 'list', 'remove'].includes(action)) { refuse(`unknown worktree action: ${action} (add, list, remove)`, usage); break; }
       if (extra) { refuse(`unexpected word: ${extra}`, usage); break; }
       if (action !== 'list' && !epic) { refuse(`yad worktree ${action} needs an epic`, usage); break; }
       if (o.repo !== undefined && o.all) { refuse('--repo and --all name different targets — pass one', usage); break; }
       if (o.repo === true || o.repo === '') { refuse('--repo needs a repo name', usage); break; }
-      if (action === 'list' && (o.repo !== undefined || o.all)) { refuse('yad worktree list lists every repo; it takes no --repo or --all', usage); break; }
+      if (action === 'list' && (o.repo !== undefined || o.all || o.story !== undefined)) { refuse('yad worktree list lists every repo; it takes no --repo, --all or --story (`list <epic>` shows its story worktrees too)', usage); break; }
+      if (o.story !== undefined && o.all) { refuse('--story and --all name different targets — pass one', usage); break; }
       if (noProduct()) break;
-      if (action === 'add') result = await commands.runWorktreeAdd(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, dryRun: !!o.dryRun, today });
+      if (action === 'add') result = await commands.runWorktreeAdd(o.dir, { epic, story: o.story ?? null, repo: o.repo ?? null, all: !!o.all, dryRun: !!o.dryRun, today });
       else if (action === 'list') result = await commands.runWorktreeList(o.dir, { epic: epic ?? null });
-      else result = await commands.runWorktreeRemove(o.dir, { epic, repo: o.repo ?? null, all: !!o.all, cwd: shellCwd() });
+      else result = await commands.runWorktreeRemove(o.dir, { epic, story: o.story ?? null, repo: o.repo ?? null, all: !!o.all, cwd: shellCwd() });
       break;
     }
     case 'issues': {

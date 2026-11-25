@@ -304,6 +304,57 @@ test('yad worktree remove --story removes a story\'s worktree even when its stor
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad worktree --story on the CLI: add, list --json and remove --json for two stories of one epic; its refusals and its help (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api } = workspace();
+  withStories(P);
+  const s1 = path.join(W, 'api--EP-x-S01');
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    // Refused, making nothing, with the cause named.
+    const no = (re, ...args) => { const r = yad(P, 'worktree', ...args); assert.notEqual(r.code, 0, r.out); assert.match(r.out, re, args.join(' ')); };
+    for (const action of ['add', 'remove']) {
+      no(/EP-x-02 is not a story id/, action, 'EP-x', '--story', 'EP-x-02');
+      no(/EP-y-S01 is a story of EP-y, not of EP-x/, action, 'EP-x', '--story', 'EP-y-S01');
+      no(/--story expects a value/, action, 'EP-x', '--story');
+      no(/--story expects a value/, action, 'EP-x', '--story=');
+      no(/--story and --all name different targets/, action, 'EP-x', '--story', 'EP-x-S01', '--all');
+    }
+    no(/no story EP-x-S09 in EP-x/, 'add', 'EP-x', '--story', 'EP-x-S09');
+    no(/yad worktree list lists every repo; it takes no --repo, --all or --story/, 'list', '--story', 'EP-x-S01');
+    no(/yad worktree list lists every repo; it takes no --repo, --all or --story/, 'list', 'EP-x', '--story', 'EP-x-S01');
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
+
+    // Two stories of one epic: two folders.
+    let r = yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S01', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).worktrees.map((w) => w.path)], ['EP-x-S01', [s1]]);
+    r = yad(P, 'worktree', 'add', 'EP-x', '--story=EP-x-S02', '--repo', 'api', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).worktrees.map((w) => w.path)], ['EP-x-S02', [s2]]);
+    r = yad(P, 'worktree', 'list', 'EP-x', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees.map((w) => [w.story, w.path]).sort((a, b) => a[1].localeCompare(b[1])), [['EP-x-S01', s1], ['EP-x-S02', s2]]);
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--story', 'EP-x-S01', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).removed], ['EP-x-S01', [{ repo: 'api', path: s1, story: 'EP-x-S01' }]]);
+    assert.equal(fs.existsSync(s1), false);
+    assert.equal(fs.existsSync(s2), true, 'the other story\'s stays');
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--json');
+    assert.notEqual(r.code, 0, 'without --story, a story\'s is never removed');
+    assert.equal(fs.existsSync(s2), true);
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--story', 'EP-x-S02', '--repo', 'api', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(fs.existsSync(s2), false);
+
+    // The usage line and the help show the flag.
+    assert.match(yad(P, 'worktree', 'nope').out, /yad worktree add <epic> \[--story <story>\] \[--repo <name>\|--all\] \[--dry-run\].*yad worktree remove <epic> \[--story <story>\] \[--repo <name>\|--all\]/);
+    const help = yad(P, 'help').out;
+    assert.match(help, /yad worktree add <epic> \[--story <story>\] \[--repo <name>\|--all\] \[--dry-run\]/);
+    assert.match(help, /yad worktree remove <epic> \[--story <story>\] \[--repo <name>\|--all\]/);
+    assert.match(help, /<repo>--<story>/, 'help says what --story makes');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad worktree remove refuses, removing nothing, while a worktree holds work — and names yad\'s own files (#115)', () => {
   const { W, P, pwt, awt } = workspace();
   const refused = (re, cwd = P) => {
