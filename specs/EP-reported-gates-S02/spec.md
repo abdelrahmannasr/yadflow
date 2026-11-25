@@ -35,6 +35,20 @@ they can fail commits that passed then. No gate knows what a promotion merge req
 - R7. `checks/<gate>` stays byte-identical to `skills/yad-checks/templates/checks/<gate>` for each gate
   changed.
 
+- R8. The rule applies only to a merge request from the same repository. On GitHub, the gate steps also
+  get `YAD_PR_FORK` (`github.event.pull_request.head.repo.full_name != github.repository`, the expression
+  the workflow already uses for `product-checkout`), and `YAD_SOURCE_BRANCH` counts only when
+  `YAD_PR_FORK` is `false`. On GitLab, `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME` counts only when
+  `CI_MERGE_REQUEST_SOURCE_PROJECT_ID` equals a set `CI_MERGE_REQUEST_PROJECT_ID`. A fork's branch named
+  `develop` is never a promotion.
+- R9. `yad run checks` removes `YAD_PROMOTE_FROM`, `YAD_SOURCE_BRANCH` and `YAD_PR_FORK` from the
+  environment it gives the gates, as it removes `CI_*` and `SDLC_*` today, so a laptop run checks every
+  commit whatever the shell exports.
+- R10. `commit-message` reads the rule only under `--profile code`. The Product's `commit-message
+  --profile product` job is never skipped, on either platform.
+- R11. The docs say each branch in the list must be protected, with pull requests required, since a
+  direct push to it is not gated.
+
 ## Non-goals
 
 - Finding promotion merge requests without the variable.
@@ -45,6 +59,7 @@ they can fail commits that passed then. No gate knows what a promotion merge req
 
 ### Session 2026-11-25
 
+- Q: The code review found a fork pull request could name its branch `develop` and trigger the skip; `yad run checks` passed the variables through; the Product's commit-message was skipped on GitLab; the docs overstated what was checked. How to fix? → A: all four: same-repository PRs only (R8), `yad run checks` strips the variables (R9, task T08), only `--profile code` reads the rule (R10), and the docs name the protection the branches need (R11) (the person, in the chat, 2026-11-25).
 - Q: Light spec — one `spec.md` holding the spec, the plan and the tasks? → A: yes (the person, Plannotator Inbox, 2026-11-25). The story qualifies: chore route, no contract, no high-risk file (the engine has no risk map).
 - Q: What should the per-commit gates do on a promotion merge request? → A: the story gates pass with a note; `verified-commits` and `contract-check` still run (the person, Plannotator Inbox, 2026-11-25). This weakens five checks on purpose for the named branches only.
 - Q: Should `yad ci check` report the variable? → A: no; the gate's job-log line is the report, and `yad ci check` is unchanged (the person, Plannotator Inbox, 2026-11-25).
@@ -114,4 +129,12 @@ non-matching value leaves today's result.
 - `docs/CLI.md`
 
 **Done when:** R6 holds.
+## T08 — `yad run checks` never passes the promotion variables to a gate
+**Files:**
+- `cli/run-checks.mjs`
+- `cli/test-run-checks.mjs`
+
+**Done when:** R9 holds: a `YAD_PROMOTE_FROM`, `YAD_SOURCE_BRANCH` or `YAD_PR_FORK` exported in the shell never reaches a gate, and a test shows a run with all three set still FAILs the rig.
+
+The R8, R10 and R11 fixes land as follow-up commits of T01 (the template's `YAD_PR_FORK`), T02–T06 (one gate each) and T07 (the docs), each with its own `Task:` trailer.
 <!-- /yad:tasks -->
