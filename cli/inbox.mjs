@@ -1,6 +1,6 @@
 // The Plannotator Inbox (EP-plannotator-review). yad never talks to Plannotator: it only shapes the text of a
 // message and puts it in its own `--json` output, in an `inbox` block, and the AGENT posts it with its own Inbox
-// tool (architecture D1). This module holds that knowledge and nothing that reaches out: no network, no file
+// tool (architecture D1). This module holds that knowledge and calls nothing that reaches out: no network, no file
 // write, no child process. S01 adds the one question every later piece asks; S02 adds the message builders.
 //
 // "The Inbox is ready" (contract.md, API) means both:
@@ -9,6 +9,7 @@
 //   - this machine has it: `toolStatus` says `installed` (its program, its plugin, or its Inbox server).
 // Otherwise the `inbox` block is absent, and every command's output is what it was before (architecture D2).
 
+import { artifactBase } from './epic-state.mjs';
 import { looksSecret, redact } from './secret-text.mjs';
 import { TOOLBOX, loadChoices, onPath, toolUse, toolboxRows } from './toolbox.mjs';
 
@@ -153,10 +154,13 @@ export function handOffMessage({ epic = null, step = null, entry } = {}) {
   };
 }
 
-// A Build step that halted. The reason's first line is the "why"; the lines after it are the output. The fixed
+// A Build step that halted. Its key names the task (`halt:<story>:<step>:<repo>:<task>`, contract `key` patterns):
+// `implement` and `checks` are walked once per task, and a later message with the same key replaces the earlier
+// one, so a halt on T02 must not take the place of the halt on T01. The caller gives `task` only for such a step.
+// The reason's first line is the "why"; the lines after it are the output. The fixed
 // paragraphs (what, why, the question, the closing line) always fit; the output keeps its LAST lines — at most
 // HALT_LINES, and fewer when they would not fit — so the error at the end is what the person sees.
-export function haltMessage({ story, repo, step, reason } = {}) {
+export function haltMessage({ story, repo, step, task = null, reason } = {}) {
   const lines = text(reason).split('\n');
   const why = oneLine(lines[0]) || '-';
   const s = part(story);
@@ -170,7 +174,7 @@ export function haltMessage({ story, repo, step, reason } = {}) {
   // Drop the oldest output lines until the whole body fits.
   while (out.length && fixed + 2 + build().length > BODY_MAX) { out = out.slice(1); cut = true; }
   return {
-    key: keyOf('halt', story, step, repo),
+    key: keyOf('halt', story, step, repo, task),
     kind: 'halt',
     thread: story ? `yad ${s}` : 'yad',
     title: title(`Build halted — ${s} in ${part(repo)}: ${part(step)}`),
@@ -181,14 +185,17 @@ export function haltMessage({ story, repo, step, reason } = {}) {
 }
 
 // A review that is ready: a Shape artifact's review PR/MR (`epic` + `artifact`), or a code PR/MR (`repo` + `pr`).
-export function reviewMessage({ epic = null, artifact = null, repo = null, pr = null, url = null, solo = false } = {}) {
+// A Shape review's key names its review branch's base (`review:<epic>:<base>:gate`): the ledger's artifact path is
+// `stories/` for every story, so two stories' review PRs would share a key. `base` is the last part of
+// `review/EP-<slug>/<base>`; left out, it is the artifact's own base (`epic.md` → `epic`). The title keeps the artifact.
+export function reviewMessage({ epic = null, artifact = null, base = null, repo = null, pr = null, url = null, solo = false } = {}) {
   const what = artifact ? `${part(artifact)} for ${part(epic)}` : `PR #${part(pr)} in ${part(repo)}`;
   const asked = solo
     ? 'Read it. In solo mode no approval is counted, so merging it is the decision.'
     : 'Read it, comment where needed, then approve or merge.';
   const links = url ? linksIn(url) : [];
   return {
-    key: keyOf('review', epic ?? repo, artifact ?? pr, artifact ? 'gate' : 'nudge'),
+    key: artifact ? keyOf('review', epic, base ?? artifactBase(String(artifact)), 'gate') : keyOf('review', repo, pr, 'nudge'),
     kind: 'review',
     thread: epic ? `yad ${part(epic)}` : repo ? `yad ${part(repo)}` : 'yad',
     title: title(`Review ready — ${what}`),

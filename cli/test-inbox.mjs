@@ -142,7 +142,7 @@ test('S02 haltMessage: the DESIGN layout, the fixed question, the last 60 lines,
   const out = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n');
   const h = haltMessage({ story: 'EP-x-S02', repo: 'engine', step: 'checks', reason: `build/test/lint failed (2 tests)\n${out}` });
   assert.deepEqual(Object.keys(h), ['key', 'kind', 'thread', 'title', 'body', 'links', 'question']);
-  assert.equal(h.key, 'halt:EP-x-S02:checks:engine');
+  assert.equal(h.key, 'halt:EP-x-S02:checks:engine:-');
   assert.equal(h.thread, 'yad EP-x-S02');
   assert.equal(h.title, 'Build halted — EP-x-S02 in engine: checks');
   assert.deepEqual(h.question, { prompt: 'What should happen next?', options: ['fix', 'skip', 'stop'] });
@@ -161,7 +161,7 @@ test('S02 haltMessage: the DESIGN layout, the fixed question, the last 60 lines,
 test('S02 reviewMessage: a Shape review or a code PR, the solo wording, the link and the notice', () => {
   const gate = reviewMessage({ epic: 'EP-x', artifact: 'epic.md', url: 'https://github.com/o/r/pull/265', solo: true });
   assert.deepEqual(Object.keys(gate), FIELDS);
-  assert.deepEqual([gate.kind, gate.key, gate.thread, gate.title], ['review', 'review:EP-x:epic.md:gate', 'yad EP-x', 'Review ready — epic.md for EP-x']);
+  assert.deepEqual([gate.kind, gate.key, gate.thread, gate.title], ['review', 'review:EP-x:epic:gate', 'yad EP-x', 'Review ready — epic.md for EP-x']);
   assert.match(gate.body, /merging it is the decision/);
   assert.deepEqual(gate.links, ['https://github.com/o/r/pull/265']);
   assert.equal(gate.notice, NOTICE);
@@ -170,6 +170,38 @@ test('S02 reviewMessage: a Shape review or a code PR, the solo wording, the link
   assert.match(nudge.body, /approve or merge/);
   // A link is only ever an https URL it was handed.
   assert.deepEqual(reviewMessage({ epic: 'EP-x', artifact: 'a.md', url: 'javascript:alert(1)' }).links, []);
+});
+
+// ---- EP-inbox-open-pr-keys-S01: a key per halted task and per review branch ---------------------------------
+
+test('EP-inbox-open-pr-keys haltMessage: the key names the task, `-` when there is none (TC-01)', () => {
+  const at = (task) => haltMessage({ story: 'EP-x-S02', repo: 'engine', step: 'implement', task, reason: 'r' }).key;
+  assert.equal(at('T02'), 'halt:EP-x-S02:implement:engine:T02');
+  assert.notEqual(at('T01'), at('T02'), 'two tasks, two keys');
+  assert.equal(at(null), 'halt:EP-x-S02:implement:engine:-');
+  assert.equal(at(undefined), 'halt:EP-x-S02:implement:engine:-');
+});
+
+test('EP-inbox-open-pr-keys reviewMessage: a gate key names the review branch base; two stories, two keys (TC-04)', () => {
+  const gate = (o) => reviewMessage({ epic: 'EP-x', url: 'https://github.com/o/r/pull/1', ...o });
+  const s1 = gate({ artifact: 'stories/', base: 'stories-S01' });
+  const s2 = gate({ artifact: 'stories/', base: 'stories-S02' });
+  assert.deepEqual([s1.key, s2.key], ['review:EP-x:stories-S01:gate', 'review:EP-x:stories-S02:gate']);
+  // No base: the artifact's own base.
+  assert.deepEqual(['epic.md', 'architecture.md', 'stories/', 'test-cases.md'].map((artifact) => gate({ artifact }).key),
+    ['review:EP-x:epic:gate', 'review:EP-x:architecture:gate', 'review:EP-x:stories:gate', 'review:EP-x:test-cases:gate']);
+});
+
+test('EP-inbox-open-pr-keys: only the key changes; the hand-off and nudge keys are as they were (TC-05)', () => {
+  const noKey = ({ key: _key, ...rest }) => rest;
+  const reason = `checks failed\n${Array.from({ length: 70 }, (_, i) => `l${i}`).join('\n')}`;
+  const h = (task) => haltMessage({ story: 'EP-x-S02', repo: 'engine', step: 'checks', task, reason });
+  assert.deepEqual(noKey(h('T03')), noKey(h(null)));
+  const r = (base) => reviewMessage({ epic: 'EP-x', artifact: 'stories/', base, url: 'https://github.com/o/r/pull/3', solo: true });
+  assert.deepEqual(noKey(r('stories-S01')), noKey(r(null)));
+  assert.equal(r('stories-S01').title, 'Review ready — stories/ for EP-x', 'the title still names the artifact');
+  assert.equal(reviewMessage({ repo: 'engine', pr: 7 }).key, 'review:engine:7:nudge');
+  assert.equal(handOffMessage({ epic: 'EP-x', step: 'epic-review', entry: { act: 'approve-merge' } }).key, 'hand-off:EP-x:epic-review:approve-merge');
 });
 
 // ---- S02 code review: the cut, injection, named secrets, characters, links -----------------------------------
@@ -265,7 +297,7 @@ test('S04 yad gate open --json: one review message when the review PR opened and
     assert.equal(r.inbox.messages.length, 1);
     const [m] = r.inbox.messages;
     assert.equal(m.kind, 'review');
-    assert.equal(m.key, 'review:EP-x:architecture.md:gate');
+    assert.equal(m.key, 'review:EP-x:architecture:gate');
     assert.equal(m.thread, 'yad EP-x');
     assert.equal(m.title, 'Review ready — architecture.md for EP-x');
     assert.deepEqual(m.links, [URL7]);
@@ -275,6 +307,24 @@ test('S04 yad gate open --json: one review message when the review PR opened and
     const s = await open(solo, { json: true, ready: () => true });
     assert.match(s.inbox.messages[0].body, /In solo mode no approval is counted, so merging it is the decision\./);
   } finally { fs.rmSync(team, { recursive: true, force: true }); fs.rmSync(solo, { recursive: true, force: true }); }
+});
+
+test('EP-inbox-open-pr-keys yad gate open --json: the key names the review branch base, so two stories\' reviews have two keys (TC-04)', async () => {
+  const T = reviewProduct();
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/stories'));
+    for (const n of ['S01', 'S02']) fs.writeFileSync(path.join(T, `epics/EP-x/stories/EP-x-${n}.md`), `---\nid: EP-x-${n}\n---\n`);
+    const state = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    const st = JSON.parse(fs.readFileSync(state, 'utf8'));
+    st.steps.push({ id: 'stories', type: 'author', artifact: 'stories/', status: 'done', risk_tags: [] },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'todo', risk_tags: [] });
+    fs.writeFileSync(state, JSON.stringify(st));
+    const key = async (o) => (await open(T, { json: true, ready: () => true, ...o })).inbox.messages[0];
+    const [s1, s2] = [await key({ artifact: 'stories/', head: 'review/EP-x/stories-S01' }), await key({ artifact: 'stories/', head: 'review/EP-x/stories-S02' })];
+    assert.deepEqual([s1.key, s2.key], ['review:EP-x:stories-S01:gate', 'review:EP-x:stories-S02:gate']);
+    assert.equal(s1.title, 'Review ready — stories/ for EP-x', 'the title still names the artifact');
+    assert.equal((await key({})).key, 'review:EP-x:architecture:gate', 'no head: the branch gate open makes');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('S04 yad gate open: no inbox on a failed open, the printed path, or an Inbox not ready; nothing else changes (TC-17)', async () => {
