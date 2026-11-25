@@ -668,14 +668,15 @@ test('#425 doctor: a gate workflow that still starts on `edited` is checks:edit-
 test('yad-checks CI: the story gates get the source branch and YAD_PROMOTE_FROM, and no other step does (#684)', () => {
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
-  const env = 'env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}" }';
+  const env = 'env: { YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }';
   for (const gate of ['spec-link', 'lineage-check', 'epic-open', 'reconcile-debt-check', 'commit-message']) {
     const run = new RegExp(`- run: bash "\\$YAD_CHECKS/${gate}\\.sh"[^\\n]*\\n {8}${env.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`);
     assert.match(github, run, gate);
   }
   assert.equal(github.split('YAD_SOURCE_BRANCH').length - 1, 5, 'only the five story gates');
   assert.doesNotMatch(github, /bash "\$YAD_CHECKS\/(?:verified-commits|contract-check)\.sh"[^\n]*\n\s*env: \{ YAD_SOURCE_BRANCH/);
-  assert.doesNotMatch(github, /\$\{\{ github\.head_ref \}\}"\s*$/m, 'the branch name only ever reaches a step through env');
+  // Review of #684: every head_ref is the one passed through env, so the branch name never reaches a shell line.
+  assert.equal(github.split('github.head_ref').length - 1, github.split('YAD_SOURCE_BRANCH: "${{ github.head_ref }}"').length - 1, 'head_ref only through env');
   for (const job of ['yad-spec-link', 'yad-lineage-check', 'yad-epic-open', 'yad-reconcile-debt', 'yad-commit-message']) {
     assert.match(gitlab, new RegExp(`\\n${job}:\\n  extends: \\.sdlc_mr_only\\n`), job);
   }
