@@ -10580,6 +10580,49 @@ test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, t
   assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit, open.url], [false, null, null, null, null]);
 });
 
+// EP-reported-agent-flow-S04: the request branches `yad skip` / `yad unskip` open once CI owns the ledger.
+test('parseSetAsideBranch reads skip/ and unskip/ request branches, never unskip as skip, and nulls an unsafe name', async () => {
+  const { parseSetAsideBranch } = await import('./epic-state.mjs');
+  assert.deepEqual(parseSetAsideBranch('skip/EP-x/ui-design'), { kind: 'skip', epic: 'EP-x', step: 'ui-design' });
+  assert.deepEqual(parseSetAsideBranch('unskip/EP-x/ui-design'), { kind: 'unskip', epic: 'EP-x', step: 'ui-design' });
+  assert.deepEqual(parseSetAsideBranch('skip/EP-a-b2/analysis'), { kind: 'skip', epic: 'EP-a-b2', step: 'analysis' });
+  for (const bad of [
+    'review/EP-x/architecture', 'skip/EP-x', 'skip/EP-x/', 'skip/EP-X/ui', 'skip/ep-x/ui', 'Skip/EP-x/ui', 'reskip/EP-x/ui',
+    'xunskip/EP-x/ui', 'skip/EP-x/ui/design', 'skip/EP-x/..', 'skip/EP-x/ui$(curl x)', 'skip/EP-x/ui`id`', 'skip/EP-x/ui design',
+    'skip/EP-x/-ui', 'skip/EP-x/ui-', 'skip/EP-x/ui--d', 'skip/EP-x/ui\n', ' skip/EP-x/ui', 'refs/heads/skip/EP-x/ui', '', null, undefined, 7,
+  ]) assert.equal(parseSetAsideBranch(bad), null, String(bad));
+});
+
+test('requestFacts reads a PR/MR\'s base, head and body in one call, and degrades to ok:false', async () => {
+  const { requestFacts } = await import('./platform.mjs');
+  const gh = fakeRunner({ 'gh pr view 12 --json baseRefName,headRefName,body': JSON.stringify({ baseRefName: 'main', headRefName: 'skip/EP-x/ui-design', body: 'B' }) });
+  assert.deepEqual(requestFacts('github', 12, { runner: gh }), { ok: true, base: 'main', head: 'skip/EP-x/ui-design', body: 'B' });
+  assert.deepEqual(gh.calls, ['gh pr view 12 --json baseRefName,headRefName,body']);
+  const gl = fakeRunner({ 'glab mr view 4 -F json': JSON.stringify({ target_branch: 'main', source_branch: 'unskip/EP-x/ui-design', description: null }) });
+  assert.deepEqual(requestFacts('gitlab', 4, { runner: gl }), { ok: true, base: 'main', head: 'unskip/EP-x/ui-design', body: '' });
+  assert.equal(requestFacts('github', 1, { runner: fakeRunner() }).ok, false, 'a failed view');
+  assert.equal(requestFacts('github', 1, { runner: fakeRunner({ 'gh pr view': 'not json' }) }).ok, false, 'an unreadable answer');
+  assert.equal(requestFacts('github', 1, { runner: fakeRunner({ 'gh pr view': JSON.stringify({ body: 'x' }) }) }).ok, false, 'no base or head');
+  assert.equal(requestFacts(null, 1, { runner: fakeRunner() }).ok, false, 'no platform');
+});
+
+test('mergedRequestNumbers lists the merged PR/MR numbers per branch, newest first, and fails whole when a branch cannot be read', async () => {
+  const { mergedRequestNumbers } = await import('./platform.mjs');
+  const gh = fakeRunner({
+    'gh pr list --head skip/EP-x/ui --state merged --limit 100 --json number': JSON.stringify([{ number: 3 }, { number: 9 }]),
+    'gh pr list --head unskip/EP-x/ui --state merged --limit 100 --json number': '[]',
+  });
+  assert.deepEqual(mergedRequestNumbers('github', ['skip/EP-x/ui', 'unskip/EP-x/ui'], { runner: gh }), { ok: true, numbers: { 'skip/EP-x/ui': [9, 3], 'unskip/EP-x/ui': [] } });
+  const gl = fakeRunner({
+    'glab api projects/:id/merge_requests?source_branch=skip%2FEP-x%2Fui&state=merged&per_page=100': JSON.stringify([{ iid: 5 }]),
+    'glab api projects/:id/merge_requests?source_branch=unskip%2FEP-x%2Fui&state=merged&per_page=100': JSON.stringify([{ iid: 7 }]),
+  });
+  assert.deepEqual(mergedRequestNumbers('gitlab', ['skip/EP-x/ui', 'unskip/EP-x/ui'], { runner: gl }), { ok: true, numbers: { 'skip/EP-x/ui': [5], 'unskip/EP-x/ui': [7] } });
+  const half = fakeRunner({ 'gh pr list --head skip/EP-x/ui': '[]' });
+  assert.equal(mergedRequestNumbers('github', ['skip/EP-x/ui', 'unskip/EP-x/ui'], { runner: half }).ok, false, 'one unread branch fails the read');
+  assert.equal(mergedRequestNumbers('github', ['skip/EP-x/ui'], { runner: fakeRunner({ 'gh pr list': '{}' }) }).ok, false, 'not a list');
+});
+
 test('readPr (GitHub): the review read carries each review\'s id and url beside its commit, and mapApprovers keeps them (E64)', async () => {
   const { readPr } = await import('./platform.mjs');
   const q = 'gh api graphql -f query=query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews';
