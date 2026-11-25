@@ -557,3 +557,80 @@ test('EP-inbox-guide-scan runGuide: the Inbox scan looks from inboxAt, the guide
     assert.deepEqual(asked, ['/top/of/checkout', T]);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- EP-inbox-open-pr-keys-S02: yad open-pr on a review branch carries the review message ---------------------
+
+// The workspace with the Product checked out on its review branch, and the Inbox server set up in the Product
+// itself: `yad open-pr` takes the review path only when run in the Product, so that is where yad looks.
+function reviewBranchWorkspace(o = {}) {
+  const { execFileSync } = require('node:child_process');
+  const ws = inboxWorkspace({ step: 'architecture-review', status: 'todo', ...o });
+  try {
+    fs.writeFileSync(path.join(ws.P, '.mcp.json'), JSON.stringify({ mcpServers: { 'plannotator-inbox': { command: 'plannotator', args: ['inbox', 'mcp'] } } }));
+    execFileSync('git', ['switch', '-q', '-c', 'review/EP-x/architecture'], { cwd: ws.P, stdio: 'pipe', env: isolatedEnv(ws.W) });
+  } catch (e) { ws.done(); throw e; }
+  return ws;
+}
+
+test('EP-inbox-open-pr-keys yad open-pr --json on a review branch: one review message, the same one yad gate open gives (TC-06, TC-07)', winSkip, () => {
+  let a;
+  let b;
+  try {
+    a = reviewBranchWorkspace();
+    b = reviewBranchWorkspace();
+    const r = a.yad(a.P, 'open-pr', '--platform', 'github', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.url, 'https://github.com/o/product/pull/9', r.stderr);
+    assert.equal(j.inbox?.messages.length, 1, r.stderr);
+    const [m] = j.inbox.messages;
+    assert.deepEqual([m.kind, m.key, m.title, m.links], ['review', 'review:EP-x:architecture:gate', 'Review ready — architecture.md for EP-x', ['https://github.com/o/product/pull/9']]);
+    assert.equal(m.notice, 'Replying here does not approve or record anything in yadflow. Type the command.');
+    // The same review opened with `yad gate open` gives the same message, key and all: an agent posts it once.
+    const g = b.yad(b.P, 'gate', 'open', 'EP-x', 'architecture.md', '--json');
+    assert.equal(g.status, 0, g.stderr);
+    assert.deepEqual(j.inbox, JSON.parse(g.stdout).inbox);
+  } finally { a?.done(); b?.done(); }
+});
+
+test('EP-inbox-open-pr-keys yad open-pr --json: no inbox when Plannotator is not chosen (the rest the same), or when the PR is not opened (TC-08, TC-09)', winSkip, () => {
+  let on;
+  let off;
+  let fails;
+  try {
+    on = reviewBranchWorkspace();
+    off = reviewBranchWorkspace({ chosen: false });
+    const withInbox = JSON.parse(on.yad(on.P, 'open-pr', '--platform', 'github', '--json').stdout);
+    const offRun = off.yad(off.P, 'open-pr', '--platform', 'github', '--json');
+    assert.equal(offRun.status, 0, offRun.stderr);
+    const without = JSON.parse(offRun.stdout);
+    assert.ok('inbox' in withInbox);
+    assert.ok(!('inbox' in without), 'not chosen: no inbox');
+    delete withInbox.inbox;
+    assert.equal(JSON.stringify(withInbox).replaceAll(on.W, '<W>'), JSON.stringify(without).replaceAll(off.W, '<W>'), 'nothing but inbox differs');
+    // The create fails: no PR, so no message, and the exit code is 1 as before.
+    fails = reviewBranchWorkspace();
+    fs.writeFileSync(path.join(fails.W, 'bin/gh'), '#!/bin/sh\nexit 1\n');
+    const f = fails.yad(fails.P, 'open-pr', '--platform', 'github', '--json');
+    assert.equal(f.status, 1, f.stderr);
+    assert.ok(!f.stdout.includes('"inbox"'), 'no PR opened: no inbox');
+  } finally { on?.done(); off?.done(); fails?.done(); }
+});
+
+test('EP-inbox-open-pr-keys yad open-pr --json for a code repo\'s task PR carries no inbox (TC-10)', winSkip, () => {
+  const { execFileSync } = require('node:child_process');
+  const ws = inboxWorkspace();
+  try {
+    const git = (...a) => execFileSync('git', a, { cwd: ws.E, stdio: 'pipe', env: isolatedEnv(ws.W) });
+    git('init', '-q', '--bare', '-b', 'main', path.join(ws.W, 'engine.git'));
+    git('remote', 'set-url', 'origin', path.join(ws.W, 'engine.git'));
+    git('push', '-q', 'origin', 'main');
+    git('switch', '-q', '-c', 'feat/EP-x-S01-T01');
+    fs.writeFileSync(path.join(ws.E, 'src/a.js'), 'b\n');
+    git('commit', '-q', '-am', 'feat: b');
+    const r = ws.yad(ws.E, 'open-pr', '--platform', 'github', '--json');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).url, 'https://github.com/o/product/pull/9', 'the task PR was opened');
+    assert.ok(!r.stdout.includes('"inbox"'), 'a task PR carries no inbox');
+  } finally { ws.done(); }
+});
