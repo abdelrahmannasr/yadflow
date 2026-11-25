@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
+import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES, yadWorktrees } from './worktree.mjs';
 import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
 import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush, epicOf } from './productcommit.mjs';
@@ -88,6 +88,55 @@ test('worktree planners: the path beside the checkout, the refusals, and yad\'s 
   assert.equal(why.length, 6);
   assert.match(why.map((y) => y.reason).join('\n'), /you are inside it\nit is locked \(agent 2\)\na MERGE_HEAD is half done in it\n1 uncommitted or untracked file\(s\): a\.js\nyad's own working file\(s\) are there: \.specify\/feature\.json, \.gitmessage\n2 commit\(s\) are on no remote/);
   assert.match(why[4].fix, /safe to delete/);
+});
+
+test('worktree planners with a story: the folder is named after the story, an epic\'s path is as before, and planAdd refuses or skips with the story\'s path (EP-reported-agent-flow-S01)', () => {
+  assert.equal(worktreePath('/ws/api', 'EP-x'), path.join('/ws', 'api--EP-x'), 'no story: as today');
+  assert.equal(worktreePath('/ws/api', 'EP-x', null), path.join('/ws', 'api--EP-x'), 'story null: as today');
+  assert.equal(worktreePath('/ws/api', 'EP-x', 'EP-x-S02'), path.join('/ws', 'api--EP-x-S02'));
+  const base = { main: '/ws/api', epic: 'EP-x', story: 'EP-x-S02', repo: 'api', hasOrigin: true, pathTaken: false, existing: null, mainIsLinked: false };
+  const at = path.join('/ws', 'api--EP-x-S02');
+  assert.deepEqual(planAdd(base), { path: at, skip: false, refuse: null });
+  assert.deepEqual(planAdd({ ...base, existing: { path: at, missing: false } }), { path: at, skip: true, refuse: null }, 'a re-run reuses the story\'s folder');
+  const gone = planAdd({ ...base, existing: { path: at, missing: true } });
+  assert.equal(gone.path, at);
+  assert.match(gone.refuse.message, /^EP-x-S02's worktree for api is gone/);
+  const taken = planAdd({ ...base, pathTaken: true });
+  assert.equal(taken.path, at);
+  assert.equal(taken.refuse.message, `${at} is already there`);
+  assert.equal(planAdd({ ...base, hasOrigin: false }).path, at);
+  assert.deepEqual(planAdd({ ...base, story: undefined }), { path: path.join('/ws', 'api--EP-x'), skip: false, refuse: null }, 'no story: the epic\'s path');
+});
+
+test('a worktree record with no story, a null story, or a story of its epic is yad\'s; a malformed or foreign-epic story is not (EP-reported-agent-flow-S01)', () => {
+  const { W, api } = workspace();
+  try {
+    const wt = path.join(W, 'api--EP-x-S02');
+    git(api, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    const rec = path.join(linkedGitDir(wt), 'yad-worktree.json');
+    const put = (o) => fs.writeFileSync(rec, JSON.stringify({ epic: 'EP-x', repo: 'api', base: 'main', ...o }));
+    const listed = () => yadWorktrees(api);
+    put({});
+    assert.equal(worktreeAt(wt)?.epic, 'EP-x', 'no story key: an epic worktree, as today');
+    assert.equal('story' in worktreeAt(wt), false);
+    assert.equal(listed().length, 1);
+    put({ story: null });
+    assert.equal(worktreeAt(wt)?.epic, 'EP-x', 'story null: an epic worktree');
+    assert.equal(listed().length, 1);
+    put({ story: 'EP-x-S02' });
+    assert.deepEqual([worktreeAt(wt)?.epic, worktreeAt(wt)?.story], ['EP-x', 'EP-x-S02'], 'a good story');
+    assert.deepEqual(listed().map((w) => [w.epic, w.story, w.path]), [['EP-x', 'EP-x-S02', wt]]);
+    for (const bad of ['EP-x-02', 'EP-x', '', 'ep-x-S02', 'EP-x-S02 ', 7, true, {}, ['EP-x-S02']]) {
+      put({ story: bad });
+      assert.equal(worktreeAt(wt), null, `malformed story ${JSON.stringify(bad)}`);
+      assert.deepEqual(listed(), [], `malformed story ${JSON.stringify(bad)} is skipped`);
+    }
+    for (const foreign of ['EP-y-S02', 'EP-xy-S01', 'EP-x-y-S01']) {
+      put({ story: foreign });
+      assert.equal(worktreeAt(wt), null, `a story of another epic: ${foreign}`);
+      assert.deepEqual(listed(), [], `a story of another epic is skipped: ${foreign}`);
+    }
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
 test('yad worktree add --all, list and remove: beside each checkout, detached, node_modules linked, the main tree untouched (#115)', () => {

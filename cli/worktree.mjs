@@ -21,7 +21,7 @@ import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
-import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
+import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf, recordStoryFits } from './worktree-record.mjs';
 import { judgedRepos } from './workspace.mjs';
 
 const CODE = 'YAD-STATE-010';
@@ -37,22 +37,23 @@ const gitRaw = (cwd, ...args) => gitRawResult(cwd, ...args).stdout;
 export const YAD_LOCAL_FILES = ['.specify/feature.json', '.gitmessage'];
 const BUSY = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply'];
 
-// PURE: where a checkout's worktree for an epic goes — beside it, named after it.
-export const worktreePath = (main, epic) => path.join(path.dirname(main), `${path.basename(main)}--${epic}`);
+// PURE: where a checkout's worktree for an epic goes — beside it, named after it; a story's worktree is
+// named after the story instead (`<repo>--EP-x-S02`).
+export const worktreePath = (main, epic, story = null) => path.join(path.dirname(main), `${path.basename(main)}--${story || epic}`);
 
 // PURE: what `add` does for one target, from the facts the command read.
-//   facts: { main, epic, repo, hasOrigin, pathTaken, existing ({ path, missing } of this epic's yad
-//            worktree, or null), mainIsLinked (the checkout is itself a linked worktree), nested (a code
+//   facts: { main, epic, story (or null: the epic's own worktree), repo, hasOrigin, pathTaken, existing
+//            ({ path, missing } of this epic's — or this story's — yad worktree, or null), mainIsLinked (the checkout is itself a linked worktree), nested (a code
 //            repo kept inside the Product's folder) }
 // → { path, skip (already there: a re-run goes on with the rest), refuse: null | { message, hint } }
-export function planAdd({ main, epic, repo, hasOrigin, pathTaken, existing, mainIsLinked, nested = false }) {
-  const where = worktreePath(main, epic);
+export function planAdd({ main, epic, story = null, repo, hasOrigin, pathTaken, existing, mainIsLinked, nested = false }) {
+  const where = worktreePath(main, epic, story);
   const name = repo ?? 'the Product';
   const no = (message, hint) => ({ path: where, skip: false, refuse: { message, hint } });
   if (mainIsLinked) return no(`${name}'s registered folder is itself a worktree`, 'register the main checkout, then run this again');
   // Its worktree would sit inside the Product's own checkout, and could not find the Product or its repos.
   if (nested) return no(`${name} is kept inside the Product's folder, and a worktree is only made for a repo beside it`, 'keep the repo beside the Product (`../<repo>` in repos.json) to give it worktrees');
-  if (existing?.missing) return no(`${epic}'s worktree for ${name} is gone (${existing.path}), but git still lists it`, 'run `git worktree prune` in the main checkout, then run this again');
+  if (existing?.missing) return no(`${story || epic}'s worktree for ${name} is gone (${existing.path}), but git still lists it`, 'run `git worktree prune` in the main checkout, then run this again');
   if (existing) return { path: existing.path, skip: true, refuse: null };
   if (pathTaken) return no(`${where} is already there`, 'move it away (a worktree yad did not record: `git worktree remove` it), then run this again');
   if (!hasOrigin) return no(`${name} has no origin remote, so a worktree's work could not reach the default branch`, 'add the remote (`git remote add origin <url>`), then run this again');
@@ -123,7 +124,7 @@ export function yadWorktrees(main) {
   for (const name of names) {
     const gitDir = path.join(dir, name);
     const rec = readJSON(path.join(gitDir, WORKTREE_RECORD), null);
-    if (!isPlainObject(rec) || typeof rec.epic !== 'string' || !isValidEpicId(rec.epic)) continue;
+    if (!isPlainObject(rec) || typeof rec.epic !== 'string' || !isValidEpicId(rec.epic) || !recordStoryFits(rec)) continue;
     let where;
     try { where = path.dirname(path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'gitdir'), 'utf8').trim())); } catch { continue; }
     let locked = false;
