@@ -539,11 +539,12 @@ export async function runChecks(dir, opts = {}) {
       ];
 
     // Nothing from the shell this runs in may make a gate act as in CI, or read another settings file,
-    // platform or git folder. GITHUB_TOKEN stays: gh reads it to sign in.
+    // platform or git folder. A promotion merge request (#684) is a CI rule, so its variables go too. GITHUB_TOKEN stays: gh reads it to sign in.
     const env = { ...process.env };
     for (const k of Object.keys(env)) {
       if (k === 'CI' || k === 'GITLAB_CI' || k.startsWith('CI_') || (k.startsWith('GITHUB_') && k !== 'GITHUB_TOKEN')
-        || k.startsWith('SDLC_') || k === 'YAD_LOCAL_PRODUCT' || k === 'GIT_DIR' || k === 'GIT_WORK_TREE' || k === 'GIT_INDEX_FILE') delete env[k];
+        || k.startsWith('SDLC_') || k === 'YAD_LOCAL_PRODUCT' || k === 'YAD_PROMOTE_FROM' || k === 'YAD_SOURCE_BRANCH' || k === 'YAD_PR_FORK'
+        || k === 'GIT_DIR' || k === 'GIT_WORK_TREE' || k === 'GIT_INDEX_FILE') delete env[k];
     }
     // The build gates get what the CI job sets for them.
     const headSha = git(repoRoot, ['rev-parse', 'HEAD']).stdout;

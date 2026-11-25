@@ -220,6 +220,18 @@ test('yad run checks: a YAD_LOCAL_PRODUCT from the shell never reaches a gate (#
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad run checks: YAD_PROMOTE_FROM, YAD_SOURCE_BRANCH and YAD_PR_FORK from the shell never reach a gate (#684)', () => {
+  const { W, backend } = workspace();
+  try {
+    // A promotion is a CI rule. Exported on a laptop (left over from a manual test, say), the three would
+    // make the story gates pass without reading a commit: the run strips them, so every commit is checked.
+    const r = spawnSync(process.execPath, [YAD, 'run', 'checks', '--no-build'], { cwd: backend, env: { ...ENV, PWD: backend, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', YAD_PROMOTE_FROM: 'feature', YAD_SOURCE_BRANCH: 'feature', YAD_PR_FORK: 'false' }, encoding: 'utf8' });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.doesNotMatch(out, /promotion from/, out);
+    assert.match(out, /PASS \[lineage-check\]: \w+ EP-demo-S01-T01 -> EP-demo \(genesis feature epic\)/, out);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad run checks: a contract file the base changed after the branch split is not this branch\'s change (#363 shape)', () => {
   const { W, backend } = workspace();
   try {
