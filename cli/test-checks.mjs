@@ -8432,14 +8432,17 @@ test('epic-open: separator bytes in a subject do not fake a record (#685)', () =
 // note and does not walk the range; with the variable unset, empty, or naming other branches, the gate does
 // exactly what it did. The rig's one commit fails every story gate (a Task trailer that names no story, on
 // a subject that breaks the commit convention), so a PASS can only come from the promotion rule.
-function promotionCase(script, tag, args = ['main']) {
+function promotionCase(script, tag, args = ['main'], { fork = false } = {}) {
   const T = scaffoldRepo();
   try {
     commit(T, 'Bad Subject Here\n\nTask: not-a-story-T01', { 'src/x.js': 'x' });
     const plain = runGate(script, T, args);
     assert.equal(plain.code, 1, `${tag} must FAIL the rig on its own: ${plain.out}`);
     const pass = `PASS [${tag}]: promotion from develop (YAD_PROMOTE_FROM); its commits were checked when they merged into develop\n`;
-    for (const env of [{ YAD_SOURCE_BRANCH: 'develop' }, { CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop' }]) {
+    // A merge request from this same repository: GitHub says YAD_PR_FORK=false, GitLab names the same project.
+    const github = { YAD_SOURCE_BRANCH: 'develop', YAD_PR_FORK: 'false' };
+    const gitlab = { CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop', CI_MERGE_REQUEST_PROJECT_ID: '7', CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '7' };
+    for (const env of [github, gitlab]) {
       for (const list of ['develop', 'main,develop', 'release, develop', ' develop\nqa ']) {
         const r = runGate(script, T, args, { ...env, YAD_PROMOTE_FROM: list });
         assert.equal(r.code, 0, `${tag} ${JSON.stringify(list)}: ${r.out}`);
@@ -8453,19 +8456,26 @@ function promotionCase(script, tag, args = ['main']) {
       { YAD_PROMOTE_FROM: 'develop-old,dev', YAD_SOURCE_BRANCH: 'develop' },
       { YAD_PROMOTE_FROM: '*', YAD_SOURCE_BRANCH: 'develop' },
       { YAD_PROMOTE_FROM: 'dev*', YAD_SOURCE_BRANCH: 'develop' },
-      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'feature' },
+      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'feature', YAD_PR_FORK: 'false' },
+      // A fork may name its own branch develop: never a promotion (code review of #684).
+      ...(fork ? [
+        { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'develop' },
+        { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'develop', YAD_PR_FORK: 'true' },
+        { YAD_PROMOTE_FROM: 'develop', ...gitlab, CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '8' },
+        { YAD_PROMOTE_FROM: 'develop', CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop', CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '7' },
+      ] : []),
     ]) {
       const r = runGate(script, T, args, env);
       assert.deepEqual({ code: r.code, out: r.out }, { code: plain.code, out: plain.out }, `${tag} ${JSON.stringify(env)}`);
     }
     // A branch name with a control character is printed with it replaced.
-    const odd = runGate(script, T, args, { YAD_PROMOTE_FROM: 'dev\x07x', YAD_SOURCE_BRANCH: 'dev\x07x' });
+    const odd = runGate(script, T, args, { YAD_PROMOTE_FROM: 'dev\x07x', YAD_SOURCE_BRANCH: 'dev\x07x', YAD_PR_FORK: 'false' });
     assert.equal(odd.code, 0, odd.out);
     assert.match(odd.out, /promotion from dev\?x \(YAD_PROMOTE_FROM\)/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 }
 
-test('lineage-check passes a promotion merge request, and only that (#684)', () => promotionCase(LINEAGE, 'lineage-check'));
+test('lineage-check passes a promotion merge request, and only that (#684)', () => promotionCase(LINEAGE, 'lineage-check', ['main'], { fork: true }));
 
 test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open'));
 
