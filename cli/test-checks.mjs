@@ -8466,3 +8466,7 @@ function promotionCase(script, tag, args = ['main']) {
 }
 
 test('lineage-check passes a promotion merge request, and only that (#684)', () => promotionCase(LINEAGE, 'lineage-check'));
+
+test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open'));
+
+
