@@ -129,8 +129,8 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    - **HALT** if the step failed — any check FAIL, a scope overrun (`yad-implement` stopped on the
      file-boundary rule), a contract-surface touch, or any ambiguity other than the human-only
      questions step 2 already halted on. Run
-     `yad build step <story> --repo <repo> <step> blocked --reason "<the halt cause>"` (it writes the
-     step's `record`) — the trust entry step 2 recorded for this run is the `rejected` one, so record
+     `yad build step <story> --repo <repo> <step> blocked [--task <task>] --reason "<the halt cause>"` (it
+     writes the step's `record`; pass `--task`, the task being walked, for `implement` and `checks`) — the trust entry step 2 recorded for this run is the `rejected` one, so record
      no second entry — **stop the loop**, and report what a human must resolve. The record is not decoration: since shape 7 a `blocked` step with nothing recorded
      on it reads as `todo` ("not started"), so a halt written without one is indistinguishable from a
      lane nobody has begun. `yad doctor` reports the difference as `step:no-record`.
@@ -138,8 +138,9 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      and the last lines of the failing output after it, if there is any (the record keeps them too). When
      the result has `inbox` and your session has the Plannotator Inbox tool, post its one `halt` message
      as the yad-guide skill's "Posting to the Inbox" says (a halt has no notice and no `verify`; "Resumed."
-     takes the place of "Confirmed: …"). Its `key` names the story, step and repo, so a
-     second halt of the same step supersedes the first. Then act on the answer, in the Inbox or the chat:
+     takes the place of "Confirmed: …"). Its `key` names the story, step and repo, and for
+     `implement` and `checks` the task too, so a second halt of the same step and task supersedes the first, and
+     a halt on another task is a message of its own. Then act on the answer, in the Inbox or the chat:
      - `fix`: propose the fix in the chat — what you would change, inside the task's declared files. Make
        it only after the person's go-ahead, then say it is made. A go-ahead for the fix is not "resolved":
        wait for that before you run the step again (that run moves the step).
