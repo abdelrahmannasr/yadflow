@@ -412,6 +412,9 @@ ${c.bold('Build helpers')}
   yad build step <story> --repo <r> <step> in_progress|in_review|done|blocked [--reason <text>] [--run <uid>] [--via auto|agent|human] [--task <T>]
                                        Move the lane's current step; done records how it closed.
                                        --task <T> reopens implement/checks for the next task
+  yad build amend <story> --repo <r> <step> --via auto|agent|human --reason <text> [--run <uid>] [--task <T>]
+                                       Correct how a closed step closed; the earlier value is kept in
+                                       its closed.amended list. --via auto names the trust run (--run)
   yad build trust <story> --repo <r> <step> --verdict <v> [--signal k=v] [--ran-by machine|human] [--note] [--task <T>]
                                        Record a step run's trust entry (prints its uid); --uid <uid>
                                        --verdict <v> finalizes one already recorded
@@ -770,7 +773,7 @@ const ACTIONS = {
   issues: { known: ['list', 'labels', 'show', 'link', 'unlink', 'sync', 'new', 'assign', 'label', 'edit', 'comment', 'close', 'reopen'], default: 'list' },
   worktree: { known: ['add', 'list', 'remove'], default: 'list' },
   run: { known: ['checks'] },
-  build: { known: ['start', 'step', 'trust', 'ship', 'merged', 'done', 'sync'] },
+  build: { known: ['start', 'step', 'amend', 'trust', 'ship', 'merged', 'done', 'sync'] },
   reports: { known: ['list', 'open', 'prune'], default: 'list' },
   brand: { known: ['show', 'init', 'check'], default: 'show' },
 };
@@ -1364,6 +1367,7 @@ async function main() {
       for (const sgl of o.signal || []) signals[sgl.slice(0, sgl.indexOf('='))] = sgl.slice(sgl.indexOf('=') + 1);
       if (action === 'start') result = await commands.buildStart(o.dir, { story, repo: o.repo, today });
       else if (action === 'step') result = await commands.buildStep(o.dir, { story, repo: o.repo, step: a3, to: a4, reason: o.reason, via: o.via || 'human', run: o.run || null, task: o.task || null, today, json: !!o.json, cwd: toolboxAt?.from ?? null });
+      else if (action === 'amend') result = await commands.buildAmend(o.dir, { story, repo: o.repo, step: a3, via: o.via ?? null, reason: o.reason, run: o.run || null, task: o.task || null, today });
       else if (action === 'trust') result = await commands.buildTrust(o.dir, { story, repo: o.repo, step: a3, verdict: o.verdict, signals, ranBy: o['ran-by'] || 'human', note: o.note || null, uid: o.uid || null, task: o.task || null, today });
       else if (action === 'ship') result = await commands.buildShip(o.dir, { story, task: o.task, repo: o.repo, pr: o.pr, mergeCommit: o['merge-commit'] || null, approvers: o.approver || [], followUp: !!o.followUp, today, fetch: !o.noFetch });
       else if (action === 'merged') result = await commands.buildMerged(o.dir, { story, task: o.task, repo: o.repo, pr: o.pr || null, ship: !!o.ship, followUp: !!o.followUp, today, fetch: !o.noFetch });
