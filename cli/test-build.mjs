@@ -2038,6 +2038,7 @@ test('EP-inbox-open-pr-keys yad build step … blocked: the halt key names the t
     for (const step of ['spec', 'tasks']) yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', step, 'done');
     // A task's first walk: the lane's step holds no task yet, so only --task names it.
     assert.equal(await halt('implement'), 'halt:EP-l-S01:implement:api:-');
+    assert.equal(await halt('implement', true), 'halt:EP-l-S01:implement:api:-', 'a bare --task names no task');
     assert.equal(await halt('implement', 'T01'), 'halt:EP-l-S01:implement:api:T01');
     yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--task', 'T01');
     assert.equal(await halt('checks', 'T01'), 'halt:EP-l-S01:checks:api:T01');
@@ -2047,5 +2048,9 @@ test('EP-inbox-open-pr-keys yad build step … blocked: the halt key names the t
     assert.equal(r.code, 0, r.out);
     assert.equal(await halt('implement'), 'halt:EP-l-S01:implement:api:T02');
     assert.equal(await halt('implement', 'T02'), 'halt:EP-l-S01:implement:api:T02');
+    // The reopen stored T02 on checks too: a checks halt with no --task names it, and so does a bare --task.
+    yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--task', 'T02');
+    assert.equal(await halt('checks'), 'halt:EP-l-S01:checks:api:T02');
+    assert.equal(await halt('checks', true), 'halt:EP-l-S01:checks:api:T02', 'a bare --task names no task of its own');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
