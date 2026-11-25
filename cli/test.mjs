@@ -10035,15 +10035,18 @@ test('yad doctor reminds of step debt as `step:debt` until it is paid, and says 
 
 // EP-reported-agent-flow-S04: on a verified Product whose epic ledger is on origin's default branch, `yad skip` and
 // `yad unskip` open a request. A real Product with a bare origin; only the PR/MR call is faked.
-function requestProductRepo({ pin = '4.15.0' } = {}) {
+function requestProductRepo({ pin = '4.15.0', sub = null } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-request-'));
   const origin = path.join(T, 'origin.git');
   fs.mkdirSync(origin);
   git(origin, 'init', '-q', '--bare');
   git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
-  const P = path.join(T, 'p');
-  git(T, 'clone', '-q', origin, P);
-  for (const [k, v] of [['user.email', 'a@b.c'], ['user.name', 'al'], ['commit.gpgsign', 'false']]) git(P, 'config', k, v);
+  const R = path.join(T, 'p');
+  git(T, 'clone', '-q', origin, R);
+  for (const [k, v] of [['user.email', 'a@b.c'], ['user.name', 'al'], ['commit.gpgsign', 'false']]) git(R, 'config', k, v);
+  // The Product may sit in a subfolder of its repository.
+  const P = sub ? path.join(R, sub) : R;
+  fs.mkdirSync(P, { recursive: true });
   fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(P, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified', ...(pin ? { gate_sync_version: pin } : {}) }));
   seedEpic(P, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
@@ -10110,6 +10113,20 @@ test('yad skip, once CI owns the ledger, pushes skip/<epic>/<step> with one empt
     assert.match(again, /skip\/EP-x\/ui-design is already on origin/);
     assert.equal(git(origin, 'rev-parse', 'refs/heads/skip/EP-x/ui-design').toString().trim(), sha);
     assert.equal(creator.calls.length, 1);
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad skip by request works on a Product that sits in a subfolder of its repository', async () => {
+  const { T, origin, P } = requestProductRepo({ sub: 'product' });
+  const prev = process.exitCode;
+  try {
+    const creator = fakeCreator();
+    process.exitCode = undefined;
+    let answer;
+    const out = await grab(async () => { answer = await runSkip(P, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', creator }); });
+    assert.notEqual(process.exitCode, 1, out);
+    assert.equal(answer.request?.opened, true, out);
+    assert.ok(originHas(origin, 'refs/heads/skip/EP-x/ui-design'));
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -10774,6 +10791,11 @@ test('mergedRequestNumbers lists the merged PR/MR numbers per branch, newest fir
     'glab api projects/:id/merge_requests?source_branch=unskip%2FEP-x%2Fui&state=merged&per_page=100': JSON.stringify([{ iid: 7 }]),
   });
   assert.deepEqual(mergedRequestNumbers('gitlab', ['skip/EP-x/ui', 'unskip/EP-x/ui'], { runner: gl }), { ok: true, numbers: { 'skip/EP-x/ui': [5], 'unskip/EP-x/ui': [7] } });
+  // With a base, only merges into it are listed.
+  const based = fakeRunner({ 'gh pr list --head skip/EP-x/ui --base main --state merged': '[{"number":4}]' });
+  assert.deepEqual(mergedRequestNumbers('github', ['skip/EP-x/ui'], { runner: based, base: 'main' }), { ok: true, numbers: { 'skip/EP-x/ui': [4] } });
+  const glBased = fakeRunner({ 'glab api projects/:id/merge_requests?source_branch=skip%2FEP-x%2Fui&target_branch=main&state=merged': '[{"iid":2}]' });
+  assert.deepEqual(mergedRequestNumbers('gitlab', ['skip/EP-x/ui'], { runner: glBased, base: 'main' }), { ok: true, numbers: { 'skip/EP-x/ui': [2] } });
   const half = fakeRunner({ 'gh pr list --head skip/EP-x/ui': '[]' });
   assert.equal(mergedRequestNumbers('github', ['skip/EP-x/ui', 'unskip/EP-x/ui'], { runner: half }).ok, false, 'one unread branch fails the read');
   assert.equal(mergedRequestNumbers('github', ['skip/EP-x/ui'], { runner: fakeRunner({ 'gh pr list': '{}' }) }).ok, false, 'not a list');
@@ -12086,7 +12108,8 @@ const reqOpts = (over = {}) => ({
   branch: 'skip/EP-test/ui-design', pr: 10, merged: true, push: false, today: '2026-11-25',
   reader: () => ({ ok: true, merged: true, mergedBy: 'bo' }),
   facts: () => ({ ok: true, base: 'trunk', head: over.branch || 'skip/EP-test/ui-design', body: REQ_BODY }),
-  mergedNumbers: () => ({ ok: true, numbers: {} }),
+  // The platform always lists the merged request itself: the default answer does too, so `newer >= n` would fail.
+  mergedNumbers: () => ({ ok: true, numbers: { [over.branch || 'skip/EP-test/ui-design']: [over.pr ?? 10] } }),
   ...over,
 });
 const reqState = (ci) => JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
@@ -12159,13 +12182,18 @@ test('gate ci applies a request only on a merge the platform confirms, into the 
       ['no reason', { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/ui-design', body: '## Summary\n' }) }, /gives no reason/],
       ['an empty reason', { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/ui-design', body: '<!-- yad:reason -->\n \u0007 \n<!-- /yad:reason -->' }) }, /gives no reason/],
       ['a step the route does not make optional', { branch: 'skip/EP-test/stories' }, /YAD-STATE-004/],
-      ['an unskip of a step not skipped', { branch: 'unskip/EP-test/stories' }, null],
     ];
     for (const [label, over, re] of red) {
       const r = await runRequest(ci, over);
-      if (re) { assert.equal(r.code, 1, `${label}: ${r.out}`); assert.match(r.out, re, label); }
+      assert.equal(r.code, 1, `${label}: ${r.out}`);
+      assert.match(r.out, re, label);
       untouched(label);
     }
+    // An unskip of a step not skipped is a quiet replay: green, nothing written.
+    const notSkipped = await runRequest(ci, { branch: 'unskip/EP-test/stories' });
+    assert.equal(notSkipped.code, 0, notSkipped.out);
+    assert.match(notSkipped.out, /stories is already not skipped/);
+    untouched('an unskip of a step not skipped');
     // A newer request for the same step merged after this one: say so, write nothing, stay green.
     const older = await runRequest(ci, { mergedNumbers: () => ({ ok: true, numbers: { 'skip/EP-test/ui-design': [10], 'unskip/EP-test/ui-design': [12] } }) });
     assert.equal(older.code, 0, older.out);
@@ -12176,6 +12204,44 @@ test('gate ci applies a request only on a merge the platform confirms, into the 
     assert.equal(ctl.code, 0, ctl.out);
     assert.equal(reqState(ci).steps.find((x) => x.id === 'ui-design').record.reason, 'no UI ::error::x');
     assert.doesNotMatch(ctl.out, /\r/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a request run applies only its request: no other epic is swept, and only requests merged into the pushed branch count', async () => {
+  const { T, ci } = scaffoldRequestProduct();
+  try {
+    // A second epic with an open review PR recorded: a review sweep would read it and write its ledger.
+    const d = path.join(ci, 'epics/EP-b/.sdlc');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: 'EP-b', currentStep: 'epic-review', steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+    ] }));
+    fs.writeFileSync(path.join(ci, 'epics/EP-b/epic.md'), '---\nid: EP-b\nowner: alice\nrepos: [backend]\n---\n');
+    writePrLedger(d, JSON.stringify([{ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 77, url: null, branch: 'review/EP-b/epic', lastSyncedAt: null }]));
+    git(ci, 'add', '-A');
+    git(ci, 'commit', '-q', '-m', 'EP-b under review');
+    // CI's checkout has no origin/HEAD, and hub.json no default_branch: the trunk is the branch the run pushes.
+    git(ci, 'remote', 'set-head', 'origin', '-d');
+    const read = [];
+    const listed = [];
+    const r = await runRequest(ci, {
+      reader: (platform, n) => { read.push(n); return { ok: true, merged: true, mergedBy: 'bo' }; },
+      mergedNumbers: (platform, branches, opts) => { listed.push(opts?.base); return { ok: true, numbers: { 'skip/EP-test/ui-design': [10] } }; },
+    });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(read, [10], 'only the request is read from the platform');
+    assert.deepEqual(listed, ['trunk'], 'the newest-request list is filtered to the pushed branch');
+    const files = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.ok(files.every((f) => f === 'epics/EP-test/.sdlc/state.json' || f === '.sdlc/index.json'), files.join(','));
+    assert.equal(git(ci, 'log', '-1', '--format=%s').toString().trim(), 'chore(gate): skip EP-test/ui-design on merge [skip ci]');
+    // A quiet replay sweeps nothing either.
+    read.length = 0;
+    const head = git(ci, 'rev-parse', 'HEAD').toString().trim();
+    const again = await runRequest(ci, { reader: (platform, n) => { read.push(n); return { ok: true, merged: true, mergedBy: 'bo' }; } });
+    assert.equal(again.code, 0, again.out);
+    assert.deepEqual(read, [10]);
+    assert.equal(git(ci, 'rev-parse', 'HEAD').toString().trim(), head, 'a replay commits nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

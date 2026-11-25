@@ -67,7 +67,8 @@ export function openSetAsideRequest(root, { kind, epic, step, reason = null, deb
   const base = resolveHookBase(root, productConfig, runner);
   if (!base) return no('origin\'s default branch could not be read', 'run `git fetch origin`, then this again');
   const rel = `${epicRel(epic)}/.sdlc/state.json`;
-  const shown = git('show', `${base}:${rel}`);
+  // `./`: a `<rev>:<path>` path is read from the repository's top, so a Product in a subfolder needs it relative.
+  const shown = git('show', `${base}:./${rel}`);
   if (!shown.ok) return no(`${rel} could not be read from ${base}`);
   let state;
   try { state = JSON.parse(shown.stdout); } catch { return no(`${rel} on ${base} does not parse`); }
@@ -83,6 +84,8 @@ export function openSetAsideRequest(root, { kind, epic, step, reason = null, deb
   if (kind === 'skip') skipStep(state, step, { reason, by, at: today, debt: debt === true });
   else unskipStep(state, step);
 
+  // A reason made only of control characters is empty once cleaned: CI would refuse it at merge, so refuse it now.
+  if (kind === 'skip' && !oneLine(reason)) return no('the reason is empty once its control characters are removed');
   const branch = requestBranch(kind, epic, step);
   const trunk = base.replace(/^origin\//, '');
   const remote = git('ls-remote', '--heads', 'origin', `refs/heads/${branch}`);

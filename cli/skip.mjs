@@ -106,6 +106,7 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
   const owned = ciOwnsLedger(root, { epic, command: `yad ${undo ? V.undo : verb}`, undoCommand: undo ? null : `yad ${V.undo} ${epic} ${step}`, request: verb === 'skip', runner });
   if (owned === 'request') {
     if (undo && reason != null && reason !== true) info(V.reasonNote);
+    if (undo && debt === true) info('--debt is not used when putting a step back: a debt is set with `yad defer --debt`, and putting the step back starts paying it');
     return openSetAsideRequest(root, {
       kind: undo ? 'unskip' : 'skip', epic, step, reason: undo ? null : reason, debt: !undo && debt === true,
       productConfig: readJSON(productConfigPath(root), null), by: recordActor(root), today,

@@ -307,15 +307,16 @@ export function requestFacts(platform, n, { cwd, runner = run } = {}) {
 
 // The merged PR/MR numbers on each branch, so `yad gate ci` applies only the newest request for a step (the
 // reconcile replays 7 days of merges, and an old skip must not undo a newer unskip). `{ ok, numbers: { [branch]:
-// [n, …] } }`, newest first, or `{ ok: false, reason }` when any branch cannot be read; never throws.
-export function mergedRequestNumbers(platform, branches = [], { cwd, runner = run } = {}) {
+// [n, …] } }`, newest first, or `{ ok: false, reason }` when any branch cannot be read; never throws. With `base`, only
+// the PRs/MRs merged into that branch count: one merged into a side branch never outranks a request on the trunk.
+export function mergedRequestNumbers(platform, branches = [], { cwd, runner = run, base = null } = {}) {
   const ready = runner !== run ? !!cliFor(platform) : platformReady(platform);
   if (!ready) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
   const numbers = {};
   for (const branch of branches) {
     const r = platform === 'gitlab'
-      ? runner('glab', ['api', `projects/:id/merge_requests?source_branch=${encodeURIComponent(branch)}&state=merged&per_page=100`], { cwd })
-      : runner('gh', ['pr', 'list', '--head', branch, '--state', 'merged', '--limit', '100', '--json', 'number'], { cwd });
+      ? runner('glab', ['api', `projects/:id/merge_requests?source_branch=${encodeURIComponent(branch)}${base ? `&target_branch=${encodeURIComponent(base)}` : ''}&state=merged&per_page=100`], { cwd })
+      : runner('gh', ['pr', 'list', '--head', branch, ...(base ? ['--base', base] : []), '--state', 'merged', '--limit', '100', '--json', 'number'], { cwd });
     if (!r.ok) return { ok: false, reason: r.stderr || `could not list the merged PRs/MRs on ${branch}` };
     let rows;
     try { rows = JSON.parse(r.stdout); } catch { return { ok: false, reason: `unreadable list of merged PRs/MRs on ${branch}` }; }

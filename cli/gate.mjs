@@ -1171,7 +1171,9 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // R11: only the merge decides. Before it, the request is a PR like any other, and the ledger is not read.
     if (!merged) { info(`${branch}: a ${request.kind} request — CI applies it when the PR/MR merges; nothing written`); return { synced: 0, committed: false, pushed: false }; }
   }
-  if (branch && !request) {
+  if (request) {
+    // A request run builds no job list: it applies the one request below, and never sweeps the other epics.
+  } else if (branch) {
     const parsed = parseReviewBranch(branch);
     // A review branch named for the OLD spelling whose ledger has already moved (shape 8) is the
     // Foundation's review: its steps keep `artifact: "discovery/"`, so the job resolves to them there.
@@ -1217,7 +1219,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // one fact about the Product, so every job also prints the same number.
   const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) }) : null;
   if (request) {
-    const r = applySetAsideRequest(root, { request, branch, pr, productConfig, git, today, reader, facts, mergedNumbers });
+    const r = applySetAsideRequest(root, { request, branch, pr, productConfig, trunk: defaultBranch, today, reader, facts, mergedNumbers });
     if (!r.ok) { process.exitCode = 1; return { synced: 0, committed: false, pushed: false }; }
     if (r.changed) touched.add(request.epic);
   }
@@ -1543,7 +1545,7 @@ export const requestReason = (body) => {
   const m = typeof body === 'string' ? body.match(REASON_RE) : null;
   return m ? forTerminal(m[1]).trim() : '';
 };
-function applySetAsideRequest(root, { request, branch, pr, productConfig, git, today, reader, facts, mergedNumbers }) {
+function applySetAsideRequest(root, { request, branch, pr, productConfig, trunk, today, reader, facts, mergedNumbers }) {
   const { kind, epic, step } = request;
   const platform = productConfig.platform;
   const no = (why) => { fail(`${forTerminal(branch)}: ${why} — nothing is written`); return { ok: false, changed: false }; };
@@ -1557,10 +1559,11 @@ function applySetAsideRequest(root, { request, branch, pr, productConfig, git, t
   const f = facts(platform, n, { cwd: root });
   if (!f?.ok) return no(`could not read #${n}'s base and head (${forTerminal(f?.reason || 'no answer')})`);
   if (f.head !== branch) return no(`#${n} is on '${forTerminal(f.head)}', not '${forTerminal(branch)}' — check the --pr number`);
-  const trunk = resolveDefaultBranch(git, productConfig);
+  // The trunk is the branch this run pushes (R12), so a Product with no `default_branch` setting and no
+  // `origin/HEAD` in CI's checkout is not compared against a guessed `main`.
   if (f.base !== trunk) return no(`#${n} merged into '${forTerminal(f.base)}', not the default branch '${forTerminal(trunk)}'`);
   const pair = [`skip/${epic}/${step}`, `unskip/${epic}/${step}`];
-  const listed = mergedNumbers(platform, pair, { cwd: root });
+  const listed = mergedNumbers(platform, pair, { cwd: root, base: trunk });
   if (!listed?.ok) return no(`could not list the merged requests for ${step} (${forTerminal(listed?.reason || 'no answer')})`);
   const newer = Math.max(0, ...pair.flatMap((b) => listed.numbers?.[b] ?? []));
   if (newer > n) { info(`${epic}: #${newer}, a newer request for ${step}, merged after #${n} — #${n} is not applied`); return { ok: true, changed: false }; }
