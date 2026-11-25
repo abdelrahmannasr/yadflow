@@ -23,6 +23,11 @@ const YAD = path.join(ROOT, 'bin/yad.mjs');
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) =>
   !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && !/^(CI|GITLAB_CI|GITHUB_ACTIONS|SDLC_BASE|SDLC_HUB_CONFIG|SDLC_PRODUCT_CONFIG)$/.test(k) && !/^(CI_|GITHUB_)/.test(k)));
 ENV.GIT_CONFIG_GLOBAL = '/dev/null';
+// Several tests call the worktree commands in this process, and git then runs with process.env: keep the
+// person's own git settings (a global ignore file, a global hooks path) out of those too, as ENV keeps them
+// out of the CLI runs (code review of EP-reported-agent-flow-S01).
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: ENV }).toString().trim();
 const yadWith = (env, cwd, ...args) => {
   const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, ...env, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', NO_COLOR: '1' }, encoding: 'utf8' });
