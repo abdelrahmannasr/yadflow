@@ -28,7 +28,7 @@ process.env.YAD_PLATFORM_READ = '0';
 process.env.YAD_CAPTURE = '0';
 
 const { applyMarkedBlock } = await import('./marked-block.mjs');
-const { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, RULES, HUMAN_ONLY_ACTS, NEVER, humanOnlyCommands } = await import('./agent-rules.mjs');
+const { AGENTS_MARKERS, agentsBlock, pointerBlock, claudeBlock, RULES, HUMAN_ONLY_ACTS, NEVER, humanOnlyCommands, SKILL_WRITTEN_SDLC } = await import('./agent-rules.mjs');
 const { agentFileActions, agentFilesState, repoActions } = await import('./plan.mjs');
 const { agentFileChecks } = await import('./doctor.mjs');
 
@@ -104,6 +104,46 @@ test('the Product block carries every rule, every human-only command and act, an
   assert.match(pointer, /yad guide --json/);
   assert.doesNotMatch(pointer, /\.\.\//);
   assert.deepEqual(claudeBlock(), ['@AGENTS.md']);
+});
+
+// EP-reported-agent-flow-S03 (engine #681): the two `.sdlc/` rules name the ledger, and allow the files a skill step
+// writes, so a skill step and the rule no longer say opposite things. The words are the spec's (R1, R2).
+test('the two .sdlc rules forbid the ledger by hand and allow the files a skill step names, in yad guide --json and both AGENTS.md blocks', () => {
+  const ledger = '(`state.json`, `approvals.json`, `comments.json`, `product-prs.json`, `hub-prs.json`)';
+  const allowed = 'an epic\'s `contract-lock.json`, `design-links.json`, `test-links.json`, `change.json` and `reconcile-debt.json`; the `reviews/` record a review skill names; and the Product files a connect or brand skill names';
+  const never = `write or edit the ledger by hand ${ledger}, an approval, or text between yad markers (only \`yad\` commands and the yad-* skills change them), or write any other file under \`.sdlc/\` or \`reviews/\` except where a yad-* skill step says to: ${allowed}`;
+  const rule = `Never write the ledger by hand ${ledger}, approvals, or text between yad markers; only \`yad\` commands and the yad-* skills change them. Write any other file under \`.sdlc/\` or \`reviews/\` only where a yad-* skill step says to: ${allowed}.`;
+  assert.equal(NEVER.find((n) => n.id === 'ledger-by-hand').text, never);
+  assert.equal(RULES.find((r) => r.id === 'never-by-hand').text, rule);
+  // Both texts are built from the one list, so a name added there reaches both.
+  for (const f of SKILL_WRITTEN_SDLC) { assert.ok(never.includes(`\`${f}\``), f); assert.ok(rule.includes(`\`${f}\``), f); }
+  assert.ok(agentsBlock().includes(`- ${never}`));
+  assert.ok(agentsBlock().includes(`- ${rule}`));
+  assert.ok(pointerBlock().includes(`- ${rule}`), 'the code-repo block prints never-by-hand');
+  const T = tmp();
+  try {
+    const out = execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin/yad.mjs'), 'guide', '--json'], { cwd: T, encoding: 'utf8', env: { ...process.env, HOME: T } });
+    const j = JSON.parse(out);
+    assert.equal(j.never.find((n) => n.id === 'ledger-by-hand').text, never);
+    assert.equal(j.rules.find((x) => x.id === 'never-by-hand').text, rule);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// EP-reported-agent-flow-S03 (engine #681): the files the rule lets a skill step write, and the files capture
+// takes as artifacts, are one list but for `reconcile-debt.json`. That file is an append-only list that capture,
+// `yad fold`, claims and owners treat as ledger today: on a local Product `yad fold` commits it with the ledger.
+// Adding it to PERSON_WRITTEN_SDLC would make capture snapshot it and `yad fold` leave a later append on disk.
+test('the rule\'s skill-written .sdlc files equal capture\'s person-written list, less reconcile-debt.json', async () => {
+  const { PERSON_WRITTEN_SDLC, capturedEpic } = await import('./capture.mjs');
+  const LEDGER_LIKE = ['reconcile-debt.json'];
+  assert.deepEqual(
+    [...PERSON_WRITTEN_SDLC].sort(),
+    SKILL_WRITTEN_SDLC.filter((f) => !LEDGER_LIKE.includes(f)).map((f) => `.sdlc/${f}`).sort(),
+  );
+  for (const f of LEDGER_LIKE) assert.ok(SKILL_WRITTEN_SDLC.includes(f), f);
+  // capturedEpic answers as before: the four are an epic's artifacts, the debt list is ledger.
+  for (const f of PERSON_WRITTEN_SDLC) assert.equal(capturedEpic(`epics/EP-x/${f}`), 'EP-x', f);
+  assert.equal(capturedEpic('epics/EP-x/.sdlc/reconcile-debt.json'), null);
 });
 
 test('check --fix writes AGENTS.md and CLAUDE.md for Claude Code, AGENTS.md alone otherwise; files are never staged', () => {
