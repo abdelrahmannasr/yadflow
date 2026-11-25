@@ -8339,13 +8339,17 @@ function oneReadRig({ seed, subjectOdd = "chore: odd $x 'q' \"d\" % \\ * [b] & |
 // The short hashes in the order the gate printed them, one per commit (a commit may print a note first).
 const printedOrder = (out) => [...new Set([...out.matchAll(/^(?:PASS|FAIL|note) \[[a-z-]+\]: ([0-9a-f]{7,})\b/gm)].map((m) => m[1]))];
 
-// How many `git log` processes a gate starts on this range: git's own trace counts them.
-function gitLogCalls(script, T) {
+// What a gate run asks git, from git's own trace: how many `git log` processes it starts, and how many
+// times product_for runs (each run probes `.sdlc/product-link.json` twice, on BASE and on HEAD).
+function gitCalls(script, T) {
   const trace = path.join(T, '.git', 'yad-trace.txt');
   runGate(script, T, ['main'], { GIT_TRACE: trace });
-  const n = (fs.readFileSync(trace, 'utf8').match(/built-in: git (?:-c \S+ )*log\b/g) || []).length;
+  const t = fs.readFileSync(trace, 'utf8');
   fs.rmSync(trace, { force: true });
-  return n;
+  return {
+    log: (t.match(/built-in: git (?:-c \S+ )*log\b/g) || []).length,
+    productFor: (t.match(/built-in: git cat-file -e \S+:\.sdlc\/product-link\.json/g) || []).length / 2,
+  };
 }
 
 test('lineage-check reads the range once and asks product_for once per story, with the same output (#685)', () => {
@@ -8363,6 +8367,29 @@ test('lineage-check reads the range once and asks product_for once per story, wi
     // A subject holding quotes, a backslash, a glob, a tab and shell words is printed whole.
     assert.ok(r.out.includes(`'${subjectOdd}' — maintenance commit, no Task trailer (exempt)`), r.out);
     assert.deepEqual(printedOrder(r.out), order);
-    assert.equal(gitLogCalls(LINEAGE, T), 1, 'one git log for the whole range');
+    const calls = gitCalls(LINEAGE, T);
+    assert.equal(calls.log, 1, 'one git log for the whole range');
+    assert.equal(calls.productFor, 1, 'product_for once for the one story, not once per commit');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// #685 review: a subject may hold the very bytes the one read uses as separators (US, RS; git allows them).
+// One placed there must not move where a record ends: here it fakes a second record, with another hash, a
+// maintenance subject and a short hash of `zz`. The gate falls back to reading each commit on its own, so
+// the real commit is judged by its real hash and trailer: its epic is missing, and it FAILs as before.
+test('lineage-check: separator bytes in a subject do not fake a record (#685)', () => {
+  const T = scaffoldRepo();
+  try {
+    seedProductEpic(path.join(T, 'product'), 'EP-demo', { fm: { type: 'chore' } });
+    commit(T, 'docs: link', { 'specs/EP-gone-S01/link.md': linkMd({ story: 'EP-gone-S01', epic: 'EP-gone', 'product-repo': '../../product' }) });
+    const msg = path.join(T, '.git', 'yad-msg.txt');
+    fs.writeFileSync(msg, `feat: x\x1e${'e'.repeat(40)}\x1fzz\x1fchore: hidden\x1d\n\nTask: EP-gone-S01-T01\n`);
+    git(T, 'commit', '-q', '--allow-empty', '--cleanup=verbatim', '-F', msg);
+    const real = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+    const r = runGate(LINEAGE, T, ['main']);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(`FAIL \\[lineage-check\\]: ${real} EP-gone-S01-T01 -> epic EP-gone does not exist in the product repo \\(orphan story link\\)`));
+    assert.doesNotMatch(r.out, /: zz /);
+    assert.doesNotMatch(r.out, /chore: hidden' — /);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

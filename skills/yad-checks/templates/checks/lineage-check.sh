@@ -534,13 +534,22 @@ load_exempt_shas lineage-check
 
 # The range, read ONCE (#685): one `git log` gives every commit's full hash, short hash, subject and Task
 # trailer values, where three `git log -1` calls per commit used to. Fields end in US (\x1f), a record in
-# RS (\x1e), and the Task values are joined with GS (\x1d). The order is rev-list's, as before.
-# showSignature is off so a `log.showSignature` setting cannot put gpg output into the records.
+# RS (\x1e), and the Task values are one per line. The order is rev-list's, as before. showSignature is
+# off so a `log.showSignature` setting cannot put gpg output into the records.
+# A subject or a trailer value may itself hold US or RS: git allows those bytes, and one placed there
+# would move where a record ends (a fake record could claim another commit's hash). So the read is
+# trusted only when the output holds exactly 3 US and 1 RS per commit; otherwise each commit is read
+# on its own, three `git log -1` calls as before, and the output is what it always was.
 commits="$(git -c log.showSignature=false log --no-merges --no-color \
-  --format='%H%x1f%h%x1f%s%x1f%(trailers:key=Task,valueonly,separator=%x1d)%x1e' "$RANGE")"
+  --format='%H%x1f%h%x1f%s%x1f%(trailers:key=Task,valueonly,separator=%x0a)%x1e' "$RANGE")"
 if [ -z "$commits" ]; then
   echo "PASS [lineage-check]: no non-merge commits in ${RANGE}"
   exit 0
+fi
+one_read=1
+if [ "$(printf '%s' "$commits" | LC_ALL=C tr -cd '\036\037' | wc -c)" -ne "$(( 4 * $(git rev-list --count --no-merges "$RANGE") ))" ]; then
+  one_read=""
+  commits="$(git rev-list --no-merges "$RANGE" | LC_ALL=C tr '\n' '\036')"
 fi
 
 # product_for, asked once per story (#685). Its answer depends only on the story and BASE, both fixed for
@@ -569,16 +578,23 @@ rc=0
 while IFS= read -r -d $'\x1e' rec; do
   rec="${rec#$'\n'}"
   [ -z "$rec" ] && continue
-  sha="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
-  short="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
-  subject="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
-  # The first Task value that is not empty, cut at a line break: what `awk '!f && length($0)'` took.
-  task=""
-  while :; do
-    _tv="${rec%%$'\x1d'*}"; _tv="${_tv%%$'\n'*}"
-    if [ -n "$_tv" ]; then task="$_tv"; break; fi
-    case "$rec" in *$'\x1d'*) rec="${rec#*$'\x1d'}" ;; *) break ;; esac
-  done
+  if [ -n "$one_read" ]; then
+    sha="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+    short="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+    subject="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+    # The first Task value that is not empty: what `awk '!f && length($0)'` took from one value a line.
+    task=""
+    while IFS= read -r _tv; do
+      if [ -n "$_tv" ]; then task="$_tv"; break; fi
+    done <<TASKS
+$rec
+TASKS
+  else
+    sha="$rec"
+    short="$(git log -1 --format=%h "$sha")"
+    subject="$(git log -1 --format=%s "$sha")"
+    task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | awk '!f && length($0) { print; f = 1 }')"
+  fi
   if is_exempt_sha "$sha"; then
     echo "PASS [lineage-check]: ${short} '${subject}' — SHA exemption (${GATE_EXEMPT_FILE} on ${BASE})"
     continue
