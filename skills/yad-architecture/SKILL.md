@@ -184,7 +184,12 @@ Compute the SHA-256 of the **exact bytes between** the `CONTRACT-SURFACE:BEGIN` 
 themselves) and write `{project-root}/epics/EP-<slug>/.sdlc/contract-lock.json`:
 
 ```json
-{ "artifact": "contract.md", "hash": "sha256:<hex>", "lockedAt": "<YYYY-MM-DD>" }
+{
+  "schemaVersion": 10,
+  "artifact": "contract.md",
+  "hash": "sha256:<hex>",
+  "lockedAt": "<YYYY-MM-DD>"
+}
 ```
 
 Canonicalization (so the hash round-trips): hash the surface region as written between the markers,

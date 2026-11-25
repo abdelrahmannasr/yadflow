@@ -14391,6 +14391,44 @@ test('doctor mirror: two copies that agree say nothing at all', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// EP-reported-agent-flow-S03 (engine #680): the lock the yad-architecture skill tells the agent to write carries the
+// engine's shape, in the bytes the engine writes, so neither doctor nor `yad migrate` reports it as behind.
+const lockTemplates = () => ['skills/yad-architecture/SKILL.md', 'skills/yad-architecture/references/contract-format.md'].map((rel) => {
+  const text = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', rel), 'utf8');
+  const blocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => m[1]).filter((b) => b.includes('"lockedAt"'));
+  assert.equal(blocks.length, 1, `${rel}: one contract-lock template`);
+  return { rel, block: blocks[0] };
+});
+
+test('the contract-lock template in both architecture files carries the engine\'s schemaVersion', () => {
+  for (const { rel, block } of lockTemplates()) {
+    const lock = JSON.parse(block);
+    assert.equal(lock.schemaVersion, ENGINE_SHAPE, rel);
+    assert.equal(Object.keys(lock)[0], 'schemaVersion', `${rel}: schemaVersion first, as the engine writes it`);
+  }
+});
+
+test('a contract lock written from the template gives no shape warning in doctor, and yad migrate leaves it unchanged', async () => {
+  const { planMigration } = await import('./migrate.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lock-shape-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ schemaVersion: ENGINE_SHAPE, version: '1.0.0' }, null, 2) + '\n');
+    for (const { rel, block } of lockTemplates()) {
+      const lock = block.replace('sha256:<hex>', `sha256:${'a'.repeat(64)}`).replace('<YYYY-MM-DD>', '2026-11-25');
+      fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/contract-lock.json'), lock + '\n');
+      const row = planMigration(T).rows.find((r) => r.file === 'epics/EP-x/.sdlc/contract-lock.json');
+      assert.equal(row?.action, 'unchanged', `${rel}: yad migrate wants to ${row?.action} it`);
+      const checks = [];
+      shapeChecks(checks, T);
+      const mine = checks.filter((c) => c.id === 'shape:EP-x');
+      assert.equal(mine.length, 1, `${rel}: the lock reaches the epic's shape check`);
+      assert.equal(mine[0].status, 'ok', `${rel}: ${mine[0].message}`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor shape: outside a project the section is silent, not a finding', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-none-'));
   const checks = [];

@@ -38,7 +38,12 @@ keeps the hash stable against edits to the surrounding prose, frontmatter, or no
 Stored at `epics/EP-<slug>/.sdlc/contract-lock.json`:
 
 ```json
-{ "artifact": "contract.md", "hash": "sha256:<hex>", "lockedAt": "<YYYY-MM-DD>" }
+{
+  "schemaVersion": 10,
+  "artifact": "contract.md",
+  "hash": "sha256:<hex>",
+  "lockedAt": "<YYYY-MM-DD>"
+}
 ```
 
 ### Recipe (must round-trip)
