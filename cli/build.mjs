@@ -221,12 +221,14 @@ export function planAmend(buildState, { story, repo, step, via, reason, run = nu
   const lane = liveLane(bs, story, repo);
   const target = lane.steps.find((s) => s?.id === step);
   if (!target) throw err(CODE, `${story} / ${repo} has no step '${step}'`, `its steps: ${lane.steps.map((s) => s?.id).join(', ')}`);
-  if (!isPassed(target)) throw err(CODE, `${step} is not closed in ${story} / ${repo}, so there is no record to correct`, `close it with the true value: yad build step ${story} --repo ${repo} ${step} done --via ${via}`);
+  if (stepStatus(target) !== 'done') throw err(CODE, `${step} is not closed in ${story} / ${repo}, so there is no record to correct`, `close it with the true value: yad build step ${story} --repo ${repo} ${step} done --via ${via}`);
   const closed = isPlainObject(target.closed) ? target.closed : null;
   if (!closed) throw err(CODE, `${step} in ${story} / ${repo} has no closing record to correct`, 'it was closed before closing records existed');
   if (task && closed.task !== task) {
     throw err(CODE, `${step} was last closed ${closed.task ? `for ${closed.task}` : 'for no task'}, not ${task}`, 'only the latest close of a step is corrected');
   }
+  // A run names the evidence for an automatic close only: given with another value, it would be dropped.
+  if (via !== 'auto' && run && run !== true) throw err(CODE, '--run applies only to --via auto', `drop --run: --via ${via} names no trust run`);
   if (closed.via === via) return { buildState: bs, already: true, from: via };
   let newRun = null;
   if (via === 'auto') {

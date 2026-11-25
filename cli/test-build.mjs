@@ -323,6 +323,9 @@ test('planAmend: corrects a closed step\'s via, keeps the earlier value in close
   assert.throws(() => amend({ via: null }), /--via is required/);
   assert.throws(() => amend({ via: 'robot' }), /--via must be auto, agent or human \(got 'robot'\)/);
   assert.throws(() => amend({ step: 'nope' }), /has no step 'nope'/);
+  assert.throws(() => amend({ run: 'aaaa1111' }), /--run applies only to --via auto/);
+  const skipped = steps(); skipped[0].status = 'skipped';
+  assert.throws(() => amend({}, bs(skipped)), /spec is not closed/);
 
   // --via auto needs a run of this step, not rejected, recorded while the dial was auto, not used.
   const run = (over) => ({ uid: 'cccc3333', story, repo: 'api', step: 'implement', task: 'T02', verdict: 'approved-unchanged', advance: 'auto', automation: 'machine_advance', ...over });
