@@ -2854,3 +2854,74 @@ test('#365 review 5: two story files claiming one ID fall back to their file nam
     assert.deepEqual(kinds(r, 'merged-no-ship').map((f) => f.story), ['EP-shop-S02']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// #685: reconcile-debt-check reads the whole range with one `git log` (trusted only when its separators add
+// up) and asks product_for once per story. A self-contained rig: two change epics in ONE thread, whose root
+// carries open hotfix debt. The (thread, epic) de-dup is unchanged, so each epic is judged once, and every
+// commit of a story still prints the note product_for gave its first commit.
+function debtRig() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-debt-'));
+  const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(T, '.no-global') };
+  for (const k of Object.keys(env)) if (/^GIT_(AUTHOR|COMMITTER)_/.test(k) || k === 'SDLC_BASE') delete env[k];
+  const git = (...a) => execFileSync('git', a, { cwd: T, env, stdio: 'pipe' }).toString();
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+  const fm = (o) => ['---', ...Object.entries(o).map(([k, v]) => `${k}: ${v}`), '---', ''].join('\n');
+  git('init', '-q'); git('config', 'user.name', 'a'); git('config', 'user.email', 'a@b.c'); git('config', 'commit.gpgsign', 'false');
+  fs.appendFileSync(path.join(T, '.git/info/exclude'), '/product/\n');
+  write('product/.sdlc/product.json', '{}\n');
+  write('product/epics/EP-root/epic.md', fm({ id: 'EP-root', kind: 'feature' }));
+  write('product/epics/EP-a/epic.md', fm({ id: 'EP-a', kind: 'change', parent: 'EP-root' }));
+  write('product/epics/EP-b/epic.md', fm({ id: 'EP-b', kind: 'change', parent: 'EP-root' }));
+  write('product/epics/EP-fix/epic.md', fm({ id: 'EP-fix', kind: 'hotfix', parent: 'EP-root' }));
+  write('product/epics/EP-fix/.sdlc/reconcile-debt.json', '[{"status":"open"}]');
+  write('a.txt', '1');
+  write('specs/EP-a-S01/link.md', fm({ story: 'EP-a-S01', epic: 'EP-a', 'product-repo': '../../product' }));
+  git('add', '-A'); git('commit', '-qm', 'seed'); git('branch', '-qM', 'main'); git('checkout', '-qb', 'feature');
+  write('specs/EP-a-S01/link.md', fm({ story: 'EP-a-S01', epic: 'EP-a', 'product-repo': '../../somewhere-else' }));
+  write('specs/EP-b-S01/link.md', fm({ story: 'EP-b-S01', epic: 'EP-b', 'product-repo': '../../product' }));
+  git('add', '-A'); git('commit', '-qm', 'docs: links');
+  for (let i = 1; i <= 5; i++) {
+    write(`f${i}.txt`, String(i)); git('add', '-A');
+    git('commit', '-qm', `feat: step ${i}`, '-m', i <= 3 ? 'Task: EP-a-S01-T01' : 'Task: EP-b-S01-T01');
+  }
+  const run = (extra = {}) => {
+    try {
+      return { code: 0, out: execFileSync('bash', [path.join(ROOT, 'skills/yad-checks/templates/checks/reconcile-debt-check.sh'), 'main'], { cwd: T, env: { ...env, ...extra }, stdio: 'pipe' }).toString() };
+    } catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
+  };
+  return { T, git, write, run, done: () => fs.rmSync(T, { recursive: true, force: true }) };
+}
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+
+test('reconcile-debt-check reads the range once and asks product_for once per story, with the same output (#685)', () => {
+  const rig = debtRig();
+  try {
+    const r = rig.run();
+    assert.equal(r.code, 1, r.out);
+    // Each epic of the thread is judged once (the (thread, epic) de-dup), and both are blocked.
+    assert.equal((r.out.match(/^FAIL \[reconcile-debt\]: thread EP-root carries OPEN hotfix debt:/gm) || []).length, 2, r.out);
+    // Every EP-a-S01 commit still prints product_for's note, though product_for ran once for the story.
+    assert.equal((r.out.match(/^note \[reconcile-debt\]: [0-9a-f]+ specs\/EP-a-S01\/link\.md names product-repo '\.\.\/\.\.\/somewhere-else'/gm) || []).length, 3, r.out);
+    const trace = path.join(rig.T, '.git', 'yad-trace.txt');
+    rig.run({ GIT_TRACE: trace });
+    const t = fs.readFileSync(trace, 'utf8');
+    assert.equal((t.match(/built-in: git (?:-c \S+ )*log\b/g) || []).length, 1, 'one git log for the whole range');
+    assert.equal((t.match(/built-in: git cat-file -e \S+:\.sdlc\/product-link\.json/g) || []).length / 2, 2, 'product_for once per story');
+  } finally { rig.done(); }
+});
+
+test('reconcile-debt-check: separator bytes in a subject do not fake a record (#685)', () => {
+  const rig = debtRig();
+  try {
+    rig.write('specs/EP-gone-S01/link.md', '---\nstory: EP-gone-S01\nepic: EP-gone\nproduct-repo: ../../product\n---\n');
+    rig.git('add', '-A'); rig.git('commit', '-qm', 'docs: gone link');
+    const msg = path.join(rig.T, '.git', 'yad-msg.txt');
+    fs.writeFileSync(msg, `feat: x\x1e${'e'.repeat(40)}\x1fzz\x1fchore: hidden\x1d\n\nTask: EP-gone-S01-T01\n`);
+    rig.git('commit', '-q', '--allow-empty', '--cleanup=verbatim', '-F', msg);
+    const real = rig.git('rev-parse', '--short', 'HEAD').trim();
+    const r = rig.run();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(`FAIL \\[reconcile-debt\\]: ${real} EP-gone-S01-T01 -> epic EP-gone does not exist in the product repo \\(orphan story link\\)`));
+    assert.doesNotMatch(r.out, /: zz /);
+  } finally { rig.done(); }
+});
