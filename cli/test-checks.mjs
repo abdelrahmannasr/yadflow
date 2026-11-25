@@ -8477,7 +8477,7 @@ function promotionCase(script, tag, args = ['main'], { fork = false } = {}) {
 
 test('lineage-check passes a promotion merge request, and only that (#684)', () => promotionCase(LINEAGE, 'lineage-check', ['main'], { fork: true }));
 
-test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open'));
+test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open', ['main'], { fork: true }));
 
 test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link'));
 
