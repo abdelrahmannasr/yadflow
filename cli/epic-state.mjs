@@ -1917,7 +1917,11 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 // `done` differently because this is present. Steps finished before it carry none, and nothing asks.
 // `approved` is written by `yad gate advance` (E112): a gate passed on recorded approvals on a Product with
 // no platform, where nothing merges. Before E112 the `yad-review-gate` skill wrote it by hand.
-export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
+// `auto`, `agent` and `human` close a Build lane step (`yad build step … done`, #658): `auto` when the step
+// advanced on its own on an `auto` dial; `agent` when an agent did the step on a dial that is not `auto`, and
+// a person still advances it; `human` when a person did it. `yad build amend` corrects one, keeping the
+// earlier value in the record's `amended` list.
+export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'agent', 'human'];
 
 export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null, waived = null, capped = null } = {}) => ({
   by: by || null,

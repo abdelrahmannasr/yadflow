@@ -10215,7 +10215,7 @@ test('verified Product: yad next and yad doctor do not send a blocker or a debt 
 test('closing records: advanceState, markInReview and repairState stamp `closed` only when told how, and the first close wins (E18)', async () => {
   const { closingRecord, CLOSED_VIA } = await import('./epic-state.mjs');
   assert.deepEqual(closingRecord({ via: 'repair' }), { by: null, date: null, via: 'repair' }, 'no empty optional keys');
-  assert.deepEqual(CLOSED_VIA, ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human']);
+  assert.deepEqual(CLOSED_VIA, ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'agent', 'human']);
 
   // No closing facts: nothing is stamped, so every existing caller is unchanged.
   const plain = uiChain('ui-design-review', { ui: 'in_progress', uiReview: 'in_review' });
