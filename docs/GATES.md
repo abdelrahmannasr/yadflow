@@ -133,6 +133,21 @@ project or group CI/CD variable on GitLab). Unset, only the default branch is ch
 same variable also makes `yad-gate-sync` write gate advances to the trunk (#232). `yad ci check`
 names the value in its `trunk` row ([branch-protection.md](branch-protection.md#which-branch)).
 
+**On a promotion merge request** (a long-lived branch such as `develop` merged into `main`), every commit
+was already checked when it merged into `develop`, and the gates that read today's state could fail it
+again (#684). Set the CI variable `YAD_PROMOTE_FROM` to the long-lived branches, separated by commas or
+spaces (a repository variable on GitHub; a project or group CI/CD variable on GitLab — never in yad's own
+files, which `yad update` rewrites). On a merge request whose source branch is one of them,
+[spec-link](#spec-link), [lineage-check](#lineage-check), [epic-open](#epic-open),
+[reconcile-debt](#reconcile-debt) and [commit-message](#commit-message) pass with the line
+`PASS [<gate>]: promotion from <branch> (YAD_PROMOTE_FROM); its commits were checked when they merged into <branch>`
+and do not walk the range. [verified-commits](#verified-commits) and [contract-check](#contract-check)
+still run in full. The names are compared whole (no `*` or other pattern), and the source branch comes
+from the platform (`github.head_ref`, passed as `YAD_SOURCE_BRANCH`; GitLab's
+`CI_MERGE_REQUEST_SOURCE_BRANCH_NAME`). Unset or empty, or on any other merge request, every gate runs as
+before. The job log line is the record: `yad ci check` cannot read the value, since yad never reads CI
+variables.
+
 **When the PR text is edited** (title or description only), GitHub runs only `pr-title` and
 `pr-template` again. They have their own workflow file for this: `yad-pr-text.yml` on a code repo,
 `yad-product-pr-text.yml` on the Product. The gate workflows do not start on an edit at all (#425). If
