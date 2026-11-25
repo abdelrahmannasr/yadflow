@@ -118,8 +118,9 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    step's skill stopped to ask its human-only questions (its first batch or a later one), the step's
    output is not finished, and a draft is not output to judge: record no trust entry. Run
    `yad build step <story> --repo <repo> <step> blocked [--task <task>] --reason "waiting on human
-   decisions: <the questions, short>"`, ask the person before `yad checkpoint --push` (a push to the default
-   branch is asked about every time, E158), and stop — skip steps 3 and 4.
+   decisions: <the questions, short>"` (pass `--task` for `implement` and `checks`, as step 4 says), ask the
+   person before `yad checkpoint --push` (a push to the default branch is asked about every time, E158),
+   and stop — skip steps 3 and 4.
    **Not when the skill also hit its contract STOP** (a contract-change item in its batch): no answer
    lifts that, so it is the step-4 contract-touch halt, with its trust entry, as before.
 3. **Ask the engine for the effective dial:** `yad dial <epic> <story> --repo <repo> <step> --json`, and use
@@ -130,7 +131,8 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      file-boundary rule), a contract-surface touch, or any ambiguity other than the human-only
      questions step 2 already halted on. Run
      `yad build step <story> --repo <repo> <step> blocked [--task <task>] --reason "<the halt cause>"` (it
-     writes the step's `record`; pass `--task`, the task being walked, for `implement` and `checks`) — the trust entry step 2 recorded for this run is the `rejected` one, so record
+     writes the step's `record`; pass `--task`, the task being walked, for `implement` and `checks`) — the
+     trust entry step 2 recorded for this run is the `rejected` one, so record
      no second entry — **stop the loop**, and report what a human must resolve. The record is not decoration: since shape 7 a `blocked` step with nothing recorded
      on it reads as `todo` ("not started"), so a halt written without one is indistinguishable from a
      lane nobody has begun. `yad doctor` reports the difference as `step:no-record`.
