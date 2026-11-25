@@ -1,6 +1,6 @@
 // The Plannotator Inbox (EP-plannotator-review). yad never talks to Plannotator: it only shapes the text of a
 // message and puts it in its own `--json` output, in an `inbox` block, and the AGENT posts it with its own Inbox
-// tool (architecture D1). This module holds that knowledge and nothing that reaches out: no network, no file
+// tool (architecture D1). This module holds that knowledge and calls nothing that reaches out: no network, no file
 // write, no child process. S01 adds the one question every later piece asks; S02 adds the message builders.
 //
 // "The Inbox is ready" (contract.md, API) means both:
