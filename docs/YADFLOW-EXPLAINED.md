@@ -372,8 +372,10 @@ yad epic new EP-cache-q --profile spike
 | `deferred` | Postponed, still owed | No |
 | `satisfied` | Inherited from a parent epic | No |
 
-On a Product in **verified** mode (where only CI writes the record, see section 6), skip, defer and
-unblock refuse once the epic's record is on the default branch, because only CI may change it there.
+On a Product in **verified** mode (where only CI writes the record, see section 6), once the epic's
+record is on the default branch only CI may change it there. A skip or an unskip then goes through a PR:
+`yad skip` opens one that changes no file, and when a person merges it, CI marks the step skipped, with
+the reason and the name of the person who merged it. Defer and unblock still refuse there.
 <!-- explainer:end id=routes -->
 
 ---
