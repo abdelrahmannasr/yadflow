@@ -11914,6 +11914,127 @@ test('gate ci: a merge in solo mode records waived: "solo" too — the path a ve
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// EP-reported-agent-flow-S04: `yad gate ci --merged` applies a merged skip or unskip request. The platform is faked
+// three ways: `reader` (merged, mergedBy), `facts` (base, head, body) and `mergedNumbers` (the newest request).
+const REQ_BODY = '## Summary\nSkip it.\n\n<!-- yad:reason -->\nbackend-only epic\n<!-- /yad:reason -->\n';
+function scaffoldRequestProduct() {
+  const made = scaffoldCiProduct();
+  const st = uiChain('ui-design', { ui: 'in_progress' });
+  st.epicId = 'EP-test';
+  fs.writeFileSync(path.join(made.ci, 'epics/EP-test/.sdlc/state.json'), JSON.stringify(st, null, 2) + '\n');
+  git(made.ci, 'add', '-A');
+  git(made.ci, 'commit', '-q', '-m', 'a classic chain at ui-design');
+  return made;
+}
+const reqOpts = (over = {}) => ({
+  branch: 'skip/EP-test/ui-design', pr: 10, merged: true, push: false, today: '2026-11-25',
+  reader: () => ({ ok: true, merged: true, mergedBy: 'bo' }),
+  facts: () => ({ ok: true, base: 'trunk', head: over.branch || 'skip/EP-test/ui-design', body: REQ_BODY }),
+  mergedNumbers: () => ({ ok: true, numbers: {} }),
+  ...over,
+});
+const reqState = (ci) => JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
+async function runRequest(ci, over) {
+  const prev = process.exitCode;
+  process.exitCode = 0;
+  try {
+    const { out } = await captureConsole(() => gateCi(ci, reqOpts(over)));
+    return { out, code: process.exitCode };
+  } finally { process.exitCode = prev; }
+}
+
+test('gate ci --merged applies a merged skip request: the step is skipped with the merger and the reason, in one bot commit', async () => {
+  const { T, ci } = scaffoldRequestProduct();
+  try {
+    const head = git(ci, 'rev-parse', 'HEAD').toString().trim();
+    const { out, code } = await runRequest(ci);
+    assert.equal(code, 0, out);
+    const ui = reqState(ci).steps.find((x) => x.id === 'ui-design');
+    assert.equal(ui.status, 'skipped');
+    assert.deepEqual([ui.record?.reason, ui.record?.by, ui.record?.date], ['backend-only epic', 'bo', '2026-11-25']);
+    assert.equal(git(ci, 'log', '-1', '--format=%s').toString().trim(), 'chore(gate): skip EP-test/ui-design on merge [skip ci]');
+    assert.equal(git(ci, 'rev-parse', 'HEAD~1').toString().trim(), head, 'one commit');
+    const files = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.ok(files.includes('epics/EP-test/.sdlc/state.json'), files.join(','));
+    assert.ok(files.every((f) => f === 'epics/EP-test/.sdlc/state.json' || f === '.sdlc/index.json'), files.join(','));
+    assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '');
+    // A replay (the reconcile) changes nothing and commits nothing.
+    const after = git(ci, 'rev-parse', 'HEAD').toString().trim();
+    const again = await runRequest(ci);
+    assert.equal(again.code, 0, again.out);
+    assert.match(again.out, /already skipped/);
+    assert.equal(git(ci, 'rev-parse', 'HEAD').toString().trim(), after);
+    // Then a merged unskip request puts it back.
+    const un = await runRequest(ci, { branch: 'unskip/EP-test/ui-design', pr: 11 });
+    assert.equal(un.code, 0, un.out);
+    assert.equal(reqState(ci).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+    assert.equal(git(ci, 'log', '-1', '--format=%s').toString().trim(), 'chore(gate): unskip EP-test/ui-design on merge [skip ci]');
+    // And a replay of the unskip is quiet too.
+    const un2 = await runRequest(ci, { branch: 'unskip/EP-test/ui-design', pr: 11 });
+    assert.equal(un2.code, 0, un2.out);
+    assert.match(un2.out, /already not skipped/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate ci applies a request only on a merge the platform confirms, into the trunk, on that branch, and only the newest one', async () => {
+  const { T, ci } = scaffoldRequestProduct();
+  try {
+    const head = git(ci, 'rev-parse', 'HEAD').toString().trim();
+    const untouched = (label) => {
+      assert.equal(git(ci, 'rev-parse', 'HEAD').toString().trim(), head, `${label}: no commit`);
+      assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', `${label}: nothing written`);
+    };
+    // Before the merge: one line, nothing written, green.
+    const pre = await runRequest(ci, { merged: false });
+    assert.equal(pre.code, 0);
+    assert.match(pre.out, /CI applies it when the PR\/MR merges/);
+    untouched('pre-merge');
+    // Each R12 failure is red and writes nothing.
+    const red = [
+      ['no --pr', { pr: null }, /--pr/],
+      ['an unreadable PR', { reader: () => ({ ok: false, reason: 'gh down' }) }, /could not read #10/],
+      ['a reader that throws', { reader: () => { throw new Error('boom'); } }, /could not read #10/],
+      ['not merged', { reader: () => ({ ok: true, merged: false, mergedBy: null }) }, /#10 is not merged/],
+      ['no merger', { reader: () => ({ ok: true, merged: true, mergedBy: null }) }, /who merged #10/],
+      ['unreadable facts', { facts: () => ({ ok: false, reason: 'x' }) }, /base and head/],
+      ['another head', { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/stories', body: REQ_BODY }) }, /is on 'skip\/EP-test\/stories'/],
+      ['a side-branch base', { facts: () => ({ ok: true, base: 'release', head: 'skip/EP-test/ui-design', body: REQ_BODY }) }, /merged into 'release', not the default branch 'trunk'/],
+      ['an unreadable request list', { mergedNumbers: () => ({ ok: false, reason: 'x' }) }, /could not list the merged requests/],
+      ['no reason', { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/ui-design', body: '## Summary\n' }) }, /gives no reason/],
+      ['an empty reason', { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/ui-design', body: '<!-- yad:reason -->\n \u0007 \n<!-- /yad:reason -->' }) }, /gives no reason/],
+      ['a step the route does not make optional', { branch: 'skip/EP-test/stories' }, /YAD-STATE-004/],
+      ['an unskip of a step not skipped', { branch: 'unskip/EP-test/stories' }, null],
+    ];
+    for (const [label, over, re] of red) {
+      const r = await runRequest(ci, over);
+      if (re) { assert.equal(r.code, 1, `${label}: ${r.out}`); assert.match(r.out, re, label); }
+      untouched(label);
+    }
+    // A newer request for the same step merged after this one: say so, write nothing, stay green.
+    const older = await runRequest(ci, { mergedNumbers: () => ({ ok: true, numbers: { 'skip/EP-test/ui-design': [10], 'unskip/EP-test/ui-design': [12] } }) });
+    assert.equal(older.code, 0, older.out);
+    assert.match(older.out, /#12, a newer request for ui-design, merged after #10/);
+    untouched('older request');
+    // A control character in the reason never reaches the record or the log.
+    const ctl = await runRequest(ci, { facts: () => ({ ok: true, base: 'trunk', head: 'skip/EP-test/ui-design', body: '<!-- yad:reason -->no UI\r::error::x<!-- /yad:reason -->' }) });
+    assert.equal(ctl.code, 0, ctl.out);
+    assert.equal(reqState(ci).steps.find((x) => x.id === 'ui-design').record.reason, 'no UI ::error::x');
+    assert.doesNotMatch(ctl.out, /\r/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate ci names the request branches when a branch is none of the three kinds; ciPin is exported and SET_ASIDE_SINCE is set', async () => {
+  const { T, ci } = scaffoldRequestProduct();
+  try {
+    const r = await runRequest(ci, { branch: 'feature/x' });
+    assert.match(r.out, /is not a review\/EP-\*\/<artifact>, skip\/EP-\*\/<step> or unskip\/EP-\*\/<step> branch/);
+    const { ciPin, SET_ASIDE_SINCE, olderThan } = await import('./gate.mjs');
+    assert.equal(typeof ciPin, 'function');
+    assert.match(SET_ASIDE_SINCE, /^\d+\.\d+\.\d+$/);
+    assert.ok(olderThan('4.14.0', SET_ASIDE_SINCE), 'no released yadflow before this story applies a request');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('E64 gate ci: a merge also stamps an epic with no open review and commits it; an epic with uncommitted ledger edits is left alone', async () => {
   const { T, ci } = scaffoldCiProduct();
   try {
