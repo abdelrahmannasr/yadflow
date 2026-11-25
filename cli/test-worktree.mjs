@@ -1010,6 +1010,76 @@ test('yad build step spec in_progress pins the epic\'s code worktree when there 
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad build step spec in_progress pins the story\'s code worktree first, then the epic\'s, then the main checkout (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api, awt } = workspace();
+  const s1 = path.join(W, 'api--EP-x-S01');
+  try {
+    const st = (id, type, status) => ({ id, type, artifact: id.startsWith('stories') ? 'stories/' : 'epic.md', status, risk_tags: [] });
+    const story = (id) => `---\nid: ${id}\nepic: EP-x\nstatus: approved\nrepos: [api]\n---\n# ${id}\n`;
+    write(P, {
+      'epics/EP-x/.sdlc/state.json': JSON.stringify({ epicId: 'EP-x', profile: 'chore', currentStep: 'ready-for-build', steps: [st('epic', 'author', 'done'), st('epic-review', 'review+approve', 'done'), st('stories', 'author', 'done'), st('stories-review', 'review+approve', 'done')] }),
+      'epics/EP-x/stories/EP-x-S01.md': story('EP-x-S01'),
+      'epics/EP-x/stories/EP-x-S02.md': story('EP-x-S02'),
+      'epics/EP-x/stories/EP-x-S03.md': story('EP-x-S03'),
+    });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'stories');
+    git(P, 'push', '-q', 'origin', 'main');
+    write(api, { '.specify/memory/constitution.md': '# c\n' });
+    git(api, 'add', '.specify');
+    git(api, 'commit', '-qm', 'spec kit');
+    git(api, 'push', '-q', 'origin', 'main');
+    const pin = (id) => {
+      assert.equal(yad(P, 'build', 'start', id, '--repo', 'api').code, 0);
+      const r = yad(P, 'build', 'step', id, '--repo', 'api', 'spec', 'in_progress', '--json');
+      assert.equal(r.code, 0, r.out);
+      return json(r).specKit;
+    };
+    const feature = (at) => { try { return JSON.parse(fs.readFileSync(path.join(at, '.specify/feature.json'), 'utf8')).feature_directory; } catch { return null; } };
+    // No worktree at all: the main checkout, as today.
+    assert.deepEqual(pin('EP-x-S03'), { file: 'api/.specify/feature.json', featureDirectory: 'specs/EP-x-S03', changed: true });
+    assert.equal(feature(api), 'specs/EP-x-S03');
+    fs.rmSync(path.join(api, '.specify/feature.json'));
+    // The story's own worktree and the epic's: the story's wins.
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S01').code, 0);
+    assert.deepEqual(pin('EP-x-S01'), { file: 'api--EP-x-S01/.specify/feature.json', featureDirectory: 'specs/EP-x-S01', changed: true });
+    assert.equal(feature(s1), 'specs/EP-x-S01');
+    assert.equal(feature(awt), null, 'the epic\'s worktree is left alone');
+    assert.equal(feature(api), null, 'the main checkout is left alone');
+    // A story with no worktree of its own: the epic's, as today.
+    assert.deepEqual(pin('EP-x-S02'), { file: 'api--EP-x/.specify/feature.json', featureDirectory: 'specs/EP-x-S02', changed: true });
+    assert.equal(feature(s1), 'specs/EP-x-S01', 'another story\'s worktree is left alone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('from a story\'s code worktree: the registry knows the repo, Product commands go to the epic\'s Product, and yad run checks runs there as the repo (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api, pwt } = workspace();
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    // The registry gives api a platform its origin (a folder) does not show: run checks can only know it from the registry.
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'gitlab' }] }) });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'api on gitlab');
+    git(P, 'push', '-q', 'origin', 'main');
+    withStories(P);
+    write(api, { 'checks/.keep': '' });
+    git(api, 'add', 'checks');
+    git(api, 'commit', '-qm', 'checks');
+    git(api, 'push', '-q', 'origin', 'main');
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S02').code, 0);
+    assert.equal(registryEntryFor(P, path.join(s2, 'src'))?.meta?.name, 'api');
+    let found = findProduct(path.join(s2, 'src'));
+    assert.deepEqual([found.root, found.repo?.name], [P, 'api'], 'no Product worktree: the main Product');
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    found = findProduct(path.join(s2, 'src'));
+    assert.deepEqual([found.root, found.worktree, found.repo?.name], [pwt, 'EP-x', 'api'], 'the epic\'s Product worktree, never one of the story');
+    const r = yad(s2, 'run', 'checks', '--no-build', '--no-fetch', '--json');
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual([out.repo, out.kind, out.platform], ['api--EP-x-S02', 'code', 'gitlab'], r.out);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad worktree add --all makes nothing when one target cannot be fetched, and a repo inside the Product is refused (#115 review 1)', () => {
   const { W, P, api, pwt } = workspace();
   try {
