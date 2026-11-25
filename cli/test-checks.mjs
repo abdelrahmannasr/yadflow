@@ -8479,6 +8479,6 @@ test('lineage-check passes a promotion merge request, and only that (#684)', () 
 
 test('epic-open passes a promotion merge request, and only that (#684)', () => promotionCase(EPIC_OPEN, 'epic-open', ['main'], { fork: true }));
 
-test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link'));
+test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link', ['main'], { fork: true }));
 
 test('commit-message passes a promotion merge request, and only that (#684)', () => promotionCase(COMMIT_MSG, 'commit-message', ['--profile', 'code', 'main']));
