@@ -10130,6 +10130,15 @@ test('yad skip by request works on a Product that sits in a subfolder of its rep
   } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('a skip request body cannot end its reason comment early: --> and --!> are both broken up', async () => {
+  const { requestBody } = await import('./skip-request.mjs');
+  const { requestReason } = await import('./gate.mjs');
+  const body = requestBody({ kind: 'skip', epic: 'EP-x', step: 'ui-design', reason: 'a --> b --!> c' });
+  const inner = body.split('<!-- yad:reason -->')[1].split('<!-- /yad:reason -->')[0];
+  assert.doesNotMatch(inner, /--!?>/, 'no HTML comment end inside the reason');
+  assert.equal(requestReason(body), 'a -- > b -- > c');
+});
+
 test('yad skip and unskip by request refuse what a local skip refuses, an old CI pin, and say how to open a PR that did not open', async () => {
   const prev = process.exitCode;
   const { runDefer, runUnblock } = await import('./skip.mjs');

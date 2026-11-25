@@ -18,9 +18,10 @@ const STEP_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const requestBranch = (kind, epic, step) => `${kind}/${epic}/${step}`;
 export const requestTitle = (kind, epic, step) => `chore(gate): ${kind} ${step} in ${epic}`;
 
-// The reason sits between markers `gate ci` reads. One line, with no control character and no `-->`, so it
-// can neither end the marker early nor start a command line in a CI log.
-const oneLine = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').replace(/-->/g, '-- >').trim();
+// The reason sits between markers `gate ci` reads. One line, with no control character and no comment end
+// (`-->`, or `--!>`, which HTML also reads as one), so it can neither end the marker early nor start a
+// command line in a CI log.
+const oneLine = (s) => forTerminal(String(s ?? '')).replace(/\s+/g, ' ').replace(/--!?>/g, '-- >').trim();
 
 // Passes `pr-template.sh --profile product` for a head that is not a review branch: `## Summary`,
 // `## Impact & Risk` with a real `Risk level:`, `## Checklist`.
