@@ -277,6 +277,95 @@ test('planStep --via human writes human; the usage line lists agent (#658)', asy
   assert.match(fs.readFileSync(YAD, 'utf8'), /yad build step <story> --repo <r> <step> in_progress\|in_review\|done\|blocked \[--reason <text>\] \[--run <uid>\] \[--via auto\|agent\|human\]/);
 });
 
+test('planAmend: corrects a closed step\'s via, keeps the earlier value in closed.amended, and refuses what it cannot correct (#658)', async () => {
+  const { planAmend } = await import('./build.mjs');
+  const story = 'EP-l-S01';
+  const steps = () => [
+    { id: 'spec', status: 'done', closed: { by: 'alice', date: '2026-11-01', via: 'human', run: 'aaaa1111' } },
+    { id: 'tasks', status: 'done', closed: { by: 'alice', date: '2026-11-02', via: 'human' } },
+    { id: 'implement', status: 'done', runs: [{ by: 'alice', date: '2026-11-03', via: 'human', run: 'used0001', task: 'T01' }], closed: { by: 'alice', date: '2026-11-04', via: 'human', run: 'bbbb2222', task: 'T02' } },
+    { id: 'checks', status: 'todo' },
+    { id: 'engineer-review', status: 'done', closed: { by: 'alice', date: '2026-11-05', via: 'human' } },
+  ];
+  const bs = (s = steps()) => ({ story, repos: { api: { currentStep: 'checks', steps: s } } });
+  const amend = (over, state = bs()) => planAmend(state, { story, repo: 'api', step: 'spec', via: 'agent', reason: 'an agent wrote it', by: 'bob', date: '2026-11-25', ...over });
+  const at = (out, id) => out.buildState.repos.api.steps.find((s) => s.id === id);
+
+  // spec and tasks: the via changes, the close's by and date stay, the history holds the earlier value.
+  let out = amend({});
+  assert.deepEqual(at(out, 'spec').closed, { by: 'alice', date: '2026-11-01', via: 'agent', run: 'aaaa1111', amended: [{ via: 'human', by: 'bob', date: '2026-11-25', reason: 'an agent wrote it' }] });
+  assert.equal(out.from, 'human');
+  assert.equal(out.already, false);
+  out = amend({ step: 'tasks', reason: '  trimmed  ' });
+  assert.deepEqual(at(out, 'tasks').closed.amended, [{ via: 'human', by: 'bob', date: '2026-11-25', reason: 'trimmed' }]);
+  // A second correction appends; the first stays.
+  const twice = amend({ via: 'human', reason: 'it was a person after all' }, amend({}).buildState);
+  assert.equal(twice.already, false);
+  assert.deepEqual(at(twice, 'spec').closed.amended.map((e) => [e.via, e.reason]), [['human', 'an agent wrote it'], ['agent', 'it was a person after all']]);
+  assert.equal(at(twice, 'spec').closed.via, 'human');
+  // The same value is nothing changed, with no history entry.
+  out = amend({ via: 'human' });
+  assert.equal(out.already, true);
+  assert.equal('amended' in at(out, 'spec').closed, false);
+  // The latest close of a per-task step, matched by --task.
+  out = amend({ step: 'implement', task: 'T02' });
+  assert.equal(at(out, 'implement').closed.via, 'agent');
+  assert.throws(() => amend({ step: 'implement', task: 'T01' }), /implement was last closed for T02, not T01/);
+  assert.throws(() => amend({ step: 'implement', task: 'nope' }), /--task must be a task id/);
+
+  // Refusals.
+  assert.throws(() => amend({ step: 'checks' }), /checks is not closed in EP-l-S01 \/ api, so there is no record to correct/);
+  const noRecord = steps(); delete noRecord[0].closed;
+  assert.throws(() => amend({}, bs(noRecord)), /spec in EP-l-S01 \/ api has no closing record to correct/);
+  assert.throws(() => amend({ step: 'engineer-review' }), /engineer-review is not corrected/);
+  assert.throws(() => amend({ reason: null }), /a correction needs a reason/);
+  assert.throws(() => amend({ reason: '   ' }), /a correction needs a reason/);
+  assert.throws(() => amend({ via: null }), /--via is required/);
+  assert.throws(() => amend({ via: 'robot' }), /--via must be auto, agent or human \(got 'robot'\)/);
+  assert.throws(() => amend({ step: 'nope' }), /has no step 'nope'/);
+
+  // --via auto needs a run of this step, not rejected, recorded while the dial was auto, not used.
+  const run = (over) => ({ uid: 'cccc3333', story, repo: 'api', step: 'implement', task: 'T02', verdict: 'approved-unchanged', advance: 'auto', automation: 'machine_advance', ...over });
+  const auto = (over, r = run()) => amend({ step: 'implement', via: 'auto', run: 'cccc3333', runRecord: r, ...over });
+  assert.throws(() => amend({ step: 'implement', via: 'auto' }), /--via auto needs --run <uid>/);
+  assert.throws(() => auto({}, null), /no trust run cccc3333 for EP-l-S01 \/ api \/ implement \/ T02/);
+  assert.throws(() => auto({}, run({ step: 'checks' })), /no trust run cccc3333/);
+  assert.throws(() => auto({}, run({ task: 'T01' })), /no trust run cccc3333/);
+  assert.throws(() => auto({}, run({ verdict: 'rejected' })), /trust run cccc3333 is rejected/);
+  assert.throws(() => auto({}, run({ advance: 'human', automation: 'human_approve' })), /was recorded while the implement dial was not auto/);
+  assert.throws(() => auto({ run: 'used0001' }, run({ uid: 'used0001' })), /trust run used0001 already closed implement/);
+  out = auto({});
+  assert.deepEqual(at(out, 'implement').closed, { by: 'alice', date: '2026-11-04', via: 'auto', run: 'cccc3333', task: 'T02', amended: [{ via: 'human', by: 'bob', date: '2026-11-25', reason: 'an agent wrote it', run: 'bbbb2222' }] });
+  // An older run with only `automation` counts too.
+  out = auto({}, run({ advance: undefined }));
+  assert.equal(at(out, 'implement').closed.via, 'auto');
+});
+
+test('yad build amend: corrects spec and tasks on disk; done on a closed step names the correction (#658)', async () => {
+  const { buildAmend } = await import('../bin/commands.mjs');
+  const { W, P, dir } = workspace();
+  const closed = (id) => read(path.join(dir, '.sdlc/build-state/EP-l-S01.json')).repos.api.steps.find((s) => s.id === id).closed;
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'done');
+    yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'tasks', 'done');
+    let r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'done');
+    assert.match(r.out, /spec is already done in EP-l-S01 \/ api — nothing changed/);
+    assert.match(r.out, /to correct how it closed: yad build amend EP-l-S01 --repo api spec --via auto\|agent\|human --reason "<why>"/);
+    for (const step of ['spec', 'tasks']) {
+      const res = await buildAmend(P, { story: 'EP-l-S01', repo: 'api', step, via: 'agent', reason: 'an agent did it', today: '2026-11-25' });
+      assert.deepEqual([res.changed, res.from, res.via], [true, 'human', 'agent']);
+      assert.equal(closed(step).via, 'agent');
+      assert.deepEqual(closed(step).amended, [{ via: 'human', by: 'alice', date: '2026-11-25', reason: 'an agent did it' }]);
+    }
+    const again = await buildAmend(P, { story: 'EP-l-S01', repo: 'api', step: 'spec', via: 'agent', reason: 'again', today: '2026-11-25' });
+    assert.equal(again.changed, false);
+    assert.equal(closed('spec').amended.length, 1);
+    await assert.rejects(() => buildAmend(P, { story: 'EP-l-S01', step: 'spec', via: 'agent', reason: 'x' }), /--repo <name> is required/);
+    await assert.rejects(() => buildAmend(P, { story: 'EP-l-S01', repo: 'api', via: 'agent', reason: 'x' }), /the step to correct is required/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad build trust: signals are checked per step, and --uid finalizes the verdict', () => {
   const { W, P, dir } = workspace();
   try {
