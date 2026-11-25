@@ -488,7 +488,7 @@ The block is `{ "tool": "plannotator", "messages": [ … ] }`. Each message has:
 
 | Field | Meaning |
 |---|---|
-| `key` | a stable id, one pattern per kind: `hand-off:<epic>:<step>:<act>`, `halt:<story>:<step>:<repo>:<task>`, `review:<epic>:<base>:gate` (`gate open`, `open-pr`) or `review:<repo>:<pr>:nudge`. A missing part is `-`. `<task>` is the task being walked, for `implement` and `checks` only (the `--task` given, else the one the lane's step holds). `<base>` is the last part of the review branch, such as `architecture` or `stories-S01`, so each story's review has its own key. The agent posts a changed message as a replacement for the one with the same key, and after a context reset searches for the key before posting again |
+| `key` | a stable id, one pattern per kind: `hand-off:<epic>:<step>:<act>`, `halt:<story>:<step>:<repo>:<task>`, `review:<epic>:<base>:gate` (`gate open`, `open-pr`) or `review:<repo>:<pr>:nudge`. A missing part is `-`. `<task>` is the task being walked, for `implement` and `checks` only (the `--task` given, else the one the lane's step holds; with neither, `-`). `<base>` is the part of the review branch after `review/EP-<slug>/`, such as `architecture` or `stories-S01`, so each story's review has its own key. The agent posts a changed message as a replacement for the one with the same key, and after a context reset searches for the key before posting again |
 | `kind` | `hand-off` (a step only the person can do), `halt` (a Build step stopped) or `review` (a review is ready) |
 | `thread` | the thread to post into: `yad <epic>` (a hand-off, a gate review), `yad <story>` (a halt), `yad <repo>` (a nudge); `yad` when none is known |
 | `title` | one line, at most 120 characters |
