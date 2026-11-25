@@ -44,8 +44,9 @@ export const WIP_PREFIX = 'yad/wip';
 export const PUSH_EVERY_MS = 5 * 60 * 1000;
 // The `.sdlc/` files a person, or their skill, writes. hook.mjs calls the first two artifact-side; the yad-ui
 // and yad-test-cases skills commit the two links files with their artifacts, "artifact-side, not ledger".
-// Everything else in a `.sdlc/` folder is the ledger, or a Build log only the engine writes.
-const PERSON_WRITTEN_SDLC = new Set(['.sdlc/contract-lock.json', '.sdlc/change.json', '.sdlc/design-links.json', '.sdlc/test-links.json']);
+// Everything else in a `.sdlc/` folder is the ledger, or a Build log only the engine writes. Exported so a test holds
+// it equal to the agent rule's list (`SKILL_WRITTEN_SDLC`, cli/agent-rules.mjs), less `reconcile-debt.json`.
+export const PERSON_WRITTEN_SDLC = new Set(['.sdlc/contract-lock.json', '.sdlc/change.json', '.sdlc/design-links.json', '.sdlc/test-links.json']);
 
 // A step owner file (E47): `<epic>/.sdlc/owners/<step>.json`, directly in that folder. The one rule capture,
 // fold, claims and the owners module all use, so the four can never disagree.

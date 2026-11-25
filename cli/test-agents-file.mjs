@@ -129,6 +129,23 @@ test('the two .sdlc rules forbid the ledger by hand and allow the files a skill 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// EP-reported-agent-flow-S03 (engine #681): the files the rule lets a skill step write, and the files capture
+// takes as artifacts, are one list but for `reconcile-debt.json`. That file is an append-only list that capture,
+// `yad fold`, claims and owners treat as ledger today: on a local Product `yad fold` commits it with the ledger.
+// Adding it to PERSON_WRITTEN_SDLC would make capture snapshot it and `yad fold` leave a later append on disk.
+test('the rule\'s skill-written .sdlc files equal capture\'s person-written list, less reconcile-debt.json', async () => {
+  const { PERSON_WRITTEN_SDLC, capturedEpic } = await import('./capture.mjs');
+  const LEDGER_LIKE = ['reconcile-debt.json'];
+  assert.deepEqual(
+    [...PERSON_WRITTEN_SDLC].sort(),
+    SKILL_WRITTEN_SDLC.filter((f) => !LEDGER_LIKE.includes(f)).map((f) => `.sdlc/${f}`).sort(),
+  );
+  for (const f of LEDGER_LIKE) assert.ok(SKILL_WRITTEN_SDLC.includes(f), f);
+  // capturedEpic answers as before: the four are an epic's artifacts, the debt list is ledger.
+  for (const f of PERSON_WRITTEN_SDLC) assert.equal(capturedEpic(`epics/EP-x/${f}`), 'EP-x', f);
+  assert.equal(capturedEpic('epics/EP-x/.sdlc/reconcile-debt.json'), null);
+});
+
 test('check --fix writes AGENTS.md and CLAUDE.md for Claude Code, AGENTS.md alone otherwise; files are never staged', () => {
   const T = tmp();
   try {
