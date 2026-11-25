@@ -275,13 +275,32 @@ test('yad worktree add with a story is refused, making nothing, for a bad id, a 
     await no({ story: true }, /--story needs a story id/);
     await no({ story: '' }, /--story needs a story id/);
     await no({ story: 'EP-y-S01' }, /EP-y-S01 is a story of EP-y, not of EP-x/);
-    await no({ story: 'EP-x-S09' }, /no story EP-x-S09 in EP-x/);
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S09' }), /no story EP-x-S09 in EP-x/);
+    // remove does not need the story file (a retired story's worktree can still be removed): with none, it finds none.
+    await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S09', cwd: W }), /no yad worktree for EP-x-S09/);
     await no({ story: 'EP-x-S01', all: true }, /--story and --all name different targets/);
     await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S03' }), /EP-x-S03 names no registered code repo/);
     await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S04' }), /EP-x-S04 names no registered code repo/);
     await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S03', repo: 'api' }), /api is not one of EP-x-S03's repos/);
     assert.equal(git(api, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
     assert.equal(git(P, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree remove --story removes a story\'s worktree even when its story file is gone (EP-reported-agent-flow-S01)', async () => {
+  const { W, P, api } = workspace();
+  withStories(P, { 'EP-x-S02': '[api]' });
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S02' });
+    assert.equal(fs.existsSync(s2), true);
+    fs.rmSync(path.join(P, 'epics/EP-x/stories/EP-x-S02.md'));
+    git(P, 'commit', '-q', '-am', 'retire EP-x-S02');
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S02' }), /no story EP-x-S02 in EP-x/, 'add still needs the file');
+    const r = await runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S02', cwd: W });
+    assert.deepEqual(r.removed, [{ repo: 'api', path: s2, story: 'EP-x-S02' }]);
+    assert.equal(fs.existsSync(s2), false);
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 

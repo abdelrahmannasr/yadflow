@@ -241,14 +241,16 @@ function epicRepos(main, epic) {
 const sameStory = (w, story) => (w.story ?? null) === (story ?? null);
 const noStory = (story) => story === undefined || story === null;
 
-// A story's checks (EP-reported-agent-flow-S01): a story id of this epic, whose file is on the Product.
-// → the repos its `repos:` names.
-function storyRepos(productMain, epic, story, all) {
+// A story's checks (EP-reported-agent-flow-S01): a story id of this epic and not with --all; for `add`,
+// its file must be on the Product too. → the repos its `repos:` names. `forRemove` neither needs the file
+// nor reads it (→ []), so a retired story's worktree can still be removed.
+function storyRepos(productMain, epic, story, all, forRemove = false) {
   if (story === true || story === '') throw err(CODE, '--story needs a story id', 'a story id looks like EP-checkout-S01');
   if (typeof story !== 'string' || !STORY_ID_RE.test(story)) throw err(CODE, `${forTerminal(String(story))} is not a story id`, 'a story id looks like EP-checkout-S01');
   const of = story.replace(/-S\d+$/, '');
   if (of !== epic) throw err(CODE, `${story} is a story of ${of}, not of ${epic}`, `pass its own epic: \`yad worktree … ${of} --story ${story}\``);
   if (all) throw err(CODE, '--story and --all name different targets — pass one', '--story makes a worktree in each code repo the story names; --all is the epic\'s');
+  if (forRemove) return [];
   const file = path.join(epicRoot(productMain, epic), 'stories', `${story}.md`);
   if (!fs.existsSync(file)) throw err(CODE, `no story ${story} in ${epic} on the Product`, `its file would be epics/${epic}/stories/${story}.md; \`yad status ${epic}\` lists the epic's stories`);
   const fm = readFrontmatter(file);
@@ -256,14 +258,15 @@ function storyRepos(productMain, epic, story, all) {
 }
 
 // → the targets. With a story: the registered code repos its `repos:` names (or the one --repo names),
-//   never the Product; `forRemove` keeps every code repo, also one the story no longer names.
+//   never the Product; `forRemove` keeps every code repo, also one the story no longer names, and works
+//   when the story file is gone (it reads no `repos:`).
 function pickTargets(productRoot, epic, { repo = null, all = false, story = null, forRemove = false }) {
   if (!isValidEpicId(epic)) throw err(CODE, `${forTerminal(epic)} is not an epic id`, 'an epic id looks like EP-checkout');
   const targets = targetsOf(productRoot);
   const product = targets[0];
   if (!fs.existsSync(path.join(epicRoot(product.main, epic), '.sdlc', 'state.json'))) throw err(CODE, `no epic ${epic} on the Product`, '`yad next` lists the epics');
   if (!noStory(story)) {
-    const wanted = storyRepos(product.main, epic, story, all);
+    const wanted = storyRepos(product.main, epic, story, all, forRemove);
     const code = targets.filter((t) => t.repo);
     if (repo && repo !== true) {
       const t = code.find((x) => x.repo === repo);
