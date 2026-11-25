@@ -409,7 +409,7 @@ ${c.bold('Build helpers')}
                                        once the story is in-build or shipped, has a ship or started
                                        work, and for the last story left when none has shipped
   yad build start <story> --repo <r>   ${c.dim('(on the Product)')} Begin a story's Build lane in one repo
-  yad build step <story> --repo <r> <step> in_progress|in_review|done|blocked [--reason <text>] [--run <uid>] [--via auto|human] [--task <T>]
+  yad build step <story> --repo <r> <step> in_progress|in_review|done|blocked [--reason <text>] [--run <uid>] [--via auto|agent|human] [--task <T>]
                                        Move the lane's current step; done records how it closed.
                                        --task <T> reopens implement/checks for the next task
   yad build trust <story> --repo <r> <step> --verdict <v> [--signal k=v] [--ran-by machine|human] [--note] [--task <T>]

@@ -104,6 +104,10 @@ const activeStep = (lane) => {
   return cur && !isPassed(cur) ? cur : lane.steps.find((s) => !isPassed(s)) || null;
 };
 
+// How a Build lane step closes (`closed.via`, a subset of CLOSED_VIA): a person's work, an agent's work on a
+// dial a person advances (#658), or an advance on its own on an `auto` dial.
+export const STEP_VIA = ['auto', 'agent', 'human'];
+
 // PURE: move one step of a lane. Only the lane's active step moves, so a lane is never walked out of order.
 // `done` writes the closing record (E18) and moves `currentStep` on; `blocked` needs a reason, written as
 // the step's record. The review step is closed by `build done`, which checks every task shipped first.
@@ -165,7 +169,13 @@ export function planStep(buildState, { story, repo, step, to, reason = null, by 
   if (active && active.id !== step) {
     throw err(CODE, `${story} / ${repo} is at ${active.id}, not ${step}`, `move ${active.id} first — the lane is walked in order`);
   }
-  if (!['auto', 'human'].includes(via)) throw err(CODE, `--via must be auto or human (got '${via}')`, '--via human, unless the orchestrator advanced it on its own');
+  if (!STEP_VIA.includes(via)) throw err(CODE, `--via must be auto, agent or human (got '${via}')`, '--via human for a person\'s work, --via agent for an agent\'s, --via auto when the step advanced on its own');
+  // An agent's close is for a dial a person advances (#658). On a dial IN FORCE at auto the step advances on
+  // its own, and that close is --via auto, which names the trust run that earned it.
+  if (via === 'agent' && to === 'done' && effectiveAdvance(target, automation).advance === 'auto') {
+    throw err(CODE, `${step} advances on its own in ${story} / ${repo}, so it is closed --via auto, not --via agent`,
+      `yad build step ${story} --repo ${repo} ${step} done --via auto --run <uid>`);
+  }
   // The dial IN FORCE — the lane's own, held at human while the kill switch is on — not the lane's word alone.
   if (via === 'auto' && to === 'done' && effectiveAdvance(target, automation).advance !== 'auto') {
     const why = effectiveAdvance(target, automation).why;

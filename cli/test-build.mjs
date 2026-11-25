@@ -226,6 +226,57 @@ test('yad build step: the lane is walked in order; a halt needs a reason; the re
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+test('yad build step done --via agent: an agent\'s close on a dial that is not auto; refused on an auto dial, allowed under the kill switch (#658)', () => {
+  const { W, P, dir } = workspace();
+  const lane = () => read(path.join(dir, '.sdlc/build-state/EP-l-S01.json')).repos.api;
+  const closed = (id) => lane().steps.find((s) => s.id === id).closed;
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    // No --run needed.
+    let r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'spec', 'done', '--via', 'agent');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(closed('spec'), { by: 'alice', date: closed('spec').date, via: 'agent' });
+    // A --run given is checked as before, and recorded.
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'tasks', 'done', '--via', 'agent', '--run', 'deadbeef');
+    assert.match(r.out, /no trust run deadbeef for EP-l-S01 \/ api \/ tasks/);
+    r = yad(P, 'build', 'trust', 'EP-l-S01', '--repo', 'api', 'tasks', '--verdict', 'approved-unchanged', '--ran-by', 'machine', '--json');
+    const run = json(r).uid;
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'tasks', 'done', '--via', 'agent', '--run', run);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([closed('tasks').via, closed('tasks').run], ['agent', run]);
+    // A value it does not know is refused with the list, and nothing is written.
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--via', 'robot');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /--via must be auto, agent or human \(got 'robot'\)/);
+    // On an auto dial the step advances on its own: --via agent is refused, and the hint names --via auto.
+    r = yad(P, 'dial', 'EP-l', 'EP-l-S01', '--repo', 'api', 'implement', '--to', 'auto');
+    assert.equal(r.code, 0, r.out);
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--via', 'agent');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /implement advances on its own in EP-l-S01 \/ api, so it is closed --via auto, not --via agent/);
+    assert.match(r.out, /--via auto --run <uid>/);
+    assert.equal(lane().currentStep, 'implement', 'nothing written');
+    // The kill switch holds the dial at human: an agent's close is allowed again.
+    r = yad(P, 'kill', '--reason', 'a bad week');
+    assert.equal(r.code, 0, r.out);
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--via', 'agent');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(closed('implement').via, 'agent');
+    // No --via, and --via human, write human as before.
+    r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'checks', 'done');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(closed('checks').via, 'human');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('planStep --via human writes human; the usage line lists agent (#658)', async () => {
+  const { planStep } = await import('./build.mjs');
+  const bs = { story: 'EP-l-S01', repos: { api: { currentStep: 'spec', steps: [{ id: 'spec', status: 'todo' }, { id: 'tasks', status: 'todo' }] } } };
+  const out = planStep(bs, { story: 'EP-l-S01', repo: 'api', step: 'spec', to: 'done', by: 'a', date: 'd', via: 'human' });
+  assert.equal(out.buildState.repos.api.steps[0].closed.via, 'human');
+  assert.match(fs.readFileSync(YAD, 'utf8'), /yad build step <story> --repo <r> <step> in_progress\|in_review\|done\|blocked \[--reason <text>\] \[--run <uid>\] \[--via auto\|agent\|human\]/);
+});
+
 test('yad build trust: signals are checked per step, and --uid finalizes the verdict', () => {
   const { W, P, dir } = workspace();
   try {
