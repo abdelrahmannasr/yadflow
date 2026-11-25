@@ -1946,7 +1946,7 @@ test('S03 yad build step … blocked: one halt message when the Inbox is ready; 
     assert.equal(r.inbox.messages.length, 1);
     const [m] = r.inbox.messages;
     assert.equal(m.kind, 'halt');
-    assert.equal(m.key, 'halt:EP-l-S01:spec:api');
+    assert.equal(m.key, 'halt:EP-l-S01:spec:api:-');
     assert.equal(m.thread, 'yad EP-l-S01');
     assert.equal(m.title, 'Build halted — EP-l-S01 in api: spec');
     assert.deepEqual(m.question, { prompt: 'What should happen next?', options: ['fix', 'skip', 'stop'] });
@@ -2024,5 +2024,28 @@ test('S03 yad build step … blocked --json: the CLI adds the block only when Pl
       { cwd, encoding: 'utf8', env: { ...ENV, PWD: cwd, HOME: home, USERPROFILE: home, PATH: only, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1' } }).stdout);
     assert.equal(from(api).inbox?.messages.length, 1, 'run from the code repo, its server counts');
     assert.ok(!('inbox' in from(P)), 'run from the Product, the repo\'s server does not');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+// EP-inbox-open-pr-keys-S01: a halt's key names the task, for a step walked once per task only.
+test('EP-inbox-open-pr-keys yad build step … blocked: the halt key names the task of implement and checks; a per-story step names none (TC-02, TC-03)', async () => {
+  const { W, P } = workspace();
+  try {
+    yad(P, 'build', 'start', 'EP-l-S01', '--repo', 'api');
+    const halt = async (step, task = null) => (await buildStep(P, { story: 'EP-l-S01', repo: 'api', step, to: 'blocked', reason: 'r', task, json: true, ready: () => true })).inbox.messages[0].key;
+    // A per-story step never names a task, even when --task is given (TC-03).
+    assert.equal(await halt('spec', 'T02'), 'halt:EP-l-S01:spec:api:-');
+    for (const step of ['spec', 'tasks']) yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', step, 'done');
+    // A task's first walk: the lane's step holds no task yet, so only --task names it.
+    assert.equal(await halt('implement'), 'halt:EP-l-S01:implement:api:-');
+    assert.equal(await halt('implement', 'T01'), 'halt:EP-l-S01:implement:api:T01');
+    yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'done', '--task', 'T01');
+    assert.equal(await halt('checks', 'T01'), 'halt:EP-l-S01:checks:api:T01');
+    yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'checks', 'done', '--task', 'T01');
+    // The next task reopens implement and stores T02 on it: a halt with no --task names it, and differs from T01's.
+    const r = yad(P, 'build', 'step', 'EP-l-S01', '--repo', 'api', 'implement', 'in_progress', '--task', 'T02');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(await halt('implement'), 'halt:EP-l-S01:implement:api:T02');
+    assert.equal(await halt('implement', 'T02'), 'halt:EP-l-S01:implement:api:T02');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });

@@ -386,8 +386,12 @@ export async function buildStep(root, { story, repo, step, to, reason, via = 'hu
   if (to === 'done') info(`next: ${lane.currentStep}`);
   hand('commit with `yad checkpoint --push`');
   const specKit = SPEC_KIT_STEPS.has(step) && to === 'in_progress' ? pinSpecKit(root, repo, story, step) : null;
+  // The halt's key names the task for a step walked once per task (contract `key` patterns): the --task given,
+  // else the task the lane's step holds (a reopen stores it). Any other step names none, even with --task.
+  const held = Array.isArray(lane?.steps) ? lane.steps.find((x) => x?.id === step)?.task : null;
+  const haltTask = PER_TASK.has(step) ? ((task && task !== true ? task : null) || held || null) : null;
   const inbox = json && to === 'blocked' && ready(root, { detectRoot: cwd ?? root })
-    ? inboxBlock([haltMessage({ story, repo, step, reason: String(reason).trim() })]) : undefined;
+    ? inboxBlock([haltMessage({ story, repo, step, task: haltTask, reason: String(reason).trim() })]) : undefined;
   return { story, repo, step, status: to, currentStep: lane.currentStep, changed: true, ...(specKit ? { specKit } : {}), ...(inbox ? { inbox } : {}) };
 }
 
