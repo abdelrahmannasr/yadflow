@@ -8481,4 +8481,14 @@ test('epic-open passes a promotion merge request, and only that (#684)', () => p
 
 test('spec-link passes a promotion merge request, and only that (#684)', () => promotionCase(SPEC_LINK, 'spec-link', ['main'], { fork: true }));
 
-test('commit-message passes a promotion merge request, and only that (#684)', () => promotionCase(COMMIT_MSG, 'commit-message', ['--profile', 'code', 'main']));
+test('commit-message passes a promotion merge request, and only that (#684)', () => promotionCase(COMMIT_MSG, 'commit-message', ['--profile', 'code', 'main'], { fork: true }));
+test('commit-message --profile product never passes as a promotion (#684 review)', () => {
+  const T = scaffoldRepo();
+  try {
+    commit(T, 'Bad Subject Here', { 'x.txt': 'x' });
+    const plain = runGate(COMMIT_MSG, T, ['--profile', 'product', 'main']);
+    assert.equal(plain.code, 1, plain.out);
+    const r = runGate(COMMIT_MSG, T, ['--profile', 'product', 'main'], { YAD_PROMOTE_FROM: 'develop', CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop', CI_MERGE_REQUEST_PROJECT_ID: '7', CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '7' });
+    assert.deepEqual({ code: r.code, out: r.out }, { code: plain.code, out: plain.out });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
