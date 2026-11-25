@@ -459,14 +459,14 @@ resolver `yad next` uses, and the rules from `cli/agent-rules.mjs`.
 ### The Plannotator Inbox: the `inbox` field
 
 [Plannotator](https://github.com/backnotprop/plannotator) keeps an **Inbox** on the person's machine: a local
-window where agents leave messages and the person answers when they can. When a Product uses it, four commands
+window where agents leave messages and the person answers when they can. When a Product uses it, five commands
 add an `inbox` block to their `--json` answer. yad only **shapes** the messages. The agent posts them with its
 own Inbox tool (the `inbox` agent rule, and the yad-guide skill's "Posting to the Inbox"). yad never runs
 Plannotator, and never reads or writes its files.
 
 **When it appears.** Only under `--json`, and only when both hold:
 - the Product chose Plannotator (`yad toolbox add plannotator`, in `.sdlc/toolbox.json`), and
-- it is found on this machine (see [the toolbox](#the-toolbox)). All four commands look from the top of the
+- it is found on this machine (see [the toolbox](#the-toolbox)). All five commands look from the top of the
   checkout or Product they ran in, as `yad toolbox list` does, so a code repo's own plugin or Inbox server counts
   wherever in that repo you run them.
 
@@ -480,14 +480,15 @@ never changes. A refused halt, a review PR that could not be opened, or a PR tha
 |---|---|---|
 | `yad guide [<epic>] --json` | the guide has person steps (`person[]` is not empty) | one `hand-off` per `person[]` entry, in order |
 | `yad build step <story> --repo <r> <step> blocked --reason <text> --json` | the halt was recorded | one `halt`. The reason's first line is the "Why"; the lines after it are the output block (the last 60, with `(trimmed)` when cut) |
-| `yad gate open <epic> <artifact> --json` | the review PR/MR was opened | one `review`, with the PR/MR's link. `yad open-pr` on a review branch opens it the same way but adds no `inbox` |
+| `yad gate open <epic> <artifact> --json` | the review PR/MR was opened | one `review`, with the PR/MR's link |
+| `yad open-pr --json`, on the Product from a `review/EP-<slug>/<base>` branch | the review PR/MR was opened | the same `review` as `yad gate open` gives for that branch, with the same `key` |
 | `yad review nudge --repo <r> --pr <n> --json` | the PR/MR was read | one `review`, with the PR/MR's link |
 
 The block is `{ "tool": "plannotator", "messages": [ … ] }`. Each message has:
 
 | Field | Meaning |
 |---|---|
-| `key` | a stable id: `hand-off:<epic>:<step>:<act>`, `halt:<story>:<step>:<repo>`, or `review:<epic or repo>:<artifact or PR number>:gate` (or `:nudge`). The agent posts a changed message as a replacement for the one with the same key, and after a context reset searches for the key before posting again |
+| `key` | a stable id, one pattern per kind: `hand-off:<epic>:<step>:<act>`, `halt:<story>:<step>:<repo>:<task>`, `review:<epic>:<base>:gate` (`gate open`, `open-pr`) or `review:<repo>:<pr>:nudge`. A missing part is `-`. `<task>` is the task being walked, for `implement` and `checks` only (the `--task` given, else the one the lane's step holds; with neither, `-`). `<base>` is the part of the review branch after `review/EP-<slug>/`, such as `architecture` or `stories-S01`, so each story's review has its own key. The agent posts a changed message as a replacement for the one with the same key, and after a context reset searches for the key before posting again |
 | `kind` | `hand-off` (a step only the person can do), `halt` (a Build step stopped) or `review` (a review is ready) |
 | `thread` | the thread to post into: `yad <epic>` (a hand-off, a gate review), `yad <story>` (a halt), `yad <repo>` (a nudge); `yad` when none is known |
 | `title` | one line, at most 120 characters |

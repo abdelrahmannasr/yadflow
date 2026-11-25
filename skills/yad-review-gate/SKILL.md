@@ -151,8 +151,9 @@ the artifact, carries the review PR's link and ends with the notice that a reply
 gate passes (`yad gate status <epic>` shows it), post "Confirmed: <the gate> passed." in the same thread and
 mark the message done. A reply in the Inbox never approves, comments on or advances the gate: approvals and
 comments are given on the PR (or with `yad gate approve` / `comment`, typed by the person), and the gate
-advances at the merge (or with `yad gate advance`, typed by the person). `yad open-pr` on a review branch
-adds no `inbox`, so a review it opened has no message to post.
+advances at the merge (or with `yad gate advance`, typed by the person). Opened from the review branch with
+`yad open-pr --json`, the review gives the same `review` message, with the same `key`: post it the same way,
+once.
 
 **`comment`** — Capture reviewer feedback. Append/create a review file
 `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` with a heading per reviewer:
