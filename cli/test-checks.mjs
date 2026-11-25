@@ -8393,3 +8393,37 @@ test('lineage-check: separator bytes in a subject do not fake a record (#685)', 
     assert.doesNotMatch(r.out, /chore: hidden' — /);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('epic-open reads the range once and asks product_for once per story, with the same output (#685)', () => {
+  const { T, order, subjectOdd } = oneReadRig({ seed: (p) => seedProductEpic(p, 'EP-demo', { stories: { 'EP-demo-S01': 'draft' } }) });
+  try {
+    const r = runGate(EPIC_OPEN, T, ['main']);
+    assert.equal(r.code, 0, r.out);
+    const notes = r.out.match(/^note \[epic-open\]: [0-9a-f]+ specs\/EP-demo-S01\/link\.md names product-repo '\.\.\/\.\.\/somewhere-else'/gm) || [];
+    assert.equal(notes.length, 4, r.out);
+    assert.equal((r.out.match(/-> EP-demo \(epic is open — has unshipped stories\)\./g) || []).length, 4, r.out);
+    assert.match(r.out, /PASS \[epic-open\]: [0-9a-f]+ EP-demo-S01-T02 -> EP-demo/);
+    assert.doesNotMatch(r.out, /EP-other-S09/);
+    assert.ok(r.out.includes(`'${subjectOdd}' — `), r.out);
+    assert.deepEqual(printedOrder(r.out), order);
+    const calls = gitCalls(EPIC_OPEN, T);
+    assert.equal(calls.log, 1, 'one git log for the whole range');
+    assert.equal(calls.productFor, 1, 'product_for once for the one story, not once per commit');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('epic-open: separator bytes in a subject do not fake a record (#685)', () => {
+  const T = scaffoldRepo();
+  try {
+    seedProductEpic(path.join(T, 'product'), 'EP-demo', { stories: { 'EP-demo-S01': 'draft' } });
+    commit(T, 'docs: link', { 'specs/EP-gone-S01/link.md': linkMd({ story: 'EP-gone-S01', epic: 'EP-gone', 'product-repo': '../../product' }) });
+    const msg = path.join(T, '.git', 'yad-msg.txt');
+    fs.writeFileSync(msg, `feat: x\x1e${'e'.repeat(40)}\x1fzz\x1fchore: hidden\x1d\n\nTask: EP-gone-S01-T01\n`);
+    git(T, 'commit', '-q', '--allow-empty', '--cleanup=verbatim', '-F', msg);
+    const real = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+    const r = runGate(EPIC_OPEN, T, ['main']);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(`FAIL \\[epic-open\\]: ${real} EP-gone-S01-T01 -> epic EP-gone does not exist in the product repo \\(orphan story link\\)`));
+    assert.doesNotMatch(r.out, /: zz /);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
