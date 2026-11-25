@@ -20,6 +20,7 @@
 - skills/yad-product-bridge/templates/github/yad-gate-sync.yml
 - skills/yad-product-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml
 - cli/test-checks.mjs
+- cli/test.mjs (added with the person's yes, 2026-11-25: the #232 test's two expected GitLab rule strings)
 
 **Done when:** R20–R22 hold. The real reconcile and merge steps are run on mixed branch lists, and a GitLab commit message naming `unskip/EP-x/s` yields that branch. The existing template tests in `cli/test.mjs` (no job reads the event action) and `cli/test-ci-check.mjs` (no run is cancelled) still pass.
 
