@@ -71,8 +71,15 @@ RANGE="${BASE}..HEAD"
 # comes from the environment (YAD_SOURCE_BRANCH on GitHub, GitLab's own variable), never from an argument,
 # so an older template's call is unchanged (#426). verified-commits and contract-check do not read it.
 # Whole names only: the list is read into an array (no glob), compared with `=`, and printed with control
-# characters replaced.
-_src_branch="${YAD_SOURCE_BRANCH:-${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}}"
+# characters replaced. Only a merge request from this same repository counts: a fork may name its own
+# branch `develop` (GitHub's YAD_PR_FORK must say false; on GitLab the source project must be this one).
+_src_branch=""
+if [ -n "${YAD_SOURCE_BRANCH:-}" ]; then
+  if [ "${YAD_PR_FORK:-}" = false ]; then _src_branch="$YAD_SOURCE_BRANCH"; fi
+elif [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" ] && [ -n "${CI_MERGE_REQUEST_PROJECT_ID:-}" ] \
+  && [ "${CI_MERGE_REQUEST_SOURCE_PROJECT_ID:-}" = "$CI_MERGE_REQUEST_PROJECT_ID" ]; then
+  _src_branch="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+fi
 if [ -n "${YAD_PROMOTE_FROM:-}" ] && [ -n "$_src_branch" ]; then
   IFS=$', \t\n' read -r -d '' -a _promote_from <<<"$YAD_PROMOTE_FROM" || true
   if [ "${#_promote_from[@]}" -gt 0 ]; then

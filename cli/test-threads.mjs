@@ -2939,7 +2939,9 @@ test('reconcile-debt-check passes a promotion merge request, and only that (#684
     const plain = rig.run();
     assert.equal(plain.code, 1, plain.out);
     const pass = 'PASS [reconcile-debt]: promotion from develop (YAD_PROMOTE_FROM); its commits were checked when they merged into develop\n';
-    for (const env of [{ YAD_SOURCE_BRANCH: 'develop' }, { CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop' }]) {
+    const github = { YAD_SOURCE_BRANCH: 'develop', YAD_PR_FORK: 'false' };
+    const gitlab = { CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: 'develop', CI_MERGE_REQUEST_PROJECT_ID: '7', CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '7' };
+    for (const env of [github, gitlab]) {
       const r = rig.run({ ...env, YAD_PROMOTE_FROM: 'main, develop' });
       assert.equal(r.code, 0, r.out);
       assert.ok(r.out.endsWith(pass), r.out);
@@ -2948,7 +2950,11 @@ test('reconcile-debt-check passes a promotion merge request, and only that (#684
       { YAD_PROMOTE_FROM: 'develop' },
       { YAD_PROMOTE_FROM: '', YAD_SOURCE_BRANCH: 'develop' },
       { YAD_PROMOTE_FROM: '*', YAD_SOURCE_BRANCH: 'develop' },
-      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'feature' },
+      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'feature', YAD_PR_FORK: 'false' },
+      // A fork may name its own branch develop: never a promotion (code review of #684).
+      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'develop' },
+      { YAD_PROMOTE_FROM: 'develop', YAD_SOURCE_BRANCH: 'develop', YAD_PR_FORK: 'true' },
+      { YAD_PROMOTE_FROM: 'develop', ...gitlab, CI_MERGE_REQUEST_SOURCE_PROJECT_ID: '8' },
     ]) {
       const r = rig.run(env);
       assert.deepEqual({ code: r.code, out: r.out }, { code: plain.code, out: plain.out }, JSON.stringify(env));
