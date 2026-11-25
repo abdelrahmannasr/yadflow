@@ -71,10 +71,14 @@ env:
 jobs:
   mergesync:
     # The human merge of a review branch: advance the step + flip the artifact status on the default
-    # branch. Nothing runs pre-merge — review state lives on the platform until the merge.
+    # branch. Nothing runs pre-merge — review state lives on the platform until the merge. The merge of a
+    # `skip/EP-…` or `unskip/EP-…` request branch (`yad skip` / `yad unskip` once CI owns the ledger) runs
+    # the same job: `yad gate ci` marks the step skipped, or puts it back.
     if: >
       github.event_name == 'pull_request' &&
-      startsWith(github.event.pull_request.head.ref, 'review/EP-') &&
+      (startsWith(github.event.pull_request.head.ref, 'review/EP-') ||
+       startsWith(github.event.pull_request.head.ref, 'skip/EP-') ||
+       startsWith(github.event.pull_request.head.ref, 'unskip/EP-')) &&
       github.event.pull_request.merged == true &&
       (vars.YAD_TRUNK == '' || github.event.pull_request.base.ref == vars.YAD_TRUNK)
     runs-on: ubuntu-latest
@@ -146,7 +150,8 @@ jobs:
         # The head ref reaches the shell through `env:`, never through `${{ }}` inside `run:`. A
         # branch name may legally contain `$`, backticks and parentheses, so a PR opened from
         # `review/EP-x$(curl …)` would otherwise execute on a runner holding `contents: write` — and
-        # the `if:` guard above does not stop it, since that name still starts with `review/EP-`.
+        # the `if:` guard above does not stop it, since that name still starts with `review/EP-`. The same
+        # holds for `skip/EP-…` and `unskip/EP-…`; `yad gate ci` then parses every kind strictly.
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -257,7 +262,7 @@ jobs:
           while read -r N REF; do
             [ -n "$N" ] || continue
             case "$REF" in
-              review/EP-*) npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
+              review/EP-*|skip/EP-*|unskip/EP-*) npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
             esac
           done < /tmp/yad-merged-prs
           exit $rc

@@ -30492,8 +30492,8 @@ test('#232: the gate sync follows the YAD_TRUNK branch when it is set, and the d
   const rules = gitlab.slice(gitlab.indexOf('\n  rules:\n'), gitlab.indexOf('\n  script:\n'));
   assert.deepEqual([...rules.matchAll(/^ {4}- if: (.+)$/gm)].map((m) => m[1]), [
     '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH != $YAD_TRUNK',
-    '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
-    '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /review\\/EP-/',
+    '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /(review|skip|unskip)\\/EP-/',
+    '$CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /(review|skip|unskip)\\/EP-/',
     '$CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"',
   ]);
   // A push to another branch than YAD_TRUNK never runs the job; unset, that first rule never matches.
