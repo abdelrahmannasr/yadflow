@@ -57,7 +57,8 @@ it is keyed by the epic alone, so two agents building two stories of one epic ge
   - the value does not match the story id pattern (`^EP-[a-z0-9-]+-S\d+$`, as `STORY_RE` in
     `cli/build.mjs`);
   - the story's epic (the id without its `-S<n>` end, as `storyEpic`) is not the epic given;
-  - the epic has no story file with that id (see the open question on this);
+  - on `add` only: the epic has no story file with that id. `remove --story` works when the story file
+    is gone (a retired story), so a story worktree can always be cleaned up with yad;
   - the value is missing (`--story` with no id).
 - R5. Two `add` calls for two stories of one epic give two folders. A second `add` for the same story
   and repo reuses its folder (`skip: true`, "already there"), as an epic's does today. An epic `add`
@@ -112,6 +113,7 @@ it is keyed by the epic alone, so two agents building two stories of one epic ge
 
 ### Session 2026-11-25
 
+- Q: Should `remove --story` refuse when the story file is gone? → A: no: only `add` needs the file; `remove` works without it, so a retired story's worktree can be cleaned up (chosen by the agent during Build, shown to the person; follow-up commit on T02).
 - Q: Light spec? → A: yes (the person, Plannotator Inbox, 2026-11-25).
 - Q: How does an agent get one worktree per story? → A: a new flag, yad worktree add EP-x --story EP-x-S02 makes <repo>--EP-x-S02 (the person, Plannotator Inbox, 2026-11-25).
 - Q: Does `--story` also make a Product worktree (`<product>--EP-x-S02`), or only code repo worktrees? → A: (this spec assumes code repos only, R3; the story says "a worktree per code repo" and "the Product worktree exactly as today"). Settled 2026-11-25 in the Plannotator Inbox: answered by the person, or chosen by the agent and shown to the person, who did not object.
