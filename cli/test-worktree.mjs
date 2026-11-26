@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES } from './worktree.mjs';
+import { worktreePath, planAdd, planRemove, YAD_LOCAL_FILES, yadWorktrees, runWorktreeAdd, runWorktreeList, runWorktreeRemove } from './worktree.mjs';
 import { worktreeAt, linkedGitDir } from './worktree-record.mjs';
 import { registryEntryFor, findProduct } from './find-product.mjs';
 import { branchToCommitOn, isProductWorktree, YAD_COMMIT_SUBJECT, patchChanges, diffIsStatusOnly, diffAddsManagedIgnoreOnly, notYadsOwnAhead, parseRawLog, recheckBeforePush, epicOf } from './productcommit.mjs';
@@ -23,6 +23,11 @@ const YAD = path.join(ROOT, 'bin/yad.mjs');
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) =>
   !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && !/^(CI|GITLAB_CI|GITHUB_ACTIONS|SDLC_BASE|SDLC_HUB_CONFIG|SDLC_PRODUCT_CONFIG)$/.test(k) && !/^(CI_|GITHUB_)/.test(k)));
 ENV.GIT_CONFIG_GLOBAL = '/dev/null';
+// Several tests call the worktree commands in this process, and git then runs with process.env: keep the
+// person's own git settings (a global ignore file, a global hooks path) out of those too, as ENV keeps them
+// out of the CLI runs (code review of EP-reported-agent-flow-S01).
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: ENV }).toString().trim();
 const yadWith = (env, cwd, ...args) => {
   const r = spawnSync(process.execPath, [YAD, ...args], { cwd, env: { ...ENV, ...env, PWD: cwd, YAD_NO_REPORT: '1', YAD_NO_UPDATE_CHECK: '1', NO_COLOR: '1' }, encoding: 'utf8' });
@@ -90,6 +95,55 @@ test('worktree planners: the path beside the checkout, the refusals, and yad\'s 
   assert.match(why[4].fix, /safe to delete/);
 });
 
+test('worktree planners with a story: the folder is named after the story, an epic\'s path is as before, and planAdd refuses or skips with the story\'s path (EP-reported-agent-flow-S01)', () => {
+  assert.equal(worktreePath('/ws/api', 'EP-x'), path.join('/ws', 'api--EP-x'), 'no story: as today');
+  assert.equal(worktreePath('/ws/api', 'EP-x', null), path.join('/ws', 'api--EP-x'), 'story null: as today');
+  assert.equal(worktreePath('/ws/api', 'EP-x', 'EP-x-S02'), path.join('/ws', 'api--EP-x-S02'));
+  const base = { main: '/ws/api', epic: 'EP-x', story: 'EP-x-S02', repo: 'api', hasOrigin: true, pathTaken: false, existing: null, mainIsLinked: false };
+  const at = path.join('/ws', 'api--EP-x-S02');
+  assert.deepEqual(planAdd(base), { path: at, skip: false, refuse: null });
+  assert.deepEqual(planAdd({ ...base, existing: { path: at, missing: false } }), { path: at, skip: true, refuse: null }, 'a re-run reuses the story\'s folder');
+  const gone = planAdd({ ...base, existing: { path: at, missing: true } });
+  assert.equal(gone.path, at);
+  assert.match(gone.refuse.message, /^EP-x-S02's worktree for api is gone/);
+  const taken = planAdd({ ...base, pathTaken: true });
+  assert.equal(taken.path, at);
+  assert.equal(taken.refuse.message, `${at} is already there`);
+  assert.equal(planAdd({ ...base, hasOrigin: false }).path, at);
+  assert.deepEqual(planAdd({ ...base, story: undefined }), { path: path.join('/ws', 'api--EP-x'), skip: false, refuse: null }, 'no story: the epic\'s path');
+});
+
+test('a worktree record with no story, a null story, or a story of its epic is yad\'s; a malformed or foreign-epic story is not (EP-reported-agent-flow-S01)', () => {
+  const { W, api } = workspace();
+  try {
+    const wt = path.join(W, 'api--EP-x-S02');
+    git(api, 'worktree', 'add', '-q', '--detach', wt, 'origin/main');
+    const rec = path.join(linkedGitDir(wt), 'yad-worktree.json');
+    const put = (o) => fs.writeFileSync(rec, JSON.stringify({ epic: 'EP-x', repo: 'api', base: 'main', ...o }));
+    const listed = () => yadWorktrees(api);
+    put({});
+    assert.equal(worktreeAt(wt)?.epic, 'EP-x', 'no story key: an epic worktree, as today');
+    assert.equal('story' in worktreeAt(wt), false);
+    assert.equal(listed().length, 1);
+    put({ story: null });
+    assert.equal(worktreeAt(wt)?.epic, 'EP-x', 'story null: an epic worktree');
+    assert.equal(listed().length, 1);
+    put({ story: 'EP-x-S02' });
+    assert.deepEqual([worktreeAt(wt)?.epic, worktreeAt(wt)?.story], ['EP-x', 'EP-x-S02'], 'a good story');
+    assert.deepEqual(listed().map((w) => [w.epic, w.story, w.path]), [['EP-x', 'EP-x-S02', wt]]);
+    for (const bad of ['EP-x-02', 'EP-x', '', 'ep-x-S02', 'EP-x-S02 ', 7, true, {}, ['EP-x-S02']]) {
+      put({ story: bad });
+      assert.equal(worktreeAt(wt), null, `malformed story ${JSON.stringify(bad)}`);
+      assert.deepEqual(listed(), [], `malformed story ${JSON.stringify(bad)} is skipped`);
+    }
+    for (const foreign of ['EP-y-S02', 'EP-xy-S01', 'EP-x-y-S01']) {
+      put({ story: foreign });
+      assert.equal(worktreeAt(wt), null, `a story of another epic: ${foreign}`);
+      assert.deepEqual(listed(), [], `a story of another epic is skipped: ${foreign}`);
+    }
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('yad worktree add --all, list and remove: beside each checkout, detached, node_modules linked, the main tree untouched (#115)', () => {
   const { W, P, api, pwt, awt } = workspace();
   try {
@@ -132,6 +186,177 @@ test('yad worktree add --all, list and remove: beside each checkout, detached, n
     assert.equal(fs.readFileSync(path.join(api, 'node_modules/dep/index.js'), 'utf8'), 'dep\n', 'only the link went');
     assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
     assert.equal(git(P, 'worktree', 'list').split('\n').length, 1);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+// Two stories of EP-x on the Product, each naming api, committed so the Product stays clean.
+const readRecord = (at) => JSON.parse(fs.readFileSync(path.join(linkedGitDir(at), 'yad-worktree.json'), 'utf8'));
+function withStories(P, stories = { 'EP-x-S01': '[api]', 'EP-x-S02': '[api]' }) {
+  write(P, Object.fromEntries(Object.entries(stories).map(([id, repos]) => [`epics/EP-x/stories/${id}.md`, `---\nid: ${id}\nepic: EP-x\nrepos: ${repos}\n---\n# ${id}\n`])));
+  git(P, 'add', '-A');
+  git(P, 'commit', '-q', '-m', 'stories');
+  git(P, 'push', '-q', 'origin', 'main');
+}
+
+test('yad worktree add, list and remove with a story: one folder per story, matched by story, reported with it; an epic\'s own as today (EP-reported-agent-flow-S01)', async () => {
+  const { W, P, api, pwt, awt } = workspace();
+  withStories(P);
+  const s1 = path.join(W, 'api--EP-x-S01');
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    let r = await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S01', dryRun: true });
+    assert.deepEqual([r.epic, r.story, r.dryRun], ['EP-x', 'EP-x-S01', true]);
+    assert.deepEqual(r.worktrees.map((w) => [w.repo, w.path, w.added, w.existing]), [['api', s1, false, false]], 'the story\'s repos, no Product');
+    assert.equal(fs.existsSync(s1), false, 'a dry run makes nothing');
+
+    r = await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S01' });
+    assert.deepEqual([r.epic, r.story], ['EP-x', 'EP-x-S01']);
+    assert.deepEqual(r.worktrees.map((w) => [w.repo, w.path, w.added, w.links]), [['api', s1, true, ['node_modules']]]);
+    const rec = worktreeAt(s1);
+    assert.deepEqual([rec.epic, rec.story, rec.repo, rec.base], ['EP-x', 'EP-x-S01', 'api', 'main'], 'the record names the epic and the story');
+    assert.equal(git(s1, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD', 'detached');
+    assert.equal(git(s1, 'rev-parse', 'HEAD'), git(s1, 'rev-parse', 'origin/main'));
+    assert.equal(fs.lstatSync(path.join(s1, 'node_modules')).isSymbolicLink(), true);
+    assert.equal(git(s1, 'status', '--porcelain'), '', 'the link is excluded');
+    assert.equal(fs.existsSync(pwt), false, 'no Product worktree for a story');
+
+    // An epic add does not reuse a story's worktree; it makes the epic's own, written as today.
+    r = await runWorktreeAdd(P, { epic: 'EP-x', repo: 'api' });
+    assert.equal(r.story, null);
+    assert.deepEqual(r.worktrees.map((w) => [w.path, w.added]), [[awt, true]]);
+    assert.equal('story' in worktreeAt(awt), false, 'an epic record has no story key');
+    assert.deepEqual(Object.keys(readRecord(awt)).sort(), ['base', 'by', 'created', 'epic', 'links', 'repo']);
+    // A second story gets a second folder: it reuses neither the epic's nor the first story's.
+    r = await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S02', repo: 'api' });
+    assert.deepEqual(r.worktrees.map((w) => [w.path, w.added]), [[s2, true]]);
+    assert.equal(worktreeAt(s2).story, 'EP-x-S02');
+    r = await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S01' });
+    assert.deepEqual(r.worktrees.map((w) => [w.path, w.added, w.existing]), [[s1, false, true]], 'a re-run reuses its folder');
+    r = await runWorktreeAdd(P, { epic: 'EP-x', repo: 'api' });
+    assert.deepEqual(r.worktrees.map((w) => [w.path, w.added, w.existing]), [[awt, false, true]], 'an epic re-run reuses the epic\'s');
+
+    r = await runWorktreeList(P, { epic: 'EP-x' });
+    assert.deepEqual(r.worktrees.map((w) => [w.epic, w.story, w.repo, w.path]).sort((a, b) => a[3].localeCompare(b[3])),
+      [['EP-x', null, 'api', awt], ['EP-x', 'EP-x-S01', 'api', s1], ['EP-x', 'EP-x-S02', 'api', s2]]);
+    assert.deepEqual(Object.keys(r.worktrees[0]), ['epic', 'story', 'repo', 'path', 'branch', 'changes', 'unpushed', 'locked', 'missing'], 'story added; no field changed');
+    const shown = yad(P, 'worktree', 'list');
+    assert.match(shown.out, new RegExp(`EP-x {2}EP-x-S01 {2}api {2}${s1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'the story is on its line');
+    assert.match(shown.out, new RegExp(`EP-x {2}api {2}${awt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'an epic line as today');
+
+    // Remove without a story: only the epic's own, never a story's.
+    r = await runWorktreeRemove(P, { epic: 'EP-x', all: true, cwd: W });
+    assert.deepEqual([r.story, r.removed], [null, [{ repo: 'api', path: awt, story: null }]]);
+    assert.ok(fs.existsSync(s1) && fs.existsSync(s2), 'the story worktrees stay');
+    await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', repo: 'api', cwd: W }), /no yad worktree for EP-x in api/, 'the epic has none left of its own');
+
+    // Remove with a story: only that story's.
+    r = await runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S01', cwd: W });
+    assert.deepEqual([r.epic, r.story, r.removed], ['EP-x', 'EP-x-S01', [{ repo: 'api', path: s1, story: 'EP-x-S01' }]]);
+    assert.equal(fs.existsSync(s1), false);
+    assert.equal(fs.existsSync(s2), true, 'the other story\'s stays');
+    assert.equal(fs.lstatSync(path.join(s2, 'node_modules')).isSymbolicLink(), true);
+    assert.equal(git(s2, 'status', '--porcelain'), '', 'the other story still has its exclude line');
+    await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S01', cwd: W }), /no yad worktree for EP-x-S01/);
+    write(s2, { 'new.txt': 'x\n' });
+    await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S02', repo: 'api', cwd: W }), /EP-x-S02's worktree was not removed: 1 still holds work/, 'today\'s refusal rules');
+    fs.rmSync(path.join(s2, 'new.txt'));
+    r = await runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S02', repo: 'api', cwd: W });
+    assert.deepEqual(r.removed.map((x) => x.path), [s2]);
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
+    assert.equal(fs.readFileSync(path.join(api, 'node_modules/dep/index.js'), 'utf8'), 'dep\n', 'only the links went');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree add with a story is refused, making nothing, for a bad id, a story of another epic, a missing story file, --all, and a story naming no registered code repo (EP-reported-agent-flow-S01)', async () => {
+  const { W, P, api } = workspace();
+  withStories(P, { 'EP-x-S01': '[api]', 'EP-x-S03': '[web]', 'EP-x-S04': '[]' });
+  try {
+    const no = async (opts, re) => {
+      await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', ...opts }), re, JSON.stringify(opts));
+      if (opts.story !== true) await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', cwd: W, ...opts }), re, `remove ${JSON.stringify(opts)}`);
+    };
+    await no({ story: 'EP-x-02' }, /EP-x-02 is not a story id/);
+    await no({ story: 'not a story' }, /is not a story id/);
+    await no({ story: true }, /--story needs a story id/);
+    await no({ story: '' }, /--story needs a story id/);
+    await no({ story: 'EP-y-S01' }, /EP-y-S01 is a story of EP-y, not of EP-x/);
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S09' }), /no story EP-x-S09 in EP-x/);
+    // remove does not need the story file (a retired story's worktree can still be removed): with none, it finds none.
+    await assert.rejects(runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S09', cwd: W }), /no yad worktree for EP-x-S09/);
+    await no({ story: 'EP-x-S01', all: true }, /--story and --all name different targets/);
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S03' }), /EP-x-S03 names no registered code repo/);
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S04' }), /EP-x-S04 names no registered code repo/);
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S03', repo: 'api' }), /api is not one of EP-x-S03's repos/);
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
+    assert.equal(git(P, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree remove --story removes a story\'s worktree even when its story file is gone (EP-reported-agent-flow-S01)', async () => {
+  const { W, P, api } = workspace();
+  withStories(P, { 'EP-x-S02': '[api]' });
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    await runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S02' });
+    assert.equal(fs.existsSync(s2), true);
+    fs.rmSync(path.join(P, 'epics/EP-x/stories/EP-x-S02.md'));
+    git(P, 'commit', '-q', '-am', 'retire EP-x-S02');
+    await assert.rejects(runWorktreeAdd(P, { epic: 'EP-x', story: 'EP-x-S02' }), /no story EP-x-S02 in EP-x/, 'add still needs the file');
+    const r = await runWorktreeRemove(P, { epic: 'EP-x', story: 'EP-x-S02', cwd: W });
+    assert.deepEqual(r.removed, [{ repo: 'api', path: s2, story: 'EP-x-S02' }]);
+    assert.equal(fs.existsSync(s2), false);
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad worktree --story on the CLI: add, list --json and remove --json for two stories of one epic; its refusals and its help (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api } = workspace();
+  withStories(P);
+  const s1 = path.join(W, 'api--EP-x-S01');
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    // Refused, making nothing, with the cause named.
+    const no = (re, ...args) => { const r = yad(P, 'worktree', ...args); assert.notEqual(r.code, 0, r.out); assert.match(r.out, re, args.join(' ')); };
+    for (const action of ['add', 'remove']) {
+      no(/EP-x-02 is not a story id/, action, 'EP-x', '--story', 'EP-x-02');
+      no(/EP-y-S01 is a story of EP-y, not of EP-x/, action, 'EP-x', '--story', 'EP-y-S01');
+      no(/--story expects a value/, action, 'EP-x', '--story');
+      no(/--story expects a value/, action, 'EP-x', '--story=');
+      no(/--story and --all name different targets/, action, 'EP-x', '--story', 'EP-x-S01', '--all');
+    }
+    no(/no story EP-x-S09 in EP-x/, 'add', 'EP-x', '--story', 'EP-x-S09');
+    no(/yad worktree list lists every repo; it takes no --repo, --all or --story/, 'list', '--story', 'EP-x-S01');
+    no(/yad worktree list lists every repo; it takes no --repo, --all or --story/, 'list', 'EP-x', '--story', 'EP-x-S01');
+    assert.equal(git(api, 'worktree', 'list').split('\n').length, 1, 'nothing was made');
+
+    // Two stories of one epic: two folders.
+    let r = yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S01', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).worktrees.map((w) => w.path)], ['EP-x-S01', [s1]]);
+    r = yad(P, 'worktree', 'add', 'EP-x', '--story=EP-x-S02', '--repo', 'api', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).worktrees.map((w) => w.path)], ['EP-x-S02', [s2]]);
+    r = yad(P, 'worktree', 'list', 'EP-x', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(json(r).worktrees.map((w) => [w.story, w.path]).sort((a, b) => a[1].localeCompare(b[1])), [['EP-x-S01', s1], ['EP-x-S02', s2]]);
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--story', 'EP-x-S01', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual([json(r).story, json(r).removed], ['EP-x-S01', [{ repo: 'api', path: s1, story: 'EP-x-S01' }]]);
+    assert.equal(fs.existsSync(s1), false);
+    assert.equal(fs.existsSync(s2), true, 'the other story\'s stays');
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--json');
+    assert.notEqual(r.code, 0, 'without --story, a story\'s is never removed');
+    assert.equal(fs.existsSync(s2), true);
+    r = yad(P, 'worktree', 'remove', 'EP-x', '--story', 'EP-x-S02', '--repo', 'api', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(fs.existsSync(s2), false);
+
+    // The usage line and the help show the flag.
+    assert.match(yad(P, 'worktree', 'nope').out, /yad worktree add <epic> \[--story <story>\] \[--repo <name>\|--all\] \[--dry-run\].*yad worktree remove <epic> \[--story <story>\] \[--repo <name>\|--all\]/);
+    const help = yad(P, 'help').out;
+    assert.match(help, /yad worktree add <epic> \[--story <story>\] \[--repo <name>\|--all\] \[--dry-run\]/);
+    assert.match(help, /yad worktree remove <epic> \[--story <story>\] \[--repo <name>\|--all\]/);
+    assert.match(help, /<repo>--<story>/, 'help says what --story makes');
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
@@ -787,6 +1012,76 @@ test('yad build step spec in_progress pins the epic\'s code worktree when there 
     assert.deepEqual(json(r).specKit, { file: 'api--EP-x/.specify/feature.json', featureDirectory: 'specs/EP-x-S01', changed: true });
     assert.equal(JSON.parse(fs.readFileSync(path.join(awt, '.specify/feature.json'), 'utf8')).feature_directory, 'specs/EP-x-S01');
     assert.equal(fs.existsSync(path.join(api, '.specify/feature.json')), false, 'the main checkout is left alone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad build step spec in_progress pins the story\'s code worktree first, then the epic\'s, then the main checkout (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api, awt } = workspace();
+  const s1 = path.join(W, 'api--EP-x-S01');
+  try {
+    const st = (id, type, status) => ({ id, type, artifact: id.startsWith('stories') ? 'stories/' : 'epic.md', status, risk_tags: [] });
+    const story = (id) => `---\nid: ${id}\nepic: EP-x\nstatus: approved\nrepos: [api]\n---\n# ${id}\n`;
+    write(P, {
+      'epics/EP-x/.sdlc/state.json': JSON.stringify({ epicId: 'EP-x', profile: 'chore', currentStep: 'ready-for-build', steps: [st('epic', 'author', 'done'), st('epic-review', 'review+approve', 'done'), st('stories', 'author', 'done'), st('stories-review', 'review+approve', 'done')] }),
+      'epics/EP-x/stories/EP-x-S01.md': story('EP-x-S01'),
+      'epics/EP-x/stories/EP-x-S02.md': story('EP-x-S02'),
+      'epics/EP-x/stories/EP-x-S03.md': story('EP-x-S03'),
+    });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'stories');
+    git(P, 'push', '-q', 'origin', 'main');
+    write(api, { '.specify/memory/constitution.md': '# c\n' });
+    git(api, 'add', '.specify');
+    git(api, 'commit', '-qm', 'spec kit');
+    git(api, 'push', '-q', 'origin', 'main');
+    const pin = (id) => {
+      assert.equal(yad(P, 'build', 'start', id, '--repo', 'api').code, 0);
+      const r = yad(P, 'build', 'step', id, '--repo', 'api', 'spec', 'in_progress', '--json');
+      assert.equal(r.code, 0, r.out);
+      return json(r).specKit;
+    };
+    const feature = (at) => { try { return JSON.parse(fs.readFileSync(path.join(at, '.specify/feature.json'), 'utf8')).feature_directory; } catch { return null; } };
+    // No worktree at all: the main checkout, as today.
+    assert.deepEqual(pin('EP-x-S03'), { file: 'api/.specify/feature.json', featureDirectory: 'specs/EP-x-S03', changed: true });
+    assert.equal(feature(api), 'specs/EP-x-S03');
+    fs.rmSync(path.join(api, '.specify/feature.json'));
+    // The story's own worktree and the epic's: the story's wins.
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--repo', 'api').code, 0);
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S01').code, 0);
+    assert.deepEqual(pin('EP-x-S01'), { file: 'api--EP-x-S01/.specify/feature.json', featureDirectory: 'specs/EP-x-S01', changed: true });
+    assert.equal(feature(s1), 'specs/EP-x-S01');
+    assert.equal(feature(awt), null, 'the epic\'s worktree is left alone');
+    assert.equal(feature(api), null, 'the main checkout is left alone');
+    // A story with no worktree of its own: the epic's, as today.
+    assert.deepEqual(pin('EP-x-S02'), { file: 'api--EP-x/.specify/feature.json', featureDirectory: 'specs/EP-x-S02', changed: true });
+    assert.equal(feature(s1), 'specs/EP-x-S01', 'another story\'s worktree is left alone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('from a story\'s code worktree: the registry knows the repo, Product commands go to the epic\'s Product, and yad run checks runs there as the repo (EP-reported-agent-flow-S01)', () => {
+  const { W, P, api, pwt } = workspace();
+  const s2 = path.join(W, 'api--EP-x-S02');
+  try {
+    // The registry gives api a platform its origin (a folder) does not show: run checks can only know it from the registry.
+    write(P, { '.sdlc/repos.json': JSON.stringify({ repos: [{ name: 'api', path: '../api', platform: 'gitlab' }] }) });
+    git(P, 'add', '-A');
+    git(P, 'commit', '-qm', 'api on gitlab');
+    git(P, 'push', '-q', 'origin', 'main');
+    withStories(P);
+    write(api, { 'checks/.keep': '' });
+    git(api, 'add', 'checks');
+    git(api, 'commit', '-qm', 'checks');
+    git(api, 'push', '-q', 'origin', 'main');
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--story', 'EP-x-S02').code, 0);
+    assert.equal(registryEntryFor(P, path.join(s2, 'src'))?.meta?.name, 'api');
+    let found = findProduct(path.join(s2, 'src'));
+    assert.deepEqual([found.root, found.repo?.name], [P, 'api'], 'no Product worktree: the main Product');
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x').code, 0);
+    found = findProduct(path.join(s2, 'src'));
+    assert.deepEqual([found.root, found.worktree, found.repo?.name], [pwt, 'EP-x', 'api'], 'the epic\'s Product worktree, never one of the story');
+    const r = yad(s2, 'run', 'checks', '--no-build', '--no-fetch', '--json');
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual([out.repo, out.kind, out.platform], ['api--EP-x-S02', 'code', 'gitlab'], r.out);
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
