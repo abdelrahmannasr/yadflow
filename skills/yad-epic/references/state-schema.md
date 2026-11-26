@@ -369,10 +369,13 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `review-passed` | `yad gate sync` / `yad gate ci`, or that skill | Its author step, closed when its gate passed because nothing closed it earlier |
 | `review-opened` | `yad gate open` (local ledger) / `yad gate sync` | An author step, closed when its review opened |
 | `repair` | `yad gate repair` | A stranded author step — an escape hatch, so it says so |
-| `auto` / `human` | `yad build step … done [--via auto --run <uid>]`, in `build-state` | A Build lane step: the dial let the run go on by itself, or it stopped for a person |
+| `auto` / `agent` / `human` | `yad build step … done [--via auto --run <uid> \| --via agent]`, in `build-state` | A Build lane step: `auto` the dial let the run go on by itself; `agent` an agent did the step on a dial that is not `auto`, and a person advanced it (#658); `human` a person did it |
 
 - **Optional keys are left out**, never written as `null`: a close with no PR has no `pr`.
-- **The first close wins.** A step that already has a `closed` keeps it; a re-sync never rewrites it.
+- **The first close wins.** A step that already has a `closed` keeps it; a re-sync never rewrites it. One
+  command corrects a Build lane step's `via`: `yad build amend` (#658). It keeps the close's `by` and `date`,
+  and appends the earlier value to `closed.amended`: `[{ via, by, date, reason, run? }]`, oldest first, where
+  `by` and `date` are the correction's. `run` is there when a correction to `auto` replaced the close's run.
 - **Nothing is invented.** A field the closer does not know is left out.
 - **Steps closed before this release carry none**, and nothing asks for one: `yad doctor` does not warn.
 - **No shape change.** An older release ignores the key, and nothing reads `done` differently because it
@@ -840,7 +843,7 @@ Each `steps[]` entry:
 | `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
 | `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; `yad dial <epic> <story> --repo <r> <step> --to auto` flips it (E34 — nothing to earn), never on the `engineer-review` gate. |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
-| `closed` | `{ by, date, via, run, task? }` | Written by `yad build step <story> --repo <r> <step> done` when the lane moves past the step (the `engineer-review` step by `yad build done`): `via` is `auto` or `human`, `run` names the trust-log run (E18), and `task` the task it closed for, when given. See "Closing records". |
+| `closed` | `{ by, date, via, run, task?, amended? }` | Written by `yad build step <story> --repo <r> <step> done` when the lane moves past the step (the `engineer-review` step by `yad build done`): `via` is `auto`, `agent` or `human`, `run` names the trust-log run (E18), and `task` the task it closed for, when given. `amended` lists each correction `yad build amend` made (#658), oldest first. See "Closing records". |
 | `opened` | `[{ task, pr, url, via, run, by, date }]` | On the **lane** (beside `steps`), not on a step: each task PR/MR opened on the project's standing approval, `yad open-pr --via auto` (#356). `via` is `auto`; `run` is the `checks` trust run that allowed it: that task's newest close. A grouped PR (#350) is listed once per task it carries, each with its own run. `yad build merged` reads the number from here before it searches. A PR/MR a person opened is not listed. |
 | `runs` | `[{ by, date, via, run, task }]` | `implement` and the steps after it are walked once per task: `yad build step … implement in_progress --task <T>` reopens them for the next task once the lane is at `engineer-review`, and keeps each earlier close here, so the engineer review finds the run of the task it finalizes. |
 | `status` | the same **step states** as the Shape chain | Lifecycle. This file is **not** migrated to shape 7 — the `yad build` commands write it, not the engine, so a rewrite would be undone by their next write. `yad-run` advances `done` steps and marks a halted lane `blocked` **with a `record`** naming the halt cause (a failed check, a scope overrun, a contract touch): that record is what separates a halted lane from one nobody started, because a bare `blocked` is the pre-shape-7 spelling of `todo` and still reads that way here. A lane halted by an older `yad-run` carries no record and reads as `todo` until the next run rewrites it — nothing advances past it either way. |

@@ -10397,7 +10397,7 @@ test('verified Product: yad next and yad doctor do not send a blocker or a debt 
 test('closing records: advanceState, markInReview and repairState stamp `closed` only when told how, and the first close wins (E18)', async () => {
   const { closingRecord, CLOSED_VIA } = await import('./epic-state.mjs');
   assert.deepEqual(closingRecord({ via: 'repair' }), { by: null, date: null, via: 'repair' }, 'no empty optional keys');
-  assert.deepEqual(CLOSED_VIA, ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human']);
+  assert.deepEqual(CLOSED_VIA, ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'agent', 'human']);
 
   // No closing facts: nothing is stamped, so every existing caller is unchanged.
   const plain = uiChain('ui-design-review', { ui: 'in_progress', uiReview: 'in_review' });
@@ -10708,11 +10708,13 @@ test('yad-run writes a closing record when it moves a lane past a step, pointing
   const loop = fs.readFileSync(new URL('../skills/yad-run/references/run-loop.md', import.meta.url), 'utf8');
   // Written with `yad build step` since #346, which writes the closing record itself.
   assert.match(loop, /yad build step <story> --repo <repo> <step> done --via auto --run <uid>/);
-  assert.match(loop, /yad build step <story> --repo <repo> <step> done --run <uid>/);
+  assert.match(loop, /yad build step <story> --repo <repo> <step> done --via agent --run <uid>/);
+  assert.doesNotMatch(loop, /<step> done --run <uid>/, 'a step the agent ran is never closed as a person\'s work');
   // SKILL.md is what the agent reads first, so it says the same.
   const skill = fs.readFileSync(new URL('../skills/yad-run/SKILL.md', import.meta.url), 'utf8');
   assert.match(skill, /yad build step <story> --repo <repo> <step> done\s+--via auto --run <uid>/);
-  assert.match(skill, /yad build step <story> --repo <repo> <step> done --run <uid>/);
+  assert.match(skill, /yad build step <story> --repo <repo> <step> done --via agent --run <uid>/);
+  assert.doesNotMatch(skill, /<step> done --run <uid>/, 'a step the agent ran is never closed as a person\'s work');
 });
 
 // The platform reads that feed a closing record (E18). `gh` / `glab` are replaced by a scripted runner, so

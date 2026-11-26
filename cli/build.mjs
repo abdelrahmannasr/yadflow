@@ -104,6 +104,10 @@ const activeStep = (lane) => {
   return cur && !isPassed(cur) ? cur : lane.steps.find((s) => !isPassed(s)) || null;
 };
 
+// How a Build lane step closes (`closed.via`, a subset of CLOSED_VIA): a person's work, an agent's work on a
+// dial a person advances (#658), or an advance on its own on an `auto` dial.
+export const STEP_VIA = ['auto', 'agent', 'human'];
+
 // PURE: move one step of a lane. Only the lane's active step moves, so a lane is never walked out of order.
 // `done` writes the closing record (E18) and moves `currentStep` on; `blocked` needs a reason, written as
 // the step's record. The review step is closed by `build done`, which checks every task shipped first.
@@ -165,7 +169,13 @@ export function planStep(buildState, { story, repo, step, to, reason = null, by 
   if (active && active.id !== step) {
     throw err(CODE, `${story} / ${repo} is at ${active.id}, not ${step}`, `move ${active.id} first — the lane is walked in order`);
   }
-  if (!['auto', 'human'].includes(via)) throw err(CODE, `--via must be auto or human (got '${via}')`, '--via human, unless the orchestrator advanced it on its own');
+  if (!STEP_VIA.includes(via)) throw err(CODE, `--via must be auto, agent or human (got '${via}')`, '--via human for a person\'s work, --via agent for an agent\'s, --via auto when the step advanced on its own');
+  // An agent's close is for a dial a person advances (#658). On a dial IN FORCE at auto the step advances on
+  // its own, and that close is --via auto, which names the trust run that earned it.
+  if (via === 'agent' && to === 'done' && effectiveAdvance(target, automation).advance === 'auto') {
+    throw err(CODE, `${step} advances on its own in ${story} / ${repo}, so it is closed --via auto, not --via agent`,
+      `yad build step ${story} --repo ${repo} ${step} done --via auto --run <uid>`);
+  }
   // The dial IN FORCE — the lane's own, held at human while the kill switch is on — not the lane's word alone.
   if (via === 'auto' && to === 'done' && effectiveAdvance(target, automation).advance !== 'auto') {
     const why = effectiveAdvance(target, automation).why;
@@ -193,6 +203,56 @@ export function planStep(buildState, { story, repo, step, to, reason = null, by 
     currentStep = after ? after.id : step;
   } else currentStep = step;
   return { buildState: { ...bs, repos: { ...bs.repos, [repo]: { ...lane, currentStep, steps } } }, already: false };
+}
+
+// PURE: correct how a closed Build lane step closed (`yad build amend`, #658) — its `closed.via`, and for
+// `auto` the trust run that earned it. Nothing else of the close changes: its `by` and `date` stay, and the
+// earlier value goes into `closed.amended`, so the record keeps its history. Because the history lives in
+// `closed`, a per-task step reopened later moves it into `runs` with the close (planStep's `keep`).
+// `runRecord` is the trust run `run` names (the caller reads it); `usedRuns` are the runs the step's earlier
+// closes name. The review step is not corrected: `yad build done` closes it as a person's merge review.
+export function planAmend(buildState, { story, repo, step, via, reason, run = null, task = null, runRecord = null, by = null, date = null }) {
+  const usage = `yad build amend ${story} --repo ${repo} ${step || '<step>'} --via ${STEP_VIA.join('|')} --reason "<why>"`;
+  if (!STEP_VIA.includes(via)) throw err(CODE, via == null || via === true ? '--via is required' : `--via must be auto, agent or human (got '${via}')`, usage);
+  if (reason == null || reason === true || !String(reason).trim()) throw err(CODE, 'a correction needs a reason', usage);
+  if (task != null && !TASK_RE.test(String(task))) throw err(CODE, `--task must be a task id such as T02 (got '${task}')`, '--task T02');
+  if (step === REVIEW_STEP) throw err(CODE, `${REVIEW_STEP} is not corrected`, `\`yad build done ${story}\` closes it as a person's merge review`);
+  const bs = lanes(buildState, story);
+  const lane = liveLane(bs, story, repo);
+  const target = lane.steps.find((s) => s?.id === step);
+  if (!target) throw err(CODE, `${story} / ${repo} has no step '${step}'`, `its steps: ${lane.steps.map((s) => s?.id).join(', ')}`);
+  if (stepStatus(target) !== 'done') throw err(CODE, `${step} is not closed in ${story} / ${repo}, so there is no record to correct`, `close it with the true value: yad build step ${story} --repo ${repo} ${step} done --via ${via}`);
+  const closed = isPlainObject(target.closed) ? target.closed : null;
+  if (!closed) throw err(CODE, `${step} in ${story} / ${repo} has no closing record to correct`, 'it was closed before closing records existed');
+  if (task && closed.task !== task) {
+    throw err(CODE, `${step} was last closed ${closed.task ? `for ${closed.task}` : 'for no task'}, not ${task}`, 'only the latest close of a step is corrected');
+  }
+  // A run names the evidence for an automatic close only: given with another value, it would be dropped.
+  if (via !== 'auto' && run && run !== true) throw err(CODE, '--run applies only to --via auto', `drop --run: --via ${via} names no trust run`);
+  if (closed.via === via) return { buildState: bs, already: true, from: via };
+  let newRun = null;
+  if (via === 'auto') {
+    if (!run || run === true) throw err(CODE, '--via auto needs --run <uid>, the trust run that advanced the step', `yad build trust ${story} --repo ${repo} ${step} --verdict … prints it`);
+    const forTask = closed.task || null;
+    const r = runRecord;
+    if (!r || r.story !== story || r.repo !== repo || r.step !== step || (r.task && forTask && r.task !== forTask)) {
+      throw err(CODE, `no trust run ${run} for ${story} / ${repo} / ${step}${forTask ? ` / ${forTask}` : ''}`, `\`yad build trust ${story} --repo ${repo} ${step} --verdict …\` prints the uid of the run it records`);
+    }
+    if (r.verdict === 'rejected') throw err(CODE, `trust run ${run} is rejected, so ${step} did not advance on its own`, `--via agent or --via human says who did it`);
+    if (!(r.advance === 'auto' || (r.advance == null && r.automation === 'machine_advance'))) {
+      throw err(CODE, `trust run ${run} was recorded while the ${step} dial was not auto, so ${step} did not advance on its own`, '--via agent says an agent did it and a person advanced it');
+    }
+    const used = (Array.isArray(target.runs) ? target.runs.map((x) => x?.run) : []).filter(Boolean);
+    if (used.includes(run)) throw err(CODE, `trust run ${run} already closed ${step} in ${story} / ${repo}`, 'each close names its own run');
+    newRun = run;
+  }
+  const entry = { via: closed.via ?? null, by, date, reason: String(reason).trim(), ...(newRun && closed.run && closed.run !== newRun ? { run: closed.run } : {}) };
+  const next = {
+    ...target,
+    closed: { ...closed, via, ...(newRun ? { run: newRun } : {}), amended: [...(Array.isArray(closed.amended) ? closed.amended : []), entry] },
+  };
+  const steps = lane.steps.map((s) => (s?.id === step ? next : s));
+  return { buildState: { ...bs, repos: { ...bs.repos, [repo]: { ...lane, steps } } }, already: false, from: closed.via ?? null };
 }
 
 // PURE: a trust entry, checked. `signals` is { name: value } from `--signal name=value`.
@@ -378,7 +438,10 @@ export async function buildStep(root, { story, repo, step, to, reason, via = 'hu
   });
   if (already) {
     ok(`${step} is already done in ${story} / ${repo} — nothing changed`);
-    return { story, repo, step, status: 'done', changed: false };
+    // Its record is not rewritten by closing it again: the correction is its own command (#658).
+    const amend = `yad build amend ${story} --repo ${repo} ${step} --via ${STEP_VIA.join('|')} --reason "<why>"`;
+    info(`to correct how it closed: ${amend}`);
+    return { story, repo, step, status: 'done', changed: false, hint: amend };
   }
   writeJSON(ctx.file, buildState);
   const lane = buildState.repos[repo];
@@ -393,6 +456,28 @@ export async function buildStep(root, { story, repo, step, to, reason, via = 'hu
   const inbox = json && to === 'blocked' && ready(root, { detectRoot: cwd ?? root })
     ? inboxBlock([haltMessage({ story, repo, step, task: haltTask, reason: String(reason).trim() })]) : undefined;
   return { story, repo, step, status: to, currentStep: lane.currentStep, changed: true, ...(specKit ? { specKit } : {}), ...(inbox ? { inbox } : {}) };
+}
+
+// `yad build amend <story> --repo <r> <step> --via human|agent|auto --reason "<why>" [--run <uid>] [--task <T>]`:
+// correct how a closed step closed (#658). It rewrites a record, so an agent runs it only when asked.
+export async function buildAmend(root, { story, repo, step, via, reason, run: runUid = null, task = null, today } = {}) {
+  repoArg(repo, `yad build amend ${story || '<story>'} --repo <name> <step> --via ${STEP_VIA.join('|')} --reason "<why>"`);
+  if (!step || step === true) throw err(CODE, 'the step to correct is required', `yad build amend ${story} --repo ${repo} <step> --via ${STEP_VIA.join('|')} --reason "<why>"`);
+  const ctx = storyContext(root, story);
+  const run = runUid === true ? null : runUid;
+  const runRecord = run ? readTrustRuns(ctx.epicDir).find((r) => r.uid === run) || null : null;
+  const { buildState, already, from } = planAmend(ctx.buildState, {
+    story, repo, step, via: via === true ? null : via, reason, run, task: task === true ? null : task, runRecord,
+    by: recordActor(root), date: today,
+  });
+  if (already) {
+    ok(`${step} in ${story} / ${repo} already closed --via ${via} — nothing changed`);
+    return { story, repo, step, via, from, changed: false };
+  }
+  writeJSON(ctx.file, buildState);
+  ok(`${story} / ${repo}: ${step} now closed --via ${via} (was ${forTerminal(String(from))}); the earlier value is kept in closed.amended`);
+  hand('commit with `yad checkpoint --push`');
+  return { story, repo, step, via, from, changed: true };
 }
 
 // Spec Kit finds the story folder it writes into through `.specify/feature.json` (issue #348): pinned to

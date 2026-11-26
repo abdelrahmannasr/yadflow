@@ -229,6 +229,9 @@ export function whoseAccount(members, { platform, host, login }, disputed = new 
 // character reaches the terminal), and a name is shown only when it is not an email address (`shown`).
 // The text is built once and shared by the terminal, Markdown and HTML outputs.
 const safe = (v) => forTerminal(String(v ?? ''));
+// How a Build lane step closed (`closed.via`, #658), in words.
+const LANE_VIA_WORDS = { human: 'a person\'s work', agent: 'an agent\'s work, advanced by a person', auto: 'advanced on its own' };
+
 // An error's message, safe to print and to share: no control character (a JSON parse error quotes the bad
 // bytes) and no absolute path of this machine (the report may be written to a file and shared).
 const reEsc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -456,6 +459,29 @@ export function buildStandup(root, { now = Date.now(), tz = 'UTC', since = null,
       // needs the address too, which a commit has and this record does not).
       if (typeof who !== 'string' || !who.trim() || isBot(who) || who.trim() === 'yad-gate-sync') continue;
       byEvent({ login: who, name: who }, who, 'done', { kind: 'closed', epic, step: s.id, via: cl.via || null, date: cl.date, text: `closed ${epic} ${safe(s.id)}${cl.via ? ` (${safe(cl.via)})` : ''}, ${cl.date}` });
+    }
+  }
+  // DONE — Build lane steps closed (#658), from build-state: the latest close of each step, and the earlier
+  // closes a per-task step keeps in `runs`. Each is `by`'s; a robot is skipped as above. The words keep a
+  // person's work, an agent's work a person advanced, and an advance on its own apart.
+  for (const [epic, led] of ledgers) {
+    for (const bs of led.buildStates || []) {
+      const story = typeof bs.story === 'string' ? bs.story : null;
+      if (!story || !bs.repos || typeof bs.repos !== 'object') continue;
+      for (const [repo, lane] of Object.entries(bs.repos)) {
+        for (const s of Array.isArray(lane?.steps) ? lane.steps : []) {
+          const closes = [...(Array.isArray(s?.runs) ? s.runs : []), s?.closed];
+          for (const cl of closes) {
+            if (!cl || typeof cl !== 'object' || !inDay(cl.date)) continue;
+            const who = cl.by;
+            if (typeof who !== 'string' || !who.trim() || isBot(who) || who.trim() === 'yad-gate-sync') continue;
+            const via = typeof cl.via === 'string' ? cl.via : null;
+            const task = typeof cl.task === 'string' ? cl.task : null;
+            const how = via ? ` (${Object.hasOwn(LANE_VIA_WORDS, via) ? LANE_VIA_WORDS[via] : safe(via)})` : '';
+            byEvent({ login: who, name: who }, who, 'done', { kind: 'lane-closed', epic, story, repo, step: s?.id ?? null, task, via, date: cl.date, text: `closed ${safe(story)} ${safe(s?.id)}${task ? ` ${safe(task)}` : ''} in ${safe(repo)}${how}, ${cl.date}` });
+          }
+        }
+      }
     }
   }
   // DONE — merged PRs/MRs, by their author.

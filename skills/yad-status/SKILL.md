@@ -176,7 +176,11 @@ Print, in this order:
    each such story and each of its repos print the Build chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
    `advance` dial (or `automation`, whichever the step carries), and `locked`. Mark that repo's `currentStep` with `→`. A repo whose lane is `status: skipped` (a whole lane set aside with `yad skip <epic> <story> --repo <repo>`, E39) prints `skipped (N/A)` and its `record.reason` instead of the chain. This shows, at a glance,
-   which Build steps are automated and where a run is waiting. (For the single *next* build sub-step to
+   which Build steps are automated and where a run is waiting. For each closed step, print how it closed,
+   from its `closed.via` (#658): `human` — a person's work; `agent` — an agent's work that a person
+   advanced; `auto` — advanced on its own on an `auto` dial; any other value as it is written. When
+   `closed.amended` is there, print each correction under the step: the earlier `via`, who corrected it,
+   when, and the reason (`yad build amend` wrote it). (For the single *next* build sub-step to
    take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
    reads the same `build-state` files.)
 8. **Automation & run record** — print the **kill switch** from `.sdlc/automation.json` (when on, who
@@ -184,7 +188,8 @@ Print, in this order:
    steps the project set to `auto` — noting that a Shape `auto` is recorded only: nothing drives a Shape
    step on its own yet. Then, for each Build step that has entries in the trust ledger — the **union** of
    the folded `.sdlc/trust-log.json` `runs` plus every loose `.sdlc/trust-log/` shard — print its **run
-   record**: number of runs and the fraction with `verdict == "approved-unchanged"`. It is **advice**:
+   record**: number of runs and the fraction with `verdict == "approved-unchanged"`. A run an agent
+   recorded with `--ran-by machine` counts as any other run, as `yad dial` counts it. It is **advice**:
    there is no threshold and nothing is "earned" (E34). Do not recommend flipping a dial; the team sets
    dials with `yad dial`. A review gate is never auto.
 
