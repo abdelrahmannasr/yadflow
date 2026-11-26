@@ -1984,3 +1984,143 @@ test('S02 yad guide --json: no inbox unless the Product chose Plannotator and it
     assert.ok(!('inbox' in JSON.parse(r.stdout)), r.stderr);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(bin, { recursive: true, force: true }); }
 });
+
+// ---- the first setup epic the guide proposes (EP-foundation-first-epic-S02) --------------------------------
+// A Product whose Foundation is at `status` (done = the review passed), with no platform so nothing reads origin.
+async function foundationProduct({ passed = true, codebase = null, epics = [] } = {}) {
+  const T = await product({ platform: null, epics });
+  const cfgPath = path.join(T, '.sdlc/product.json');
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  if (codebase) cfg.profile = { codebase };
+  put(cfgPath, cfg);
+  put(path.join(T, 'foundation/.sdlc/state.json'), {
+    epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: passed ? 'foundation-done' : 'foundation-review',
+    steps: [
+      { id: 'foundation', type: 'author', artifact: 'foundation/', status: 'done', risk_tags: [] },
+      { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: passed ? 'done' : 'in_review', risk_tags: [] },
+    ],
+  });
+  return T;
+}
+const yadJSON = (T, ...args) => {
+  const r = spawnSync('node', [YAD, ...args, '--json'], { cwd: T, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+  return JSON.parse(r.stdout);
+};
+const yadText = (T, ...args) => spawnSync('node', [YAD, ...args], { cwd: T, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } }).stdout;
+
+test('firstEpic: the Foundation passed and nothing is open, so the guide proposes bootstrap then pack, as optional agent steps', async () => {
+  const T = await foundationProduct();
+  try {
+    const g = buildGuide(T);
+    assert.deepEqual(g.firstEpic.proposals.map((p) => [p.seed, p.proposedEpic, p.matches]), [['bootstrap', 'EP-bootstrap', true], ['pack', 'EP-pack', false]]);
+    assert.equal(g.firstEpic.optional, true);
+    for (const p of g.firstEpic.proposals) {
+      assert.equal(p.command, `yad epic new ${p.seed} --seed ${p.seed} --profile classic`);
+      assert.ok(typeof p.why === 'string' && p.why.length > 0 && p.why.length <= 200, p.why);
+    }
+    // The agent runs a command only on the person's yes: each is optional, and the roadmap path stays.
+    const runs = g.agent.filter((a) => a.run);
+    assert.deepEqual(runs.map((a) => a.run), g.firstEpic.proposals.map((p) => p.command));
+    assert.ok(runs.every((a) => a.optional === true && /only once the person says yes/.test(a.why)));
+    assert.equal(g.agent.at(-1).skill, 'yad-epic');
+    assert.deepEqual(g.person.map((p) => p.act), ['choose']);
+    assert.match(g.person[0].steps[0], /start the bootstrap or the pack epic, or a roadmap item/);
+    // The Foundation's own view says the same.
+    assert.deepEqual(buildGuide(T, { epic: 'EP-foundation' }).firstEpic, g.firstEpic);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('firstEpic: a brownfield Product gets pack first; a Product with no codebase answer reads as greenfield', async () => {
+  const B = await foundationProduct({ codebase: 'brownfield' });
+  const G = await foundationProduct({ codebase: 'greenfield' });
+  try {
+    assert.deepEqual(buildGuide(B).firstEpic.proposals.map((p) => [p.seed, p.matches]), [['pack', true], ['bootstrap', false]]);
+    assert.deepEqual(buildGuide(G).firstEpic.proposals.map((p) => p.seed), ['bootstrap', 'pack']);
+    // The brownfield backfill hint still leads the agent list.
+    assert.equal(buildGuide(B).agent[0].skill, 'yad-backfill');
+  } finally { fs.rmSync(B, { recursive: true, force: true }); fs.rmSync(G, { recursive: true, force: true }); }
+});
+
+test('firstEpic: a kind with an epic is not proposed again; with both, the key is absent and today\'s step is back', async () => {
+  const T = await foundationProduct();
+  try {
+    await runEpicNew(T, { slug: 'bootstrap', seed: 'bootstrap', today: '2026-11-26' });
+    const one = buildGuide(T, { epic: 'EP-foundation' });
+    assert.deepEqual(one.firstEpic.proposals.map((p) => [p.seed, p.matches]), [['pack', false]]);
+    // An open feature epic is where the general view goes, as before: no proposal there.
+    assert.equal('firstEpic' in buildGuide(T), false);
+    await runEpicNew(T, { slug: 'pack', seed: 'pack', today: '2026-11-26' });
+    const none = buildGuide(T, { epic: 'EP-foundation' });
+    assert.equal('firstEpic' in none, false, 'absent, never null');
+    assert.deepEqual(none.agent.map((a) => a.skill ?? a.run), ['yad-epic']);
+    assert.deepEqual(none.person[0].steps, ['Pick the roadmap item to start.']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('firstEpic: a taken id gets -2; a Foundation not yet passed proposes nothing', async () => {
+  const T = await foundationProduct({ epics: ['bootstrap'] });
+  const N = await foundationProduct({ passed: false });
+  try {
+    const p = buildGuide(T, { epic: 'EP-foundation' }).firstEpic.proposals[0];
+    assert.equal(p.proposedEpic, 'EP-bootstrap-2');
+    assert.equal(p.command, 'yad epic new bootstrap-2 --seed bootstrap --profile classic');
+    assert.equal('firstEpic' in buildGuide(N), false);
+    assert.equal('firstEpic' in yadJSON(N, 'next'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(N, { recursive: true, force: true }); }
+});
+
+test('firstEpic: yad next --json carries the same object, and yad next prints the proposal lines', async () => {
+  const T = await foundationProduct();
+  try {
+    const g = buildGuide(T);
+    assert.deepEqual(yadJSON(T, 'next').firstEpic, g.firstEpic);
+    assert.deepEqual(yadJSON(T, 'next', 'EP-foundation').firstEpic, g.firstEpic);
+    assert.deepEqual(yadJSON(T, 'guide').firstEpic, g.firstEpic);
+    for (const out of [yadText(T, 'next'), yadText(T, 'next', 'EP-foundation')]) {
+      assert.match(out, /→ propose the bootstrap epic: yad epic new bootstrap --seed bootstrap --profile classic/);
+      assert.match(out, /→ or the pack epic: yad epic new pack --seed pack --profile classic/);
+      assert.match(out, /optional — or pick a roadmap item and invoke the yad-epic skill/);
+    }
+    // An open feature epic: the general view goes to it, with no proposal.
+    await runEpicNew(T, { slug: 'pay', today: '2026-11-26' });
+    assert.equal('firstEpic' in yadJSON(T, 'next'), false);
+    assert.doesNotMatch(yadText(T, 'next'), /propose the bootstrap epic/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('firstEpic: the old `discovery` spelling of the Product level proposes too', async () => {
+  const T = await product({ platform: null, epics: [] });
+  try {
+    put(path.join(T, 'epics/EP-discovery/.sdlc/state.json'), {
+      epicId: 'EP-discovery', kind: 'discovery', profile: 'discovery', currentStep: 'discovery-done',
+      steps: [
+        { id: 'discovery', type: 'author', artifact: 'discovery.md', status: 'done', risk_tags: [] },
+        { id: 'discovery-review', type: 'review+approve', artifact: 'discovery.md', status: 'done', risk_tags: [] },
+      ],
+    });
+    assert.deepEqual(buildGuide(T).firstEpic?.proposals.map((p) => p.seed), ['bootstrap', 'pack']);
+    assert.deepEqual(yadJSON(T, 'next', 'EP-discovery').firstEpic?.proposals.map((p) => p.seed), ['bootstrap', 'pack']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('firstEpic: a ledger that does not load stops the proposal — it may be the setup epic itself', async () => {
+  const T = await foundationProduct();
+  try {
+    put(path.join(T, 'epics/EP-bootstrap/.sdlc/state.json'), '{ not json');
+    assert.equal('firstEpic' in buildGuide(T, { epic: 'EP-foundation' }), false, 'no EP-bootstrap-2 beside a broken EP-bootstrap');
+    assert.equal(buildGuide(T).situation.stage, 'broken', 'the general view names the broken ledger first, as before');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('firstEpic: `yad next --json` keeps its actions exactly as they were, with the proposal beside them', async () => {
+  const T = await foundationProduct();
+  try {
+    const { firstEpic, ...rest } = yadJSON(T, 'next');
+    assert.ok(firstEpic);
+    const { epicAction } = await import('./next.mjs');
+    assert.deepEqual(rest.actions.map((a) => a.epicId), ['EP-foundation']);
+    const action = { ...epicAction(T, 'EP-foundation').action };
+    delete action.route;   // a rendering input `yad next --json` strips
+    assert.deepEqual(rest.actions[0], JSON.parse(JSON.stringify(action)));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
