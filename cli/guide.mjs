@@ -21,7 +21,7 @@ import path from 'node:path';
 import { c, log, info, hand, readJSON, readPlainFile, forTerminal, exists } from './lib.mjs';
 import { VERSION, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { DEFAULT_LIFECYCLE, DRIVERS, GATE_SUFFIX } from './lifecycle.mjs';
-import { PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds, bindingsForProfile, loadSkillBindings, recordedRoute, stepSkills } from './epic-state.mjs';
+import { PRODUCT_DONE, PRODUCT_EPICS, artifactBase, epicRoot, isValidEpicId, isPassed, loadLedger, optionalStepsFor, epicIds, bindingsForProfile, loadSkillBindings, recordedRoute, stepSkills } from './epic-state.mjs';
 import { epicAction, soloOf } from './next.mjs';
 import { buildStatus } from './status.mjs';
 import { recommendationsFor, bindCommand, sameSkill } from './recommend.mjs';
@@ -36,6 +36,7 @@ import { reposBeside, insideGitRepo, PRODUCT_DIR } from './workspace.mjs';
 import { PREAPPROVED } from './agent-guard.mjs';
 import { localSetupWaiting } from './local-setup.mjs';
 import { handOffMessage, inboxBlock, inboxReady } from './inbox.mjs';
+import { firstEpicChoice, firstEpicProposal } from './first-epic.mjs';
 
 export const GUIDE_VERSION = 1;
 
@@ -224,6 +225,8 @@ export function playbook(a, ctx) {
       }
       case 'foundation-done':
       case 'discovery-done':
+        // EP-foundation-first-epic-S02: a setup epic is proposed first, while a kind has no epic yet.
+        if (ctx.firstEpic) return firstEpicWork(ctx.firstEpic);
         return {
           agent: [agentSkill('yad-epic', 'seed the next feature epic from the approved roadmap, once the person picks which item')],
           person: [{ act: 'choose', why: 'which roadmap item comes next is the person\'s call', steps: ['Pick the roadmap item to start.'], commands: [], verify: null }],
@@ -257,6 +260,20 @@ export function playbook(a, ctx) {
     }
   }
   return { agent: [...base.agent, ...beside], person: [...base.person, ...besidePerson] };
+}
+
+// The proposed setup epic (EP-foundation-first-epic-S02): each `yad epic new --seed` command is an optional
+// agent step, run only on the person's yes; the roadmap path stays beside it. `extra` leads the agent list
+// (the brownfield backfill hint of the "nothing open" branch).
+function firstEpicWork(fe, extra = []) {
+  return {
+    agent: [
+      ...extra,
+      ...fe.proposals.map((p) => ({ ...agentRun(p.command, `only once the person says yes: ${p.why}`), optional: true })),
+      agentSkill('yad-epic', 'or seed a feature epic from the approved roadmap, once the person picks which item'),
+    ],
+    person: [{ act: 'choose', why: 'whether to start a setup epic, and which, is the person\'s call', steps: [firstEpicChoice(fe)], commands: [], verify: null }],
+  };
 }
 
 // The step block: the facts, mandatory or skippable, who does it, and the skills and tools that fit.
@@ -522,8 +539,10 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
       return typeof st?.record?.reason === 'string' ? st.record.reason : null;
     };
     const ectx = { ...ctx, haltReason, ciOwns: !!seeded && seeded.has(chosen.toLowerCase()), originUnread: verified && seeded === null, originAsFetched: !!seeded && !seeded.has(chosen.toLowerCase()) };
+    const firstEpic = PRODUCT_EPICS.includes(chosen) && PRODUCT_DONE.includes(action.kind) ? firstEpicProposal(root, productConfig) : null;
+    if (firstEpic) ectx.firstEpic = firstEpic;
     const { agent, person } = playbook(action, ectx);
-    return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state, ectx), agent, person, then: thenFor(person, chosen) };
+    return { ...base, situation: { ...situation, stage: 'in-epic' }, step: stepBlock(action, state, ectx), agent, person, ...(firstEpic ? { firstEpic } : {}), then: thenFor(person, chosen) };
   }
   const problems = (m.epics || []).filter((e) => e.problem).map((e) => ({ epic: e.epic, problem: clean(e.problem) }));
   if (problems.length) return broken(base, situation, problems, epicChoices(m));
@@ -537,9 +556,13 @@ export function buildGuide(root, { epic = null, cwd = root ?? process.cwd(), run
   // Nothing open: the Foundation (optional) or the first epic.
   const brownfield = productConfig?.profile?.codebase === 'brownfield';
   const hasFoundation = epicIds(root).some((id) => PRODUCT_EPICS.includes(id));
+  const backfill = brownfield ? [agentSkill('yad-backfill', 'existing code: document what is already built first, so new epics can thread off it')] : [];
+  // EP-foundation-first-epic-S02: the Foundation has passed and nothing is open, so a setup epic is proposed.
+  const firstEpic = hasFoundation ? firstEpicProposal(root, productConfig) : null;
+  if (firstEpic) return { ...base, situation, step: null, ...firstEpicWork(firstEpic, backfill), firstEpic, then: 'run `yad guide --json` again once the epic exists' };
   return { ...base, situation, step: null,
     agent: [
-      ...(brownfield ? [agentSkill('yad-backfill', 'existing code: document what is already built first, so new epics can thread off it')] : []),
+      ...backfill,
       ...(hasFoundation ? [] : [{ ...agentRun('yad foundation new', 'only once the person says they want the Foundation: frame the whole product once (purpose, scope, MVP, roadmap, stack), then run its skill'), optional: true }]),
       agentSkill('yad-epic', 'start the first feature epic, from what the person wants built'),
     ],

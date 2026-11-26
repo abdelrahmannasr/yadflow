@@ -14,6 +14,7 @@ import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists, emitJSON, forTerminal } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { printTeamHint, soloTeamHint } from './people.mjs';
+import { firstEpicProposal, printFirstEpic } from './first-epic.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
 import { bindingsForEpic, doneStepUnapproved, reviewAsItStands, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, SEED_KINDS, STEPS } from './epic-state.mjs';
@@ -273,7 +274,7 @@ export function actionLine(a, { solo, bindings = null, verified = false } = {}) 
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null, seed = null, bindings = null, automation = null, verified = false, owners = null, changed = [] } = {}) {
+function printAction(a, { solo, theme: tag = null, seed = null, firstEpic = null, bindings = null, automation = null, verified = false, owners = null, changed = [] } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
@@ -289,6 +290,9 @@ function printAction(a, { solo, theme: tag = null, seed = null, bindings = null,
     // so the one actionable line is printed too.
     const lanes = buildLanes(a.builds);
     if (lanes.length && lanes.every((r) => r.status === 'skipped')) hand(actionLine(a, { solo, bindings, verified }));
+  } else if (firstEpic) {
+    // EP-foundation-first-epic-S02: the proposed setup epic replaces "seed the next feature from roadmap.md".
+    printFirstEpic(firstEpic, { epicSkill: stepSkills('epic', bindings)[0] || 'yad-epic' });
   } else {
     hand(actionLine(a, { solo, bindings, verified }));
     printOwner(owners, a.step);
@@ -394,7 +398,7 @@ function phaseLine(a) {
 }
 
 // `yad next` with no epic: orient across the whole project, always ending on ONE thing to do.
-function generalNext(root, { all, headCount = null } = {}) {
+function generalNext(root, { all, headCount = null, firstEpic = null } = {}) {
   if (!isSetUp(root)) {
     log(`\n  ${c.bold('Project not set up yet.')}`);
     hand(`run ${c.bold('yad setup')} ${c.dim('(then come back to `yad next`)')}`);
@@ -433,6 +437,7 @@ function generalNext(root, { all, headCount = null } = {}) {
     if (productOpen) { printAction(productRow.action, { solo, bindings, automation, verified, ...productRow }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
+    if (firstEpic) { printFirstEpic(firstEpic, { epicSkill: stepSkills('epic', bindings)[0] || 'yad-epic' }); return; }
     // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
     // brownfield anchor is the engine's own promote verb, not a step on any chain.
     if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindingsForProfile(bindings, 'foundation'))[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
@@ -452,6 +457,7 @@ function generalNext(root, { all, headCount = null } = {}) {
 
   if (featureEpics.length === 1 || all) {
     for (const r of rows) printAction(r.action, { solo, bindings, automation, verified, ...r });
+    if (firstEpic) { log(''); printFirstEpic(firstEpic, { epicSkill: stepSkills('epic', bindings)[0] || 'yad-epic' }); }
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
@@ -470,6 +476,7 @@ function generalNext(root, { all, headCount = null } = {}) {
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
   // form loses the dim from the first bold word to the end of the line.
   info(`${c.dim('detail:')} ${c.bold('yad next <epic>')}  ${c.dim('•  all at once:')} ${c.bold('yad next --all')}`);
+  if (firstEpic) { log(''); printFirstEpic(firstEpic, { epicSkill: stepSkills('epic', bindings)[0] || 'yad-epic' }); }
 }
 
 // `yad next <epic> --check <step>`: the precondition guard. Exit 0 if runnable now, 1 otherwise.
@@ -483,6 +490,19 @@ function checkPrecondition(root, epic, stepId) {
   fail(`${epic}: ${stepId} is blocked — ${res.reason}`);
   hand(`see what to do now: ${c.bold(`yad next ${epic}`)}`);
   process.exitCode = 1;
+}
+
+// The proposed setup epic (EP-foundation-first-epic-S02), the same object and the same condition as
+// `yad guide`: the Foundation has passed and a seed kind has no epic, and either this is the Foundation's
+// own view or no feature epic is open. `yad status` decides "open"; imported here, not at the top, because
+// status.mjs imports this file.
+// The proposal is worked out first: most runs have none (no Foundation, not passed, every kind taken), and
+// then the status read, which loads every ledger again, is not made at all.
+async function firstEpicFor(root, { productView = false } = {}) {
+  const fe = firstEpicProposal(root, readJSON(productConfigPath(root), null));
+  if (!fe || productView) return fe;
+  const { buildStatus } = await import('./status.mjs');
+  return (buildStatus(root, { fetch: false }).epics || []).some((e) => !e.product) ? null : fe;
 }
 
 // ---- machine-readable output (`--json`) --------------------------------------------------------
@@ -517,7 +537,7 @@ function jsonError(message) {
 
 // `--json` counterpart of runNext's three routes. Kept in one function so the routing reads next to
 // the prose routing it mirrors.
-function jsonNext(root, { epic, check }) {
+async function jsonNext(root, { epic, check }) {
   if (epic && check) {
     const res = preconditionsMet(loadLedger(epicRoot(root, epic)).state, check);
     answer({ ok: !!res.ok, check: { epic, step: check, ok: !!res.ok, ...(res.reason ? { reason: res.reason } : {}) } });
@@ -528,14 +548,17 @@ function jsonNext(root, { epic, check }) {
     if (!exists(path.join(epicRoot(root, epic), '.sdlc', 'state.json'))) {
       return jsonError(`no epic state at ${epicRel(epic)}/.sdlc/state.json`);
     }
-    return answer({ ok: true, actions: [actionFor(root, epic)] });
+    const action = actionFor(root, epic);
+    const firstEpic = PRODUCT_EPICS.includes(epic) && PRODUCT_DONE.includes(action.kind) ? await firstEpicFor(root, { productView: true }) : null;
+    return answer({ ok: true, actions: [action], ...(firstEpic ? { firstEpic } : {}) });
   }
   if (!isSetUp(root)) return answer({ ok: true, setUp: false, actions: [] });
   // Every epic that HAS a ledger, discovery included — its ACTION kind already says whether it is open
   // (`discovery-*`) or finished, so filtering it out would hide a fact rather than clarify one.
   // `--all` is implied: an array always carries everything, so there is nothing left to expand.
   const bindings = loadSkillBindings(root);
-  return answer({ ok: true, actions: listEpics(root).map((id) => actionFor(root, id, undefined, bindings)) });
+  const firstEpic = await firstEpicFor(root);
+  return answer({ ok: true, actions: listEpics(root).map((id) => actionFor(root, id, undefined, bindings)), ...(firstEpic ? { firstEpic } : {}) });
 }
 
 // Entry point for the `next` command: route to the precondition check, a single epic's action, or the
@@ -550,7 +573,7 @@ export async function runNext(root, { epic, check, all, json, headCount = null }
   }
   if (json) return jsonNext(root, { epic, check });
   if (epic && check) return checkPrecondition(root, epic, check);
-  if (!epic) return generalNext(root, { all, headCount });
+  if (!epic) return generalNext(root, { all, headCount, firstEpic: await firstEpicFor(root) });
 
   const epicDir = epicRoot(root, epic);
   if (!exists(path.join(epicDir, '.sdlc', 'state.json'))) {
@@ -565,5 +588,6 @@ export async function runNext(root, { epic, check, all, json, headCount = null }
   const automation = loadAutomation(root);
   const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
   const row = rowFor(root, epic, bindings);
-  printAction(row.action, { solo: isSolo(root), bindings, automation, verified, ...row });
+  const firstEpic = PRODUCT_EPICS.includes(epic) && PRODUCT_DONE.includes(row.action.kind) ? await firstEpicFor(root, { productView: true }) : null;
+  printAction(row.action, { solo: isSolo(root), bindings, automation, verified, ...row, firstEpic });
 }
