@@ -36122,3 +36122,161 @@ test('#322 review 7: a step resumed late beside finished work (E41) retires noth
   assert.equal(stampPassed(t, 'ui-design-review', { platform: 'github', number: 55 }), false, 'it held nothing, so it retires nothing');
   assert.equal(retiredPr(t, 'test-cases.md', 52, 'github'), false, 'the in-flight test-cases review still counts');
 });
+
+// ---- `yad repo features` (EP-foundation-first-epic-S03) ---------------------------------------------------
+// A workspace: `product/` (the Product) beside code repos, each a real git repo with the files given committed.
+function featuresWorkspace(repos) {
+  const W = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-features-'));
+  const P = path.join(W, 'product');
+  fs.mkdirSync(path.join(P, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(P, '.sdlc', 'hub.json'), '{}');
+  const entries = [];
+  for (const [name, spec] of Object.entries(repos)) {
+    entries.push({ name, path: `../${name}`, git_url: `https://example.test/${name}.git`, default_branch: 'main' });
+    if (spec === null) continue;   // registered, not cloned
+    const R = path.join(W, name);
+    fs.mkdirSync(R, { recursive: true });
+    const g = (...a) => execFileSync('git', a, { cwd: R, stdio: 'pipe' }).toString().trim();
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.name', 'T'); g('config', 'user.email', 't@example.test'); g('config', 'commit.gpgsign', 'false');
+    for (const [rel, body] of Object.entries(spec)) {
+      fs.mkdirSync(path.dirname(path.join(R, rel)), { recursive: true });
+      fs.writeFileSync(path.join(R, rel), body);
+    }
+    if (Object.keys(spec).length) { g('add', '-A'); g('commit', '-q', '-m', 'init'); }
+  }
+  fs.writeFileSync(path.join(P, '.sdlc', 'repos.json'), JSON.stringify({ repos: entries }, null, 2));
+  return { W, P };
+}
+const featuresJSONOf = (P, ...args) => {
+  const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'repo', 'features', ...args, '--json'], { cwd: P, encoding: 'utf8' });
+  return { status: r.status, j: JSON.parse(r.stdout) };
+};
+const lines = (n) => `${Array.from({ length: n }, (_, i) => `l${i}`).join('\n')}\n`;
+
+test('yad repo features: a monorepo is split at packages/ and apps/, tests docs and config left out, biggest first', () => {
+  const { W, P } = featuresWorkspace({ mono: {
+    'packages/billing/index.js': lines(30), 'packages/billing/tax.js': lines(10),
+    'packages/billing/tax.test.js': lines(99), 'packages/billing/__tests__/a.js': lines(99),
+    'apps/web/main.ts': lines(20), 'apps/api/server.ts': lines(5),
+    'docs/guide.md': lines(500), 'scripts/build.sh': lines(500), '.github/ci.yml': lines(500), 'package.json': '{}\n',
+    'packages/billing/logo.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 0]),
+  } });
+  try {
+    const { status, j } = featuresJSONOf(P);
+    assert.equal(status, 0);
+    assert.equal(j.ok, true);
+    const [row] = j.repos;
+    assert.equal(row.repo, 'mono');
+    assert.match(row.head, /^[0-9a-f]{7,}$/);
+    assert.equal(row.behind, null, 'no origin ref: unknown, not 0');
+    assert.deepEqual(row.features, [
+      { name: 'billing', paths: ['packages/billing/**'], files: 3, lines: 40 },
+      { name: 'web', paths: ['apps/web/**'], files: 1, lines: 20 },
+      { name: 'api', paths: ['apps/api/**'], files: 1, lines: 5 },
+    ], 'scripts/ is not a feature root when packages/ or apps/ exist; the binary counts as a file, not as lines');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad repo features: a flat repo uses its top-level folders, and only what HEAD holds', () => {
+  const { W, P } = featuresWorkspace({ flat: { 'cli/a.mjs': lines(8), 'skills/x/SKILL.md': lines(3), 'README.md': lines(40) } });
+  try {
+    const R = path.join(W, 'flat');
+    // Changed, staged and new files are not committed, so they change nothing.
+    fs.writeFileSync(path.join(R, 'cli/a.mjs'), lines(1000));
+    fs.mkdirSync(path.join(R, 'extra'));
+    fs.writeFileSync(path.join(R, 'extra/new.js'), lines(50));
+    execFileSync('git', ['add', 'extra/new.js'], { cwd: R });
+    const { j } = featuresJSONOf(P);
+    assert.deepEqual(j.repos[0].features.map((f) => [f.name, f.files, f.lines]), [['cli', 1, 8], ['skills', 1, 3]]);
+    assert.equal(fs.readFileSync(path.join(R, 'cli/a.mjs'), 'utf8'), lines(1000), 'nothing written in the clone');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad repo features: past --max the smallest are grouped as "other", last; --max is checked', () => {
+  const files = {};
+  for (let i = 1; i <= 5; i++) files[`m${i}/f.js`] = lines(i * 10);
+  const { W, P } = featuresWorkspace({ big: files });
+  try {
+    const { j } = featuresJSONOf(P, '--max', '3');
+    assert.deepEqual(j.repos[0].features.map((f) => f.name), ['m5', 'm4', 'other']);
+    assert.deepEqual(j.repos[0].features[2], { name: 'other', paths: ['m3/**', 'm2/**', 'm1/**'], files: 3, lines: 60, grouped: 3 });
+    assert.equal(featuresJSONOf(P).j.repos[0].features.length, 5, 'the default cap (25) leaves five alone');
+    for (const bad of ['0', '201', '2.5', 'many']) {
+      const r = featuresJSONOf(P, '--max', bad);
+      assert.equal(r.status, 1, bad);
+      assert.match(r.j.error, /--max takes a whole number from 1 to 200/);
+    }
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad repo features: a missing clone and an empty repo are rows with a problem; the rest are listed', () => {
+  const { W, P } = featuresWorkspace({ gone: null, empty: {}, ok: { 'src/app/a.js': lines(2) } });
+  try {
+    const { status, j } = featuresJSONOf(P);
+    assert.equal(status, 0, 'a repo it cannot read never fails the run');
+    const by = Object.fromEntries(j.repos.map((r) => [r.repo, r]));
+    assert.match(by.gone.problem, /no local clone/);
+    assert.match(by.empty.problem, /no commit yet/);
+    assert.deepEqual(by.gone.features, []);
+    assert.equal(by.ok.problem, undefined);
+    assert.deepEqual(by.ok.features.map((f) => f.name), ['app']);
+    // One repo by name; an unknown name is refused.
+    assert.deepEqual(featuresJSONOf(P, 'ok').j.repos.map((r) => r.repo), ['ok']);
+    assert.equal(featuresJSONOf(P, 'nope').status, 1);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad repo features: a clone behind origin says by how many, and the text lists the rows', () => {
+  const { W, P } = featuresWorkspace({ web: { 'src/home/a.js': lines(3) } });
+  try {
+    const R = path.join(W, 'web');
+    const g = (...a) => execFileSync('git', a, { cwd: R, stdio: 'pipe' }).toString().trim();
+    // origin/main two commits ahead of HEAD, made locally: no network.
+    const base = g('rev-parse', 'HEAD');
+    for (const n of [1, 2]) { fs.writeFileSync(path.join(R, `src/home/b${n}.js`), lines(1)); g('add', '-A'); g('commit', '-q', '-m', `b${n}`); }
+    g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    g('reset', '-q', '--hard', base);
+    assert.equal(featuresJSONOf(P).j.repos[0].behind, 2);
+    const out = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'repo', 'features'], { cwd: P, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } }).stdout;
+    assert.match(out, /web {2}[0-9a-f]{7,} {2}\(tracked files at HEAD\)/);
+    assert.match(out, /2 commits behind origin\/main — pull to list the latest/);
+    assert.match(out, /• home {2}1 file {2}3 lines {3}src\/home\/\*\*/);
+    assert.match(out, /a starting list: rename, merge or split these/);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('yad repo features: a committed name cannot reach the terminal raw; the person\'s git settings change no count', () => {
+  const { W, P } = featuresWorkspace({ web: { 'src/evil\u001b[31mRED/a.js': lines(4), 'src/nl\nx/b.js': lines(6), 'src/ok/c.js': lines(2) } });
+  try {
+    const R = path.join(W, 'web');
+    // A submodule is a `commit` entry in the tree, not a file.
+    execFileSync('git', ['update-index', '--add', '--cacheinfo', `160000,${execFileSync('git', ['rev-parse', 'HEAD'], { cwd: R }).toString().trim()},lib/sub`], { cwd: R });
+    execFileSync('git', ['commit', '-q', '-m', 'sub'], { cwd: R });
+    // Settings that would colour git grep's output into a pipe, or print full paths.
+    const H = path.join(W, 'home');
+    fs.mkdirSync(H);
+    fs.writeFileSync(path.join(H, '.gitconfig'), '[color]\n\tui = always\n\tgrep = always\n[grep]\n\tfullName = true\n');
+    const env = { ...process.env, HOME: H, NO_COLOR: '1' };
+    const r = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'repo', 'features', '--json'], { cwd: P, encoding: 'utf8', env });
+    const f = JSON.parse(r.stdout).repos[0].features;
+    assert.deepEqual(f.map((x) => [x.name, x.files, x.lines]).sort(), [['evil\u001b[31mRED', 1, 4], ['nl\nx', 1, 6], ['ok', 1, 2]],
+      'every line counted despite the settings; the newline path parsed; no `lib` row for the submodule');
+    const out = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'repo', 'features'], { cwd: P, encoding: 'utf8', env }).stdout;
+    assert.equal(out.includes('\u001b'), false, 'no escape byte in the printed rows');
+    assert.doesNotMatch(out, /• nl\n/, 'a newline in a name never splits a row');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('groupBoundaries: duplicate names, a container\'s own files, the top-level fallback, and the cap at its ends', async () => {
+  const { groupBoundaries } = await import('./repo-features.mjs');
+  const L = new Map([['apps/web/a.js', 5], ['packages/web/b.js', 3], ['src/main.ts', 2]]);
+  assert.deepEqual(groupBoundaries(['apps/web/a.js', 'packages/web/b.js', 'src/main.ts'], L).map((r) => [r.name, r.paths[0]]),
+    [['apps/web', 'apps/web/**'], ['packages/web', 'packages/web/**'], ['src', 'src/*']]);
+  assert.deepEqual(groupBoundaries(['README.md', 'index.js'], new Map([['index.js', 9]])), [{ name: '(top level)', paths: ['*'], files: 2, lines: 9 }]);
+  assert.deepEqual(groupBoundaries([], new Map()), []);
+  const many = Array.from({ length: 4 }, (_, i) => `m${i}/f.js`);
+  assert.deepEqual(groupBoundaries(many, new Map(), { max: 1 }).map((r) => [r.name, r.grouped]), [['other', 4]]);
+  assert.equal(groupBoundaries(many, new Map(), { max: 200 }).length, 4);
+  assert.deepEqual(groupBoundaries(['Tests/a.js', 'Docs/b.md', 'Core/c.js'], new Map()).map((r) => r.name), ['Core'], 'skipped folders match in any case');
+});
