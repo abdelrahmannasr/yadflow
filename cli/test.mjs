@@ -21282,9 +21282,10 @@ test('CLI: `yad epic new --seed` is wired end to end, refuses --issue with its c
     assert.equal(r.code, 0, r.out);
     assert.equal(JSON.parse(r.out).seed, 'pack');
     // `--issue` would refuse `--seed` as a flag it does not take, with no code. The seed check runs first.
-    const withIssue = yadRun(T, 'epic', 'new', 'other', '--seed', 'pack', '--issue', '3', '--json');
-    assert.equal(withIssue.code, 1);
-    const j = JSON.parse(withIssue.out);
+    // stdout only: a failed run's stderr may carry other lines (a Node end-of-life notice on CI).
+    const withIssue = spawnSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'epic', 'new', 'other', '--seed', 'pack', '--issue', '3', '--json'], { cwd: T, encoding: 'utf8' });
+    assert.equal(withIssue.status, 1);
+    const j = JSON.parse(withIssue.stdout);
     assert.equal(j.code, 'YAD-STATE-012');
     assert.match(j.error, /--seed cannot go with --issue/);
     assert.equal(fs.existsSync(path.join(T, 'epics', 'EP-other')), false);
