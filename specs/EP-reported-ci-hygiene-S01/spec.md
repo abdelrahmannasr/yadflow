@@ -37,8 +37,8 @@ and `"origin/${YAD_BASE}"`. A step's `env:` applies to that step only, so each l
   `commit-message` steps read the range base from `env: { YAD_RANGE_BASE: "${{ steps.base.outputs.base }}" }`.
 - R5. After the shell expands the variables, every step runs the same command with the same arguments as
   before, so each job's result is the same.
-- R6. The tests that matched the old lines (`cli/test-checks.mjs`, the `#496` test and the E120
-  `product-checkout` test) match the new form.
+- R6. The tests that matched the old lines (`cli/test-checks.mjs`: the `#496` test and the E120
+  `product-checkout` test; `cli/test.mjs`: the `#684` story-gate test) match the new form.
 - R7. A new test in `cli/test-checks.mjs` reads every `skills/*/templates/github/*.yml` and fails when a
   `run:` script (a one-line `run:` or a `run: |` block) holds `${{`.
 - R8. `skills/yad-checks/references/check-gates.md` describes the new form.
@@ -57,12 +57,13 @@ and `"origin/${YAD_BASE}"`. A step's `env:` applies to that step only, so each l
 - Q: Light spec — one `spec.md` holding the spec, the plan and the tasks? → A: yes (the person, 2026-11-27). The story qualifies: chore route, no contract, no high-risk file (the engine has no risk map).
 - Q: One PR for the three tasks, or one PR each? → A: one PR, one commit per task (the person, 2026-11-27).
 - Q: `yad-update-guard.yml` is not one of the five templates the story names, but it pastes two values into `run:` the same way. In or out? → A: in (R4). It is the same fix and the same finding class, and R7's guard test would fail on it otherwise.
+- Q: T01 also needs `cli/test.mjs` (the `#684` test matches the story-gate `env:` line exactly), which makes 4 files. How to keep each task at 3? → A: move the doc (`check-gates.md`) from T01 to T03 (the person, 2026-11-27).
 
 ## Plan
 
 Change the templates one group at a time, each with the tests that read it. T01 covers `yad-checks.yml`,
-which holds 14 of the 18 lines, with its tests and the doc. T02 covers the three other templates. T03 adds
-the guard test, once every template is clean, so the test never fails on `main`. Each task is checked by
+which holds 14 of the 18 lines, with its tests. T02 covers the three other templates. T03 adds
+the guard test and the doc, once every template is clean, so the test never fails on `main`. Each task is checked by
 the full test suite and by the yad check jobs on this PR, which run the changed `yad-checks.yml` lines.
 
 ## Tasks
@@ -72,9 +73,9 @@ the full test suite and by the yad check jobs on this PR, which run the changed 
 **Files:**
 - `skills/yad-checks/templates/github/yad-checks.yml`
 - `cli/test-checks.mjs`
-- `skills/yad-checks/references/check-gates.md`
+- `cli/test.mjs`
 
-**Done when:** R2, R3, R5 and R8 hold for `yad-checks.yml`, and the `#496` and E120 tests match the new lines (R6).
+**Done when:** R2, R3 and R5 hold for `yad-checks.yml`, and the `#496`, E120 and `#684` tests match the new lines (R6).
 
 ## T02 — the product, verified-commits and update-guard templates pass their values through env
 **Files:**
@@ -84,9 +85,10 @@ the full test suite and by the yad check jobs on this PR, which run the changed 
 
 **Done when:** R2–R5 hold for the three templates, and the full test suite passes.
 
-## T03 — a test keeps `${{ }}` out of every GitHub run script
+## T03 — a test keeps `${{ }}` out of every GitHub run script, and the doc says so
 **Files:**
 - `cli/test-checks.mjs`
+- `skills/yad-checks/references/check-gates.md`
 
-**Done when:** R1 and R7 hold: the new test passes on the clean templates, and fails when a `${{ github.base_ref }}` is put back into a `run:` line.
+**Done when:** R1, R7 and R8 hold: the new test passes on the clean templates, and fails when a `${{ github.base_ref }}` is put back into a `run:` line.
 <!-- /yad:tasks -->
