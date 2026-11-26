@@ -69,7 +69,8 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/commit-message.sh" --profile product "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/commit-message.sh" --profile product "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
 
   # The gate ledger is CI-owned: reject non-bot commits to .sdlc/{state,approvals,comments,product-prs,hub-prs}.json
   # or reviews/*.md (.sdlc/contract-lock.json is artifact-side and allowed). The one other exception is a
@@ -112,7 +113,8 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/ledger-guard.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/ledger-guard.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
 
   # E131: a member file (.sdlc/members/) is changed only by its own person, and every email it adds must be
   # the author of a commit in this PR that GitHub attributes to that person. Needs a read token to ask
@@ -159,4 +161,5 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: node "$YAD_CHECKS/member-check.mjs" "origin/${{ github.base_ref }}"
+      - run: node "$YAD_CHECKS/member-check.mjs" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
