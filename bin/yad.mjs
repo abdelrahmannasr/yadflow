@@ -212,7 +212,7 @@ ${c.bold('Team usage (EM adoption & behavior report)')}
 
 ${c.bold('Where am I / what next')}
   yad epic new <slug> --issue <ref>    Seed from an item: its label sets the type; a defect or change finds its parent or gets a stub
-  yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--parent <epic> --inherits <bases>] [--json]
+  yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--parent <epic> --inherits <bases>] [--seed bootstrap|pack] [--json]
                                        Seed a new epic's lifecycle: writes its step chain from a
                                        profile, plus empty approval/comment ledgers and reviews/.
                                        --type feature|chore (default feature). A change/defect/
@@ -1180,12 +1180,16 @@ async function main() {
       }
       if (noProduct()) break;
       if (o.issue !== undefined) {
+        // `--seed` is refused with its own code before the `--issue` path, which takes no seed (S01).
+        // Without `--issue`, `runEpicNew` makes the same checks and prints the same coded line.
+        const seedNo = commands.seedFlagRefusal({ seed: o.seed, stub: o.stub, parent: o.parent, issue: true });
+        if (seedNo) { refuse(o.json ? seedNo[0] : `${seedNo[0]} [${commands.SEED_CODE}]`, seedNo[1], { code: commands.SEED_CODE, json: o.json }); break; }
         const foreign = commands.seedForeign(process.argv.slice(2));
         if (foreign.length) { refuse(`yad epic new --issue does not take ${foreign.join(', ')}`); break; }
         result = await commands.runEpicNewFromIssue(o.dir, { slug, issue: o.issue, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
         break;
       }
-      result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
+      result = await commands.runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, seed: o.seed, today, json: o.json });
       break;
     }
     case 'backfill': {

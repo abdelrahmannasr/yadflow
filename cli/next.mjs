@@ -16,7 +16,7 @@ import { PROJECT_FILES, isVerifiedLedger, productConfigPath, stepAdvance } from 
 import { printTeamHint, soloTeamHint } from './people.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { OWNER_STEPS, liveOwner, readState as loadLedgerState } from './owners.mjs';
-import { bindingsForEpic, doneStepUnapproved, reviewAsItStands, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, STEPS } from './epic-state.mjs';
+import { bindingsForEpic, doneStepUnapproved, reviewAsItStands, bindingsForProfile, dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS, SEED_KINDS, STEPS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -71,7 +71,10 @@ export function epicAction(root, id, lin = epicLineage(root, id), bindings = loa
     // which route it is on simply gets the line it got before the short lanes existed.
     route: lifecycleProfile(ledger?.state?.profile) ? ledger.state.profile : null,
   };
-  return { action, view };
+  // The setup-epic kind (EP-foundation-first-epic-S01) rides beside the action, like the theme: the
+  // action's `--json` keys are frozen. Only a known kind counts; anything else reads as none.
+  const seed = SEED_KINDS.includes(ledger?.state?.seed) ? ledger.state.seed : null;
+  return { action, view, seed };
 }
 
 const actionFor = (root, id, lin, bindings) => epicAction(root, id, lin, bindings).action;
@@ -82,8 +85,8 @@ const actionFor = (root, id, lin, bindings) => epicAction(root, id, lin, binding
 // `bindings`, so the row's wins.
 const rowFor = (root, id, bindings = loadSkillBindings(root)) => {
   const lin = epicLineage(root, id);
-  const { action, view } = epicAction(root, id, lin, bindings);
-  return { action, theme: lin.theme, owners: liveOwners(root, id), changed: changedSinceApproved(root, id), bindings: view };
+  const { action, view, seed } = epicAction(root, id, lin, bindings);
+  return { action, theme: lin.theme, seed, owners: liveOwners(root, id), changed: changedSinceApproved(root, id), bindings: view };
 };
 
 // The done reviews whose artifact changed after they were approved (#418). Beside the action, like the
@@ -270,13 +273,13 @@ export function actionLine(a, { solo, bindings = null, verified = false } = {}) 
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false, owners = null, changed = [] } = {}) {
+function printAction(a, { solo, theme: tag = null, seed = null, bindings = null, automation = null, verified = false, owners = null, changed = [] } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
   // The free grouping tag, printed only when the epic has one — most do not, and an empty marker on
   // every line would cost more attention than it pays back.
-  const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
+  const theme = `${tag ? ` ${c.dim(`#${tag}`)}` : ''}${seed ? ` ${c.dim(`seed: ${seed}`)}` : ''}`;
   log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)}${theme} ${c.dim(`— ${a.why}`)}`);
   // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
   // of the single static hint; otherwise the one actionable line.
@@ -456,8 +459,8 @@ function generalNext(root, { all, headCount = null } = {}) {
   // The grouping theme rides this list too. This is the ONE `yad next` view that shows several epics
   // side by side, so it is where seeing which of them belong together is worth most — and leaving it
   // off would have meant bare `yad next`, the command people run by default, never showed the tag.
-  for (const { action: a, theme: tag, bindings: view, changed } of rows) {
-    const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
+  for (const { action: a, theme: tag, seed, bindings: view, changed } of rows) {
+    const theme = `${tag ? ` ${c.dim(`#${tag}`)}` : ''}${seed ? ` ${c.dim(`seed: ${seed}`)}` : ''}`;
     // Debt is reminded here too (E41): the roll-up is the view people run most, and a reminder that only
     // appears once you already look at the one epic is not a reminder.
     const owed = (a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '')

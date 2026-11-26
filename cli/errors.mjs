@@ -28,6 +28,7 @@ export const CODES = {
   'YAD-STATE-009': 'a Build record cannot be written in its current state (no lane yet, a step out of order, a PR not merged, a task not shipped)',
   'YAD-STATE-010': 'an epic worktree cannot be added or removed in its current state (a path taken, no origin, uncommitted or unpushed work, a lock)',
   'YAD-STATE-011': 'the project brain (.sdlc/brain/graph.json) or a Graphify graph cannot be read, or names a format this yadflow does not read',
+  'YAD-STATE-012': 'an epic cannot be seeded with --seed: the value is not bootstrap or pack, or the type, the route or another flag does not allow a setup epic',
   'YAD-CFG-001': 'the Product settings (product.json, or hub.json on a Product that has only that name) name an unknown platform (expected github, gitlab, or null)',
   'YAD-CFG-002': 'design.json names an unknown design tool (expected one of config.yaml design.tools, or none)',
   'YAD-CFG-003': 'testing.json names an unknown testing tool (expected one of config.yaml testing.tools, or none)',
