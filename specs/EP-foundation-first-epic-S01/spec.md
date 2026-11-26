@@ -58,6 +58,20 @@ such a mark. `kind` is taken: it is the lifecycle marker (`stub`, `foundation`).
 
 ## Tasks
 
-- **T01** — R1–R8 in `cli/epic.mjs`, `cli/epic-state.mjs`, `cli/errors.mjs`, `cli/argv-flags.mjs`,
-  `bin/yad.mjs`, `cli/next.mjs`, `docs/CLI.md`, with tests in `cli/test.mjs` (or the file the existing
-  `yad epic new` tests are in).
+<!-- yad:tasks -->
+## T01 — `yad epic new --seed bootstrap|pack`
+**Files:**
+- `cli/epic.mjs`
+- `cli/epic-state.mjs`
+- `cli/errors.mjs`
+- `cli/argv-flags.mjs`
+- `bin/yad.mjs`
+- `bin/commands.mjs`
+- `cli/next.mjs`
+- `cli/test.mjs`
+- `docs/CLI.md`
+
+**Done when:** R1–R8 hold. The tests in `cli/test.mjs` run every refusal in text and `--json` and check
+that nothing is written, and they fail when the key is dropped from `seedState` or the `--issue` seed check
+is dropped. Shipped in #700.
+<!-- /yad:tasks -->
