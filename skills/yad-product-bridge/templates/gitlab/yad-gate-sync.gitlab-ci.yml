@@ -100,9 +100,9 @@ yad-gate-sync:
       when: never
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\/EP-/
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /(review|skip|unskip)\/EP-/
     # The same on the trunk YAD_TRUNK names (#232). Unset or empty, this rule never matches.
-    - if: $CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /review\/EP-/
+    - if: $CI_PIPELINE_SOURCE == "push" && $YAD_TRUNK && $CI_COMMIT_BRANCH == $YAD_TRUNK && $CI_COMMIT_MESSAGE =~ /(review|skip|unskip)\/EP-/
     # Scheduled sweep: the only path that picks up bare approvals (advances merged reviews it finds).
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"
   script:
@@ -224,7 +224,8 @@ yad-gate-sync:
         # `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default branch.
         SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
         glab api --paginate "projects/:id/merge_requests?state=merged&updated_after=${SINCE}&per_page=100&order_by=updated_at" > /tmp/yad-raw-mrs 2>/dev/null || rc=1
-        jq -r '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' /tmp/yad-raw-mrs > /tmp/yad-merged-mrs || rc=1
+        # A merged `skip/EP-…` or `unskip/EP-…` request MR (`yad skip` / `yad unskip` once CI owns the ledger) is swept too.
+        jq -r '.[] | select(.source_branch | startswith("review/EP-") or startswith("skip/EP-") or startswith("unskip/EP-")) | "\(.iid) \(.source_branch)"' /tmp/yad-raw-mrs > /tmp/yad-merged-mrs || rc=1
         while read -r IID REF; do
           [ -n "$IID" ] || continue
           git checkout -q -B "$YAD_SYNC_BRANCH" "origin/$YAD_SYNC_BRANCH"
@@ -233,7 +234,9 @@ yad-gate-sync:
       else
         # MERGE push to the default branch whose commit names a review branch: resolve the merged MR's
         # IID from its source branch so `gate ci` can re-read approvals, then advance there.
-        REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
+        # The character list is the guard: nothing outside it reaches the shell or the API URL below. A
+        # `skip/EP-…` or `unskip/EP-…` request is read the same way (`unskip` first, so it is never cut to `skip`).
+        REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE '(review|unskip|skip)/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
         if [ -n "$REVIEW_BRANCH" ]; then
           # `.[0].iid // empty` so an empty MR array yields an empty IID (jq prints "null" otherwise),
           # which keeps the "could not resolve" branch below correct.

@@ -6569,6 +6569,80 @@ test('#434 gate-sync reconcile: one paginated search gives number + branch; only
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// EP-reported-agent-flow-S04: a merged `skip/EP-…` or `unskip/EP-…` request goes through the same jobs as a review.
+// The real steps run, with stand-ins for gh, glab and npx.
+test('gate-sync: the GitHub merge and reconcile jobs run gate ci for skip/EP-* and unskip/EP-* request branches too', () => {
+  const text = fs.readFileSync(GATE_SYNC_GITHUB, 'utf8');
+  const guard = text.match(/mergesync:[\s\S]*?if: >\n([\s\S]*?)\n {4}runs-on:/)?.[1] ?? '';
+  for (const kind of ['review/EP-', 'skip/EP-', 'unskip/EP-']) assert.ok(guard.includes(`startsWith(github.event.pull_request.head.ref, '${kind}')`), kind);
+  assert.match(guard, /merged == true/, 'still only a merge');
+  // The head ref still reaches the shell only through env:, never ${{ }} inside run:.
+  const step = text.match(/- name: Advance the gate on merge[\s\S]*?--merged/)?.[0] ?? '';
+  assert.match(step, /HEAD_REF: \$\{\{ github\.event\.pull_request\.head\.ref \}\}/);
+  assert.match(step, /--branch "\$HEAD_REF"/);
+  assert.doesNotMatch(step.slice(step.indexOf('run: |')), /\$\{\{/);
+
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-reconcile-req-'));
+  try {
+    const bin = path.join(T, 'bin');
+    fs.mkdirSync(bin);
+    const log = path.join(T, 'calls');
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nprintf 'gh %s\\n' "$*" >> "${log}"\nprintf '%s\\n' "\${GH_OUT}"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\nprintf 'npx %s\\n' "$*" >> "${log}"\n`, { mode: 0o755 });
+    execFileSync('git', ['init', '-q', T]);
+    fs.writeFileSync(path.join(T, 'step.sh'), reconcileStep());
+    const r = spawnSync('bash', ['step.sh'], { cwd: T, encoding: 'utf8', env: { ...GIT_ENV, PATH: `${bin}:${process.env.PATH}`, GITHUB_REPOSITORY: 'acme/product', YAD_PKG: '4.15.0',
+      GH_OUT: '12 review/EP-a/epic\n13 skip/EP-x/ui-design\n14 feat/x\n15 unskip/EP-x/ui-design\n16 reskip/EP-x/ui\n17 skipper/EP-x/ui' } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n').filter((c) => c.startsWith('npx')), [
+      'npx -y -p yadflow@4.15.0 yad gate ci --branch review/EP-a/epic --pr 12 --merged',
+      'npx -y -p yadflow@4.15.0 yad gate ci --branch skip/EP-x/ui-design --pr 13 --merged',
+      'npx -y -p yadflow@4.15.0 yad gate ci --branch unskip/EP-x/ui-design --pr 15 --merged',
+    ]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate-sync (GitLab): the merge rules, the sweep and the merge path take skip/EP-* and unskip/EP-*, through the same character list', () => {
+  const text = fs.readFileSync(GATE_SYNC_GITLAB, 'utf8');
+  const rules = text.split('\n').filter((l) => /CI_COMMIT_MESSAGE =~/.test(l));
+  assert.equal(rules.length, 2, rules.join('\n'));
+  for (const l of rules) assert.ok(l.includes('=~ /(review|skip|unskip)\\/EP-/'), l);
+  // The merge path's extraction, run as the runner runs it.
+  const line = text.split('\n').find((l) => l.includes('REVIEW_BRANCH="$(printf'))?.trim();
+  assert.ok(line, 'the merge path extracts the branch');
+  const extract = (msg) => spawnSync('sh', ['-c', `${line}\nprintf '%s' "$REVIEW_BRANCH"`], { encoding: 'utf8', env: { ...GIT_ENV, CI_COMMIT_MESSAGE: msg } }).stdout;
+  assert.equal(extract("Merge branch 'unskip/EP-x/s' into 'main'"), 'unskip/EP-x/s', 'unskip is never cut to skip');
+  assert.equal(extract("Merge branch 'skip/EP-x/ui-design' into 'main'"), 'skip/EP-x/ui-design');
+  assert.equal(extract("Merge branch 'review/EP-x/epic' into 'main'"), 'review/EP-x/epic');
+  assert.equal(extract("Merge branch 'skip/EP-x/u$(curl evil)' into 'main'"), 'skip/EP-x/u', 'the character list stops at the first unsafe character');
+  assert.equal(extract('chore: nothing here'), '');
+  // The sweep keeps all three prefixes, and only them.
+  const jqArg = text.match(/jq -r '(\.\[\] \| select\(\.source_branch[^']+)'/)?.[1];
+  assert.ok(jqArg, 'the sweep has a jq filter');
+  for (const kind of ['review/EP-', 'skip/EP-', 'unskip/EP-']) assert.ok(jqArg.includes(`startswith("${kind}")`), kind);
+  const mrs = JSON.stringify([{ iid: 1, source_branch: 'review/EP-a/epic' }, { iid: 2, source_branch: 'skip/EP-x/ui' }, { iid: 3, source_branch: 'feat/x' }, { iid: 4, source_branch: 'unskip/EP-x/ui' }, { iid: 5, source_branch: 'reskip/EP-x/ui' }]);
+  const jq = spawnSync('jq', ['-r', jqArg], { input: mrs, encoding: 'utf8' });
+  if (jq.error?.code !== 'ENOENT') assert.equal(jq.stdout, '1 review/EP-a/epic\n2 skip/EP-x/ui\n4 unskip/EP-x/ui\n', jq.stderr);
+});
+
+// The ledger guard looks at what a commit changes, never at the branch name: a request branch that changes the
+// ledger fails it, as a review branch does, and the empty request commit `yad skip` makes passes.
+test('ledger-guard: a skip/EP-* request that changes state.json fails; the empty request commit passes', () => {
+  const T = scaffoldRepo();
+  try {
+    seedLedgerOnBase(T);
+    git(T, 'checkout', '-q', '-B', 'skip/EP-x/ui-design');
+    git(T, 'commit', '-q', '--allow-empty', '-m', 'chore(gate): skip ui-design in EP-x');
+    const empty = runGate(LEDGER_GUARD, T);
+    assert.equal(empty.code, 0, empty.out);
+    commit(T, 'chore(gate): skip ui-design in EP-x', { 'epics/EP-x/.sdlc/state.json': '{"epicId":"EP-x","skipped":true}\n' });
+    const bad = runGate(LEDGER_GUARD, T);
+    assert.equal(bad.code, 1, bad.out);
+    assert.match(bad.out, /FAIL \[ledger-guard\]/);
+    assert.match(bad.out, /epics\/EP-x\/\.sdlc\/state\.json/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // #434: npx fetched the whole CLI on every gate-sync run. The GitHub reconcile job keeps ~/.npm/_cacache, keyed
 // on the pin the job resolved (set in GITHUB_ENV by the step before); the GitLab job keeps it in the clone, keyed on
 // every pin source (YAD_VERSION and the two pin files).

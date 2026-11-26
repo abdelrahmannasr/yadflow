@@ -16,6 +16,7 @@ import {
   canonicalApprovals, canonicalComments, canonicalProductPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards, recordSoloRereview, soloRereviewDue,
   reopenStep, retiredPr, epicLineage, heldByReopen, reopenStampDue, stampPassed, isGateStep, readFrontmatter,
+  parseSetAsideBranch, skipStep, unskipStep,
 } from './epic-state.mjs';
 import { readShips } from './ledger.mjs';
 import { activePeople, activeSum, activeBasis, approverCount, printTeamHint, soloTeamHint } from './people.mjs';
@@ -23,7 +24,7 @@ import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch, branchToCommitOn, onlyYadCommitsAhead, explainForeignFile, isProductWorktree, recheckBeforePush } from './productcommit.mjs';
 import {
   readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
-  getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber,
+  getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists, newestPrNumber, requestFacts, mergedRequestNumbers,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
@@ -1119,7 +1120,7 @@ export function convertProductLevel(root, productConfig, { git = (...a) => run('
   }
 }
 
-export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr, branchOf = prBranch, newest = newestPrNumber, contentAt = headContentHash } = {}) {
+export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr, branchOf = prBranch, newest = newestPrNumber, contentAt = headContentHash, facts = requestFacts, mergedNumbers = mergedRequestNumbers } = {}) {
   const { productConfig } = loadProduct(root);
   if (!productConfig?.platform) { warn(`no Product platform configured (${settingsEditHint(root)}) — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
   const git = (...args) => run('git', args, { cwd: root });
@@ -1162,9 +1163,18 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
 
   // Build the work list: one job per (epic, artifact) — from the event branch, or a full sweep.
   const jobs = [];
-  if (branch) {
+  // EP-reported-agent-flow-S04: a merged `skip/…` or `unskip/…` request, applied below in place of the job list.
+  let request = null;
+  if (branch && !parseReviewBranch(branch)) {
+    request = parseSetAsideBranch(branch);
+    if (!request) { warn(`${branch} is not a review/EP-*/<artifact>, skip/EP-*/<step> or unskip/EP-*/<step> branch — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
+    // R11: only the merge decides. Before it, the request is a PR like any other, and the ledger is not read.
+    if (!merged) { info(`${branch}: a ${request.kind} request — CI applies it when the PR/MR merges; nothing written`); return { synced: 0, committed: false, pushed: false }; }
+  }
+  if (request) {
+    // A request run builds no job list: it applies the one request below, and never sweeps the other epics.
+  } else if (branch) {
     const parsed = parseReviewBranch(branch);
-    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0, committed: false, pushed: false }; }
     // A review branch named for the OLD spelling whose ledger has already moved (shape 8) is the
     // Foundation's review: its steps keep `artifact: "discovery/"`, so the job resolves to them there.
     // Without this, that merge finds no ledger at `epics/EP-discovery/` and is dropped.
@@ -1208,6 +1218,11 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // branch, no jobs) would pay for a 360-day `git log --all` on every push and throw it away. It is
   // one fact about the Product, so every job also prints the same number.
   const sweepCount = jobs.length ? activePeople(root, { today: today || undefined, aliases: legacyLogins(productConfig) }) : null;
+  if (request) {
+    const r = applySetAsideRequest(root, { request, branch, pr, productConfig, trunk: defaultBranch, today, reader, facts, mergedNumbers });
+    if (!r.ok) { process.exitCode = 1; return { synced: 0, committed: false, pushed: false }; }
+    if (r.changed) touched.add(request.epic);
+  }
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
@@ -1484,7 +1499,9 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const indexOnly = indexStaged && staged.every((f) => f === INDEX_FILE);
   const sync = indexOnly
     ? 'rebuild the Product index'
-    : !branch
+    : request
+      ? `${request.kind} ${request.epic}/${request.step} on merge`
+      : !branch
       ? 'scheduled gate sync' // sweep is a batch; one subject for the run
       // Say "advance" only when a step really advanced (issue #362): a re-read of a done step that
       // still changed the ledger is a sync, and a log full of repeated "advance" lines hides the real one.
@@ -1514,6 +1531,62 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-product-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
   return { synced, committed: true, pushed: false };
+}
+
+// EP-reported-agent-flow-S04: apply one merged `skip/<epic>/<step>` or `unskip/<epic>/<step>` request to the
+// ledger on the checked-out default branch. Merging the PR/MR is the decision; `gate ci` only checks, with the
+// platform, that it really is this request, merged into the trunk (R12), and that it is the newest request for
+// the step (R13), then runs the pure rule a local `yad skip` runs (R15). Replay is quiet (R16), so the 7-day
+// reconcile can visit it again. `{ ok, changed }`; on `ok: false` the run is red and nothing is written.
+const REASON_RE = /<!-- yad:reason -->([\s\S]*?)<!-- \/yad:reason -->/;
+// The reason is text from a PR body, printed in the CI log: a control character (a `\r::error::`) could start a
+// workflow command, so `forTerminal` replaces each with a space before it is stored or printed (R14).
+export const requestReason = (body) => {
+  const m = typeof body === 'string' ? body.match(REASON_RE) : null;
+  return m ? forTerminal(m[1]).trim() : '';
+};
+function applySetAsideRequest(root, { request, branch, pr, productConfig, trunk, today, reader, facts, mergedNumbers }) {
+  const { kind, epic, step } = request;
+  const platform = productConfig.platform;
+  const no = (why) => { fail(`${forTerminal(branch)}: ${why} — nothing is written`); return { ok: false, changed: false }; };
+  const n = Number(pr);
+  if (!Number.isInteger(n) || n <= 0) return no('a request is applied only with the PR/MR number that merged it (--pr)');
+  let p;
+  try { p = reader(platform, n, { cwd: root }); } catch (e) { p = { ok: false, reason: e.message }; }
+  if (!p?.ok) return no(`could not read #${n} from the platform (${forTerminal(p?.reason || 'no answer')})`);
+  if (!p.merged) return no(`#${n} is not merged`);
+  if (!p.mergedBy) return no(`the platform does not say who merged #${n}`);
+  const f = facts(platform, n, { cwd: root });
+  if (!f?.ok) return no(`could not read #${n}'s base and head (${forTerminal(f?.reason || 'no answer')})`);
+  if (f.head !== branch) return no(`#${n} is on '${forTerminal(f.head)}', not '${forTerminal(branch)}' — check the --pr number`);
+  // The trunk is the branch this run pushes (R12), so a Product with no `default_branch` setting and no
+  // `origin/HEAD` in CI's checkout is not compared against a guessed `main`.
+  if (f.base !== trunk) return no(`#${n} merged into '${forTerminal(f.base)}', not the default branch '${forTerminal(trunk)}'`);
+  const pair = [`skip/${epic}/${step}`, `unskip/${epic}/${step}`];
+  const listed = mergedNumbers(platform, pair, { cwd: root, base: trunk });
+  if (!listed?.ok) return no(`could not list the merged requests for ${step} (${forTerminal(listed?.reason || 'no answer')})`);
+  const newer = Math.max(0, ...pair.flatMap((b) => listed.numbers?.[b] ?? []));
+  if (newer > n) { info(`${epic}: #${newer}, a newer request for ${step}, merged after #${n} — #${n} is not applied`); return { ok: true, changed: false }; }
+  let ledger;
+  try { ledger = loadLedger(epicRoot(root, epic)); } catch (e) { return no(e.message); }
+  if (!ledger.state) return no(`${epic} has no epic state on the default branch`);
+  const before = (Array.isArray(ledger.state.steps) ? ledger.state.steps : []).find((x) => x?.id === step);
+  const skipped = stepStatus(before) === 'skipped';
+  if ((kind === 'skip') === skipped && before) { info(`${epic}: ${step} is already ${skipped ? 'skipped' : 'not skipped'} — #${n} changes nothing`); return { ok: true, changed: false }; }
+  const reason = kind === 'skip' ? requestReason(f.body) : null;
+  if (kind === 'skip' && !reason) return no(`#${n} gives no reason between <!-- yad:reason --> and <!-- /yad:reason --> in its description`);
+  try {
+    if (kind === 'skip') skipStep(ledger.state, step, { reason, by: p.mergedBy, at: today || new Date().toISOString().slice(0, 10) });
+    else unskipStep(ledger.state, step);
+  } catch (e) {
+    fail(`${e.code ? `${e.code}: ` : ''}${e.message} — #${n} is not applied, nothing is written`);
+    if (e.hint) hand(e.hint);
+    return { ok: false, changed: false };
+  }
+  writeState(ledger.files.state, ledger.state);
+  ok(`${epic}: ${step} ${kind === 'skip' ? `skipped by ${p.mergedBy}, who merged #${n}` : `un-skipped by #${n}, merged by ${p.mergedBy}`}`);
+  if (reason) info(`reason: ${reason}`);
+  return { ok: true, changed: true };
 }
 
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
@@ -1771,7 +1844,7 @@ export function buildReopenMessage({ epic, step, reason, walked = [], revoked = 
 // The exact yadflow the wired gate-sync job runs, when the Product pins one: `gate_sync_version`, else the
 // `.sdlc/cli-version.json` stamp — the workflow's own order, an exact release of this major only (else it
 // floats on the major). A `YAD_VERSION` variable on the platform overrides both and cannot be seen here.
-function ciPin(root, productConfig) {
+export function ciPin(root, productConfig) {
   const major = String(VERSION).split('.')[0];
   const exact = (v) => typeof v === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(v) && v.split('.')[0] === major;
   for (const v of [productConfig?.gate_sync_version, readJSON(path.join(root, PROJECT_FILES.version), null)?.version]) if (exact(v)) return v;
@@ -1798,6 +1871,9 @@ export function olderThan(a, b) {
 // The first release whose `yad gate ci` / `yad gate sync` know a retired review PR (#322). A CI pinned
 // below it would replay the old merge and pass the gate again.
 export const REOPEN_SINCE = '4.7.0';
+// The first release whose `yad gate ci` applies a merged `skip/…` or `unskip/…` request (EP-reported-agent-flow-S04).
+// `yad skip` refuses to open one for a CI pinned below it: that CI would never apply it.
+export const SET_ASIDE_SINCE = '4.15.0';
 
 // `yad gate reopen <epic> <step> --reason "<why>"` (#322) — reopen an approved Shape step before Build
 // starts. The step goes back to `in_progress`, every later step that started goes back to `todo`, and the

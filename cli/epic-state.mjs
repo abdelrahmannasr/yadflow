@@ -427,6 +427,15 @@ export function parseReviewBranch(branch = '') {
   return m ? { epic: m[1], base: m[2] } : null;
 }
 
+// EP-reported-agent-flow-S04: `skip/EP-<slug>/<step>` or `unskip/EP-<slug>/<step>` -> { kind, epic, step }, the
+// request branch `yad skip` / `yad unskip` opens once CI owns the ledger. Null for any other branch. The step is
+// one kebab-case word, so a name holding `$`, a backtick, a space, `..` or a second `/` is null. The kind is
+// matched whole, so `unskip/…` is never read as `skip/…`.
+export function parseSetAsideBranch(branch = '') {
+  const m = typeof branch === 'string' ? branch.match(/^(skip|unskip)\/(EP-[a-z0-9-]+)\/([a-z0-9]+(?:-[a-z0-9]+)*)$/) : null;
+  return m ? { kind: m[1], epic: m[2], step: m[3] } : null;
+}
+
 // The reverse of artifactBase: an artifact-base back to the ledger's artifact path. A single-story
 // base (stories-S01) still maps to stories/ — the stories gate is ONE step over the whole set
 // (storiesHash fingerprints the directory), so any story branch syncs the same review step.

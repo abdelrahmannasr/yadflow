@@ -627,7 +627,7 @@ test('a review re-opened behind finished work: the agent opens it once, and the 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('on a verified Product whose ledger CI owns, a skip is said to be refused, not offered', async () => {
+test('on a verified Product whose ledger CI owns, a skip is offered as a request PR/MR that CI applies on merge', async () => {
   const T = await product();
   const R = tmp();
   try {
@@ -639,11 +639,13 @@ test('on a verified Product whose ledger CI owns, a skip is said to be refused, 
     moveTo(T, 'EP-pay', 'ui-design');
     const g = buildGuide(T, { epic: 'EP-pay' });
     assert.equal(g.step.mandatory, false);
-    assert.equal(g.step.skip.command, null);
-    assert.match(g.step.skip.note, /only CI writes it/);
+    assert.equal(g.step.skip.command, 'yad skip EP-pay ui-design --reason "<why>"');
+    assert.match(g.step.skip.note, /only CI writes it: `yad skip` pushes a `skip\/<epic>\/<step>` branch and opens a PR\/MR, and CI marks the step skipped when that PR\/MR merges/);
+    assert.doesNotMatch(g.step.skip.note, /refuse/);
     const said = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--dir', T], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     const text = `${said.stdout}${said.stderr}`;
-    assert.match(text, /optional, but it cannot be skipped here: on this verified Product/);
+    assert.match(text, /can be skipped — the person decides: yad skip EP-pay ui-design --reason "<why>" \(on this verified Product/);
+    assert.doesNotMatch(text, /cannot be skipped here/);
     assert.doesNotMatch(text, /null/);
     // A blocked step there is not the agent's to clear either.
     const st = readState(T, 'EP-pay');
@@ -672,15 +674,25 @@ test('on a verified Product whose epic is not on origin as fetched, the skip is 
     const g = buildGuide(T, { epic: 'EP-pay' });
     assert.equal(g.step.skip.command, 'yad skip EP-pay ui-design --reason "<why>"');
     assert.match(g.step.skip.note, /origin as last fetched: run `git fetch origin` first/);
+    // EP-reported-agent-flow-S04: once CI owns the ledger a skip goes through a PR/MR CI applies; it is not refused.
+    assert.match(g.step.skip.note, /`yad skip` opens a PR\/MR that CI applies when it merges/);
+    assert.doesNotMatch(g.step.skip.note, /refused/);
     const said = spawnSync(process.execPath, [YAD, 'guide', 'EP-pay', '--dir', T], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
     assert.match(`${said.stdout}${said.stderr}`, /can be skipped — the person decides: yad skip EP-pay ui-design --reason "<why>" \(checked against origin as last fetched/);
     // An unblock there carries the same caution; with no origin at all, the unreadable one.
     const st = readState(T, 'EP-pay');
     Object.assign(st.steps.find((s) => s.id === 'ui-design'), { status: 'blocked', record: { reason: 'legal', by: 'alice', date: '2026-10-27' } });
     put(statePath(T, 'EP-pay'), st);
-    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin as last fetched/);
+    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin as last fetched: .*the command is refused/, 'unblock keeps the refusal');
     git(T, ['remote', 'remove', 'origin']);
-    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin could not be read/);
+    assert.match(buildGuide(T, { epic: 'EP-pay' }).agent[0].why, /origin could not be read.*the command is refused/);
+    // …and with no origin, the skip's own caution says what happens instead.
+    st.steps.find((s) => s.id === 'ui-design').status = 'in_progress';
+    delete st.steps.find((s) => s.id === 'ui-design').record;
+    put(statePath(T, 'EP-pay'), st);
+    const unread = buildGuide(T, { epic: 'EP-pay' }).step.skip.note;
+    assert.match(unread, /origin could not be read.*`yad skip` opens a PR\/MR that CI applies when it merges/);
+    assert.doesNotMatch(unread, /refused/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); fs.rmSync(R, { recursive: true, force: true }); }
 });
 

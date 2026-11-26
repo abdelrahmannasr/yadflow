@@ -112,9 +112,12 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   and owes it back, add `--debt`: `yad next` and `yad doctor` then remind them until its review passes.
   It can be picked back up with `yad undefer EP-<slug> ui-design` at any time — after the stories are
   finished, the UI re-opens beside them and the stories stay done.
-- **On a verified Product (the mode check below), none of these verbs works here:** by this step the
-  epic's ledger is on the default branch, so `yad skip`, `yad defer` and `yad undefer` refuse (CI owns
-  `state.json`, and has no step for them yet). Tell the user that, and do not edit the ledger by hand.
+- **On a verified Product (the mode check below):** by this step the epic's ledger is on the default
+  branch, and only CI may change it there. A skip still works, through a PR/MR: on the person's yes,
+  `yad skip EP-<slug> ui-design --reason "<why>"` pushes a `skip/EP-<slug>/ui-design` branch and opens a
+  PR/MR that changes no file, and CI marks the step skipped when a person merges it. Tell the user that
+  merging it is the decision, and that `yad unskip` goes back the same way. `yad defer` and `yad undefer`
+  still refuse here: CI has no step for them yet. Do not edit the ledger by hand.
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure

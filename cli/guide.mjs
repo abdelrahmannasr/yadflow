@@ -159,6 +159,11 @@ function reviewWork(a, ctx, epic, also = null) {
 // behind a review that merged since (`yad skip` says so; `yad unblock` does not, so the guide does).
 const UNREAD = 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, the command is refused';
 const ASFETCHED = 'checked against origin as last fetched: run `git fetch origin` first if the epic\'s first review PR/MR may have merged, because CI then owns its ledger and the command is refused';
+// The same two cautions for a skip, which is not refused once CI owns the ledger: it goes through a PR/MR that CI
+// applies when it merges (EP-reported-agent-flow-S04). The blocked-step text keeps the two above.
+const SKIP_UNREAD = 'origin could not be read, so it is not known whether CI already owns this epic\'s ledger; if its first review PR/MR has merged, `yad skip` opens a PR/MR that CI applies when it merges, instead of writing the ledger';
+const SKIP_ASFETCHED = 'checked against origin as last fetched: run `git fetch origin` first if the epic\'s first review PR/MR may have merged, because CI then owns its ledger and `yad skip` opens a PR/MR that CI applies when it merges';
+const SKIP_BY_REQUEST = 'on this verified Product the epic\'s ledger is on the default branch, and only CI writes it: `yad skip` pushes a `skip/<epic>/<step>` branch and opens a PR/MR, and CI marks the step skipped when that PR/MR merges';
 
 // A blocked step: the person resolves it, and the agent clears it only when asked. On a verified Product
 // `yad unblock` refuses once the epic's ledger is on the default branch, and CI has no step for it yet (the
@@ -276,13 +281,14 @@ function stepBlock(a, state, ctx = {}) {
     actionKind: a.kind,
     brief: facts?.description ?? null,
     mandatory: !facts || productLevel ? null : !skippable,
-    // On a verified Product whose ledger CI already owns, `yad skip` refuses (cli/skip.mjs): said, not offered.
-    skip: !skippable ? null : ctx.ciOwns
-      ? { command: null, decidedBy: 'human', note: 'on this verified Product the epic\'s ledger is on the default branch, and only CI writes it; CI has no step for a skip yet (`yad skip` refuses)' }
-      : { command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human',
-        // `yad skip` warns the same way when it cannot read origin (cli/skip.mjs).
-        ...(ctx.originUnread ? { note: UNREAD } : {}),
-        ...(ctx.originAsFetched ? { note: ASFETCHED } : {}) },
+    // On a verified Product whose ledger CI already owns, `yad skip` opens a request PR/MR that CI applies on
+    // merge (cli/skip-request.mjs, EP-reported-agent-flow-S04): offered, with a note that says so.
+    skip: !skippable ? null : {
+      command: `yad skip ${a.epicId} ${tok(authorId, '<step>')} --reason "<why>"`, decidedBy: 'human',
+      ...(ctx.ciOwns ? { note: SKIP_BY_REQUEST } : {}),
+      // `yad skip` warns the same way when it cannot read origin (cli/skip.mjs).
+      ...(!ctx.ciOwns && ctx.originUnread ? { note: SKIP_UNREAD } : {}),
+      ...(!ctx.ciOwns && ctx.originAsFetched ? { note: SKIP_ASFETCHED } : {}) },
     driver: facts?.gate ? 'human' : recordedDriver(state, a.step) ?? facts?.driver ?? null,
     ...(facts?.gate ? { advance: facts.advance } : {}),
     status: clean(a.status ?? null),

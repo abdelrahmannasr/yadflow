@@ -252,7 +252,7 @@ Notes:
   and can be marked N/A now: offer it, and on the person's yes run `yad skip EP-<slug> ui-design --reason "<why>"` (a
   skip is the person's decision, E158) — it stays visible,
   short-circuits its gate, and advances straight to `stories` when architecture is approved. It is
-  reversible with `yad unskip EP-<slug> ui-design` until the stories review opens. **On a verified Product, now is the only time:** once this epic's first review PR merges, CI owns `state.json` and `yad skip` refuses. Don't hand-edit the chain to drop the steps;
+  reversible with `yad unskip EP-<slug> ui-design` until the stories review opens. **On a verified Product, now is the simplest time:** before this epic's first review PR merges, the skip is written here and rides that PR. After it merges, CI owns `state.json`: `yad skip` then opens a `skip/EP-<slug>/ui-design` PR/MR instead, and CI marks the step skipped when a person merges it. Don't hand-edit the chain to drop the steps;
   the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").
 
 ### Step 5b — Open the epic's review gate
