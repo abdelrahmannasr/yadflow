@@ -3279,7 +3279,8 @@ export function ledgerSeed(root, id) {
   const file = path.join(epicRoot(root, id), '.sdlc', 'state.json');
   if (!fs.existsSync(file)) return null;
   let state;
-  try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return undefined; }
+  // The safe reader: a link, a FIFO or an outsized file is refused as unreadable, never followed.
+  try { state = readJSONStrict(file, null); } catch { return undefined; }
   const seed = isPlainObject(state) ? state.seed : null;
   return SEED_KINDS.includes(seed) ? seed : null;
 }
