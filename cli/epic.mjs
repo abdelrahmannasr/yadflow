@@ -31,12 +31,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSON, warn, emitJSON } from './lib.mjs';
+import { c, fail, forTerminal, hand, info, log, ok, readJSON, warn, emitJSON } from './lib.mjs';
 import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
   planThreadedSeed, readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
-  seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  SEED_KINDS, SEED_PROFILES, seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
@@ -52,16 +52,33 @@ export function epicIdFrom(slug) {
 
 // `type` defaults to null rather than `feature` so an explicit `--type` is distinguishable from no
 // flag at all — which is what lets an existing `epic.md` supply the answer without overriding the user.
-export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false, returnResult = false } = {}) {
+// `--seed` (EP-foundation-first-epic-S01): the refusals that need no ledger read, in the contract's
+// order — the value first, then the flags a seeded epic cannot take. Exported so `bin/yad.mjs` asks it
+// before the `--issue` path, which would otherwise refuse `--seed` as a flag it does not know, with no code.
+// Returns null, or `[message, hint]`.
+export function seedFlagRefusal({ seed, stub = false, parent = null, issue = false } = {}) {
+  if (seed === null || seed === undefined) return null;
+  if (!SEED_KINDS.includes(seed)) return [`--seed takes ${SEED_KINDS.join(' or ')}, not "${forTerminal(String(seed))}"`, null];
+  const flag = issue ? 'issue' : stub ? 'stub' : parent ? 'parent' : null;
+  if (flag) return [`--seed cannot go with --${flag}: a seeded epic is a new feature epic of its own`, `drop --${flag}, or drop --seed`];
+  return null;
+}
+export const SEED_CODE = 'YAD-STATE-012';
+
+export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, seed = null, today, json = false, returnResult = false } = {}) {
   // `returnResult` (E170, with json): a caller that seeds as one part of its work gets the answer back, and
   // it alone speaks, so stdout stays one JSON document.
   const answer = returnResult ? (payload) => payload : emitJSON;
-  const bail = (message, hint) => {
+  const bail = (message, hint, code = null) => {
     process.exitCode = 1;
-    if (json) return answer({ ok: false, error: message, hint });
-    fail(message); if (hint) hand(hint);
+    if (json) return answer({ ok: false, error: message, hint, ...(code ? { code } : {}) });
+    fail(code ? `${message} ${c.dim(`[${code}]`)}` : message); if (hint) hand(hint);
     return undefined;
   };
+  // Every `--seed` refusal carries its own code, and runs before anything is written.
+  const seedBail = (message, hint = null) => bail(message, hint, SEED_CODE);
+  const flagRefusal = seedFlagRefusal({ seed, stub, parent });
+  if (flagRefusal) return seedBail(...flagRefusal);
 
   const epic = epicIdFrom(slug);
   if (!epic) return bail(`usage: yad epic new <slug> [--type ${WORK_ITEM_TYPES.join('|')}] [--profile ${seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
@@ -122,6 +139,9 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   }
   type = type || 'feature';
 
+  if (seed && type !== 'feature') {
+    return seedBail(`--seed needs a feature epic (this is a ${forTerminal(String(type))}): drop --type, or drop --seed`);
+  }
   if (!WORK_ITEM_TYPES.includes(type)) {
     return bail(`unknown work-item type: ${type}`, `a work item is one of ${WORK_ITEM_TYPES.join(' · ')}`);
   }
@@ -178,6 +198,9 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
     });
   }
   profile = profile || 'classic';
+  if (seed && !SEED_PROFILES.includes(profile)) {
+    return seedBail(`--seed needs the full chain (${SEED_PROFILES.join(' or ')}): a walking skeleton fixes the first contract, and ${forTerminal(String(profile))} has no architecture step`);
+  }
 
   // A STUB anchors a feature that was built before the Product existed, so a defect can thread off it
   // today. Two restrictions, both from what a stub IS rather than from anything technical:
@@ -211,7 +234,7 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
     );
   }
 
-  const state = seedState({ epic, profile, type, today, stub });
+  const state = seedState({ epic, profile, type, today, stub, seed });
   writeState(files.state, state);
   // E19: the index lists the new work item — on the default branch of a local Product only; `quiet`
   // keeps a --json stdout one document.
@@ -236,12 +259,13 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // showed up on every seed would be one more always-null field for every reader to ignore.
   if (json) {
     return answer({
-      ok: true, epic, type, profile, stub, currentStep: state.currentStep,
+      ok: true, epic, type, profile, stub, ...(seed ? { seed } : {}), currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
       ...(skills.length > 1 ? { nextSkills: skills } : {}),
     });
   }
   ok(`${epic} seeded — ${stub ? 'stub anchor' : typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
+  if (seed) ok(`${epic} seeded as a ${seed} epic: the yad-epic skill writes its scope from the Foundation`);
   info(`chain: ${state.steps.map((s) => (!stub && s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
   hand(stub
     ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad backfill promote\` to make it a real anchor (\`--full\` wakes the chain). Defects can thread off it now`

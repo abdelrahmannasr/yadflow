@@ -3264,7 +3264,13 @@ export const seedableProfiles = (profiles = LIFECYCLE_PROFILES) =>
 // skill rather than to authoring. Modelled here rather than in a second function because it differs
 // from a plain seed in three fields, and two functions sharing a chain is how the five skill copies
 // drifted in the first place. `yad-stub` Step 5 is one line now: run `yad epic new --stub`.
-export function seedState({ epic, profile, type, today, stub = false }) {
+// The setup-epic kinds `yad epic new --seed` takes (EP-foundation-first-epic): a closed list, from the
+// locked contract. `bootstrap` is a new project's first epic, `pack` brings an existing codebase in.
+export const SEED_KINDS = Object.freeze(['bootstrap', 'pack']);
+// The routes a seeded epic may take: the full chain, because a walking skeleton fixes the first contract.
+export const SEED_PROFILES = Object.freeze(['classic', 'analysis-first']);
+
+export function seedState({ epic, profile, type, today, stub = false, seed = null }) {
   const p = lifecycleProfile(profile);
   if (!p || !seedableProfiles().includes(p.id)) {
     throw err('YAD-STATE-007', `cannot seed the '${profile}' lifecycle profile`,
@@ -3284,6 +3290,10 @@ export function seedState({ epic, profile, type, today, stub = false }) {
     type,
     ...(stub ? { kind: 'stub' } : {}),
     profile: p.id,
+    // `seed` (EP-foundation-first-epic) marks the Product's setup epic — the outline the yad-epic and
+    // yad-stories skills follow. A second axis beside `kind`, so its own key, right after `profile`; and
+    // absent rather than null when not seeded, so an unseeded ledger keeps today's bytes.
+    ...(seed ? { seed } : {}),
     currentStep: stub ? 'backfill-pending' : steps[0].id,
     steps,
   };

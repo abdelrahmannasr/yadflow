@@ -17,7 +17,7 @@ export { reconcile } from '../cli/reconcile.mjs';
 export { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair, gateReopen } from '../cli/gate.mjs';
 export { gateApprove, gateComment, gateAdvance } from '../cli/gate-local.mjs';
 export { isValidEpicId, productDriftError, seedableProfiles } from '../cli/epic-state.mjs';
-export { runEpicNew, runFoundationNew, runFoundationStatus } from '../cli/epic.mjs';
+export { runEpicNew, runFoundationNew, runFoundationStatus, seedFlagRefusal, SEED_CODE } from '../cli/epic.mjs';
 export { runStatus } from '../cli/status.mjs';
 export { runGuide } from '../cli/guide.mjs';
 export { runSkillBind, runSkillList, runSkillRecommend, runSkillUnbind } from '../cli/skill.mjs';

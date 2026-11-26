@@ -21204,6 +21204,110 @@ test('CLI: `yad epic new` is wired end to end, flags and all', () => {
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// ---- `yad epic new --seed` — the Product's setup epic (EP-foundation-first-epic-S01) ----------------
+test('yad epic new --seed: writes `seed` right after `profile`, says so, and adds it to --json', async () => {
+  for (const seed of ['bootstrap', 'pack']) {
+    const { T, out, failed } = await epicNewOn({ slug: 'setup', seed });
+    try {
+      assert.equal(failed, false, out);
+      const st = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-setup/.sdlc/state.json'), 'utf8'));
+      assert.equal(st.seed, seed);
+      const keys = Object.keys(st);
+      assert.equal(keys[keys.indexOf('profile') + 1], 'seed', 'seed sits right after profile');
+      assert.match(out, new RegExp(`EP-setup seeded as a ${seed} epic: the yad-epic skill writes its scope from the Foundation`));
+    } finally { cleanTmp(T); }
+  }
+  const { T, out } = await epicNewOn({ slug: 'setup', seed: 'pack', profile: 'analysis-first', json: true });
+  try {
+    const j = JSON.parse(out);
+    assert.equal(j.ok, true);
+    assert.equal(j.seed, 'pack');
+    assert.equal(j.profile, 'analysis-first');
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: with no --seed, the ledger and the --json answer carry no seed key at all', async () => {
+  const { T } = await epicNewOn({ slug: 'plain' });
+  const { T: T2, out } = await epicNewOn({ slug: 'plain', json: true });
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-plain/.sdlc/state.json'), 'utf8'));
+    assert.deepEqual(Object.keys(st), ['schemaVersion', 'epicId', 'createdAt', 'type', 'profile', 'currentStep', 'steps']);
+    assert.equal('seed' in JSON.parse(out), false);
+  } finally { cleanTmp(T); cleanTmp(T2); }
+});
+
+test('yad epic new --seed: every refusal is YAD-STATE-012, names the way out, and writes nothing', async () => {
+  const cases = [
+    [{ seed: 'nope' }, /--seed takes bootstrap or pack, not "nope"/],
+    [{ seed: 'pack', stub: true }, /--seed cannot go with --stub/],
+    [{ seed: 'pack', type: 'change', parent: 'EP-base', inherits: 'epic' }, /--seed cannot go with --parent/],
+    [{ seed: 'bootstrap', type: 'chore' }, /--seed needs a feature epic \(this is a chore\)/],
+    [{ seed: 'bootstrap', type: 'bogus' }, /--seed needs a feature epic \(this is a bogus\)/],
+    [{ seed: 'bootstrap', profile: 'chore' }, /--seed needs the full chain \(classic or analysis-first\).*chore has no architecture step/],
+    [{ seed: 'bootstrap', profile: 'spike' }, /spike has no architecture step/],
+  ];
+  for (const [opts, said] of cases) {
+    for (const json of [false, true]) {
+      const { T, out, failed } = await epicNewOn({ slug: 'setup', json, ...opts });
+      try {
+        assert.equal(failed, true, `${JSON.stringify(opts)} was not refused`);
+        assert.match(json ? JSON.parse(out).error : out, said);
+        if (json) assert.equal(JSON.parse(out).code, 'YAD-STATE-012');
+        else assert.match(out, /\[YAD-STATE-012\]/);
+        assert.equal(fs.existsSync(path.join(T, 'epics')), false, `${JSON.stringify(opts)} wrote under epics/`);
+      } finally { cleanTmp(T); }
+    }
+  }
+  // A header that says `chore` is the type, so the seed is refused there too.
+  const { T, out, failed } = await epicNewOn({ slug: 'setup', seed: 'pack' }, { files: { 'epics/EP-setup/epic.md': '---\nkind: chore\ntype: chore\n---\n' } });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /this is a chore/);
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-setup/.sdlc')), false);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new --seed: the error code is in the catalog the docs table is keyed on', async () => {
+  const { CODES } = await import('./errors.mjs');
+  assert.ok(CODES['YAD-STATE-012']);
+  assert.match(fs.readFileSync(path.join(ROOT, 'docs', 'CLI.md'), 'utf8'), /\| `YAD-STATE-012` \|/);
+});
+
+test('CLI: `yad epic new --seed` is wired end to end, refuses --issue with its code, and `yad next` shows the kind', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-seedcli-'));
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  fs.writeFileSync(path.join(T, '.sdlc', 'hub.json'), '{}');
+  try {
+    const r = yadRun(T, 'epic', 'new', 'setup', '--seed', 'pack', '--json');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(JSON.parse(r.out).seed, 'pack');
+    // `--issue` would refuse `--seed` as a flag it does not take, with no code. The seed check runs first.
+    const withIssue = yadRun(T, 'epic', 'new', 'other', '--seed', 'pack', '--issue', '3', '--json');
+    assert.equal(withIssue.code, 1);
+    const j = JSON.parse(withIssue.out);
+    assert.equal(j.code, 'YAD-STATE-012');
+    assert.match(j.error, /--seed cannot go with --issue/);
+    assert.equal(fs.existsSync(path.join(T, 'epics', 'EP-other')), false);
+    // `yad next` prints the kind beside the id, for one epic and in the list; its --json is unchanged.
+    assert.match(yadRun(T, 'next', 'EP-setup').out, /EP-setup seed: pack/);
+    assert.match(yadRun(T, 'next').out, /EP-setup seed: pack/);
+    const nextJson = JSON.parse(yadRun(T, 'next', 'EP-setup', '--json').out);
+    assert.ok(nextJson.actions?.length, 'yad next --json lists the action');
+    for (const a of nextJson.actions) assert.equal('seed' in a, false, 'the action keys are frozen');
+    // The text refusals carry the code too, on the path a person types.
+    for (const args of [['--seed', 'bogus'], ['--seed', 'pack', '--stub'], ['--seed', 'pack', '--profile', 'chore'], ['--seed', 'pack', '--issue', '3']]) {
+      const t = yadRun(T, 'epic', 'new', 'third', ...args);
+      assert.equal(t.code, 1, args.join(' '));
+      assert.match(t.out, /\[YAD-STATE-012\]/, args.join(' '));
+    }
+    assert.equal(fs.existsSync(path.join(T, 'epics', 'EP-third')), false);
+    // R6: doctor and migrate leave the seed as it is.
+    yadRun(T, 'migrate', '--apply');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-setup/.sdlc/state.json'), 'utf8')).seed, 'pack');
+    assert.match(yadRun(T, '--help').out, /--seed bootstrap\|pack/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad epic new --stub: an anchor for a feature that shipped before the Product existed', async () => {
   const { T, out, failed } = await epicNewOn({ slug: 'legacy-cart', stub: true });
   try {
