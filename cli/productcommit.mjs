@@ -331,7 +331,16 @@ export function guardDefaultBranch(branch, defaultBranch, { allowBranch = false,
     return true;
   }
   fail(`on '${b}', not the default branch '${d}' — ${cmd} commits go to the default branch to stay out of PR-checked ranges`);
-  hand(`switch to '${d}' and re-run, or pass --allow-branch to override (if '${d}' is wrong, set default_branch in ${root ? settingsEditHint(root) : SETTINGS_EDIT_HINT})`);
+  const where = `if '${d}' is wrong, set default_branch in ${root ? settingsEditHint(root) : SETTINGS_EDIT_HINT}`;
+  // A second checkout of the Product that yad did not make (#692): `git switch <d>` fails there while another
+  // folder holds it. A detached HEAD at its tip here counts as the default branch (#597) and keeps what is
+  // uncommitted here, so it comes first; a worktree from `yad worktree add` (#115) is for later work only —
+  // it is a new folder, and what was written here stays here.
+  if (isProductWorktree(root) && !worktreeAt(root)) {
+    hand(`this is a second checkout of the Product that yad did not make: \`git switch --detach origin/${d}\` here and re-run commits what is here; for later work, use a worktree from \`yad worktree add <epic>\` (run it from the main checkout), which commits and pushes to '${d}' — what was written here stays here; --allow-branch overrides (${where})`);
+  } else {
+    hand(`switch to '${d}' and re-run, or pass --allow-branch to override (${where})`);
+  }
   process.exitCode = 1;
   return false;
 }
