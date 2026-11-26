@@ -586,3 +586,78 @@ test('E174 review 3: approvals with no fingerprint fall back to the closing fing
   assert.equal(g.posts.length, 0); reset();
 });
 
+
+// ---- the setup epic stays off the roadmap (EP-foundation-first-epic-S04) ----------------------------------
+const { runEpicNew } = await import('./epic.mjs');
+const { spawnSync } = await import('node:child_process');
+const YAD = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'bin', 'yad.mjs');
+const statusOf = (T, text = false) => {
+  const r = spawnSync('node', [YAD, 'foundation', 'status', ...(text ? [] : ['--json'])], { cwd: T, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', YAD_PLATFORM_READ: '0' } });
+  return text ? r.stdout : JSON.parse(r.stdout);
+};
+
+test('foundation status: a seeded epic is listed under setup, never as unlisted; setup is always in --json', async () => {
+  const T = await product();
+  try {
+    assert.deepEqual(statusOf(T).setup, [], 'present and empty with no setup epic');
+    await runEpicNew(T, { slug: 'bootstrap', seed: 'bootstrap', today: '2026-11-26', json: true, returnResult: true });
+    await runEpicNew(T, { slug: 'pay', today: '2026-11-26', json: true, returnResult: true });
+    const j = statusOf(T);
+    assert.deepEqual(j.setup, [{ epicId: 'EP-bootstrap', seed: 'bootstrap', status: j.setup[0].status }]);
+    assert.equal(typeof j.setup[0].status, 'string');
+    assert.deepEqual(j.unlisted, ['EP-pay'], 'the setup epic is not a feature the roadmap misses');
+    const out = statusOf(T, true);
+    assert.match(out, /setup {2}\(outside the roadmap, never published as an item\)/);
+    assert.match(out, new RegExp(`EP-bootstrap {2}bootstrap {2}${j.setup[0].status}`));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('foundation status: with no setup epic the text has no setup block', async () => {
+  const T = await product();
+  try { assert.doesNotMatch(statusOf(T, true), /outside the roadmap/); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('foundation publish: a roadmap row naming a setup epic is never published, and the notes say why', async () => {
+  const T = await product();
+  try {
+    // A roadmap row names EP-signup, and that epic was seeded as the setup epic.
+    await runEpicNew(T, { slug: 'signup', seed: 'pack', today: '2026-11-26', json: true, returnResult: true });
+    const g = fake();
+    const r = await P.runFoundationPublish(T, { dryRun: true, json: true, env, runner: g.runner });
+    assert.deepEqual(r.created.map((x) => x.epicId).sort(), ['EP-checkout', 'EP-referrals', 'EP-teams']);
+    assert.ok(r.notes.some((n) => /EP-signup is the pack setup epic, so its row was left out/.test(n)), r.notes.join(' | '));
+    const f = fake();
+    const real = await P.runFoundationPublish(T, { json: true, env, runner: f.runner });
+    assert.equal(f.created.some((x) => x.args.some((a) => /EP-signup/.test(a))), false, 'no item opened for it');
+    assert.ok(real.notes.some((n) => /EP-signup is the pack setup epic, so its row was left out$/.test(n)), real.notes.join(' | '));
+    const recorded = JSON.parse(fs.readFileSync(path.join(T, 'foundation/.sdlc/roadmap-items.json'), 'utf8'));
+    assert.equal(recorded.items.some((e) => e.epicId === 'EP-signup'), false, 'nothing recorded for it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); reset(); }
+});
+
+test('foundation publish: only state.json says "seeded" — a broken sibling file does not hide it, a broken state.json leaves the row out', async () => {
+  const T = await product();
+  try {
+    await runEpicNew(T, { slug: 'signup', seed: 'pack', today: '2026-11-26', json: true, returnResult: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-signup/.sdlc/comments.json'), '{ broken');
+    await runEpicNew(T, { slug: 'checkout', today: '2026-11-26', json: true, returnResult: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-checkout/.sdlc/state.json'), '{ broken');
+    const r = await P.runFoundationPublish(T, { dryRun: true, json: true, env, runner: fake().runner });
+    assert.deepEqual(r.created.map((x) => x.epicId).sort(), ['EP-referrals', 'EP-teams']);
+    assert.ok(r.notes.some((n) => /EP-signup is the pack setup epic/.test(n)));
+    assert.ok(r.notes.some((n) => /the ledger of EP-checkout cannot be read, so its row was left out/.test(n)), r.notes.join(' | '));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); reset(); }
+});
+
+test('foundation publish: a setup epic that was published before it was seeded names its open item', async () => {
+  const T = await product();
+  try {
+    fs.writeFileSync(path.join(T, 'foundation/.sdlc/roadmap-items.json'), JSON.stringify({ items: [
+      { epicId: 'EP-signup', platform: 'github', host: 'github.com', repo: 'a/p', number: 5, url: 'https://github.com/a/p/issues/5', publishedAt: '2026-11-20T00:00:00.000Z' },
+    ] }));
+    await runEpicNew(T, { slug: 'signup', seed: 'bootstrap', today: '2026-11-26', json: true, returnResult: true });
+    const r = await P.runFoundationPublish(T, { dryRun: true, json: true, env, runner: fake().runner });
+    assert.ok(r.notes.some((n) => /EP-signup is the bootstrap setup epic, so its row was left out — it was already published as #5; close that item/.test(n)), r.notes.join(' | '));
+    assert.equal(r.created.some((x) => x.epicId === 'EP-signup'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); reset(); }
+});

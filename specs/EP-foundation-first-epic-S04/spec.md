@@ -12,8 +12,10 @@ that names its id would be published as a roadmap item.
 
 ## Requirements
 
-- **R1.** `ledgerSeed(root, id)` (`cli/epic-state.mjs`) returns the epic's `seed` when it is a known kind, else
-  `null` (not seeded, another word, or a ledger that does not load).
+- **R1.** `ledgerSeed(root, id)` (`cli/epic-state.mjs`) reads only the epic's `state.json` and returns its
+  `seed` when it is a known kind; `null` when there is no ledger, no seed, or another word; `undefined` when
+  `state.json` exists but cannot be read (unknown, never "not seeded"). A broken sibling ledger file
+  (comments, approvals) does not hide the seed.
 - **R2.** `yad foundation status --json` always has `setup`: one `{ epicId, seed, status }` per epic whose
   ledger has a known `seed`, Product level left out. `status` is `featureStatus`, the roadmap rows' words. It
   may be empty.
@@ -22,7 +24,10 @@ that names its id would be published as a roadmap item.
   `setup  (outside the roadmap, never published as an item)` with one row per setup epic
   (`<mark> <epicId>  <seed>  <status>`, the roadmap's marks). Only when `setup` is not empty.
 - **R5.** `yad foundation publish` leaves out a roadmap row whose epic is seeded, in a dry run too, and adds a
-  `notes` line: `<EP> is the <seed> setup epic, so its row was left out`. No item is opened for it.
+  `notes` line: `<EP> is the <seed> setup epic, so its row was left out`, plus `— it was already published as
+  #<n>; close that item if it should not be on the roadmap` when the record already holds it. A row whose
+  `state.json` cannot be read is left out too, with a note naming `yad doctor`: it may be a setup epic, and an
+  item is not taken back. No item is opened or recorded for either.
 - **R6.** `docs/CLI.md`: the two rows say so.
 
 ## Non-goals
@@ -48,6 +53,7 @@ that names its id would be published as a roadmap item.
 
 **Done when:** R1–R6 hold. The tests in `cli/test-foundation-publish.mjs` cover `setup` empty and filled,
 `unlisted` without the setup epic, the text block present and absent, and publish (dry run and real) leaving a
-seeded row out with its note. They fail when the publish filter is dropped, or when `unlisted` counts the setup
+seeded row out with its note and no record, a broken sibling file, a broken `state.json`, and a row already
+published before it was seeded. They fail when the publish filter is dropped, or when `unlisted` counts the setup
 epic.
 <!-- /yad:tasks -->
