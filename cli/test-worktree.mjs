@@ -910,6 +910,80 @@ test('a detached HEAD in the main Product checkout is refused, and --allow-branc
   } finally { fs.rmSync(W, { recursive: true, force: true }); }
 });
 
+// The guard run on its own in a folder, as each caller runs it (with the Product root).
+const guardIn = (root) => {
+  const src = `import { guardDefaultBranch } from ${JSON.stringify(new URL('./productcommit.mjs', import.meta.url).href)};
+guardDefaultBranch('wip', 'main', { root: process.argv[1], cmd: 'yad checkpoint' });`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', src, root], { env: { ...ENV, NO_COLOR: '1' }, encoding: 'utf8' });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+};
+const SECOND = /second checkout of the Product that yad did not make/;
+
+test('on a branch in a plain git worktree of the Product, the refusal names yad worktree add and a detached HEAD at the tip, not `switch to main` (#692)', () => {
+  const { W, P } = workspace();
+  try {
+    const plain = path.join(W, 'product-plain');
+    git(P, 'worktree', 'add', '-q', '-b', 'wip', plain, 'origin/main');
+    assert.equal(isProductWorktree(plain), true);
+    assert.equal(worktreeAt(plain), null, 'yad did not make it');
+    const ship = { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T04-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T04', repo: 'api', mergeCommit: 'cab', date: '2026-10-25' }) };
+    write(plain, ship);
+    let r = yad(plain, 'checkpoint', '--push');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /on 'wip', not the default branch 'main'/, 'the refusal itself is unchanged');
+    assert.match(r.out, SECOND);
+    assert.match(r.out, /`git switch --detach origin\/main` here and re-run commits what is here; for later work, use a worktree from `yad worktree add <epic>` \(run it from the main checkout\)/, 'the way that commits these files comes first');
+    assert.match(r.out, /what was written here stays here/);
+    assert.match(r.out, /--allow-branch overrides \(if 'main' is wrong, set default_branch in /);
+    assert.doesNotMatch(r.out, /switch to 'main'/, 'git switch main fails while the main checkout holds it');
+    assert.equal(git(plain, 'rev-list', '--count', 'origin/main..HEAD'), '0', 'nothing was committed');
+
+    // The hint it names works: detached at the tip, the same folder counts as the default branch, and the
+    // re-run commits the file still waiting here and pushes it to main.
+    const before = git(P, 'rev-parse', 'origin/main');
+    git(plain, 'switch', '-q', '--detach', 'origin/main');
+    assert.equal(branchToCommitOn(plain, (...a) => run('git', a, { cwd: plain }), 'main'), 'main');
+    r = yad(plain, 'checkpoint', '--push');
+    assert.equal(r.code, 0, r.out);
+    git(P, 'fetch', '-q', 'origin');
+    assert.equal(git(P, 'rev-list', '--count', `${before}..origin/main`), '1', r.out);
+    assert.match(git(P, 'show', '--name-only', '--format=', 'origin/main'), /EP-x-S01-T04-api\.json/);
+
+    // --allow-branch is as before: it commits on the branch, with today's warning.
+    git(plain, 'switch', '-q', '-c', 'wip2');
+    write(plain, { 'epics/EP-x/.sdlc/build-log/EP-x-S01-T05-api.json': JSON.stringify({ story: 'EP-x-S01', task: 'T05', repo: 'api', mergeCommit: 'cad', date: '2026-10-26' }) });
+    r = yad(plain, 'checkpoint', '--allow-branch');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /--allow-branch: committing on 'wip2'/);
+    assert.equal(git(plain, 'rev-list', '--count', 'origin/main..HEAD'), '1');
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
+test('the main checkout, the worktrees yad made (the Product\'s and a code repo\'s, each with a record), and no root keep today\'s refusal on a branch (#692)', () => {
+  const { W, P, pwt, awt } = workspace();
+  try {
+    git(P, 'switch', '-q', '-c', 'wip');
+    let r = guardIn(P);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /switch to 'main' and re-run, or pass --allow-branch to override/);
+    assert.doesNotMatch(r.out, SECOND, 'the main checkout');
+
+    assert.equal(yad(P, 'worktree', 'add', 'EP-x', '--all').code, 0);
+    git(P, 'switch', '-q', 'main');
+    for (const at of [pwt, awt]) {
+      git(at, 'switch', '-q', '-c', `wip-${path.basename(at)}`);
+      r = guardIn(at);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /switch to 'main' and re-run, or pass --allow-branch to override/, at);
+      assert.doesNotMatch(r.out, SECOND, `${at} has yad's record`);
+    }
+    r = guardIn('');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /switch to 'main' and re-run/, 'no root');
+    assert.doesNotMatch(r.out, SECOND);
+  } finally { fs.rmSync(W, { recursive: true, force: true }); }
+});
+
 test('--allow-branch never applies to a detached HEAD: refused before any commit, in the main checkout and in a worktree with a commit not yad\'s own (#597 review)', () => {
   const { W, P } = workspace();
   try {
