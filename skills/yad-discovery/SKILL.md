@@ -173,6 +173,12 @@ each `yad-epic` reads (its "Step 2c"). When the Product has a platform, the gate
 Product (via `yad-product-bridge`) and `yad-review-gate action: sync` pulls platform approvals and comments
 into the ledger; otherwise the review is recorded locally.
 
+**Once the review has passed, `yad guide --json` proposes the first epic** (`firstEpic`): one or both kinds,
+the one that matches the project first — `bootstrap` for a new project, `pack` for an existing one — each
+with its exact `yad epic new … --seed` command, and marked optional. The Foundation proposes a first epic,
+and seeds it only on the person's yes: show the person the proposal and its reason, and run a command only
+when they say yes to it. They may pick a roadmap item instead.
+
 **Once the review has passed and the Product has a platform, offer to publish the roadmap** (E174). Ask the
 person, then run `yad foundation publish --dry-run` to show what it would create, then `yad foundation publish`.
 It opens one issue or work item per roadmap feature in the Product repo: type feature, a priority by phase

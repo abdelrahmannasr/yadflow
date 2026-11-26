@@ -123,6 +123,23 @@ Adopt the **pm** lens. Decompose the epic into the smallest set of
 independently reviewable, independently buildable stories. For each story decide which repos it touches
 (must be a subset of the epic's `repos`). Prefer stories scoped to a clear slice of user value.
 
+**A setup epic** (`state.json` has `seed`, set by `yad epic new --seed`) follows its outline instead, from the
+approved `epic.md`:
+- **`seed: bootstrap`** — **one story per concern**, in this order, each tagged with the repos it applies to
+  (all of them in the epic's `repos`): make and register the repos; tooling; CI and yadflow's gates; the
+  design system and identity (`yad brand init` only when the person asks for it); the walking skeleton
+  deployed. A concern the epic left out is not written.
+- **`seed: pack`** — **one story per boundary** in the epic's chosen list. Its **Notes for build** name the
+  boundary's repo and paths, and its three steps: anchor the feature with a stub epic (the `yad-stub` skill,
+  which runs `yad epic new <slug> --stub`); document it with the `yad-backfill` skill; then, once its spec is
+  approved with `verified: true` and the person has chosen light or full (`yad-backfill` asks),
+  `yad backfill promote EP-<stub> --repo <repo> --feature <feature>` (`--full` for full). Its acceptance
+  criteria: the anchor promoted, or the feature recorded as left out on purpose.
+
+In both, **every act only a person may do** (a platform repo, branch protection, CI secrets or variables,
+deploy credentials, a signing key) is an acceptance criterion the person meets, written with its exact
+command or steps, never agent work.
+
 ### Step 4 — Assign IDs (engine-assigned, never by hand)
 Scan `stories/` for existing `EP-<slug>-S0N.md`. Assign the next zero-padded numbers continuing from
 the highest existing one (`S01`, `S02`, …). **Never renumber or rename** an existing story — IDs are
