@@ -449,7 +449,7 @@ test('buildStandup lists Build lane closes from build-state, keeping a person\'s
     const html = S.renderHtml(m);
     for (const words of ['(a person\'s work)', '(an agent\'s work, advanced by a person)', '(advanced on its own)']) {
       assert.ok(md.includes(words), `markdown: ${words}`);
-      assert.ok(html.includes(words.replace("'", '&#39;')) || html.includes(words), `html: ${words}`);
+      assert.ok(html.includes(words.replaceAll("'", '&#39;')) || html.includes(words), `html: ${words}`);
     }
     assert.ok(!(md + html).includes('\u001b'));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
