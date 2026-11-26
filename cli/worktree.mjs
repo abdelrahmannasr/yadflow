@@ -21,7 +21,7 @@ import { err } from './errors.mjs';
 import { epicRoot, readFrontmatter, isValidEpicId } from './epic-state.mjs';
 import { PROJECT_FILES, productConfigPath } from './manifest.mjs';
 import { resolveDefaultBranch } from './productcommit.mjs';
-import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf } from './worktree-record.mjs';
+import { WORKTREE_RECORD, worktreeAt, sameDir, linkedGitDir, commonDirOf, recordStoryFits, STORY_ID_RE } from './worktree-record.mjs';
 import { judgedRepos } from './workspace.mjs';
 
 const CODE = 'YAD-STATE-010';
@@ -37,22 +37,23 @@ const gitRaw = (cwd, ...args) => gitRawResult(cwd, ...args).stdout;
 export const YAD_LOCAL_FILES = ['.specify/feature.json', '.gitmessage'];
 const BUSY = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply'];
 
-// PURE: where a checkout's worktree for an epic goes — beside it, named after it.
-export const worktreePath = (main, epic) => path.join(path.dirname(main), `${path.basename(main)}--${epic}`);
+// PURE: where a checkout's worktree for an epic goes — beside it, named after it; a story's worktree is
+// named after the story instead (`<repo>--EP-x-S02`).
+export const worktreePath = (main, epic, story = null) => path.join(path.dirname(main), `${path.basename(main)}--${story || epic}`);
 
 // PURE: what `add` does for one target, from the facts the command read.
-//   facts: { main, epic, repo, hasOrigin, pathTaken, existing ({ path, missing } of this epic's yad
-//            worktree, or null), mainIsLinked (the checkout is itself a linked worktree), nested (a code
+//   facts: { main, epic, story (or null: the epic's own worktree), repo, hasOrigin, pathTaken, existing
+//            ({ path, missing } of this epic's — or this story's — yad worktree, or null), mainIsLinked (the checkout is itself a linked worktree), nested (a code
 //            repo kept inside the Product's folder) }
 // → { path, skip (already there: a re-run goes on with the rest), refuse: null | { message, hint } }
-export function planAdd({ main, epic, repo, hasOrigin, pathTaken, existing, mainIsLinked, nested = false }) {
-  const where = worktreePath(main, epic);
+export function planAdd({ main, epic, story = null, repo, hasOrigin, pathTaken, existing, mainIsLinked, nested = false }) {
+  const where = worktreePath(main, epic, story);
   const name = repo ?? 'the Product';
   const no = (message, hint) => ({ path: where, skip: false, refuse: { message, hint } });
   if (mainIsLinked) return no(`${name}'s registered folder is itself a worktree`, 'register the main checkout, then run this again');
   // Its worktree would sit inside the Product's own checkout, and could not find the Product or its repos.
   if (nested) return no(`${name} is kept inside the Product's folder, and a worktree is only made for a repo beside it`, 'keep the repo beside the Product (`../<repo>` in repos.json) to give it worktrees');
-  if (existing?.missing) return no(`${epic}'s worktree for ${name} is gone (${existing.path}), but git still lists it`, 'run `git worktree prune` in the main checkout, then run this again');
+  if (existing?.missing) return no(`${story || epic}'s worktree for ${name} is gone (${existing.path}), but git still lists it`, 'run `git worktree prune` in the main checkout, then run this again');
   if (existing) return { path: existing.path, skip: true, refuse: null };
   if (pathTaken) return no(`${where} is already there`, 'move it away (a worktree yad did not record: `git worktree remove` it), then run this again');
   if (!hasOrigin) return no(`${name} has no origin remote, so a worktree's work could not reach the default branch`, 'add the remote (`git remote add origin <url>`), then run this again');
@@ -123,7 +124,7 @@ export function yadWorktrees(main) {
   for (const name of names) {
     const gitDir = path.join(dir, name);
     const rec = readJSON(path.join(gitDir, WORKTREE_RECORD), null);
-    if (!isPlainObject(rec) || typeof rec.epic !== 'string' || !isValidEpicId(rec.epic)) continue;
+    if (!isPlainObject(rec) || typeof rec.epic !== 'string' || !isValidEpicId(rec.epic) || !recordStoryFits(rec)) continue;
     let where;
     try { where = path.dirname(path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'gitdir'), 'utf8').trim())); } catch { continue; }
     let locked = false;
@@ -235,11 +236,49 @@ function epicRepos(main, epic) {
   return Array.isArray(fm.repos) ? fm.repos : [];
 }
 
-function pickTargets(productRoot, epic, { repo = null, all = false }) {
+// Is this a story worktree's match? A story's worktree matches only that story; an epic's (no story) only
+// an epic's — so neither ever reuses or removes the other.
+const sameStory = (w, story) => (w.story ?? null) === (story ?? null);
+const noStory = (story) => story === undefined || story === null;
+
+// A story's checks (EP-reported-agent-flow-S01): a story id of this epic and not with --all; for `add`,
+// its file must be on the Product too. → the repos its `repos:` names. `forRemove` neither needs the file
+// nor reads it (→ []), so a retired story's worktree can still be removed.
+function storyRepos(productMain, epic, story, all, forRemove = false) {
+  if (story === true || story === '') throw err(CODE, '--story needs a story id', 'a story id looks like EP-checkout-S01');
+  if (typeof story !== 'string' || !STORY_ID_RE.test(story)) throw err(CODE, `${forTerminal(String(story))} is not a story id`, 'a story id looks like EP-checkout-S01');
+  const of = story.replace(/-S\d+$/, '');
+  if (of !== epic) throw err(CODE, `${story} is a story of ${of}, not of ${epic}`, `pass its own epic: \`yad worktree … ${of} --story ${story}\``);
+  if (all) throw err(CODE, '--story and --all name different targets — pass one', '--story makes a worktree in each code repo the story names; --all is the epic\'s');
+  if (forRemove) return [];
+  const file = path.join(epicRoot(productMain, epic), 'stories', `${story}.md`);
+  if (!fs.existsSync(file)) throw err(CODE, `no story ${story} in ${epic} on the Product`, `its file would be epics/${epic}/stories/${story}.md; \`yad status ${epic}\` lists the epic's stories`);
+  const fm = readFrontmatter(file);
+  return Array.isArray(fm.repos) ? fm.repos : [];
+}
+
+// → the targets. With a story: the registered code repos its `repos:` names (or the one --repo names),
+//   never the Product; `forRemove` keeps every code repo, also one the story no longer names, and works
+//   when the story file is gone (it reads no `repos:`).
+function pickTargets(productRoot, epic, { repo = null, all = false, story = null, forRemove = false }) {
   if (!isValidEpicId(epic)) throw err(CODE, `${forTerminal(epic)} is not an epic id`, 'an epic id looks like EP-checkout');
   const targets = targetsOf(productRoot);
   const product = targets[0];
   if (!fs.existsSync(path.join(epicRoot(product.main, epic), '.sdlc', 'state.json'))) throw err(CODE, `no epic ${epic} on the Product`, '`yad next` lists the epics');
+  if (!noStory(story)) {
+    const wanted = storyRepos(product.main, epic, story, all, forRemove);
+    const code = targets.filter((t) => t.repo);
+    if (repo && repo !== true) {
+      const t = code.find((x) => x.repo === repo);
+      if (!t) throw err(CODE, `${forTerminal(repo)} is not a registered repo`, '`yad repo list` shows them');
+      if (!forRemove && !wanted.includes(repo)) throw err(CODE, `${forTerminal(repo)} is not one of ${story}'s repos (${wanted.map(forTerminal).join(', ') || 'none'})`, `add it to the story's \`repos:\`, or pass one it names`);
+      return [t];
+    }
+    if (forRemove) return code;
+    const picked = code.filter((t) => wanted.includes(t.repo));
+    if (!picked.length) throw err(CODE, `${story} names no registered code repo (repos: ${wanted.map(forTerminal).join(', ') || 'none'})`, 'register the repo with `yad repo add`, or fix the story\'s `repos:`');
+    return picked;
+  }
   if (repo && repo !== true) {
     const t = targets.find((x) => x.repo === repo);
     if (!t) throw err(CODE, `${forTerminal(repo)} is not a registered repo`, '`yad repo list` shows them');
@@ -257,18 +296,19 @@ const refusedLine = (t) => `${forTerminal(t.repo)} (${t.shownPath}): ${t.refused
 const REFUSED_HINT = 'fix its path in .sdlc/repos.json, or move the folder aside and clone it with `yad repo clone`';
 const refusedRow = (t) => ({ repo: t.repo, path: t.shownPath, why: t.refused });
 
-export async function runWorktreeAdd(productRoot, { epic, repo = null, all = false, dryRun = false, today = null } = {}) {
-  const targets = pickTargets(productRoot, epic, { repo, all });
+export async function runWorktreeAdd(productRoot, { epic, story = null, repo = null, all = false, dryRun = false, today = null } = {}) {
+  const targets = pickTargets(productRoot, epic, { repo, all, story });
+  story = noStory(story) ? null : story;
   const plans = [];
   // Every target is checked — and fetched — before any worktree is made, so a refusal makes nothing.
   for (const t of targets) {
     const name = t.repo ?? 'the Product';
     if (t.refused) throw err(CODE, refusedLine(t), REFUSED_HINT);
     if (t.missing) throw err(CODE, `${forTerminal(t.repo)} is not cloned here (${forTerminal(t.main)})`, `\`yad repo clone ${forTerminal(t.repo)}\` fetches it`);
-    const mine = yadWorktrees(t.main).find((w) => w.epic === epic && (w.repo ?? null) === t.repo);
-    const where = worktreePath(t.main, epic);
+    const mine = yadWorktrees(t.main).find((w) => w.epic === epic && sameStory(w, story) && (w.repo ?? null) === t.repo);
+    const where = worktreePath(t.main, epic, story);
     const plan = planAdd({
-      main: t.main, epic, repo: t.repo, nested: !!t.nested, mainIsLinked: !!linkedGitDir(t.main),
+      main: t.main, epic, story, repo: t.repo, nested: !!t.nested, mainIsLinked: !!linkedGitDir(t.main),
       hasOrigin: git(t.main, 'remote', 'get-url', 'origin').ok, pathTaken: fs.existsSync(where),
       existing: mine ? { path: mine.path, missing: mine.missing } : null,
     });
@@ -280,7 +320,7 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
   }
   if (dryRun) {
     for (const p of plans) info(p.skip ? `${p.name}: ${p.path} is already there` : `would add ${p.path} for ${p.name}, detached at origin/${p.branch}${p.links.length ? `, linking ${p.links.join(', ')}` : ''}`);
-    return { epic, dryRun: true, worktrees: plans.map((p) => ({ repo: p.repo, path: p.path, base: p.branch, links: p.links, added: false, existing: p.skip })) };
+    return { epic, story, dryRun: true, worktrees: plans.map((p) => ({ repo: p.repo, path: p.path, base: p.branch, links: p.links, added: false, existing: p.skip })) };
   }
   for (const p of plans.filter((x) => !x.skip)) {
     if (!git(p.main, 'fetch', '--quiet', 'origin', `+refs/heads/${p.branch}:refs/remotes/origin/${p.branch}`).ok) {
@@ -303,7 +343,8 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
       if (!added.ok) throw err(CODE, `git could not add ${p.path}: ${added.stderr || added.stdout}`, 'fix what git says, then run this again — the worktrees this run made were taken back');
       made.push(p);
       const linked = linkFromMain(p);
-      writeJSON(path.join(linkedGitDir(p.path), WORKTREE_RECORD), { epic, repo: p.repo, base: p.branch, created: today, by, links: linked });
+      // An epic's record is written exactly as before (no `story` key); a story's names its epic and the story.
+      writeJSON(path.join(linkedGitDir(p.path), WORKTREE_RECORD), { epic, ...(story ? { story } : {}), repo: p.repo, base: p.branch, created: today, by, links: linked });
       done.push({ repo: p.repo, path: p.path, base: p.branch, links: linked, added: true, existing: false });
     }
   } catch (e) {
@@ -332,7 +373,7 @@ export async function runWorktreeAdd(productRoot, { epic, repo = null, all = fal
     }
   }
   if (made.length) hand(`open each agent's session IN its worktree folder (the capture hook watches the folder the session started in), then make the step's usual branch there`);
-  return { epic, dryRun: false, worktrees: done };
+  return { epic, story, dryRun: false, worktrees: done };
 }
 
 // Link each planned folder (node_modules, and the hooks folder: `p.hooks`) into the new worktree. A
@@ -403,7 +444,7 @@ export async function runWorktreeList(productRoot, { epic = null } = {}) {
     for (const w of yadWorktrees(t.main)) {
       if (epic && w.epic !== epic) continue;
       const s = stateOf(w);
-      rows.push({ epic: w.epic, repo: w.repo ?? null, path: w.path, branch: s.branch, changes: s.changes.length, unpushed: s.unpushed, locked: w.locked !== false, missing: w.missing });
+      rows.push({ epic: w.epic, story: w.story ?? null, repo: w.repo ?? null, path: w.path, branch: s.branch, changes: s.changes.length, unpushed: s.unpushed, locked: w.locked !== false, missing: w.missing });
     }
   }
   if (!rows.length) info(epic ? `no yad worktrees for ${epic}` : 'no yad worktrees');
@@ -413,15 +454,17 @@ export async function runWorktreeList(productRoot, { epic = null } = {}) {
     if (r.changes) bits.push(`${r.changes} changed`);
     if (r.unpushed) bits.push(`${r.unpushed} unpushed`);
     if (r.locked) bits.push('locked');
-    info(`${r.epic}  ${r.repo ?? 'Product'}  ${r.path}  (${bits.join(', ')})`);
+    info(`${r.epic}  ${r.story ? `${r.story}  ` : ''}${r.repo ?? 'Product'}  ${r.path}  (${bits.join(', ')})`);
   }
   for (const s of skipped) warn(`${forTerminal(s.repo)} (${s.path}): ${s.why} — yad runs no git there, so its worktrees are not listed`);
   return { worktrees: rows, ...(skipped.length ? { skipped } : {}) };
 }
 
-export async function runWorktreeRemove(productRoot, { epic, repo = null, all = false, cwd = process.cwd() } = {}) {
-  // --all: every checkout's worktree for the epic, also one of a repo the epic no longer names.
-  const picked = pickTargets(productRoot, epic, { repo, all });
+export async function runWorktreeRemove(productRoot, { epic, story = null, repo = null, all = false, cwd = process.cwd() } = {}) {
+  // --all: every checkout's worktree for the epic, also one of a repo the epic no longer names. A story:
+  // that story's worktree in every code repo (or the one --repo names); without one, never a story's.
+  const picked = pickTargets(productRoot, epic, { repo, all, story, forRemove: true });
+  story = noStory(story) ? null : story;
   const targets = all ? targetsOf(productRoot) : picked;
   const named = repo && repo !== true ? picked[0] : null;
   if (named?.refused) throw err(CODE, refusedLine(named), REFUSED_HINT);
@@ -430,11 +473,11 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
   for (const t of targets) {
     if (t.refused) { skipped.push(refusedRow(t)); continue; }
     if (t.missing) continue;
-    const w = yadWorktrees(t.main).find((x) => x.epic === epic && (x.repo ?? null) === t.repo);
+    const w = yadWorktrees(t.main).find((x) => x.epic === epic && sameStory(x, story) && (x.repo ?? null) === t.repo);
     if (w) found.push({ t, w });
   }
   for (const s of skipped) warn(`${forTerminal(s.repo)} (${s.path}): ${s.why} — yad runs no git there, so it was left alone`);
-  if (!found.length) throw err(CODE, `no yad worktree for ${epic}${repo && repo !== true ? ` in ${repo}` : ''}`, '`yad worktree list` shows them');
+  if (!found.length) throw err(CODE, `no yad worktree for ${story || epic}${repo && repo !== true ? ` in ${repo}` : ''}`, '`yad worktree list` shows them');
   // Every one is checked before any is removed: with --all, one refusal removes nothing.
   const refused = [];
   for (const f of found) {
@@ -446,7 +489,7 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
   }
   if (refused.length) {
     for (const r of refused) for (const y of r.why) warn(`${r.repo ?? 'Product'}: ${r.path} — ${y.reason}; ${y.fix}`);
-    throw err(CODE, `${epic}'s worktree${found.length > 1 ? 's were' : ' was'} not removed: ${refused.length} still hold${refused.length === 1 ? 's' : ''} work`, 'fix what is listed above, then run this again — nothing was removed');
+    throw err(CODE, `${story || epic}'s worktree${found.length > 1 ? 's were' : ' was'} not removed: ${refused.length} still hold${refused.length === 1 ? 's' : ''} work`, 'fix what is listed above, then run this again — nothing was removed');
   }
   const removed = [];
   for (const f of found) {
@@ -461,7 +504,7 @@ export async function runWorktreeRemove(productRoot, { epic, repo = null, all = 
     }
     dropExcludeLines(f.t.main, Array.isArray(f.w.links) ? f.w.links : []); // also a link the person deleted
     ok(`removed ${f.w.path}`);
-    removed.push({ repo: f.t.repo, path: f.w.path });
+    removed.push({ repo: f.t.repo, path: f.w.path, story });
   }
-  return { epic, removed, ...(skipped.length ? { skipped } : {}) };
+  return { epic, story, removed, ...(skipped.length ? { skipped } : {}) };
 }

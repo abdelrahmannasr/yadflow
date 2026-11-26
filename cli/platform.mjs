@@ -286,6 +286,46 @@ export function readPr(platform, n, opts = {}) {
   return platform === 'gitlab' ? readPrGitLab(n, opts) : readPrGitHub(n, opts);
 }
 
+// ---- a skip or unskip request (EP-reported-agent-flow-S04) -----------------------------------------
+// `yad gate ci` applies a merged `skip/…` or `unskip/…` PR/MR only when its base is the trunk and its head is the
+// branch it was run for, and it reads the reason from the body. One call gives all three. `readPr`'s field list
+// is left as it is: tests fake it word for word. `{ ok, base, head, body }` or `{ ok: false, reason }`; never throws.
+export function requestFacts(platform, n, { cwd, runner = run } = {}) {
+  const ready = runner !== run ? !!cliFor(platform) : platformReady(platform);
+  if (!ready) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  const github = platform !== 'gitlab';
+  const r = github
+    ? runner('gh', ['pr', 'view', String(Number(n)), '--json', 'baseRefName,headRefName,body'], { cwd })
+    : runner('glab', ['mr', 'view', String(Number(n)), '-F', 'json'], { cwd });
+  if (!r.ok) return { ok: false, reason: r.stderr || (github ? 'gh pr view failed' : 'glab mr view failed') };
+  let v;
+  try { v = JSON.parse(r.stdout); } catch { return { ok: false, reason: `unreadable ${github ? 'gh pr view' : 'glab mr view'} response` }; }
+  const [base, head, body] = github ? [v?.baseRefName, v?.headRefName, v?.body] : [v?.target_branch, v?.source_branch, v?.description];
+  if (typeof base !== 'string' || !base || typeof head !== 'string' || !head) return { ok: false, reason: `PR/MR ${Number(n)} names no base or head branch` };
+  return { ok: true, base, head, body: typeof body === 'string' ? body : '' };
+}
+
+// The merged PR/MR numbers on each branch, so `yad gate ci` applies only the newest request for a step (the
+// reconcile replays 7 days of merges, and an old skip must not undo a newer unskip). `{ ok, numbers: { [branch]:
+// [n, …] } }`, newest first, or `{ ok: false, reason }` when any branch cannot be read; never throws. With `base`, only
+// the PRs/MRs merged into that branch count: one merged into a side branch never outranks a request on the trunk.
+export function mergedRequestNumbers(platform, branches = [], { cwd, runner = run, base = null } = {}) {
+  const ready = runner !== run ? !!cliFor(platform) : platformReady(platform);
+  if (!ready) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  const numbers = {};
+  for (const branch of branches) {
+    const r = platform === 'gitlab'
+      ? runner('glab', ['api', `projects/:id/merge_requests?source_branch=${encodeURIComponent(branch)}${base ? `&target_branch=${encodeURIComponent(base)}` : ''}&state=merged&per_page=100`], { cwd })
+      : runner('gh', ['pr', 'list', '--head', branch, ...(base ? ['--base', base] : []), '--state', 'merged', '--limit', '100', '--json', 'number'], { cwd });
+    if (!r.ok) return { ok: false, reason: r.stderr || `could not list the merged PRs/MRs on ${branch}` };
+    let rows;
+    try { rows = JSON.parse(r.stdout); } catch { return { ok: false, reason: `unreadable list of merged PRs/MRs on ${branch}` }; }
+    if (!Array.isArray(rows)) return { ok: false, reason: `unreadable list of merged PRs/MRs on ${branch}` };
+    numbers[branch] = rows.map((x) => Number(platform === 'gitlab' ? x?.iid : x?.number)).filter((x) => Number.isInteger(x) && x > 0).sort((a, b) => b - a);
+  }
+  return { ok: true, numbers };
+}
+
 // ---- find the PR/MR for a branch ----------------------------------------------------------------
 // The review PR/MR opened for `review/EP-<slug>/<artifact>`, by HEAD/source branch. Under the verified ledger
 // the ledger records that pointer only at merge (CI is the sole writer), so without this a human has

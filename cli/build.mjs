@@ -487,19 +487,22 @@ export async function buildAmend(root, { story, repo, step, via, reason, run: ru
 // here fails it: a problem is a warning with the fix. The file is the clone's working state, as Spec Kit's
 // own writes are — it is not committed.
 const SPEC_KIT_STEPS = new Set(['spec', 'tasks']);
-// A registered checkout's worktree for an epic, when yad made one beside it (#115); else null.
-function epicWorktreeOf(checkout, epic, repo) {
-  const at = path.join(path.dirname(checkout), `${path.basename(checkout)}--${epic}`);
+// A registered checkout's worktree for an epic, when yad made one beside it (#115); else null. With a
+// story: that story's own worktree (`<repo>--<story>`, EP-reported-agent-flow-S01) instead. The record must
+// match: an epic's worktree has no story, a story's names it.
+function epicWorktreeOf(checkout, epic, repo, story = null) {
+  const at = path.join(path.dirname(checkout), `${path.basename(checkout)}--${story || epic}`);
   const rec = worktreeAt(at);
-  return rec && rec.repo === repo && rec.epic === epic && sameDir(rec.main, checkout) ? at : null;
+  return rec && rec.repo === repo && rec.epic === epic && (rec.story ?? null) === story && sameDir(rec.main, checkout) ? at : null;
 }
 
 export function pinSpecKit(root, repo, story, step = 'spec') {
   let checkout;
   try { ({ checkout } = registeredRepo(root, repo)); } catch (e) { warn(`Spec Kit folder not pinned: ${e.message}${e.hint ? ` — ${e.hint}` : ''}`); return null; }
   if (!checkout) { info(`${repo} is not checked out here, so Spec Kit's feature folder was not pinned`); return null; }
-  // The story's epic has its own worktree of this repo (#115): the agent specs there, so the pin goes there.
-  const wt = epicWorktreeOf(checkout, storyEpic(story), repo);
+  // The story has its own worktree of this repo (EP-reported-agent-flow-S01), or else its epic has (#115):
+  // the agent specs there, so the pin goes there.
+  const wt = epicWorktreeOf(checkout, storyEpic(story), repo, story) ?? epicWorktreeOf(checkout, storyEpic(story), repo);
   const where = wt ? path.basename(wt) : repo;
   const dir = path.join(wt ?? checkout, '.specify');
   const featureDirectory = `specs/${story}`;

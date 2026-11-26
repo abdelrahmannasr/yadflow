@@ -12,6 +12,13 @@ import { isPlainObject } from './lib.mjs';
 
 export const WORKTREE_RECORD = 'yad-worktree.json';
 const EPIC_RE = /^EP-[a-z0-9-]+$/;
+// The story id pattern: the same regular expression as STORY_RE in cli/build.mjs, copied here because
+// build.mjs imports this file (an import back would be a cycle). Keep the two alike.
+export const STORY_ID_RE = /^EP-[a-z0-9-]+-S\d+$/;
+// Does a record's optional `story` fit its `epic`? No story (absent or null) is an epic's own worktree; a
+// story must be a story id whose epic (the id without its `-S<n>` end) is the record's epic.
+export const recordStoryFits = (rec) => rec.story === undefined || rec.story === null
+  || (typeof rec.story === 'string' && STORY_ID_RE.test(rec.story) && rec.story.replace(/-S\d+$/, '') === rec.epic);
 const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
 const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
 export const sameDir = (a, b) => { const [x, y] = [a && real(a), b && real(b)]; return !!x && !!y && fold(x) === fold(y); };
@@ -38,7 +45,8 @@ export function commonDirOf(gitDir) {
   try { return path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); } catch { return null; }
 }
 
-// → { epic, repo, base, created, by, gitDir, commonDir, main } for a worktree yad made, else null.
+// → { epic, story?, repo, base, created, by, gitDir, commonDir, main } for a worktree yad made, else null.
+//   `story` is there only in a story's worktree (`yad worktree add <epic> --story <story>`).
 //   `repo` is null for the Product's worktree, or the registered repo's name. `main` is the main checkout
 //   (the folder holding the common `.git`).
 export function worktreeAt(top) {
@@ -49,6 +57,7 @@ export function worktreeAt(top) {
   try { rec = JSON.parse(fs.readFileSync(path.join(gitDir, WORKTREE_RECORD), 'utf8')); } catch { return null; }
   if (!isPlainObject(rec) || typeof rec.epic !== 'string' || !EPIC_RE.test(rec.epic)) return null;
   if (!(rec.repo === null || (typeof rec.repo === 'string' && rec.repo))) return null;
+  if (!recordStoryFits(rec)) return null;
   const commonDir = commonDirOf(gitDir);
   if (!commonDir || path.basename(commonDir) !== '.git') return null;
   return { ...rec, gitDir, commonDir, main: path.dirname(commonDir) };
