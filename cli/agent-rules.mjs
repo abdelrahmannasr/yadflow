@@ -246,6 +246,8 @@ export const COMMAND_CLASS = {
   // `--html <file>` overwrite any file, as `standup --out` could).
   'brain view': { class: 'local-write' },
   'repo list': { class: 'read' },
+  // EP-foundation-first-epic-S03: reads each clone's HEAD; no fetch, nothing written.
+  'repo features': { class: 'read' },
   'repo refresh': { class: 'local-write', flags: { push: 'default-push', 'allow-branch': 'on-request' } },
   // #213: runs Repomix (npx from an empty temp folder) and writes one pack — the usual one, a file named,
   // or stdout. Nothing leaves the machine but the npm download.
@@ -494,6 +496,14 @@ export const SHIPPED_ALLOW_LISTS = Object.freeze([
     'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat', 'review cards', 'review walkthrough', 'member list',
     'worktree list', 'reports list', 'brand show', 'brand check', 'claims', 'owners', 'history list', 'history show', 'history search', 'repo list', 'risk-map check', 'codeowners check', 'story frames', 'docs list',
     'thread', 'reconcile check'].map((k) => `Bash(yad ${k}:*)`),
+  // next release (EP-foundation-first-epic-S03): `repo features`
+  [
+    'guide', 'help', 'doctor', 'detect', 'signing check', 'ci check', 'toolbox list', 'toolbox check', 'local-setup list', 'skill list',
+    'skill recommend', 'foundation status', 'status', 'next', 'gate status', 'gate review', 'gate walkthrough', 'review context', 'review chat',
+    'review cards', 'review walkthrough', 'member list', 'worktree list', 'reports list', 'brand show', 'brand check', 'claims', 'owners',
+    'history list', 'history show', 'history search', 'repo list', 'repo features', 'risk-map check', 'codeowners check', 'story frames',
+    'docs list', 'thread', 'reconcile check'
+  ].map((k) => `Bash(yad ${k}:*)`),
 ].map((list) => Object.freeze(list)));
 
 // Entries an older yadflow pre-approved that this one does not (a command later reclassed as a write, say).

@@ -547,6 +547,12 @@ ${c.bold('Build helpers')}
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(product): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
+  yad repo features [<repo>] [--max <n>]
+                                       Read-only: the candidate feature boundaries of each connected
+                                       repo, from the files committed at HEAD, with their file and line
+                                       counts (src/ lib/ packages/ apps/ when there, else the top-level
+                                       folders; tests, docs and build output left out). --max (25; 1 to
+                                       200) groups the smallest as "other". No fetch, nothing written
   yad repo pack <name> [--include <globs>] [--logs] [-o <file>|-]
                                        Pack one repo with Repomix the safe way (npx from an empty
                                        folder, the npm registry named): with no -o, its usual
@@ -1632,8 +1638,18 @@ async function main() {
         // A file is named where the person ran yad, not in the Product yad found from there.
         out = o.out === undefined || o.out === '-' ? o.out : path.resolve(shellCwd(), o.out);
       }
+      let max;
+      if (action === 'features') {
+        if (o._.length > 3) { refuse(`unexpected argument(s): ${o._.slice(3).join(' ')}`, 'use: yad repo features [<repo>] [--max <n>] [--json]'); break; }
+        // EP-foundation-first-epic-S03: a whole number from 1 to 200, 25 when not given.
+        const { FEATURES_MAX } = await import('../cli/repo-features.mjs');
+        max = o.max === undefined ? FEATURES_MAX.default : Number(o.max);
+        if (!/^\d+$/.test(String(o.max ?? max)) || max < FEATURES_MAX.min || max > FEATURES_MAX.max) {
+          refuse(`--max takes a whole number from ${FEATURES_MAX.min} to ${FEATURES_MAX.max}, not "${forTerminal(String(o.max))}"`, 'use: yad repo features [<repo>] [--max <n>] [--json]'); break;
+        }
+      }
       result = await commands.runRepo(o.dir, { action: action || 'list', name, pattern, clear: !!o.clear, today,
-        push: o.push, allowBranch: o.allowBranch, include: o.include, logs: !!o.logs, out });
+        push: o.push, allowBranch: o.allowBranch, include: o.include, logs: !!o.logs, out, max });
       break;
     }
     case 'risk-map': {

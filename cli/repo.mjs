@@ -16,6 +16,7 @@ import { gitHead, packRepo, runRepomix } from './setup.mjs';
 import { publishCodeContext, publishTarget, packOf, codeMapOf } from './repo-publish.mjs';
 import { PREVIEW_KEY, patternProblems } from './preview.mjs';
 import { safeName } from './brain.mjs';
+import { featuresJSON, printFeatures, repoFeatures } from './repo-features.mjs';
 
 // Why `refresh` will not pack this entry, or null when it will (E81): see the loop in `runRepo`.
 function notPackable(root, repo, j) {
@@ -63,7 +64,7 @@ function defaultBranch(cwd, repo) {
   return !/^[-+]/.test(b) && git(cwd, 'check-ref-format', `refs/heads/${b}`).ok ? b : null;
 }
 
-export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false, include, logs = false, out } = {}) {
+export async function runRepo(root, { action = 'list', name, pattern, clear = false, today, push = false, allowBranch = false, include, logs = false, out, max } = {}) {
   const { regPath, registry, problem } = load(root);
   // A refresh that stops here published nothing, and says so as every refused refresh does (`published: null`).
   if (problem) { fail(`${problem} — fix it in the Product and re-run`); process.exitCode = 1; return { action, repos: [], ...(action === 'refresh' ? { refreshed: 0, published: null, next: [] } : {}) }; }
@@ -257,7 +258,20 @@ export async function runRepo(root, { action = 'list', name, pattern, clear = fa
 
   if (action === 'pack') return packAction(root, entries, { name, include, logs, out, push });
 
-  fail(`unknown repo action: ${action} (list | refresh | pack | sync | clone | preview)`);
+  // EP-foundation-first-epic-S03: read-only, from each clone's HEAD. A repo it cannot read is a row with
+  // `problem`, never a failure of the whole run.
+  if (action === 'features') {
+    if (name && !entries.some((r) => r.name === name)) {
+      fail(`no connected repo named ${shown(name)} — \`yad repo list\` names them`);
+      process.exitCode = 1;
+      return { repos: [] };
+    }
+    const rows = repoFeatures(root, entries, { name, max });
+    printFeatures(rows);
+    return { repos: featuresJSON(rows) };
+  }
+
+  fail(`unknown repo action: ${action} (list | refresh | pack | sync | clone | preview | features)`);
   process.exitCode = 1;
   return { action };
 }

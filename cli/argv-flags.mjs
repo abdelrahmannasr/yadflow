@@ -6,6 +6,8 @@ export const VALUE_FLAGS = new Set(['--dir', '--issue', '--body-file', '--priori
   '--story',
   // EP-foundation-first-epic-S01: `yad epic new <slug> --seed bootstrap|pack`.
   '--seed',
+  // EP-foundation-first-epic-S03: `yad repo features --max <n>`.
+  '--max',
   // E159: the setup answers an agent passes after asking the person.
   '--default-branch', '--design', '--design-url', '--testing', '--testing-url', '--learning', '--connect', '--coderabbit']);
 export const LIST_FLAGS = new Set(['--signal', '--approver', '--add-repo', '--label', '--add', '--remove']);
