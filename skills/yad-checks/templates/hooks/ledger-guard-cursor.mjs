@@ -89,7 +89,10 @@ function resolveYad() {
 // Run the resolved `yad` with `args` appended. `options` go to spawnSync.
 function runYad(yad, args, options) {
   const all = [...yad.args, ...args];
-  if (yad.shell) return spawnSync([yad.file, ...all].map(quoteForCmd).join(' '), { ...options, shell: true, windowsHide: true });
+  // The shell is only for a `.cmd` or `.bat` launcher: Windows cannot start one without a shell (Node refuses
+  // since 18.20.2). Every word is wrapped in double quotes, and a Windows path cannot hold a `"`, so the
+  // quoting is whole.
+  if (yad.shell) return spawnSync([yad.file, ...all].map(quoteForCmd).join(' '), { ...options, shell: true, windowsHide: true }); // nosemgrep: javascript.lang.security.audit.spawn-shell-true.spawn-shell-true
   return spawnSync(yad.file, all, { ...options, windowsHide: true });
 }
 // ---- end yad-resolve ---------------------------------------------------------------------------------
