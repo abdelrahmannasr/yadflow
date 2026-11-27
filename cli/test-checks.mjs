@@ -4577,6 +4577,42 @@ test('#496: both CI files pass the base branch to install-deps and build-test-li
   }
 });
 
+// #703: GitHub pastes a `${{ }}` value into a run: script's text before the shell reads it, so a value
+// with shell characters would run as code. Every value reaches a script through the step's env: instead.
+// Returns each `${{` found inside a run: script, as "<line>: <text>": a one-line `run: <cmd>`, or the
+// lines of a `run: |` / `run: >` block (it ends at the first line indented no deeper than its key).
+function runScriptExpressions(text) {
+  const found = [];
+  let block = -1; // the indent of the open block's `run:` key, or -1 outside one
+  text.split('\n').forEach((line, i) => {
+    const indent = line.match(/^ */)[0].length;
+    if (block >= 0) {
+      if (line.trim() === '' || indent > block) {
+        if (line.includes('${{')) found.push(`${i + 1}: ${line.trim()}`);
+        return;
+      }
+      block = -1;
+    }
+    const m = line.match(/^( *)(?:- )?run: *(.*)$/);
+    if (!m) return;
+    const key = m[1].length + (line.slice(m[1].length).startsWith('- ') ? 2 : 0);
+    if (/^[|>][-+]?\s*(#.*)?$/.test(m[2])) block = key;
+    else if (m[2].includes('${{')) found.push(`${i + 1}: ${line.trim()}`);
+  });
+  return found;
+}
+
+test('#703: no GitHub workflow template puts a ${{ }} value inside a run: script', () => {
+  const dirs = ['skills/yad-checks/templates/github', 'skills/yad-product-bridge/templates/github'];
+  const files = dirs.flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.yml')).map((f) => `${d}/${f}`));
+  assert.ok(files.length >= 7, 'found the GitHub templates');
+  for (const f of files) assert.deepEqual(runScriptExpressions(fs.readFileSync(path.join(ROOT, f), 'utf8')), [], f);
+  // The finder itself: it catches the old one-line form and a value inside a block, and passes env: values.
+  assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"\n'), ['1: - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"']);
+  assert.deepEqual(runScriptExpressions('        run: |\n          before="${{ github.event.before }}"\n\n          echo ok\n      - name: next\n'), ['2: before="${{ github.event.before }}"']);
+  assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/x.sh" "origin/$YAD_BASE"\n        env: { YAD_BASE: "${{ github.base_ref }}" }\n        with: { a: "${{ env.A }}" }\n'), []);
+});
+
 test('build-test-lint gate: all green scripts pass', () => {
   const T = scaffoldRepo();
   commit(T, 'chore: wire scripts', {

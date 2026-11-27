@@ -720,7 +720,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   `product-checkout.sh` clones with its own token, and the base was fetched by `fetch-depth: 0`.
 
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
-  jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base
+  jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/$YAD_BASE` as base,
+  with `YAD_BASE: "${{ github.base_ref }}"` set in each step's `env:` — never `${{ }}` inside a `run:` script, which GitHub
+  pastes into the script text before the shell reads it (#703)
   (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The trigger sets
   `types: [opened, synchronize, reopened]` — never `edited` (#425): a job skipped by `if:` counts as
   passed, so a run started by an edit of the PR text would turn a failed gate green. The two jobs that read
@@ -730,7 +732,7 @@ The gates run identically under either CI; the config just invokes the scripts w
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) and the advisory `risk-map`
-  check run as their own jobs with `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout takes the
+  check run as their own jobs with `fetch-depth: 0`, the same `origin/$YAD_BASE` base. The build/test/lint checkout takes the
   full history with no `filter: blob:none` (#426): a blob-less clone leaves out the base's `checks/`
   when the PR changed them, and with no token kept the base-copy step could not fetch them. Its installer follows `package.json#packageManager`, and `NX_BASE` /
   `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
