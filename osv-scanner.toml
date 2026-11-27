@@ -1,0 +1,20 @@
+# OSV-Scanner settings, read by OpenSSF Scorecard's Vulnerabilities check (.github/workflows/scorecard.yml).
+# It sits next to package-lock.json, the manifest it applies to.
+#
+# Both advisories below are in packages bundled inside npm itself (node_modules/npm/node_modules/…).
+# npm is pulled in only by @semantic-release/npm, a dev dependency the release job uses. A bundled package
+# cannot be changed from outside its parent, so `overrides` in package.json cannot reach it. yadflow's
+# published package has no runtime dependencies, so no user installs either package.
+#
+# Look at this again on the ignoreUntil date, or as soon as an npm release bundles glob >= 14.0.2 and
+# minimatch >= 11.0.1: then update the lockfile and delete the entry. (EP-reported-ci-hygiene-S02)
+
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2027-02-27
+reason = "glob 13.0.6 is bundled inside npm 11.21.2, which only @semantic-release/npm pulls in, for the release job. It is not in the published yadflow package. No npm release bundles glob 14.0.2 or later yet."
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2027-02-27
+reason = "minimatch 10.2.5 is bundled inside npm 11.21.2, which only @semantic-release/npm pulls in, for the release job. It is not in the published yadflow package. No npm release bundles minimatch 11.0.1 or later yet."
