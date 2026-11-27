@@ -174,9 +174,14 @@ run_agent() {
       # Isolated: a settings folder of its own for the run, holding only a link to your login (auth.json),
       # so your settings are neither read nor written (codex records each folder it trusts in its settings).
       # YAD_ACCEPTANCE_CODEX_MODEL picks the model; with none, Codex uses its own default.
-      local home="$WORK/codex-home"
+      # Codex runs each command in a login shell (`zsh -lc`), which reads the person's zsh profile. A profile
+      # that puts its own folders first on PATH (`brew shellenv` does) hides the wrappers: the agent then
+      # reaches the real npx, which hangs in Codex's sandbox with no network, or a cached published yadflow.
+      # An empty ZDOTDIR makes zsh read no profile of the person's, so the wrappers stay first.
+      local home="$WORK/codex-home" zdot="$WORK/codex-zdotdir"
       if [ ! -e "$home/auth.json" ]; then mkdir -p "$home"; ln -s "${CODEX_HOME:-$HOME/.codex}/auth.json" "$home/auth.json"; fi
-      env CODEX_HOME="$home" codex exec --json --sandbox workspace-write --skip-git-repo-check -C "$dir" -o "$out.final.txt" \
+      mkdir -p "$zdot"
+      env CODEX_HOME="$home" ZDOTDIR="$zdot" codex exec --json --sandbox workspace-write --skip-git-repo-check -C "$dir" -o "$out.final.txt" \
         ${YAD_ACCEPTANCE_CODEX_MODEL:+-m "$YAD_ACCEPTANCE_CODEX_MODEL"} "$prompt" \
         < /dev/null > "$out.jsonl" 2> "$out.err" || true ;;
     fake-good)
