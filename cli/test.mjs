@@ -21273,6 +21273,46 @@ test('yad epic new --seed: the error code is in the catalog the docs table is ke
   assert.match(fs.readFileSync(path.join(ROOT, 'docs', 'CLI.md'), 'utf8'), /\| `YAD-STATE-012` \|/);
 });
 
+test('yad doctor and yad migrate keep a seeded epic\'s `seed`: no finding, no planned change, the same bytes after --apply', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { planMigration, runMigrate } = await import('./migrate.mjs');
+  const LEDGER = 'epics/EP-setup/.sdlc/state.json';
+  // A Product yad migrate accepts: epicNewOn makes only `.sdlc/`, so stamp the engine's shape as setup does.
+  const stamp = { '.sdlc/cli-version.json': JSON.stringify({ schemaVersion: ENGINE_SHAPE, version: '1.0.0' }, null, 2) + '\n' };
+  // What doctor says, with the temporary folder taken out, so two Products can be compared line for line.
+  const findings = (T) => collectDoctor(T).checks.map((x) => `${x.status} ${x.id ?? ''} ${String(x.message).split(T).join('<T>')}`);
+  const { T: P } = await epicNewOn({ slug: 'setup' }, { files: stamp });
+  try {
+    const plain = findings(P);
+    for (const seed of ['bootstrap', 'pack']) {
+      const { T, failed } = await epicNewOn({ slug: 'setup', seed }, { files: stamp });
+      try {
+        assert.equal(failed, false);
+        const before = fs.readFileSync(path.join(T, LEDGER), 'utf8');
+        assert.equal(JSON.parse(before).seed, seed);
+        // doctor: the seeded Product reads exactly as the plain one, so nothing flags `seed`.
+        assert.deepEqual(findings(T), plain, `${seed}: doctor reports something the plain Product does not`);
+        // migrate: the plan leaves the ledger alone ...
+        const row = planMigration(T).rows.find((r) => r.file === LEDGER);
+        assert.ok(row, `${seed}: yad migrate reads the epic's ledger`);
+        assert.equal(row.action, 'unchanged', `${seed}: yad migrate wants to ${row.action} it`);
+        assert.equal(row.changes, false);
+        // ... and --apply writes nothing to it: the same bytes, `seed` after `profile`, the same shape.
+        const code = process.exitCode;
+        let res = null;
+        try { await grab(async () => { res = await runMigrate(T, { apply: true }); }); } finally { process.exitCode = code; }
+        assert.equal(res?.ok, true, `${seed}: yad migrate --apply stopped before it ran`);
+        const after = fs.readFileSync(path.join(T, LEDGER), 'utf8');
+        assert.equal(after, before, `${seed}: yad migrate --apply rewrote the ledger`);
+        const st = JSON.parse(after);
+        const keys = Object.keys(st);
+        assert.equal(keys[keys.indexOf('profile') + 1], 'seed');
+        assert.equal(st.schemaVersion, ENGINE_SHAPE);
+      } finally { cleanTmp(T); }
+    }
+  } finally { cleanTmp(P); }
+});
+
 test('CLI: `yad epic new --seed` is wired end to end, refuses --issue with its code, and `yad next` shows the kind', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-seedcli-'));
   fs.mkdirSync(path.join(T, '.sdlc'));
