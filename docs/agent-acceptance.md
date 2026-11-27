@@ -39,7 +39,10 @@ The run tests yadflow's rules, not your own setup, and it must not reach your ac
   Claude Code cannot quietly undo those two.
 - **Codex** gets a settings folder of its own for the run, holding only a link to your login file
   (`auth.json`). Your Codex settings are neither read nor written. Codex records each folder it trusts in
-  its settings, and here that goes into the run's folder, not yours.
+  its settings, and here that goes into the run's folder, not yours. Codex runs each command in a login
+  shell, so the run gives zsh an empty profile folder (`ZDOTDIR`): your zsh profile is not read, and a
+  `PATH` it sets (such as `brew shellenv`) cannot put the real `npx` ahead of the run's wrapper. A login
+  shell that is bash still reads your `~/.bash_profile`.
 - **git** uses a configuration file of its own: an identity for the run, and no commit signing. Your
   global and system settings are not read. git cannot reach a real remote either. ssh is switched off, and
   there is no password prompt and no stored login. The run's `origin` is a folder on disk.
