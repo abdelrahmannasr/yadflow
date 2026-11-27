@@ -1,3 +1,43 @@
+# [4.15.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.14.0...v4.15.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **ci:** let Dependabot PRs pass the pr-template gate ([#668](https://github.com/abdelrahmannasr/yadflow/issues/668)) ([72ed9ef](https://github.com/abdelrahmannasr/yadflow/commit/72ed9ef9e5d3267206337b7523548cb9fdb229a5))
+* contract-check checks out the PR head commit, not GitHub's merge commit ([#708](https://github.com/abdelrahmannasr/yadflow/issues/708)) ([#712](https://github.com/abdelrahmannasr/yadflow/issues/712)) ([270a2ae](https://github.com/abdelrahmannasr/yadflow/commit/270a2aed4998df1bb81b881a6019caf083c9b14f))
+* look for Plannotator from the top of the checkout in yad guide ([#683](https://github.com/abdelrahmannasr/yadflow/issues/683)) ([4816548](https://github.com/abdelrahmannasr/yadflow/commit/48165489b7e82cf860af23b988520c471448dc2c))
+* pass the base branch and other values to the GitHub check workflows through env ([#703](https://github.com/abdelrahmannasr/yadflow/issues/703)) ([#709](https://github.com/abdelrahmannasr/yadflow/issues/709)) ([a7238f9](https://github.com/abdelrahmannasr/yadflow/commit/a7238f9afc8427cf86f7fa7fa24eeb095d6de818))
+* say which .sdlc/ files a skill step may write, and stamp the contract-lock template ([#695](https://github.com/abdelrahmannasr/yadflow/issues/695)) ([f68696d](https://github.com/abdelrahmannasr/yadflow/commit/f68696d4d1cf06ace14a0f6bbd5fa9832aad50cd))
+
+
+### Features
+
+* add Plannotator to the toolbox, and inboxReady ([#674](https://github.com/abdelrahmannasr/yadflow/issues/674)) ([f327916](https://github.com/abdelrahmannasr/yadflow/commit/f327916cc6b10ea2b73134b647cf8ccdb7bc30f9))
+* carry Build halts to the Plannotator Inbox ([#676](https://github.com/abdelrahmannasr/yadflow/issues/676)) ([2e06b41](https://github.com/abdelrahmannasr/yadflow/commit/2e06b416019e005676ce67fe94a00c9febc41da9))
+* carry review prompts to the Plannotator Inbox ([#677](https://github.com/abdelrahmannasr/yadflow/issues/677)) ([7bd405c](https://github.com/abdelrahmannasr/yadflow/commit/7bd405cd45f5378ae9ea27e1d8eec76aee7b858e))
+* carry the Plannotator review message on yad open-pr --json from a review branch ([#688](https://github.com/abdelrahmannasr/yadflow/issues/688)) ([7064efe](https://github.com/abdelrahmannasr/yadflow/commit/7064efe0ecd2421684e7aa2fdb5518cf53e1cdb7))
+* give each halted task and each review branch its own Plannotator Inbox key ([#686](https://github.com/abdelrahmannasr/yadflow/issues/686)) ([1d5f017](https://github.com/abdelrahmannasr/yadflow/commit/1d5f0177610d931386414683722fd6af1096389f))
+* offer line notes in Plannotator during a Shape review ([#678](https://github.com/abdelrahmannasr/yadflow/issues/678)) ([beee2a9](https://github.com/abdelrahmannasr/yadflow/commit/beee2a914d048066ba1203b0e0002ed63feb1be0))
+* one worktree per story with yad worktree add --story ([#697](https://github.com/abdelrahmannasr/yadflow/issues/697)) ([5959cf1](https://github.com/abdelrahmannasr/yadflow/commit/5959cf1d3dfe3258bc34fee02f0f2b1af11d94cf))
+* pass the story gates on a same-repository promotion merge request ([#693](https://github.com/abdelrahmannasr/yadflow/issues/693)) ([5c6604c](https://github.com/abdelrahmannasr/yadflow/commit/5c6604c2e10a087e5ed9d1886886f5cb680fbb38))
+* point the default-branch refusal at a detached HEAD and yad worktree add in a plain git worktree ([#699](https://github.com/abdelrahmannasr/yadflow/issues/699)) ([2403630](https://github.com/abdelrahmannasr/yadflow/commit/24036300c9b83c13bc3022d444504dc20e611a75))
+* post yadflow's hand-offs to the Plannotator Inbox ([#675](https://github.com/abdelrahmannasr/yadflow/issues/675)) ([a9c2339](https://github.com/abdelrahmannasr/yadflow/commit/a9c23394038ae6ecbf72200678cf19ecfaa58e9c))
+* record a Build step as an agent's work, and correct a closed step's record ([#698](https://github.com/abdelrahmannasr/yadflow/issues/698)) ([9309032](https://github.com/abdelrahmannasr/yadflow/commit/9309032e330800955d0c77ca363813944643c232))
+* say brain first in the brain block of the four skills ([#673](https://github.com/abdelrahmannasr/yadflow/issues/673)) ([6fb8590](https://github.com/abdelrahmannasr/yadflow/commit/6fb85902c5805b6ecbc3e9f65f71051a1cf24476))
+* skip and unskip an optional step through a PR that CI applies, once CI owns the ledger ([#696](https://github.com/abdelrahmannasr/yadflow/issues/696)) ([fe1a671](https://github.com/abdelrahmannasr/yadflow/commit/fe1a671a9c0f8fd7b64fb4feb5311456d4f0f126))
+* tell the agent to ask the project brain first ([#672](https://github.com/abdelrahmannasr/yadflow/issues/672)) ([b079309](https://github.com/abdelrahmannasr/yadflow/commit/b079309489a29d73e35ee9c4c8a578dd5872efe2))
+* tell the agent to build the brain after a repo refresh ([#670](https://github.com/abdelrahmannasr/yadflow/issues/670)) ([9729c53](https://github.com/abdelrahmannasr/yadflow/commit/9729c53db53802df5a0cb3645f194611125a285f))
+* yad epic new --seed bootstrap|pack marks the Product's setup epic ([#700](https://github.com/abdelrahmannasr/yadflow/issues/700)) ([d667e95](https://github.com/abdelrahmannasr/yadflow/commit/d667e95bdc202b6aebd8697b0c011340183c63e7))
+* yad foundation status lists setup epics apart, and publish leaves them out ([#706](https://github.com/abdelrahmannasr/yadflow/issues/706)) ([3bf115b](https://github.com/abdelrahmannasr/yadflow/commit/3bf115ba9df54512bc4c33d2e015b7041dadecc9))
+* yad guide and yad next propose the first setup epic once the Foundation has passed ([#702](https://github.com/abdelrahmannasr/yadflow/issues/702)) ([6a5eedf](https://github.com/abdelrahmannasr/yadflow/commit/6a5eedf07ecb3eb10322f9010720a3c12e2a5219))
+* yad repo features lists each connected repo's feature boundaries with their size ([#705](https://github.com/abdelrahmannasr/yadflow/issues/705)) ([50cf9c1](https://github.com/abdelrahmannasr/yadflow/commit/50cf9c126a6b505afdcb42b2e7dd76e2daf17492))
+
+
+### Performance Improvements
+
+* read the range once in epic-open and reconcile-debt-check, and look up each story's Product once ([#690](https://github.com/abdelrahmannasr/yadflow/issues/690)) ([a4d7bc9](https://github.com/abdelrahmannasr/yadflow/commit/a4d7bc9e50e47ccc594d44a7de2b34d32d9d9840))
+* read the range once in lineage-check, and look up each story's Product once ([#687](https://github.com/abdelrahmannasr/yadflow/issues/687)) ([2ce3261](https://github.com/abdelrahmannasr/yadflow/commit/2ce326189f3ad5992fea51ca78bdcc5c3c721bce))
+
 # [4.14.0](https://github.com/abdelrahmannasr/yadflow/compare/v4.13.0...v4.14.0) (2026-11-22)
 
 
