@@ -4596,19 +4596,20 @@ function runScriptExpressions(text) {
     const m = line.match(/^( *)(?:- )?run: *(.*)$/);
     if (!m) return;
     const key = m[1].length + (line.slice(m[1].length).startsWith('- ') ? 2 : 0);
-    if (/^[|>][-+]?\s*(#.*)?$/.test(m[2])) block = key;
+    if (/^[|>][-+0-9]*\s*(#.*)?$/.test(m[2])) block = key;
     else if (m[2].includes('${{')) found.push(`${i + 1}: ${line.trim()}`);
   });
   return found;
 }
 
 test('#703: no GitHub workflow template puts a ${{ }} value inside a run: script', () => {
-  const dirs = ['skills/yad-checks/templates/github', 'skills/yad-product-bridge/templates/github'];
+  const dirs = fs.readdirSync(path.join(ROOT, 'skills')).map((s) => `skills/${s}/templates/github`).filter((d) => fs.existsSync(path.join(ROOT, d)));
   const files = dirs.flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.yml')).map((f) => `${d}/${f}`));
   assert.ok(files.length >= 7, 'found the GitHub templates');
   for (const f of files) assert.deepEqual(runScriptExpressions(fs.readFileSync(path.join(ROOT, f), 'utf8')), [], f);
   // The finder itself: it catches the old one-line form and a value inside a block, and passes env: values.
   assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"\n'), ['1: - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"']);
+  assert.deepEqual(runScriptExpressions('        run: |2\n          x="${{ github.head_ref }}"\n'), ['2: x="${{ github.head_ref }}"']);
   assert.deepEqual(runScriptExpressions('        run: |\n          before="${{ github.event.before }}"\n\n          echo ok\n      - name: next\n'), ['2: before="${{ github.event.before }}"']);
   assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/x.sh" "origin/$YAD_BASE"\n        env: { YAD_BASE: "${{ github.base_ref }}" }\n        with: { a: "${{ env.A }}" }\n'), []);
 });
