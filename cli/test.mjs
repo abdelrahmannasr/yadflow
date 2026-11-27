@@ -21299,7 +21299,9 @@ test('yad doctor and yad migrate keep a seeded epic\'s `seed`: no finding, no pl
         assert.equal(row.changes, false);
         // ... and --apply writes nothing to it: the same bytes, `seed` after `profile`, the same shape.
         const code = process.exitCode;
-        try { await grab(() => runMigrate(T, { apply: true })); } finally { process.exitCode = code; }
+        let res = null;
+        try { await grab(async () => { res = await runMigrate(T, { apply: true }); }); } finally { process.exitCode = code; }
+        assert.equal(res?.ok, true, `${seed}: yad migrate --apply stopped before it ran`);
         const after = fs.readFileSync(path.join(T, LEDGER), 'utf8');
         assert.equal(after, before, `${seed}: yad migrate --apply rewrote the ledger`);
         const st = JSON.parse(after);
