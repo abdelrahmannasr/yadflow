@@ -36,7 +36,7 @@ import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
   planThreadedSeed, readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
-  SEED_KINDS, SEED_PROFILES, seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  ledgerSeed, SEED_KINDS, SEED_PROFILES, seedState, staleFoundationGuards, stepSkills, bindingsForEpic, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { refreshIndexAfterWrite } from './product-index.mjs';
@@ -500,9 +500,22 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   // `epic.md` when it exists (that is where the author wrote it) and from the ledger's own `type` when it
   // does not — a `yad epic new --type chore` has no `epic.md` yet, and reading that absence as `feature`
   // would list a chore. Anything that cannot be read is left to `yad doctor`, never allowed to throw here.
+  // EP-foundation-first-epic-S04: the Product's setup epics (a ledger with `seed`), shown apart from the
+  // roadmap and never counted as a feature it misses. Status in the roadmap's own words.
+  const setup = [];
+  for (const id of epicIds(root)) {
+    if (PRODUCT_EPICS.includes(id)) continue;
+    const seed = ledgerSeed(root, id);
+    if (!seed) continue;
+    try {
+      const epicDir = epicRoot(root, id);
+      setup.push({ epicId: id, seed, status: featureStatus(loadLedger(epicDir), { stories: epicStories(epicDir) }) });
+    } catch { /* `ledgerSeed` read it a moment ago; a ledger that stops loading is `yad doctor`'s */ }
+  }
+  const seeded = new Set(setup.map((s) => s.epicId));
   const listed = new Set(features.map((f) => f.epicId));
   const unlisted = epicIds(root).filter((id) => {
-    if (PRODUCT_EPICS.includes(id) || listed.has(id)) return false;
+    if (PRODUCT_EPICS.includes(id) || listed.has(id) || seeded.has(id)) return false;
     try {
       const state = loadLedger(epicRoot(root, id)).state;
       if (!state) return false;
@@ -522,7 +535,7 @@ export async function runFoundationStatus(root, { json = false } = {}) {
   for (const f of features) f.item = items ? (items.get(f.epicId) ?? null) : null;
   if (items === null) warnings.push('foundation/.sdlc/roadmap-items.json cannot be read, so no row shows its item');
   if (json) {
-    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, changed, features, unlisted, ...(warnings.length ? { warnings } : {}) });
+    return emitJSON({ ok: true, epic: productId, roadmap: rel, approved, changed, features, unlisted, setup, ...(warnings.length ? { warnings } : {}) });
   }
   for (const w of warnings) warn(w);
   log(`\n  ${c.bold(`${productId} roadmap`)}  ${c.dim(`${rel} — each status is read from the epic ledgers`)}`);
@@ -536,6 +549,13 @@ export async function runFoundationStatus(root, { json = false } = {}) {
     const mark = f.status === 'shipped' ? c.green('✓') : f.status === 'planned' ? c.dim('·') : c.cyan('•');
     log(`    ${mark} ${name}  ${f.status}${f.item ? c.dim(`  #${f.item.number}`) : ''}`);
     if (f.disagrees) log(`      ${c.dim(`the row says "${f.written}" — that column is no longer kept by hand; the ledger's answer is shown`)}`);
+  }
+  if (setup.length) {
+    log(`  ${c.bold('setup')}  ${c.dim('(outside the roadmap, never published as an item)')}`);
+    for (const s of setup) {
+      const mark = s.status === 'shipped' ? c.green('✓') : s.status === 'planned' ? c.dim('·') : c.cyan('•');
+      log(`    ${mark} ${s.epicId}  ${s.seed}  ${s.status}`);
+    }
   }
   if (unlisted.length) {
     info(`not on the roadmap: ${unlisted.join(', ')} ${c.dim('(feature epics no row proposes — an epic may have been given a different id)')}`);

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { run, forTerminal, readJSON, readJSONStrict, writeJSON, c, log, fail, hand, info, warn, emitJSON } from './lib.mjs';
 import { err } from './errors.mjs';
 import { isVerifiedLedger, productConfigPath, epicFiles } from './manifest.mjs';
-import { acceptedHashes, artifactBase, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, reviewAsItStands, roadmapFeatures, soloRereviewCovers } from './epic-state.mjs';
+import { acceptedHashes, artifactBase, doneStepUnapproved, epicRoot, isStaleHash, FOUNDATION_EPIC, isValidEpicId, loadLedger, PRODUCT_DONE, PRODUCT_EPICS, ledgerSeed, reviewAsItStands, roadmapFeatures, soloRereviewCovers } from './epic-state.mjs';
 import { productGit, resolveDefaultBranch } from './productcommit.mjs';
 import { isSolo } from './gate.mjs';
 import { createLabel, labelRules, readLabels } from './issues.mjs';
@@ -147,7 +147,15 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   if (!fs.existsSync(file)) return refuse('foundation/roadmap.md does not exist');
   const skipped = [];
   const nearMiss = [];
-  const rows = roadmapRows(fs.readFileSync(file, 'utf8'), skipped, nearMiss);
+  // EP-foundation-first-epic-S04: a row naming a setup epic (its ledger has `seed`) is never published —
+  // setup work is shown apart from the roadmap, not opened as a roadmap item.
+  // A ledger that cannot be read is left out too: it may be a setup epic, and an item is not taken back.
+  const setupRows = [];
+  const rows = roadmapRows(fs.readFileSync(file, 'utf8'), skipped, nearMiss).filter((r) => {
+    const seed = ledgerSeed(root, r.epicId);
+    if (seed !== null) setupRows.push({ epicId: r.epicId, seed });
+    return seed === null;
+  });
   const record = readRecord(root);
   if (env.YAD_PLATFORM_READ === '0') return refuse('platform reads are turned off (YAD_PLATFORM_READ=0)');
   let where;
@@ -159,6 +167,14 @@ export async function runFoundationPublish(root, { dryRun = false, json = false,
   // in `failed` may still have been written. Not in `out`: the --json envelope keeps its keys.
   let wroteRecord = false;
   const known = new Map(record.filter((e) => e.host === t.host && e.repo === t.repo).map((e) => [e.epicId, e]));
+  // Said after `known` is read, so a setup epic published before it was seeded names its open item.
+  for (const { epicId, seed } of setupRows) {
+    const was = known.get(epicId);
+    const open = was ? ` — it was already published as #${was.number}; close that item if it should not be on the roadmap` : '';
+    out.notes.push(seed === undefined
+      ? `the ledger of ${epicId} cannot be read, so its row was left out (it may be a setup epic) — run \`yad doctor\``
+      : `${epicId} is the ${seed} setup epic, so its row was left out${open}`);
+  }
   const todo = rows.filter((r) => !known.has(r.epicId));
   out.alreadyPublished = rows.length - todo.length;
 

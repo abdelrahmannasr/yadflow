@@ -3270,6 +3270,21 @@ export const SEED_KINDS = Object.freeze(['bootstrap', 'pack']);
 // The routes a seeded epic may take: the full chain, because a walking skeleton fixes the first contract.
 export const SEED_PROFILES = Object.freeze(['classic', 'analysis-first']);
 
+// The seed kind an epic's `state.json` records, or null: no ledger, not seeded, or an unknown word. Only
+// `state.json` is read — the field lives there, and a broken sibling ledger file (comments, approvals) must
+// not hide it. `undefined` when `state.json` exists but cannot be read: unknown, never "not seeded", so
+// `foundation publish` can leave the row out instead of opening an item for what may be a setup epic.
+// Read by `foundation status` and `foundation publish` (S04).
+export function ledgerSeed(root, id) {
+  const file = path.join(epicRoot(root, id), '.sdlc', 'state.json');
+  if (!fs.existsSync(file)) return null;
+  let state;
+  // The safe reader: a link, a FIFO or an outsized file is refused as unreadable, never followed.
+  try { state = readJSONStrict(file, null); } catch { return undefined; }
+  const seed = isPlainObject(state) ? state.seed : null;
+  return SEED_KINDS.includes(seed) ? seed : null;
+}
+
 export function seedState({ epic, profile, type, today, stub = false, seed = null }) {
   const p = lifecycleProfile(profile);
   if (!p || !seedableProfiles().includes(p.id)) {
