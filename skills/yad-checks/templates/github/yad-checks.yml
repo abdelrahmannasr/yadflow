@@ -76,8 +76,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The PR's own head commit, not refs/pull/<n>/merge (#708). The merge ref is a merge commit GitHub
+      # makes, and the quote rule refuses any merge commit in the range, so a rebase could never pass it.
+      # The gate builds the merge into the base itself (git merge-tree). Only this job: the others ignore or
+      # tolerate merge commits, and build-test-lint tests the merged tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, persist-credentials: false }
+        with: { fetch-depth: 0, persist-credentials: false, ref: "${{ github.event.pull_request.head.sha }}" }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
         run: |

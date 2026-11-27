@@ -1400,6 +1400,30 @@ test('contract-check gate: a quote is checked against the link.md that lands (is
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #708: GitHub's default PR checkout is refs/pull/<n>/merge, a merge commit of the branch into the base. The quote
+// rule refuses any merge commit in the range, so there a rebased branch could never pass. The workflow checks out
+// the PR head instead (held in test-ci-check.mjs); this holds why: the tip passes, the same branch merged fails.
+test('contract-check gate: a rebased quote passes on the branch tip and fails on a merge commit on top of it (#708)', () => {
+  const T = scaffoldRepo();
+  const hash = seedLockedContract(T);
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'docs: the base moves on', { 'docs/notes.md': 'base\n' });
+  git(T, 'checkout', '-q', '-B', 'feature');
+  commit(T, 'docs(spec): quote the S01 slice\n\nTask: EP-demo-S01-T01', {
+    'specs/EP-demo-S01/contracts/orders.md': quoteSlice(SURFACE_LINES.slice(2, 5)),
+    'specs/EP-demo-S01/link.md': quoteLink('EP-demo-S01', hash),
+  });
+  const tip = runGate(CONTRACT, T);
+  assert.equal(tip.code, 0, `the PR head, rebased onto main, proves the quote:\n${tip.out}`);
+  // What refs/pull/<n>/merge is: the base, with the branch merged into it.
+  git(T, 'checkout', '-q', '--detach', 'main');
+  git(T, 'merge', '-q', '--no-ff', '-m', 'Merge feature into main', 'feature');
+  const merged = runGate(CONTRACT, T);
+  assert.equal(merged.code, 1, merged.out);
+  assert.match(merged.out, /not rebased onto main \(or holds merge commits\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // Review 5: "the whole slice is gone" reads what lands. The branch removes its slice and link.md; the base
 // adds a file to that slice afterwards — the merge leaves a slice with no link.md, which is not a clean-up.
 test('contract-check gate: a slice the base adds to is not gone, though the branch removed its part (issue #344 review 5)', { skip: !MERGE_TREE && 'git older than 2.38 reads the branch tip' }, () => {

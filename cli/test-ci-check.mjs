@@ -865,6 +865,34 @@ test('#426: every gate call runs "$YAD_CHECKS/…", the base branch\'s copy, set
   assert.equal(glBlocks.size, 1, 'the .yad_base_checks block is the same in every GitLab file');
 });
 
+// #708: on GitHub a PR job checks out refs/pull/<n>/merge, a merge commit, and the quote rule refuses any merge
+// commit in the range. So contract-check, and only it, checks out the PR's own head commit.
+test('#708: only the contract-check job checks out the PR head commit; every other GitHub job keeps the merge ref', () => {
+  let seen = 0;
+  for (const { name, text, gitlab } of GATE_TEMPLATES) {
+    if (gitlab) continue;
+    const jobs = noComments(text).slice(noComments(text).search(/^jobs:$/m)).split(/^(?= {2}[\w-]+:\s*$)/m).slice(1);
+    for (const j of jobs) {
+      const id = j.split(':')[0].trim();
+      // Every checkout step, each from its `uses:` up to the next step, so a `ref:` on a line of its own, or on a
+      // second checkout in the job, counts too.
+      const steps = [...j.matchAll(/actions\/checkout@/g)].map(({ index }) => {
+        const next = j.indexOf('\n      - ', index);
+        return j.slice(index, next < 0 ? undefined : next);
+      });
+      assert.ok(steps.length, `${name} ${id}: has a checkout`);
+      if (name.endsWith('/yad-checks.yml') && id === 'contract-check') {
+        seen++;
+        assert.equal(steps.length, 1, `${name} ${id}: one checkout`);
+        assert.match(steps[0], /\bref: "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/, `${name} ${id}: checks out the PR head`);
+      } else {
+        for (const s of steps) assert.doesNotMatch(s, /\bref:/, `${name} ${id}: keeps the default merge ref`);
+      }
+    }
+  }
+  assert.equal(seen, 1, 'the contract-check job is in yad-checks.yml');
+});
+
 // The upgrade PR: the base's (older) script runs with the new workflow's call. So a call may only use what the
 // previous release's script already accepts. A change to this list needs that check, by hand, first.
 test('#426: the gate calls are the ones the previous release\'s scripts accept', () => {
