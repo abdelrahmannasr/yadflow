@@ -69,14 +69,19 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
 
   contract-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The PR's own head commit, not refs/pull/<n>/merge (#708). The merge ref is a merge commit GitHub
+      # makes, and the quote rule refuses any merge commit in the range, so a rebase could never pass it.
+      # The gate builds the merge into the base itself (git merge-tree). Only this job: the others ignore or
+      # tolerate merge commits, and build-test-lint tests the merged tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, persist-credentials: false }
+        with: { fetch-depth: 0, persist-credentials: false, ref: "${{ github.event.pull_request.head.sha }}" }
       - name: Gate scripts from the base branch (#426)
         env: { YAD_BASE: "${{ github.base_ref }}" }
         run: |
@@ -111,9 +116,10 @@ jobs:
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
-        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash "$YAD_CHECKS/contract-check.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
+      - run: bash "$YAD_CHECKS/contract-check.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
 
   # E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
   # approver count read from the base branch's map. The script always exits 0: the count is reported,
@@ -156,7 +162,8 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/risk-map-check.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/risk-map-check.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
 
   build-test-lint:
     runs-on: ubuntu-latest
@@ -228,8 +235,10 @@ jobs:
           key: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'package.json') }}
           restore-keys: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-
       # The base branch lets a Unity project skip these two, and stops a change from skipping them by deleting package.json (#496).
-      - run: bash "$YAD_CHECKS/install-deps.sh" "origin/${{ github.base_ref }}"
-      - run: bash "$YAD_CHECKS/build-test-lint.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/install-deps.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
+      - run: bash "$YAD_CHECKS/build-test-lint.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
 
   # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:
   # a sealed epic (all stories shipped) refuses new behaviour, forcing a change-epic. reconcile-debt:
@@ -275,9 +284,10 @@ jobs:
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
-        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash "$YAD_CHECKS/lineage-check.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
+      - run: bash "$YAD_CHECKS/lineage-check.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
 
   epic-open:
     runs-on: ubuntu-latest
@@ -319,9 +329,10 @@ jobs:
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
-        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash "$YAD_CHECKS/epic-open.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
+      - run: bash "$YAD_CHECKS/epic-open.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
 
   reconcile-debt:
     runs-on: ubuntu-latest
@@ -363,9 +374,10 @@ jobs:
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
       # E120: check the Product out where .sdlc/product-link.json says, when the YAD_PRODUCT_TOKEN
       # secret is set; without it the gate defers, with a WARNING unless the PR comes from a fork (#345).
-      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/${{ github.base_ref }}"
-        env: { YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
-      - run: bash "$YAD_CHECKS/reconcile-debt-check.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/product-checkout.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_PRODUCT_TOKEN: "${{ secrets.YAD_PRODUCT_TOKEN }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
+      - run: bash "$YAD_CHECKS/reconcile-debt-check.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
 
   # Pattern gate: every commit subject follows the convention (profile: code). The PR title and body are
   # checked by yad-pr-text.yml.
@@ -407,7 +419,8 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/commit-message.sh" --profile code "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/commit-message.sh" --profile code "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}", YAD_SOURCE_BRANCH: "${{ github.head_ref }}", YAD_PROMOTE_FROM: "${{ vars.YAD_PROMOTE_FROM }}", YAD_PR_FORK: "${{ github.event.pull_request.head.repo.full_name != github.repository }}" }
 
   # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
   verified-commits:
@@ -452,4 +465,5 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/verified-commits.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/verified-commits.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }
