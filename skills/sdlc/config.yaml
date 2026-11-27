@@ -14,7 +14,8 @@ epics_folder: "{project-root}/epics"
 # `yad foundation new` seeds the ledger; `yad-discovery` authors the sections. A 2-step author→review
 # chain whose review binds to the required sections; on approval it terminates at `foundation-done` (no
 # Build). Its approval is REPORTED, not enforced, before feature work begins. roadmap.md is the menu of
-# features each epic reads (yad-epic / yad-analysis Step 2c) — reference-only, never auto-seeds epics.
+# features each epic reads (yad-epic / yad-analysis Step 2c) — reference-only. The Foundation proposes a
+# first epic, and seeds it only on the person's yes.
 foundation:
   epic_id: "EP-foundation"                             # reserved id; yad-epic/yad-analysis never pick it
   location: "{project-root}/foundation/"               # the sections + .sdlc/ ledger + reviews/ live here

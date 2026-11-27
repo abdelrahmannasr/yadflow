@@ -242,7 +242,7 @@ const discoverySteps: FlowStep[] = [
       { id: "di-2", from: "code-repos", to: "analyst", label: "read code-maps (brownfield)", type: "event", color: "#1e8449", delay: 700, duration: 600 },
       { id: "di-3", from: "analyst", to: "product", label: "write purpose / scope / mvp / roadmap.md", type: "write", color: "#2471a3", delay: 1400, duration: 800 },
     ],
-    sideEffects: { jobs: "purpose.md · scope.md · mvp.md · roadmap.md · stack.md · repos.md (+ market.md · risks.md)", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
+    sideEffects: { jobs: "purpose.md · scope.md · mvp.md · roadmap.md · stack.md · repos.md (+ market.md · risks.md)", notifications: "roadmap.md is reference-only — the Foundation proposes a first epic, and seeds it only on the person's yes" },
   },
   gateStep("foundation", "the Foundation sections", "1 approver, who should not be the author (base)", "#1e8449"),
 ];

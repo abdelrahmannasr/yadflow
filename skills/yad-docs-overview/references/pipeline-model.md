@@ -42,8 +42,8 @@ reported, not enforced, before feature work begins.
 |--------------|------|------------------------|
 | `yad foundation new` then `yad-discovery` *(optional)* | → `foundation-review` (base rule) | `purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md` (+ optional `market.md`, `risks.md`); seeds `foundation/.sdlc/state.json` |
 
-`roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only, never
-auto-seeds epics. A product created before E75 may still hold the old spelling, `epics/EP-discovery/`
+`roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only. The Foundation
+proposes a first epic, and seeds it only on the person's yes. A product created before E75 may still hold the old spelling, `epics/EP-discovery/`
 (six files, ending at `discovery-done`); `yad migrate --apply` converts it on a local ledger.
 
 <!-- `1-front` and `3-build` are DATA — the `phase` column in skills/sdlc/module-help.csv, which
