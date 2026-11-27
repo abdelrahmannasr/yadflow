@@ -437,7 +437,7 @@ failure. Each one says why that story's slice could not pass as a quote:
 | `this line is not in the locked surface: …` / `not one unbroken run of the locked surface` | Copy whole lines, in order, from the locked surface. If the line is new, the contract is changing: add the trailer and lock upstream. |
 | `this removes slice file(s) — a deletion changes the surface.` | A deletion needs the trailer. |
 | `only a Markdown slice can pass as a quote` | Any other file under `contracts/` needs the trailer. |
-| `not rebased onto <base> (or holds merge commits)` | Rebase the branch onto the base, then force-push. |
+| `not rebased onto <base> (or holds merge commits)` | Rebase the branch onto the base, then force-push. On GitHub, if a rebased branch still gets this, the job checked out the PR's merge commit (`refs/pull/<n>/merge`) instead of its head: the shipped `yad-checks.yml` checks out `github.event.pull_request.head.sha` for this job since #708, so run `yad update`; a job you wrote yourself needs the same `ref:` on its `actions/checkout`. |
 | `the branch's own commits touch it, but it is not in what lands (added and removed again?)` | That needs the trailer. |
 | `specs/<folder>/contracts is not under a story ID — it quotes no lock.` | Move the slice under its story's folder, or delete it. |
 | `<link.md> is not there, so the slice is tied to no lock` | Re-run `yad-spec`. |
