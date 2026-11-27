@@ -720,8 +720,12 @@ The gates run identically under either CI; the config just invokes the scripts w
   `product-checkout.sh` clones with its own token, and the base was fetched by `fetch-depth: 0`.
 
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
-  jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/$YAD_BASE` as base,
-  with `YAD_BASE: "${{ github.base_ref }}"` set in each step's `env:` — never `${{ }}` inside a `run:` script, which GitHub
+  jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/$YAD_BASE` as base. The
+  `contract-check` job alone checks out the PR's own head commit (`ref: "${{ github.event.pull_request.head.sha }}"`,
+  #708): the default `refs/pull/<n>/merge` is a merge commit GitHub makes, and the quote rule refuses any merge
+  commit in the range, so a rebased branch could never pass. The gate builds the merge into the base itself
+  (`git merge-tree`); the other jobs ignore or tolerate merge commits or, for build/test/lint, test the merged tree. Each step
+  sets `YAD_BASE: "${{ github.base_ref }}"` in its `env:` — never `${{ }}` inside a `run:` script, which GitHub
   pastes into the script text before the shell reads it (#703)
   (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The trigger sets
   `types: [opened, synchronize, reopened]` — never `edited` (#425): a job skipped by `if:` counts as
