@@ -2953,7 +2953,7 @@ test('the shipped workflows run product-checkout before each Product-reading gat
   const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
   for (const gate of ['contract-check', 'lineage-check', 'epic-open', 'reconcile-debt-check']) {
-    assert.match(gh, new RegExp(`- run: bash "\\$YAD_CHECKS/product-checkout\\.sh" "origin/\\$\\{\\{ github\\.base_ref \\}\\}"\\n {8}env: \\{ YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}", YAD_PR_FORK: "\\$\\{\\{ github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository \\}\\}" \\}\\n {6}- run: bash "\\$YAD_CHECKS/${gate}\\.sh"`), gate);
+    assert.match(gh, new RegExp(`- run: bash "\\$YAD_CHECKS/product-checkout\\.sh" "origin/\\$YAD_BASE"\\n {8}env: \\{ YAD_BASE: "\\$\\{\\{ github\\.base_ref \\}\\}", YAD_PRODUCT_TOKEN: "\\$\\{\\{ secrets\\.YAD_PRODUCT_TOKEN \\}\\}", YAD_PR_FORK: "\\$\\{\\{ github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository \\}\\}" \\}\\n {6}- run: bash "\\$YAD_CHECKS/${gate}\\.sh"`), gate);
     assert.match(gl, new RegExp(`- bash "\\$YAD_CHECKS/product-checkout\\.sh" "origin/\\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"\\n {4}- bash "\\$YAD_CHECKS/${gate}\\.sh"`), gate);
   }
 });
@@ -4572,9 +4572,46 @@ test('#496: both CI files pass the base branch to install-deps and build-test-li
   const gh = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gl = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
   for (const s of ['install-deps.sh', 'build-test-lint.sh']) {
-    assert.ok(gh.includes(`bash "$YAD_CHECKS/${s}" "origin/\${{ github.base_ref }}"`), s);
+    assert.ok(gh.includes(`bash "$YAD_CHECKS/${s}" "origin/$YAD_BASE"\n        env: { YAD_BASE: "\${{ github.base_ref }}" }`), s);
     assert.ok(gl.includes(`bash "$YAD_CHECKS/${s}" "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"`), s);
   }
+});
+
+// #703: GitHub pastes a `${{ }}` value into a run: script's text before the shell reads it, so a value
+// with shell characters would run as code. Every value reaches a script through the step's env: instead.
+// Returns each `${{` found inside a run: script, as "<line>: <text>": a one-line `run: <cmd>`, or the
+// lines of a `run: |` / `run: >` block (it ends at the first line indented no deeper than its key).
+function runScriptExpressions(text) {
+  const found = [];
+  let block = -1; // the indent of the open block's `run:` key, or -1 outside one
+  text.split('\n').forEach((line, i) => {
+    const indent = line.match(/^ */)[0].length;
+    if (block >= 0) {
+      if (line.trim() === '' || indent > block) {
+        if (line.includes('${{')) found.push(`${i + 1}: ${line.trim()}`);
+        return;
+      }
+      block = -1;
+    }
+    const m = line.match(/^( *)(?:- )?run: *(.*)$/);
+    if (!m) return;
+    const key = m[1].length + (line.slice(m[1].length).startsWith('- ') ? 2 : 0);
+    if (/^[|>][-+0-9]*\s*(#.*)?$/.test(m[2])) block = key;
+    else if (m[2].includes('${{')) found.push(`${i + 1}: ${line.trim()}`);
+  });
+  return found;
+}
+
+test('#703: no GitHub workflow template puts a ${{ }} value inside a run: script', () => {
+  const dirs = fs.readdirSync(path.join(ROOT, 'skills')).map((s) => `skills/${s}/templates/github`).filter((d) => fs.existsSync(path.join(ROOT, d)));
+  const files = dirs.flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.yml')).map((f) => `${d}/${f}`));
+  assert.ok(files.length >= 7, 'found the GitHub templates');
+  for (const f of files) assert.deepEqual(runScriptExpressions(fs.readFileSync(path.join(ROOT, f), 'utf8')), [], f);
+  // The finder itself: it catches the old one-line form and a value inside a block, and passes env: values.
+  assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"\n'), ['1: - run: bash "$YAD_CHECKS/spec-link.sh" "origin/${{ github.base_ref }}"']);
+  assert.deepEqual(runScriptExpressions('        run: |2\n          x="${{ github.head_ref }}"\n'), ['2: x="${{ github.head_ref }}"']);
+  assert.deepEqual(runScriptExpressions('        run: |\n          before="${{ github.event.before }}"\n\n          echo ok\n      - name: next\n'), ['2: before="${{ github.event.before }}"']);
+  assert.deepEqual(runScriptExpressions('      - run: bash "$YAD_CHECKS/x.sh" "origin/$YAD_BASE"\n        env: { YAD_BASE: "${{ github.base_ref }}" }\n        with: { a: "${{ env.A }}" }\n'), []);
 });
 
 test('build-test-lint gate: all green scripts pass', () => {

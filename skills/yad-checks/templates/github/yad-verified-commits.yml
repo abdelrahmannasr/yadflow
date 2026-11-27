@@ -65,4 +65,5 @@ jobs:
             if [ "$on_base" = 0 ]; then printf 'note: %s has no checks/ folder yet, so the gate scripts from this PR run: %s (#426)\n' "$YAD_BASE" "$w"; fi
           )
           echo "YAD_CHECKS=$YAD_CHECKS" >> "$GITHUB_ENV"
-      - run: bash "$YAD_CHECKS/verified-commits.sh" "origin/${{ github.base_ref }}"
+      - run: bash "$YAD_CHECKS/verified-commits.sh" "origin/$YAD_BASE"
+        env: { YAD_BASE: "${{ github.base_ref }}" }

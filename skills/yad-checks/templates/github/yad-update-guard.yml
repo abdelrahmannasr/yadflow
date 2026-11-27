@@ -37,8 +37,9 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Resolve the pushed range base
         id: base
+        env: { YAD_BEFORE: "${{ github.event.before }}" }
         run: |
-          before="${{ github.event.before }}"
+          before="$YAD_BEFORE"
           # First push / branch create / an unfetched before-SHA: fall back to the commit's parent.
           # This checks only the tip commit (HEAD~1..HEAD) — a rare fail-open for the multi-commit
           # first-push case, preferred over failing closed on a missing ref.
@@ -48,6 +49,8 @@ jobs:
           fi
           echo "base=$before" >> "$GITHUB_OUTPUT"
       - name: verified-commits
-        run: bash checks/verified-commits.sh "${{ steps.base.outputs.base }}"
+        env: { YAD_RANGE_BASE: "${{ steps.base.outputs.base }}" }
+        run: bash checks/verified-commits.sh "$YAD_RANGE_BASE"
       - name: commit-message
-        run: bash checks/commit-message.sh "${{ steps.base.outputs.base }}"
+        env: { YAD_RANGE_BASE: "${{ steps.base.outputs.base }}" }
+        run: bash checks/commit-message.sh "$YAD_RANGE_BASE"
