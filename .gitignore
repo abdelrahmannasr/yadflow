@@ -7,6 +7,9 @@ _bmad-output/
 
 # IDE skill mirrors (regenerable via `yad check --fix`)
 # .claude/ holds per-machine skill mirrors; only the shared settings.json (yad's agent-guard hook) is tracked.
+# `!/.claude/` first: a global ignore rule of `.claude/` hides the whole folder, and git cannot bring back a
+# file inside an ignored folder.
+!/.claude/
 .claude/*
 !.claude/settings.json
 .agents/

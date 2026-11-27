@@ -62,7 +62,8 @@
       "Bash(yad story frames:*)",
       "Bash(yad docs list:*)",
       "Bash(yad thread:*)",
-      "Bash(yad reconcile check:*)"
+      "Bash(yad reconcile check:*)",
+      "Bash(yad repo features:*)"
     ]
   }
 }
